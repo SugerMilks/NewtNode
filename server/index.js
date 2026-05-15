@@ -3398,6 +3398,41 @@ async function readComposerPoses() {
 
 async function readSavedWorkflows() {
   await mkdir(savedWorkflowsDir, { recursive: true });
+  const workflows = await readSavedWorkflowFiles();
+  const legacyProjects = await readNodeProjects();
+  const existingIds = new Set(workflows.map((workflow) => String(workflow.id || "")));
+  let migratedLegacyProject = false;
+
+  for (const project of legacyProjects) {
+    if (!project?.id || existingIds.has(String(project.id))) continue;
+
+    const workflow = {
+      id: project.id,
+      name: project.name || "Untitled node project",
+      fileName: uniqueWorkflowFileName(project.name || "legacy-workflow", workflows),
+      createdAt: project.createdAt || project.updatedAt || new Date().toISOString(),
+      updatedAt: project.updatedAt || project.createdAt || new Date().toISOString(),
+      app: "NewtNode",
+      version: 1,
+      migratedFrom: "server/data/node-projects.json",
+      graph: {
+        nodes: Array.isArray(project.graph?.nodes) ? project.graph.nodes : [],
+        edges: Array.isArray(project.graph?.edges) ? project.graph.edges : [],
+        groups: Array.isArray(project.graph?.groups) ? project.graph.groups : [],
+        viewport: project.graph?.viewport || { x: 0, y: 0, scale: 1 }
+      }
+    };
+
+    workflows.push(workflow);
+    existingIds.add(String(workflow.id));
+    migratedLegacyProject = true;
+    await writeWorkflowFile(workflow);
+  }
+
+  return (migratedLegacyProject ? await readSavedWorkflowFiles() : workflows).sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+}
+
+async function readSavedWorkflowFiles() {
   const entries = await readdir(savedWorkflowsDir, { withFileTypes: true });
   const workflows = [];
 
@@ -3423,7 +3458,7 @@ async function readSavedWorkflows() {
     }
   }
 
-  return workflows.sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+  return workflows;
 }
 
 async function writeWorkflowFile(workflow) {

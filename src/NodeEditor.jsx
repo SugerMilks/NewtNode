@@ -2329,6 +2329,12 @@ export default function NodeEditor({ active = true } = {}) {
     }
   }
 
+  function handleProjectJump(event) {
+    const nextProjectId = event.target.value;
+    if (!nextProjectId || nextProjectId === projectId) return;
+    loadProject(nextProjectId);
+  }
+
   async function deleteProject(project) {
     if (!window.confirm(`Delete "${project.name}"?`)) return;
 
@@ -2769,6 +2775,31 @@ export default function NodeEditor({ active = true } = {}) {
         onPointerCancel={stopNodeDrag}
         onContextMenu={openCanvasContextMenu}
       >
+        <div className="canvas-project-bar" onPointerDown={(event) => event.stopPropagation()} onContextMenu={(event) => event.stopPropagation()}>
+          <input
+            className="canvas-project-name"
+            value={projectName}
+            onChange={(event) => setProjectName(event.target.value)}
+            placeholder="Project name"
+            aria-label="Project name"
+          />
+          <button className="canvas-project-save" onClick={saveProject} title="Save workflow">
+            <Save size={15} />
+            <span>Save</span>
+          </button>
+          <label className="canvas-project-select" title="Jump to saved workflow">
+            <FolderOpen size={15} />
+            <select value={projectId || ""} onChange={handleProjectJump} aria-label="Jump to saved workflow">
+              <option value="">{projects.length ? "Jump to project" : "No saved projects"}</option>
+              {projects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                </option>
+              ))}
+            </select>
+            <ChevronDown size={13} />
+          </label>
+        </div>
         <div
           className="node-scene"
           style={{

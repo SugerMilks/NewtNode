@@ -208,6 +208,90 @@
   cursor: grabbing;
 }
 
+.canvas-project-bar {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  max-width: min(calc(100% - 24px), 760px);
+  padding: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 10px;
+  background: rgba(18, 18, 18, 0.88);
+  box-shadow: 0 14px 38px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(16px);
+  cursor: default;
+}
+
+.node-workspace.toolbar-collapsed .canvas-project-bar {
+  left: 52px;
+  max-width: min(calc(100% - 64px), 760px);
+}
+
+.canvas-project-name,
+.canvas-project-select select {
+  min-height: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  outline: 0;
+  color: #f4f0e8;
+  background: rgba(0, 0, 0, 0.34);
+  font: inherit;
+  font-size: 12px;
+}
+
+.canvas-project-name {
+  width: min(30vw, 230px);
+  min-width: 150px;
+  padding: 0 9px;
+  border-radius: 8px;
+}
+
+.canvas-project-save {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: 8px;
+  color: #f4f0e8;
+  background: rgba(221, 198, 49, 0.16);
+}
+
+.canvas-project-save:hover {
+  background: rgba(221, 198, 49, 0.24);
+}
+
+.canvas-project-select {
+  position: relative;
+  display: grid;
+  grid-template-columns: 16px minmax(124px, 1fr) 14px;
+  align-items: center;
+  gap: 6px;
+  min-width: min(34vw, 260px);
+  min-height: 32px;
+  padding: 0 8px;
+  border-radius: 8px;
+  color: rgba(244, 240, 232, 0.72);
+  background: rgba(0, 0, 0, 0.34);
+}
+
+.canvas-project-select select {
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  appearance: none;
+  color: rgba(244, 240, 232, 0.86);
+  background: transparent;
+}
+
+.canvas-project-select option {
+  color: #121212;
+}
+
 .node-scene {
   position: absolute;
   top: 0;
@@ -2733,5 +2817,22 @@
 
   .composer-controls {
     grid-template-columns: 1fr;
+  }
+
+  .canvas-project-bar {
+    right: 12px;
+    left: 12px;
+    flex-wrap: wrap;
+  }
+
+  .node-workspace.toolbar-collapsed .canvas-project-bar {
+    left: 52px;
+  }
+
+  .canvas-project-name,
+  .canvas-project-select {
+    flex: 1 1 150px;
+    width: auto;
+    min-width: 0;
   }
 }
