@@ -1031,6 +1031,8 @@ export default function NodeEditor({ active = true } = {}) {
 
   function updateNode(nodeId, patch) {
     let nextUtilityData = null;
+    let nextCameraData = null;
+    const cameraPresetChanged = ["shotPreset", "lensPreset", "typePreset"].some((key) => Object.prototype.hasOwnProperty.call(patch, key));
     setNodes((current) => {
       const shouldUpdateConnectedPreviews = Array.isArray(patch.resultItems) && patch.resultItems.some((item) => item?.url);
       const nextNodes = current.map((node) =>
@@ -1041,6 +1043,7 @@ export default function NodeEditor({ active = true } = {}) {
                 ...patch
               };
               if (node.type === "utility") nextUtilityData = data;
+              if (node.type === "camera") nextCameraData = data;
               return {
                 ...node,
                 data
@@ -1062,6 +1065,14 @@ export default function NodeEditor({ active = true } = {}) {
           return !staleOutput && !inactiveInput;
         })
       );
+    }
+
+    if (nextCameraData && cameraPresetChanged && !hasCameraPreset({ data: nextCameraData })) {
+      setEdges((current) => current.filter((edge) => !(edge.from.nodeId === nodeId && edge.from.port === "cameraOut")));
+      setSelectedEdgeId((current) => {
+        const selectedEdge = edgesRef.current.find((edge) => edge.id === current);
+        return selectedEdge?.from.nodeId === nodeId && selectedEdge?.from.port === "cameraOut" ? null : current;
+      });
     }
   }
 
@@ -9989,6 +10000,7 @@ function normalizeEdgeForCurrentGraph(edge, nodeMap) {
       nextEdge.from.port = "imageOut";
       nextEdge.color = portColors.image;
     } else {
+      if (!hasCameraPreset(source)) return null;
       nextEdge.from.port = "cameraOut";
       nextEdge.color = portColors.camera;
     }
