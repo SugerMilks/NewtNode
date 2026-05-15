@@ -418,7 +418,17 @@ app.delete("/api/saved-workflows/:fileName", async (req, res) => {
     return res.status(404).json({ error: "Workflow not found." });
   }
 
+  let deletedWorkflow = null;
+  try {
+    deletedWorkflow = JSON.parse(await readFile(filePath, "utf8"));
+  } catch {
+    deletedWorkflow = null;
+  }
+
   await rm(filePath, { force: true });
+  if (deletedWorkflow?.id) {
+    await removeLegacyNodeProject(deletedWorkflow.id);
+  }
   const workflows = await readSavedWorkflows();
   res.json(workflows.map(({ graph, ...workflow }) => workflow));
 });
@@ -5632,6 +5642,14 @@ async function readNodeProjects() {
 
 async function writeNodeProjects(projects) {
   await writeFile(nodeProjectsPath, JSON.stringify(projects, null, 2));
+}
+
+async function removeLegacyNodeProject(projectId) {
+  const projects = await readNodeProjects();
+  const nextProjects = projects.filter((project) => project.id !== projectId);
+  if (nextProjects.length !== projects.length) {
+    await writeNodeProjects(nextProjects);
+  }
 }
 
 function resolveImageModel(model) {
