@@ -376,14 +376,14 @@ const initialEdges = [
 ];
 
 const contextMenuSize = { width: 190, height: 420, inset: 8 };
-const minZoom = 0.35;
+const viewportScaleFloor = 0.0001;
 const maxZoom = 1.9;
 const nodeDraftStorageKey = "seedance-node-editor-draft-v1";
 const previewBaseWidth = 330;
+const previewScaleFloor = 0.05;
 const groupPalette = ["#3d85ff", "#f0c83b", "#58ce63", "#9b5cff", "#ff4fb3", "#ff8b35"];
 const groupPadding = { x: 42, top: 62, bottom: 42 };
-const groupMinWidth = 260;
-const groupMinHeight = 190;
+const groupSizeFloor = 1;
 const imageRunStaggerMs = 850;
 const videoModelNames = {
   seedance: "Seedance 2.0",
@@ -889,8 +889,8 @@ export default function NodeEditor({ active = true } = {}) {
       color,
       x: Math.round(bounds.left - groupPadding.x),
       y: Math.round(bounds.top - groupPadding.top),
-      width: Math.round(Math.max(groupMinWidth, bounds.width + groupPadding.x * 2)),
-      height: Math.round(Math.max(groupMinHeight, bounds.height + groupPadding.top + groupPadding.bottom)),
+      width: Math.round(Math.max(groupSizeFloor, bounds.width + groupPadding.x * 2)),
+      height: Math.round(Math.max(groupSizeFloor, bounds.height + groupPadding.top + groupPadding.bottom)),
       nodeIds: [...selectedNodeIds]
     };
 
@@ -1343,8 +1343,8 @@ export default function NodeEditor({ active = true } = {}) {
           group.id === dragState.groupId
             ? {
                 ...group,
-                width: Math.round(clamp(dragState.group.width + deltaX, groupMinWidth, 4200)),
-                height: Math.round(clamp(dragState.group.height + deltaY, groupMinHeight, 3200))
+                width: Math.round(Math.max(groupSizeFloor, dragState.group.width + deltaX)),
+                height: Math.round(Math.max(groupSizeFloor, dragState.group.height + deltaY))
               }
             : group
         )
@@ -1364,7 +1364,7 @@ export default function NodeEditor({ active = true } = {}) {
     if (dragState?.type === "previewResize") {
       const deltaX = pointer.x - dragState.startPointer.x;
       const deltaY = pointer.y - dragState.startPointer.y;
-      const nextScale = clamp(dragState.startScale + Math.max(deltaX, deltaY) / previewBaseWidth, 1, 3);
+      const nextScale = Math.max(previewScaleFloor, dragState.startScale + Math.max(deltaX, deltaY) / previewBaseWidth);
       updateNode(dragState.nodeId, { previewScale: roundPreviewScale(nextScale) });
     }
 
@@ -1523,7 +1523,7 @@ export default function NodeEditor({ active = true } = {}) {
 
   function zoomViewportAtPoint(pointer, zoomFactor) {
     setViewport((current) => {
-      const nextScale = clamp(current.scale * zoomFactor, minZoom, maxZoom);
+      const nextScale = Math.min(maxZoom, Math.max(viewportScaleFloor, current.scale * zoomFactor));
       if (nextScale === current.scale) return current;
       const scenePoint = {
         x: (pointer.x - current.x) / current.scale,
@@ -4489,7 +4489,7 @@ function NodeBody({
 
   if (node.type === "preview") {
     const previewItems = connectedPreviewSources(incoming.sourceIn);
-    const previewIndex = Math.min(Math.max(Math.trunc(Number(node.data.previewSelectedIndex || 0)) || 0, 0), Math.max(0, previewItems.length - 1));
+    const previewIndex = previewSelectedIndexForNode(node, previewItems);
     const previewSource = previewItems[previewIndex] || null;
     const canStepPreview = previewItems.length > 1;
     const sourcePort = config.input.find((port) => port.id === "sourceIn");
@@ -6841,10 +6841,12 @@ function connectedPreviewSources(items = []) {
     .flatMap(({ source, edge }) => {
       const sourceType = previewMediaType(source, edge);
       const sourceName = source.type === "camera" && edge.from.port === "imageOut" ? "Camera image" : sourceLabel(source);
+      const selectedResultIndex = Math.trunc(Number(source.data.selectedResultIndex));
       return normalizedResultItems(source.data.resultItems, source.data.resultUrl, sourceType).map((item, index, allItems) => ({
         ...item,
         sourceNodeId: source.id,
         sourceResultIndex: index,
+        sourceSelectedResult: index === selectedResultIndex || item.url === source.data.resultUrl,
         type: item.type || sourceType,
         label: allItems.length > 1 ? `${sourceName} ${index + 1}` : sourceName
       }));
@@ -6854,9 +6856,21 @@ function connectedPreviewSources(items = []) {
 function previewVideoSourceForNode(node, incomingByNode) {
   if (node?.type !== "preview") return null;
   const previewItems = connectedPreviewSources(incomingByNode?.[node.id]?.sourceIn || []);
-  const previewIndex = Math.min(Math.max(Math.trunc(Number(node.data.previewSelectedIndex || 0)) || 0, 0), Math.max(0, previewItems.length - 1));
+  const previewIndex = previewSelectedIndexForNode(node, previewItems);
   const previewSource = previewItems[previewIndex] || null;
   return previewSource?.type === "video" ? previewSource : null;
+}
+
+function previewSelectedIndexForNode(node, previewItems = []) {
+  const maxIndex = Math.max(0, previewItems.length - 1);
+  const data = node?.data || {};
+  if (data.previewSelectedIndex !== undefined && data.previewSelectedIndex !== null && data.previewSelectedIndex !== "") {
+    const selectedIndex = Math.trunc(Number(data.previewSelectedIndex));
+    return Math.min(Math.max(Number.isFinite(selectedIndex) ? selectedIndex : 0, 0), maxIndex);
+  }
+
+  const sourceSelectedIndex = previewItems.findIndex((item) => item.sourceSelectedResult);
+  return sourceSelectedIndex >= 0 ? sourceSelectedIndex : 0;
 }
 
 function previewMediaType(source, edge) {
@@ -8226,8 +8240,8 @@ function normalizeGroups(groups = [], nodeMap = new Map()) {
         color: groupPalette.includes(group?.color) ? group.color : groupPalette[index % groupPalette.length],
         x: finiteNumber(group?.x, 120 + index * 30),
         y: finiteNumber(group?.y, 120 + index * 30),
-        width: Math.max(groupMinWidth, finiteNumber(group?.width, groupMinWidth)),
-        height: Math.max(groupMinHeight, finiteNumber(group?.height, groupMinHeight)),
+        width: Math.max(groupSizeFloor, finiteNumber(group?.width, groupSizeFloor)),
+        height: Math.max(groupSizeFloor, finiteNumber(group?.height, groupSizeFloor)),
         nodeIds
       };
     })

@@ -574,8 +574,6 @@
 
 .node-card.preview {
   width: calc(330px * var(--preview-scale, 1));
-  min-width: 330px;
-  max-width: 990px;
 }
 
 .node-title {
@@ -1796,7 +1794,6 @@
   display: block;
   width: 100%;
   height: auto;
-  max-height: 720px;
   object-fit: contain;
   background: #000;
 }
