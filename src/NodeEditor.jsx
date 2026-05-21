@@ -16,6 +16,7 @@ import {
   MonitorPlay,
   ImagePlus,
   Lock,
+  Maximize2,
   Minus,
   PanelLeftClose,
   PanelLeftOpen,
@@ -511,6 +512,11 @@ export default function NodeEditor({ active = true } = {}) {
     () => nodes.filter((node) => selectedNodeSet.has(node.id) && isRunnableNode(node) && node.data.status !== "running"),
     [nodes, selectedNodeSet]
   );
+  const selectedPlayablePreviewNodes = React.useMemo(
+    () => nodes.filter((node) => selectedNodeSet.has(node.id) && previewVideoSourceForNode(node, incomingByNode)),
+    [nodes, selectedNodeSet, incomingByNode]
+  );
+  const selectedRunAllCount = selectedRunnableNodes.length + selectedPlayablePreviewNodes.length;
   const selectedProjectName = projects.find((project) => project.id === projectId)?.name;
   const composerEditorNode = nodes.find((node) => node.id === composerEditorNodeId && node.type === "composer");
 
@@ -656,13 +662,14 @@ export default function NodeEditor({ active = true } = {}) {
         setProjectMenuOpen(false);
       }
       if (!event.target.closest?.(".node-context-menu")) {
+        if (contextMenu?.pendingConnection) setDraftEdge(null);
         setContextMenu(null);
       }
     }
 
     window.addEventListener("pointerdown", handlePointerDown);
     return () => window.removeEventListener("pointerdown", handlePointerDown);
-  }, [active]);
+  }, [active, contextMenu]);
 
   React.useEffect(() => {
     if (!active) return undefined;
@@ -769,22 +776,42 @@ export default function NodeEditor({ active = true } = {}) {
     });
   }
 
-  function addNode(type, position) {
-    const count = nodes.filter((node) => node.type === type).length + 1;
+  function addNode(type, position, options = {}) {
+    const count = nodesRef.current.filter((node) => node.type === type).length + 1;
     const spec = nodeCatalog.find((item) => item.type === type);
     const nodePosition = position || defaultNodePosition(count);
+    const nodeId = createNodeId(type);
+    const nextNode = {
+      id: nodeId,
+      type,
+      x: nodePosition.x,
+      y: nodePosition.y,
+      data: createDefaultNodeData(type, spec?.label || "Node", count)
+    };
+    const graphNodes = [...nodesRef.current, nextNode];
+    const pendingConnection = options.pendingConnection || null;
+    const pendingInput = pendingConnection ? compatibleInputPortForNewNode(pendingConnection.from, nextNode, graphNodes) : null;
     pushUndoSnapshot();
     setSelectedEdgeId(null);
-    setNodes((current) => [
-      ...current,
-      {
-        id: createNodeId(type),
-        type,
-        x: nodePosition.x,
-        y: nodePosition.y,
-        data: createDefaultNodeData(type, spec?.label || "Node", count)
-      }
-    ]);
+    setNodes((current) => [...current, nextNode]);
+    setSelectedNodeIds([nodeId]);
+    if (pendingConnection && pendingInput) {
+      setEdges((current) =>
+        dedupeEdges([
+          ...current,
+          {
+            id: `edge-${Date.now()}`,
+            from: pendingConnection.from,
+            to: { nodeId, port: pendingInput },
+            color: pendingConnection.color
+          }
+        ])
+      );
+      setSaveStatus(`Connected ${spec?.label || "node"}`);
+    } else if (pendingConnection) {
+      setSaveStatus(`${spec?.label || "Node"} added`);
+    }
+    if (pendingConnection) setDraftEdge(null);
     setContextMenu(null);
   }
 
@@ -1403,14 +1430,21 @@ export default function NodeEditor({ active = true } = {}) {
   function openCanvasContextMenu(event) {
     if (event.target.closest("[data-node-card-id]")) return;
     event.preventDefault();
+    openNodeContextMenuAtPoint(event.clientX, event.clientY);
+  }
+
+  function openNodeContextMenuAtPoint(clientX, clientY, pendingConnection = null) {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
-    const menuPosition = clampContextMenuPosition(event.clientX - rect.left, event.clientY - rect.top, rect);
+    const clampedClientX = clamp(clientX, rect.left, rect.right);
+    const clampedClientY = clamp(clientY, rect.top, rect.bottom);
+    const menuPosition = clampContextMenuPosition(clampedClientX - rect.left, clampedClientY - rect.top, rect);
     setContextMenu({
       x: menuPosition.x,
       y: menuPosition.y,
-      scene: screenToScene(event.clientX, event.clientY)
+      scene: screenToScene(clampedClientX, clampedClientY),
+      pendingConnection
     });
   }
 
@@ -1582,6 +1616,7 @@ export default function NodeEditor({ active = true } = {}) {
       return;
     }
 
+    let keepDraftEdge = false;
     const target = document.elementFromPoint(event.clientX, event.clientY)?.closest("[data-port-role='input']");
     if (target) {
       const to = {
@@ -1615,9 +1650,27 @@ export default function NodeEditor({ active = true } = {}) {
           ];
         });
       }
+    } else {
+      event.preventDefault();
+      event.stopPropagation();
+      const releasePoint = screenToScene(event.clientX, event.clientY);
+      setDraftEdge((current) =>
+        current
+          ? {
+              ...current,
+              x: releasePoint.x,
+              y: releasePoint.y
+            }
+          : current
+      );
+      openNodeContextMenuAtPoint(event.clientX, event.clientY, {
+        from: draftEdge.from,
+        color: draftEdge.color
+      });
+      keepDraftEdge = true;
     }
 
-    setDraftEdge(null);
+    if (!keepDraftEdge) setDraftEdge(null);
     stopNodeDrag();
   }
 
@@ -1625,9 +1678,77 @@ export default function NodeEditor({ active = true } = {}) {
     return !getConnectionError(from, to);
   }
 
-  function getConnectionError(from, to) {
-    const source = nodes.find((node) => node.id === from.nodeId);
-    const target = nodes.find((node) => node.id === to.nodeId);
+  function compatibleInputPortForNewNode(from, targetNode, graphNodes) {
+    const source = graphNodes.find((node) => node.id === from.nodeId);
+    if (!source || !targetNode) return null;
+
+    const activeInputs = new Set(activeInputPortIdsForNode(targetNode));
+    const candidates = preferredAutoInputPorts(source, from, targetNode).filter((port) => activeInputs.has(port));
+    return candidates.find((port) => !getConnectionError(from, { nodeId: targetNode.id, port }, graphNodes)) || null;
+  }
+
+  function preferredAutoInputPorts(source, from, target) {
+    const outputKind = autoConnectionOutputKind(source, from);
+    const inputs = {
+      prompt: {
+        text: ["textIn"],
+        imageModel: ["promptIn"],
+        videoModel: ["promptIn"],
+        utility: ["promptIn"],
+        composer: ["promptIn"]
+      },
+      image: {
+        preview: ["sourceIn"],
+        text: ["imageIn"],
+        camera: ["imageIn"],
+        composer: ["imageIn"],
+        imageModel: ["imagePromptIn", "transferIn"],
+        videoModel: ["startFrameIn", "referenceImageIn", "endFrameIn"],
+        utility: ["imageIn", "referenceImageIn"]
+      },
+      video: {
+        preview: ["sourceIn"],
+        text: ["videoIn"],
+        videoModel: ["referenceVideoIn"],
+        utility: ["referenceVideoIn", "maskVideoIn"]
+      },
+      audio: {
+        videoModel: ["referenceAudioIn"]
+      },
+      camera: {
+        imageModel: ["cameraIn"]
+      },
+      style: {
+        imageModel: ["styleIn"],
+        text: ["styleIn"]
+      },
+      transfer: {
+        imageModel: ["transferIn"],
+        composer: ["imageIn"],
+        utility: ["imageIn", "referenceImageIn"],
+        preview: ["sourceIn"]
+      }
+    };
+
+    return inputs[outputKind]?.[target.type] || [];
+  }
+
+  function autoConnectionOutputKind(source, from) {
+    if (source.type === "camera") return from.port === "cameraOut" ? "camera" : "image";
+    if (source.type === "composer") return from.port === "promptOut" ? "prompt" : "image";
+    if (source.type === "utility") return utilityOutputType(source);
+    if (source.type === "style") return "style";
+    if (source.type === "transfer") return "transfer";
+    if (source.type === "video" || source.type === "videoModel") return "video";
+    if (source.type === "audio") return "audio";
+    if (source.type === "text") return "prompt";
+    if (source.type === "image" || source.type === "imageModel") return "image";
+    return "";
+  }
+
+  function getConnectionError(from, to, graphNodes = nodes) {
+    const source = graphNodes.find((node) => node.id === from.nodeId);
+    const target = graphNodes.find((node) => node.id === to.nodeId);
 
     if (!source || !target) return "Choose a valid connection";
 
@@ -2288,16 +2409,55 @@ export default function NodeEditor({ active = true } = {}) {
     }
   }
 
+  function playSelectedPreviewVideos(nodeIds) {
+    const canvas = canvasRef.current;
+    const selectedIdSet = new Set(nodeIds);
+    const videos = [...(canvas?.querySelectorAll("[data-preview-video-node-id]") || [])].filter((video) => selectedIdSet.has(video.getAttribute("data-preview-video-node-id")));
+    const playRequests = videos.map((video) => {
+      video.pause();
+      try {
+        video.currentTime = 0;
+      } catch {
+        // Some browsers reject seeks before video metadata is ready.
+      }
+      try {
+        return video.play();
+      } catch (error) {
+        return Promise.reject(error);
+      }
+    });
+
+    return Promise.allSettled(playRequests);
+  }
+
   async function runSelectedNodes() {
     const selectedIds = new Set(selectedNodeIds);
+    const currentIncomingByNode = buildIncomingByNode(nodesRef.current, edgesRef.current);
     const runnable = nodesRef.current.filter((node) => selectedIds.has(node.id) && isRunnableNode(node) && node.data.status !== "running");
-    if (!runnable.length) {
+    const playablePreviewNodes = nodesRef.current.filter((node) => selectedIds.has(node.id) && previewVideoSourceForNode(node, currentIncomingByNode));
+    const previewPlayback = playablePreviewNodes.length ? playSelectedPreviewVideos(playablePreviewNodes.map((node) => node.id)) : null;
+
+    if (!runnable.length && !playablePreviewNodes.length) {
       setSaveStatus("No runnable selected nodes");
       return;
     }
 
-    setSaveStatus(`Running ${runnable.length} selected node${runnable.length === 1 ? "" : "s"}...`);
+    if (!runnable.length) {
+      const playback = previewPlayback ? await previewPlayback : [];
+      const failedPlays = playback.filter((item) => item.status === "rejected").length;
+      setSaveStatus(
+        failedPlays
+          ? `Playing ${Math.max(0, playablePreviewNodes.length - failedPlays)} preview video${playablePreviewNodes.length - failedPlays === 1 ? "" : "s"}; ${failedPlays} blocked`
+          : `Playing ${playablePreviewNodes.length} preview video${playablePreviewNodes.length === 1 ? "" : "s"}`
+      );
+      return;
+    }
+
+    setSaveStatus(
+      `${playablePreviewNodes.length ? `Playing ${playablePreviewNodes.length} preview video${playablePreviewNodes.length === 1 ? "" : "s"}; ` : ""}Running ${runnable.length} selected node${runnable.length === 1 ? "" : "s"}...`
+    );
     const result = await runNodesByDependencyOrder(runnable);
+    if (previewPlayback) await previewPlayback;
     const failedCount = result.failed + result.skipped;
     setSaveStatus(
       failedCount
@@ -2532,17 +2692,17 @@ export default function NodeEditor({ active = true } = {}) {
             bounds={selectionBounds}
             viewport={viewport}
             selectedCount={selectedNodeIds.length}
-            runnableCount={selectedRunnableNodes.length}
+            runnableCount={selectedRunAllCount}
             onRunAll={runSelectedNodes}
             onGroup={createGroupFromSelection}
           />
         )}
         {contextMenu && (
-          <div className="node-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }}>
+          <div className={`node-context-menu ${contextMenu.pendingConnection ? "pending-connection" : ""}`} style={{ left: contextMenu.x, top: contextMenu.y }}>
             {nodeCatalog.map((item) => {
               const Icon = item.icon;
               return (
-                <button key={item.type} onClick={() => addNode(item.type, contextMenu.scene)}>
+                <button key={item.type} onClick={() => addNode(item.type, contextMenu.scene, { pendingConnection: contextMenu.pendingConnection })}>
                   <Icon size={15} />
                   <span>{item.label}</span>
                 </button>
@@ -2609,7 +2769,7 @@ function SelectionActionBar({ bounds, viewport, selectedCount, runnableCount, on
     <div className="selection-action-bar" style={{ left: x, top: y }} onPointerDown={(event) => event.stopPropagation()}>
       <span className="selection-action-dot" aria-hidden="true" />
       <span className="selection-action-divider" aria-hidden="true" />
-      <button onClick={onRunAll} disabled={!runnableCount} title={runnableCount ? `Run ${runnableCount} selected node${runnableCount === 1 ? "" : "s"}` : "No runnable selected nodes"}>
+      <button onClick={onRunAll} disabled={!runnableCount} title={runnableCount ? `Run or play ${runnableCount} selected node${runnableCount === 1 ? "" : "s"}` : "No runnable selected nodes"}>
         <Play size={18} />
         <span>Run All</span>
       </button>
@@ -2852,7 +3012,7 @@ function MediaPreview({ node }) {
   if (node.type === "video") {
     return (
       <div className="media-preview">
-        <video src={node.data.resultUrl} controls muted />
+        <video src={node.data.resultUrl} controls muted loop />
       </div>
     );
   }
@@ -4346,7 +4506,7 @@ function NodeBody({
         </NodeRow>
         <div className={`preview-stage ${previewSource ? "has-preview" : ""}`}>
           {previewSource?.type === "image" && <img src={previewSource.url} alt={previewSource.label} />}
-          {previewSource?.type === "video" && <video src={previewSource.url} controls />}
+          {previewSource?.type === "video" && <video src={previewSource.url} controls loop data-preview-video-node-id={node.id} />}
           {!previewSource && <span>Preview will appear here</span>}
         </div>
         {canStepPreview && (
@@ -5276,7 +5436,7 @@ function ResultPane({ label, resultUrl, resultItems = [], selectedIndex = 0, typ
         <div className="result-carousel" onPointerDown={(event) => event.stopPropagation()}>
           <div className="result-item" key={activeItem.url}>
             {activeItem.type === "image" && <img src={activeItem.url} alt={activeItem.label || `Generated image ${activeIndex + 1}`} />}
-            {activeItem.type === "video" && <video src={activeItem.url} controls />}
+            {activeItem.type === "video" && <video src={activeItem.url} controls loop />}
           </div>
           {items.length > 1 && (
             <div className="result-cycle-controls" onPointerDown={(event) => event.stopPropagation()}>
@@ -5451,16 +5611,55 @@ function ColorIdMattePicker({ imageUrl, node, onUpdate }) {
 
 function ExtractFrameControls({ videoUrl, node, onUpdate }) {
   const videoRef = React.useRef(null);
+  const largeVideoRef = React.useRef(null);
   const [duration, setDuration] = React.useState(0);
+  const [pickerOpen, setPickerOpen] = React.useState(false);
   const selectedTime = Math.max(0, finiteNumber(node.data.extractFrameTime, 0));
   const selectedFormat = node.data.extractFrameFormat === "jpeg" ? "jpeg" : "png";
+  const sliderMax = duration ? Math.max(0, duration - 0.01) : Math.max(1, selectedTime);
+  const sliderValue = clamp(selectedTime, 0, sliderMax);
 
   React.useEffect(() => {
     setDuration(0);
+    setPickerOpen(false);
   }, [videoUrl]);
 
+  React.useEffect(() => {
+    if (!pickerOpen) return undefined;
+    function handleKeyDown(event) {
+      if (event.key === "Escape") setPickerOpen(false);
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [pickerOpen]);
+
+  React.useEffect(() => {
+    syncVideoTime(videoRef.current, selectedTime);
+    syncVideoTime(largeVideoRef.current, selectedTime);
+  }, [selectedTime, videoUrl, pickerOpen]);
+
+  function syncVideoTime(video, time) {
+    if (!video || !Number.isFinite(time)) return;
+    const upper = Number.isFinite(video.duration) ? Math.max(0, video.duration - 0.01) : time;
+    const nextTime = clamp(time, 0, upper);
+    if (Math.abs(video.currentTime - nextTime) > 0.05) {
+      try {
+        video.currentTime = nextTime;
+      } catch {
+        // Some browsers reject seeks before metadata is fully available.
+      }
+    }
+  }
+
+  function seekPreviewVideos(time) {
+    syncVideoTime(videoRef.current, time);
+    syncVideoTime(largeVideoRef.current, time);
+  }
+
   function commitTime(value) {
-    const nextTime = Math.round(Math.max(0, Number(value) || 0) * 100) / 100;
+    const unclampedTime = Math.max(0, Number(value) || 0);
+    const boundedTime = duration ? clamp(unclampedTime, 0, Math.max(0, duration - 0.01)) : unclampedTime;
+    const nextTime = Math.round(boundedTime * 100) / 100;
     if (Math.abs(nextTime - selectedTime) < 0.005) return;
     onUpdate(node.id, {
       extractFrameTime: String(nextTime),
@@ -5481,30 +5680,42 @@ function ExtractFrameControls({ videoUrl, node, onUpdate }) {
     }
   }
 
+  function handlePreviewOpen(event) {
+    event.stopPropagation();
+    if (videoUrl) setPickerOpen(true);
+  }
+
+  function handlePreviewKeyDown(event) {
+    if (!videoUrl || (event.key !== "Enter" && event.key !== " ")) return;
+    event.preventDefault();
+    setPickerOpen(true);
+  }
+
   function handleTimeInput(event) {
     const nextTime = Math.max(0, Number(event.target.value) || 0);
     commitTime(nextTime);
-    const video = videoRef.current;
-    if (video && Number.isFinite(video.duration)) {
-      video.currentTime = clamp(nextTime, 0, Math.max(0, video.duration - 0.01));
-    }
+    seekPreviewVideos(nextTime);
   }
 
   return (
     <>
       <NodeRow label="Preview">
-        <div className={`extract-frame-preview ${videoUrl ? "" : "empty"}`} onPointerDown={(event) => event.stopPropagation()}>
+        <div
+          className={`extract-frame-preview ${videoUrl ? "" : "empty"}`}
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={handlePreviewOpen}
+          onKeyDown={handlePreviewKeyDown}
+          role={videoUrl ? "button" : undefined}
+          tabIndex={videoUrl ? 0 : undefined}
+          title={videoUrl ? "Open large frame picker" : undefined}
+        >
           {videoUrl ? (
-            <video
-              ref={videoRef}
-              src={videoUrl}
-              controls
-              muted
-              preload="metadata"
-              onLoadedMetadata={handleLoadedMetadata}
-              onSeeked={(event) => commitTime(event.currentTarget.currentTime)}
-              onTimeUpdate={(event) => commitTime(event.currentTarget.currentTime)}
-            />
+            <>
+              <video ref={videoRef} src={videoUrl} muted preload="metadata" playsInline onLoadedMetadata={handleLoadedMetadata} />
+              <button type="button" className="extract-frame-expand-button" onClick={handlePreviewOpen} title="Open large frame picker" aria-label="Open large frame picker">
+                <Maximize2 size={14} />
+              </button>
+            </>
           ) : (
             <span>No video</span>
           )}
@@ -5522,6 +5733,40 @@ function ExtractFrameControls({ videoUrl, node, onUpdate }) {
           <option value="jpeg">JPEG</option>
         </select>
       </NodeRow>
+      {pickerOpen && videoUrl && (
+        <div className="extract-frame-modal" role="dialog" aria-modal="true" aria-label="Extract frame picker" onPointerDown={(event) => event.stopPropagation()}>
+          <div className="extract-frame-modal-panel">
+            <div className="extract-frame-modal-header">
+              <div>
+                <strong>Extract Frame</strong>
+                <span>{duration ? `${formatFrameTimeDisplay(selectedTime)} / ${formatFrameTimeDisplay(duration)}` : formatFrameTimeDisplay(selectedTime)}</span>
+              </div>
+              <button type="button" className="color-id-picker-close" onClick={() => setPickerOpen(false)} title="Close picker" aria-label="Close picker">
+                <X size={17} />
+              </button>
+            </div>
+            <div className="extract-frame-modal-video">
+              <video
+                ref={largeVideoRef}
+                src={videoUrl}
+                controls
+                muted
+                preload="metadata"
+                playsInline
+                onLoadedMetadata={handleLoadedMetadata}
+                onSeeked={(event) => commitTime(event.currentTarget.currentTime)}
+                onTimeUpdate={(event) => commitTime(event.currentTarget.currentTime)}
+              />
+            </div>
+            <div className="extract-frame-modal-controls">
+              <span>Time</span>
+              <input type="range" min="0" max={sliderMax} step="0.01" value={sliderValue} onChange={handleTimeInput} />
+              <input type="number" min="0" step="0.01" value={node.data.extractFrameTime ?? 0} onChange={handleTimeInput} />
+              <strong>{duration ? `/ ${formatFrameTimeDisplay(duration)}` : "sec"}</strong>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
@@ -5983,6 +6228,14 @@ function visiblePortIdsForNode(node) {
 
 function inputPortIdsForNode(node) {
   return (getNodeConfig(node?.type)?.input || []).map((port) => port.id);
+}
+
+function activeInputPortIdsForNode(node) {
+  if (node?.type === "utility") {
+    return utilityInputPortIds(node.data?.utilityMode, node.data?.utilityImageModel, node.data?.utilityVideoModel);
+  }
+
+  return inputPortIdsForNode(node);
 }
 
 function outputPortIdsForNode(node) {
@@ -6596,6 +6849,14 @@ function connectedPreviewSources(items = []) {
         label: allItems.length > 1 ? `${sourceName} ${index + 1}` : sourceName
       }));
     });
+}
+
+function previewVideoSourceForNode(node, incomingByNode) {
+  if (node?.type !== "preview") return null;
+  const previewItems = connectedPreviewSources(incomingByNode?.[node.id]?.sourceIn || []);
+  const previewIndex = Math.min(Math.max(Math.trunc(Number(node.data.previewSelectedIndex || 0)) || 0, 0), Math.max(0, previewItems.length - 1));
+  const previewSource = previewItems[previewIndex] || null;
+  return previewSource?.type === "video" ? previewSource : null;
 }
 
 function previewMediaType(source, edge) {

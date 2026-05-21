@@ -498,6 +498,13 @@
   box-shadow: 0 18px 42px rgba(0, 0, 0, 0.4);
 }
 
+.node-context-menu.pending-connection {
+  border-color: rgba(221, 198, 49, 0.44);
+  box-shadow:
+    0 18px 42px rgba(0, 0, 0, 0.4),
+    0 0 0 1px rgba(221, 198, 49, 0.14);
+}
+
 .node-context-menu button {
   display: grid;
   grid-template-columns: 18px 1fr;
@@ -803,6 +810,7 @@
 }
 
 .extract-frame-preview {
+  position: relative;
   display: grid;
   overflow: hidden;
   width: 100%;
@@ -812,6 +820,7 @@
   border-radius: 8px;
   color: rgba(244, 240, 232, 0.44);
   background: rgba(0, 0, 0, 0.3);
+  cursor: zoom-in;
 }
 
 .extract-frame-preview video {
@@ -820,6 +829,32 @@
   max-height: 168px;
   object-fit: contain;
   background: #000;
+  pointer-events: none;
+}
+
+.extract-frame-preview.empty {
+  cursor: default;
+}
+
+.extract-frame-expand-button {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: grid;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  color: rgba(244, 240, 232, 0.88);
+  background: rgba(18, 18, 18, 0.78);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.24);
+}
+
+.extract-frame-expand-button:hover {
+  color: #101010;
+  background: #ddc631;
 }
 
 .extract-frame-time {
@@ -834,6 +869,98 @@
   color: rgba(244, 240, 232, 0.48);
   font-size: 11px;
   white-space: nowrap;
+}
+
+.extract-frame-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.76);
+  backdrop-filter: blur(10px);
+}
+
+.extract-frame-modal-panel {
+  display: grid;
+  width: min(92vw, 1180px);
+  max-height: 92vh;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: #151515;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.42);
+}
+
+.extract-frame-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.extract-frame-modal-header > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.extract-frame-modal-header strong {
+  color: rgba(244, 240, 232, 0.86);
+  font-size: 14px;
+}
+
+.extract-frame-modal-header span {
+  color: rgba(244, 240, 232, 0.52);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.extract-frame-modal-video {
+  display: grid;
+  min-height: 360px;
+  max-height: calc(92vh - 156px);
+  place-items: center;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #050505;
+}
+
+.extract-frame-modal-video video {
+  display: block;
+  width: 100%;
+  max-height: calc(92vh - 156px);
+  object-fit: contain;
+  background: #000;
+}
+
+.extract-frame-modal-controls {
+  display: grid;
+  grid-template-columns: auto minmax(180px, 1fr) 104px auto;
+  align-items: center;
+  gap: 10px;
+  color: rgba(244, 240, 232, 0.62);
+  font-size: 13px;
+  font-weight: 740;
+}
+
+.extract-frame-modal-controls input[type="range"] {
+  width: 100%;
+  accent-color: #ddc631;
+}
+
+.extract-frame-modal-controls input[type="number"] {
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.extract-frame-modal-controls strong {
+  min-width: 54px;
+  color: #ddc631;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
 .media-node-body > .media-upload-card {
