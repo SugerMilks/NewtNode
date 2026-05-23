@@ -933,6 +933,10 @@ textarea::placeholder {
   background: #f0c83b;
 }
 
+.model3d-dot {
+  background: #14d8c8;
+}
+
 .media-legend small {
   color: rgba(244, 240, 232, 0.44);
 }
@@ -1017,6 +1021,11 @@ textarea::placeholder {
 .media-pill.text {
   color: #111;
   background: #f0c83b;
+}
+
+.media-pill.model3d {
+  color: #071313;
+  background: #14d8c8;
 }
 
 .recent-table strong {

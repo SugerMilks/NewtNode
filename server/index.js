@@ -41,6 +41,8 @@ const seedanceFastCostPerThousandTokens = Number(process.env.SEEDANCE_FAST_COST_
 const nanoBananaCost1K2K = Number(process.env.NANO_BANANA_IMAGE_COST_1K_2K || 0.15);
 const nanoBananaCost4K = Number(process.env.NANO_BANANA_IMAGE_COST_4K || 0.3);
 const openAiImage2MediumCost = Number(process.env.OPENAI_IMAGE_2_MEDIUM_COST || 0.053);
+const hunyuan3DProBaseCost = Number(process.env.HUNYUAN_3D_PRO_BASE_COST || 0.375);
+const hunyuan3DProAddOnCost = Number(process.env.HUNYUAN_3D_PRO_ADD_ON_COST || 0.15);
 const nanoImageAspectRatios = ["21:9", "16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3", "4:5", "5:4"];
 const openAiImageAspectRatios = nanoImageAspectRatios;
 const falTextRequestCost = Number(process.env.FAL_TEXT_REQUEST_COST || 0.001);
@@ -202,7 +204,8 @@ app.get("/api/health", (_req, res) => {
       apiJsonErrors: true,
       voidFrameValidation: true,
       sam3VideoMaskOutput: true,
-      extractVideoFrame: true
+      extractVideoFrame: true,
+      generate3d: true
     },
     ffmpeg: {
       configured: Boolean(ffmpegBinaryPath),
@@ -252,6 +255,11 @@ app.get("/api/stats", async (_req, res) => {
       },
       openAiImage2: {
         mediumCost: openAiImage2MediumCost,
+        currency: "USD"
+      },
+      hunyuan3DPro: {
+        baseCost: hunyuan3DProBaseCost,
+        addOnCost: hunyuan3DProAddOnCost,
         currency: "USD"
       },
       textProcessing: {
@@ -1747,6 +1755,134 @@ app.post("/api/node/generate-video", async (req, res) => {
   }
 });
 
+app.post("/api/node/generate-3d", async (req, res) => {
+  try {
+    if (!process.env.FAL_KEY) {
+      return res.status(400).json({ error: "Missing FAL_KEY in .env." });
+    }
+
+    const imageViewUrls = normalizeHunyuan3DImageViewUrls(req.body);
+    if (!imageViewUrls.front) {
+      return res.status(400).json({ error: "Connect a front image to the 3D node." });
+    }
+
+    const endpoint = "fal-ai/hunyuan-3d/v3.1/pro/image-to-3d";
+    const generateType = normalizeChoice(req.body.generateType, ["Normal", "Geometry"], "Normal");
+    const enablePbr = Boolean(req.body.enablePbr) && generateType !== "Geometry";
+    const faceCount = clampInteger(req.body.faceCount, 40000, 1500000, 500000);
+    const uploadedViewUrls = Object.fromEntries(
+      await Promise.all(Object.entries(imageViewUrls).map(async ([view, url]) => [view, await localAssetToFalUrl(url)]))
+    );
+    const input = {
+      input_image_url: uploadedViewUrls.front,
+      generate_type: generateType,
+      enable_pbr: enablePbr,
+      face_count: faceCount
+    };
+    const viewFields = {
+      back: "back_image_url",
+      left: "left_image_url",
+      right: "right_image_url",
+      top: "top_image_url",
+      bottom: "bottom_image_url",
+      leftFront: "left_front_image_url",
+      rightFront: "right_front_image_url"
+    };
+
+    Object.entries(viewFields).forEach(([view, field]) => {
+      if (uploadedViewUrls[view]) input[field] = uploadedViewUrls[view];
+    });
+
+    const result = await subscribeFal(endpoint, { input, logs: true }, { route: "generate-3d", node: req.body.nodeId });
+    const data = result?.data || {};
+    const remoteModel =
+      normalizeFalFile(data.model_glb) ||
+      normalizeFalFile(data.model_urls?.glb) ||
+      findFalMediaFile(data, "model/");
+
+    if (!remoteModel?.url) {
+      return res.status(502).json({ error: "Hunyuan 3D returned no GLB model.", raw: data });
+    }
+
+    const output = await downloadModelFile(remoteModel.url, "hunyuan-3d-pro", remoteModel.content_type || remoteModel.mimeType || remoteModel.mime_type);
+    const remoteThumbnail = normalizeFalFile(data.thumbnail) || normalizeFalFile(data.thumbnail_url) || firstFalImageResult(data);
+    let thumbnailOutput = null;
+    if (remoteThumbnail?.url) {
+      try {
+        thumbnailOutput = await downloadImage(remoteThumbnail.url, "hunyuan-3d-thumbnail", remoteThumbnail.content_type || remoteThumbnail.mimeType || remoteThumbnail.mime_type);
+      } catch (error) {
+        console.warn("Could not download 3D thumbnail:", error.message);
+      }
+    }
+
+    const cost = estimateHunyuan3DProCost({
+      generateType,
+      enablePbr,
+      faceCount,
+      inputImageCount: Object.keys(imageViewUrls).length,
+      endpoint
+    });
+
+    await appendHistory({
+      id: result.requestId || randomUUID(),
+      createdAt: new Date().toISOString(),
+      mediaType: "model3d",
+      provider: "fal.ai",
+      modelName: "Hunyuan 3D 3.1 Pro",
+      endpoint,
+      mode: "Image to 3D",
+      prompt: "Image to 3D",
+      submittedPrompt: "Image to 3D",
+      project: projectFromBody(req.body),
+      node: nodeFromBody(req.body),
+      settings: {
+        model: req.body.model || "Hunyuan 3D 3.1 Pro",
+        generateType,
+        enablePbr,
+        faceCount,
+        imageViews: Object.keys(imageViewUrls),
+        inputImageCount: Object.keys(imageViewUrls).length
+      },
+      cost,
+      remoteModel,
+      remoteThumbnail,
+      modelUrls: data.model_urls || null,
+      seed: data.seed ?? null,
+      localModel: output.publicPath,
+      localImage: thumbnailOutput?.publicPath || "",
+      outputFileName: output.fileName,
+      outputBytes: output.bytes
+    });
+
+    res.json({
+      requestId: result.requestId,
+      endpoint,
+      modelName: "Hunyuan 3D 3.1 Pro",
+      seed: data.seed,
+      text: "Hunyuan 3D model generated.",
+      cost,
+      model: {
+        ...remoteModel,
+        label: "Hunyuan 3D model",
+        localUrl: output.publicPath,
+        fileName: output.fileName,
+        mimeType: output.mimeType
+      },
+      thumbnail: thumbnailOutput
+        ? {
+            ...remoteThumbnail,
+            localUrl: thumbnailOutput.publicPath,
+            fileName: thumbnailOutput.fileName,
+            mimeType: thumbnailOutput.mimeType
+          }
+        : null
+    });
+  } catch (error) {
+    console.error(error);
+    sendApiError(res, error, "3D generation failed.");
+  }
+});
+
 async function runSam3VideoSegmentation(req, res, { prompt, referenceVideoUrls }) {
   const videoUrl = firstLocalOutput(referenceVideoUrls);
   if (!videoUrl) {
@@ -2679,6 +2815,25 @@ function normalizeChoice(value, choices, fallback) {
   return choices.includes(normalized) ? normalized : fallback;
 }
 
+function normalizeHunyuan3DImageViewUrls(body = {}) {
+  const viewOrder = ["front", "back", "left", "right", "top", "bottom", "leftFront", "rightFront"];
+  const viewUrls = body.imageViewUrls && typeof body.imageViewUrls === "object" && !Array.isArray(body.imageViewUrls) ? body.imageViewUrls : {};
+  const normalized = {};
+
+  viewOrder.forEach((view) => {
+    const url = String(viewUrls[view] || "").trim();
+    if (isLocalAssetUrl(url)) normalized[view] = url;
+  });
+
+  const legacyUrls = Array.isArray(body.imageUrls) ? body.imageUrls.filter(isLocalAssetUrl).slice(0, viewOrder.length) : [];
+  legacyUrls.forEach((url, index) => {
+    const view = viewOrder[index];
+    if (!normalized[view]) normalized[view] = url;
+  });
+
+  return normalized;
+}
+
 function parseReferenceNames(rawValue, count) {
   let names = [];
 
@@ -3113,6 +3268,27 @@ async function downloadImage(url, kind, mimeTypeHint = "") {
   };
 }
 
+async function downloadModelFile(url, kind, mimeTypeHint = "") {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Could not download generated 3D model: ${response.status} ${response.statusText}`);
+  }
+
+  const mimeType = normalizeMimeType(mimeTypeHint || response.headers.get("content-type") || "model/gltf-binary", "model/gltf-binary");
+  const extension = modelExtensionForUrl(url, mimeType);
+  const fileName = uniqueOutputFileName(kind, extension);
+  const outputPath = path.join(outputsDir, fileName);
+  const bytes = Buffer.from(await response.arrayBuffer());
+  await writeFile(outputPath, bytes);
+
+  return {
+    fileName,
+    publicPath: `/outputs/${fileName}`,
+    bytes: bytes.length,
+    mimeType
+  };
+}
+
 function uniqueOutputFileName(kind, extension) {
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
   const safeKind = String(kind || "output").replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "") || "output";
@@ -3126,8 +3302,17 @@ function imageExtensionForUrl(url, mimeType) {
   return extensionForMime(mimeType);
 }
 
-function normalizeMimeType(value) {
-  return String(value || "image/png").split(";")[0].trim().toLowerCase() || "image/png";
+function modelExtensionForUrl(url, mimeType) {
+  const extension = path.extname(new URL(url).pathname).toLowerCase();
+  if ([".glb", ".gltf", ".obj"].includes(extension)) return extension;
+  const normalizedMime = normalizeMimeType(mimeType, "model/gltf-binary");
+  if (normalizedMime === "application/octet-stream") return ".glb";
+  const inferred = extensionForMime(normalizedMime);
+  return inferred === ".png" ? ".glb" : inferred;
+}
+
+function normalizeMimeType(value, fallback = "image/png") {
+  return String(value || fallback).split(";")[0].trim().toLowerCase() || fallback;
 }
 
 function normalizeFalFile(value) {
@@ -3198,6 +3383,11 @@ function falFileMatchesMedia(file, mimePrefix) {
   if (mimePrefix === "video/") {
     const fileName = String(file.file_name || file.fileName || file.name || file.url || "").toLowerCase();
     return [".mp4", ".mov", ".webm", ".gif"].some((extension) => fileName.includes(extension));
+  }
+
+  if (mimePrefix === "model/") {
+    const fileName = String(file.file_name || file.fileName || file.name || file.url || "").toLowerCase();
+    return [".glb", ".gltf", ".obj"].some((extension) => fileName.includes(extension));
   }
 
   return false;
@@ -3858,6 +4048,29 @@ function estimateImageCost({ resolution }) {
     resolution,
     pricingBasis: "Nano Banana Pro fal.ai per-image estimate",
     pricingSource: "fal-model-page-2026-05-15"
+  };
+}
+
+function estimateHunyuan3DProCost({ generateType, enablePbr, faceCount, inputImageCount = 1, endpoint }) {
+  const customFaceCount = Number(faceCount) !== 500000;
+  const multiView = Number(inputImageCount) > 1;
+  const addOnCount = (enablePbr && generateType !== "Geometry" ? 1 : 0) + (customFaceCount ? 1 : 0) + (multiView ? 1 : 0);
+  const amountUsd = hunyuan3DProBaseCost + addOnCount * hunyuan3DProAddOnCost;
+
+  return {
+    amountUsd: roundCurrency(amountUsd),
+    currency: "USD",
+    unitRateUsd: hunyuan3DProBaseCost,
+    units: 1,
+    unit: "3D generation",
+    mediaType: "model3d",
+    generateType,
+    enablePbr,
+    faceCount,
+    inputImageCount,
+    pricingBasis: "Hunyuan 3D Pro fal.ai estimate: base generation plus PBR, multi-view, and custom face-count add-ons",
+    pricingSource: "fal-model-page-2026-05-23",
+    endpoint
   };
 }
 
@@ -4863,6 +5076,9 @@ function mimeForOpenAiOutputFormat(format) {
 function extensionForMime(mimeType) {
   if (mimeType === "image/jpeg") return ".jpg";
   if (mimeType === "image/webp") return ".webp";
+  if (mimeType === "model/gltf-binary") return ".glb";
+  if (mimeType === "model/gltf+json") return ".gltf";
+  if (mimeType === "model/obj") return ".obj";
   return ".png";
 }
 
@@ -5045,6 +5261,9 @@ function resolveLocalAssetPath(publicPath) {
 function mimeForExtension(extension) {
   if (extension === ".jpg" || extension === ".jpeg") return "image/jpeg";
   if (extension === ".webp") return "image/webp";
+  if (extension === ".glb") return "model/gltf-binary";
+  if (extension === ".gltf") return "model/gltf+json";
+  if (extension === ".obj") return "model/obj";
   if (extension === ".mp4") return "video/mp4";
   if (extension === ".mov" || extension === ".qt") return "video/quicktime";
   if (extension === ".webm") return "video/webm";
@@ -5058,5 +5277,6 @@ function mediaTypeForMime(mimeType = "") {
   if (mimeType.startsWith("image/")) return "image";
   if (mimeType.startsWith("video/")) return "video";
   if (mimeType.startsWith("audio/")) return "audio";
+  if (mimeType.startsWith("model/")) return "model3d";
   return "file";
 }

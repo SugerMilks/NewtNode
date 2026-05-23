@@ -9,6 +9,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Compass,
+  Download,
   FileAudio,
   FileImage,
   Film,
@@ -44,6 +45,7 @@ const nodeCatalog = [
   { type: "video", label: "Video", icon: Video },
   { type: "audio", label: "Audio", icon: FileAudio },
   { type: "preview", label: "Preview", icon: MonitorPlay },
+  { type: "model3d", label: "3D", icon: Box },
   { type: "imageModel", label: "Image Model", icon: ImagePlus },
   { type: "videoModel", label: "Video Model", icon: Film }
 ];
@@ -56,6 +58,7 @@ const portColors = {
   transfer: "#ff4fb3",
   video: "#58ce63",
   audio: "#ff8b35",
+  model3d: "#14d8c8",
   preview: "#8d8d8d"
 };
 
@@ -393,6 +396,21 @@ const videoModelNames = {
   aurora: "Creatify Aurora",
   sam3Video: "SAM 3 Video"
 };
+const model3DNames = {
+  hunyuanPro: "Hunyuan 3D 3.1 Pro"
+};
+const model3DViewInputs = [
+  { id: "frontImageIn", view: "front", label: "Front" },
+  { id: "backImageIn", view: "back", label: "Back" },
+  { id: "leftImageIn", view: "left", label: "Left" },
+  { id: "rightImageIn", view: "right", label: "Right" },
+  { id: "topImageIn", view: "top", label: "Top" },
+  { id: "bottomImageIn", view: "bottom", label: "Bottom" },
+  { id: "leftFrontImageIn", view: "leftFront", label: "Left Front" },
+  { id: "rightFrontImageIn", view: "rightFront", label: "Right Front" }
+];
+const model3DDescription =
+  "Generates a GLB 3D model from connected view images. Front is required; Back, Left, Right, Top, Bottom, Left Front, and Right Front are optional.";
 const utilityImageModelNames = {
   colorIdMatte: "Color ID Matte",
   dwpose: "DWPose",
@@ -1702,6 +1720,7 @@ export default function NodeEditor({ active = true } = {}) {
         text: ["imageIn"],
         camera: ["imageIn"],
         composer: ["imageIn"],
+        model3d: ["frontImageIn"],
         imageModel: ["imagePromptIn", "transferIn"],
         videoModel: ["startFrameIn", "referenceImageIn", "endFrameIn"],
         utility: ["imageIn", "referenceImageIn"]
@@ -1725,7 +1744,11 @@ export default function NodeEditor({ active = true } = {}) {
       transfer: {
         imageModel: ["transferIn"],
         composer: ["imageIn"],
+        model3d: ["frontImageIn"],
         utility: ["imageIn", "referenceImageIn"],
+        preview: ["sourceIn"]
+      },
+      model3d: {
         preview: ["sourceIn"]
       }
     };
@@ -1739,6 +1762,7 @@ export default function NodeEditor({ active = true } = {}) {
     if (source.type === "utility") return utilityOutputType(source);
     if (source.type === "style") return "style";
     if (source.type === "transfer") return "transfer";
+    if (source.type === "model3d") return "model3d";
     if (source.type === "video" || source.type === "videoModel") return "video";
     if (source.type === "audio") return "audio";
     if (source.type === "text") return "prompt";
@@ -1758,6 +1782,7 @@ export default function NodeEditor({ active = true } = {}) {
         if (target.type === "text" && to.port === "imageIn") return "";
         if (target.type === "camera" && to.port === "imageIn") return "";
         if (target.type === "composer" && to.port === "imageIn") return "";
+        if (target.type === "model3d" && isModel3DImageInputPort(to.port)) return "";
         if (target.type === "imageModel" && ["imagePromptIn", "transferIn"].includes(to.port)) return "";
         if (target.type === "videoModel" && ["startFrameIn", "endFrameIn", "referenceImageIn"].includes(to.port)) return "";
         if (target.type === "utility" && ["imageIn", "referenceImageIn"].includes(to.port)) return "";
@@ -1785,6 +1810,7 @@ export default function NodeEditor({ active = true } = {}) {
       if (
         (target.type === "imageModel" && to.port === "transferIn") ||
         (target.type === "composer" && to.port === "imageIn") ||
+        (target.type === "model3d" && isModel3DImageInputPort(to.port)) ||
         (target.type === "utility" && ["imageIn", "referenceImageIn"].includes(to.port)) ||
         (target.type === "preview" && to.port === "sourceIn")
       )
@@ -1805,6 +1831,7 @@ export default function NodeEditor({ active = true } = {}) {
       if (target.type === "text" && to.port === "imageIn") return "";
       if (target.type === "camera" && to.port === "imageIn") return "";
       if (target.type === "composer" && to.port === "imageIn") return "";
+      if (target.type === "model3d" && isModel3DImageInputPort(to.port)) return "";
       if (target.type === "imageModel" && ["imagePromptIn", "transferIn"].includes(to.port)) return "";
       if (target.type === "videoModel" && ["startFrameIn", "endFrameIn", "referenceImageIn"].includes(to.port)) return "";
       if (target.type === "utility" && ["imageIn", "referenceImageIn"].includes(to.port)) return "";
@@ -1860,6 +1887,7 @@ export default function NodeEditor({ active = true } = {}) {
         if (target.type === "text" && to.port === "imageIn") return "";
         if (target.type === "camera" && to.port === "imageIn") return "";
         if (target.type === "composer" && to.port === "imageIn") return "";
+        if (target.type === "model3d" && isModel3DImageInputPort(to.port)) return "";
         if (target.type === "imageModel" && ["imagePromptIn", "transferIn"].includes(to.port)) return "";
         if (target.type === "videoModel" && ["startFrameIn", "endFrameIn", "referenceImageIn"].includes(to.port)) return "";
         if (target.type === "utility" && ["imageIn", "referenceImageIn"].includes(to.port)) return "";
@@ -1867,9 +1895,17 @@ export default function NodeEditor({ active = true } = {}) {
       }
     }
 
+    if (target?.type === "model3d" && isModel3DImageInputPort(to.port)) {
+      if (source.type === "camera") return from.port === "imageOut" ? "" : "3D image input accepts Camera image output";
+      if (source.type === "composer") return from.port === "imageOut" ? "" : "3D image input accepts Composer frame output";
+      if (source.type === "utility") return utilityOutputType(source) === "image" ? "" : "3D image input accepts image outputs";
+      if (["image", "imageModel", "transfer"].includes(source.type)) return "";
+      return "3D image input accepts image outputs";
+    }
+
     if (target?.type === "preview") {
-      if (["image", "video", "imageModel", "videoModel", "utility", "transfer", "composer"].includes(source?.type)) return "";
-      return "Preview accepts image and video sources";
+      if (["image", "video", "imageModel", "videoModel", "utility", "transfer", "composer", "model3d"].includes(source?.type)) return "";
+      return "Preview accepts image, video, and 3D sources";
     }
 
     if (target?.type === "text") {
@@ -2246,6 +2282,7 @@ export default function NodeEditor({ active = true } = {}) {
     const batchCount = isSingleRunSegmentation ? 1 : nodeBatchCount(currentNode);
     const previousImageResults = existingResultItemsForNode(currentNode, "image");
     const previousVideoResults = existingResultItemsForNode(currentNode, "video");
+    const previous3DResults = existingResultItemsForNode(currentNode, "model3d");
     const previousUtilityResults = existingResultItemsForNode(currentNode, currentNode.type === "utility" ? utilityOutputType(currentNode) : "image");
 
     try {
@@ -2372,6 +2409,27 @@ export default function NodeEditor({ active = true } = {}) {
           selectedResultIndex: firstNewIndex,
           resultText: successes.map((item) => item.text).filter(Boolean).join("\n\n"),
           error: failures.length ? nodeBatchStatusMessage("image", batchCount, successes.length, failures) : ""
+        });
+        return { status: "complete" };
+      }
+
+      if (currentNode.type === "model3d") {
+        const generated = await run3DModelGeneration({
+          node: currentNode,
+          incoming,
+          projectId,
+          projectName
+        });
+        const resultItems = appendResultItems(previous3DResults, [generated], "model3d");
+        const firstNewIndex = Math.max(0, resultItems.length - 1);
+        updateNode(currentNode.id, {
+          status: "complete",
+          resultUrl: generated.url,
+          resultItems,
+          selectedResultIndex: firstNewIndex,
+          resultText: generated.text || "",
+          resultType: "model3d",
+          error: ""
         });
         return { status: "complete" };
       }
@@ -4502,11 +4560,12 @@ function NodeBody({
     return (
       <div className="node-body preview-node-body">
         <NodeRow label="Source" inputPort={sourcePort} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-          <button className={previewSource ? "connected-field" : ""}>{previewSource ? previewSource.label : "Connect image or video"}</button>
+          <button className={previewSource ? "connected-field" : ""}>{previewSource ? previewSource.label : "Connect media"}</button>
         </NodeRow>
         <div className={`preview-stage ${previewSource ? "has-preview" : ""}`}>
           {previewSource?.type === "image" && <img src={previewSource.url} alt={previewSource.label} />}
           {previewSource?.type === "video" && <video src={previewSource.url} controls loop data-preview-video-node-id={node.id} />}
+          {previewSource?.type === "model3d" && <Model3DViewer url={previewSource.url} label={previewSource.label} />}
           {!previewSource && <span>Preview will appear here</span>}
         </div>
         {canStepPreview && (
@@ -5069,6 +5128,99 @@ function NodeBody({
     );
   }
 
+  if (node.type === "model3d") {
+    const viewPorts = model3DViewInputs.map((view) => ({
+      ...view,
+      port: config.input.find((port) => port.id === view.id)
+    }));
+    const settingsOpen = Boolean(node.data.settingsOpen);
+    const frontInputs = [...(incoming.frontImageIn || []), ...(incoming.imageIn || [])];
+    const frontConnected = Boolean(frontInputs.length);
+    const generateType = normalizeModel3DGenerateType(node.data.generateType);
+    const faceCount = model3DFaceCount(node.data.faceCount);
+
+    return (
+      <div className="node-body model-node-body model3d-body">
+        <ResultPane
+          label="Results will appear here"
+          resultUrl={node.data.resultUrl}
+          resultItems={node.data.resultItems}
+          selectedIndex={node.data.selectedResultIndex}
+          type="model3d"
+          status={node.data.status}
+          error={node.data.error}
+          onSelectResult={(index, item) => onUpdate(node.id, { selectedResultIndex: index, resultUrl: item.url })}
+        />
+        <OutputPortRow node={node} port={outputPort} label="3D output" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
+        {!settingsOpen && (
+          <div className="model-input-port-stack model3d-input-port-stack" aria-label="3D model inputs">
+            {viewPorts
+              .map((view) => view.port)
+              .filter(Boolean)
+              .map((port) => (
+                <PortHandle
+                  key={port.id}
+                  node={node}
+                  port={port}
+                  side="input"
+                  onConnectStart={onConnectStart}
+                  onDisconnectInput={onDisconnectInput}
+                  connectedPortKeys={connectedPortKeys}
+                />
+              ))}
+          </div>
+        )}
+        <button className="run-node-button" onClick={() => onRun(node)} disabled={running || !frontConnected}>
+          {running ? "Running 3D..." : "Run 3D"}
+        </button>
+        <details className="model-settings-drawer" open={settingsOpen} onToggle={(event) => onUpdate(node.id, { settingsOpen: event.currentTarget.open })}>
+          <summary>Settings</summary>
+          <NodeRow label="Model">
+            <select value={node.data.model || model3DNames.hunyuanPro} onChange={(event) => onUpdate(node.id, { model: event.target.value })}>
+              <option>{model3DNames.hunyuanPro}</option>
+            </select>
+          </NodeRow>
+          {viewPorts.map((view) => {
+            const items = view.id === "frontImageIn" ? frontInputs : incoming[view.id] || [];
+            const connected = Boolean(items.length);
+            return (
+              <NodeRow key={view.id} label={view.label} inputPort={settingsOpen ? view.port : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+                <button className={connected ? "connected-field" : ""}>{connectedSummary(items, view.id === "frontImageIn" ? "Add front" : "Optional")}</button>
+              </NodeRow>
+            );
+          })}
+          <NodeRow label="Mode">
+            <select value={generateType} onChange={(event) => onUpdate(node.id, { generateType: event.target.value })}>
+              <option>Normal</option>
+              <option>Geometry</option>
+            </select>
+          </NodeRow>
+          <NodeRow label="PBR">
+            <button
+              className={`node-toggle ${node.data.enablePbr && generateType !== "Geometry" ? "enabled" : ""}`}
+              onClick={() => onUpdate(node.id, { enablePbr: !node.data.enablePbr })}
+              disabled={generateType === "Geometry"}
+              title={generateType === "Geometry" ? "PBR is ignored in Geometry mode" : "Enable PBR textures"}
+            >
+              <span />
+            </button>
+          </NodeRow>
+          <NodeRow label="Faces">
+            <input
+              type="number"
+              min="40000"
+              max="1500000"
+              step="10000"
+              value={faceCount}
+              onChange={(event) => onUpdate(node.id, { faceCount: event.target.value })}
+            />
+          </NodeRow>
+        </details>
+        <p className="utility-model-description">{model3DDescription}</p>
+      </div>
+    );
+  }
+
   if (node.type === "imageModel") {
     const promptValue = resolvedPromptText(incoming.promptIn) || node.data.prompt;
     const promptConnected = Boolean(resolvedPromptText(incoming.promptIn));
@@ -5430,6 +5582,14 @@ function ResultPane({ label, resultUrl, resultItems = [], selectedIndex = 0, typ
     onSelectResult?.(nextIndex, items[nextIndex]);
   }
 
+  function downloadActiveItem() {
+    if (!activeItem?.url) return;
+    const link = document.createElement("a");
+    link.href = activeItem.url;
+    link.download = resultDownloadFileName(activeItem);
+    link.click();
+  }
+
   return (
     <div className={`result-pane ${items.length ? "has-result" : ""} ${items.length > 1 ? "multi-result" : ""}`}>
       {activeItem && (
@@ -5437,7 +5597,11 @@ function ResultPane({ label, resultUrl, resultItems = [], selectedIndex = 0, typ
           <div className="result-item" key={activeItem.url}>
             {activeItem.type === "image" && <img src={activeItem.url} alt={activeItem.label || `Generated image ${activeIndex + 1}`} />}
             {activeItem.type === "video" && <video src={activeItem.url} controls loop />}
+            {activeItem.type === "model3d" && <Model3DViewer url={activeItem.url} label={activeItem.label || `3D model ${activeIndex + 1}`} />}
           </div>
+          <button type="button" className="result-download-button" onClick={downloadActiveItem} title={`Download ${activeItem.type === "model3d" ? "3D model" : "result"}`} aria-label="Download result">
+            <Download size={14} />
+          </button>
           {items.length > 1 && (
             <div className="result-cycle-controls" onPointerDown={(event) => event.stopPropagation()}>
               <button type="button" onClick={() => selectOffset(-1)} title="Previous generation">
@@ -5455,6 +5619,195 @@ function ResultPane({ label, resultUrl, resultItems = [], selectedIndex = 0, typ
       {error && <small>{error}</small>}
     </div>
   );
+}
+
+function resultDownloadFileName(item) {
+  const urlName = String(item?.url || "").split("/").pop() || "";
+  const cleanUrlName = urlName.split("?")[0].split("#")[0];
+  if (cleanUrlName) return cleanUrlName;
+  if (item?.type === "model3d") return "newt-node-model.glb";
+  if (item?.type === "video") return "newt-node-video.mp4";
+  return "newt-node-image.png";
+}
+
+function Model3DViewer({ url, label }) {
+  const hostRef = React.useRef(null);
+  const [state, setState] = React.useState(url ? "loading" : "empty");
+
+  React.useEffect(() => {
+    const host = hostRef.current;
+    if (!host || !url) {
+      setState("empty");
+      return undefined;
+    }
+
+    let disposed = false;
+    let animationFrame = 0;
+    let modelRoot = null;
+    let isDragging = false;
+    let lastPointer = { x: 0, y: 0 };
+    let yaw = -0.35;
+    let pitch = 0.2;
+    let distance = 4;
+
+    setState("loading");
+    host.innerHTML = "";
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x111111);
+
+    const camera = new THREE.PerspectiveCamera(35, 1, 0.05, 1000);
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.domElement.className = "model-3d-canvas";
+    host.appendChild(renderer.domElement);
+
+    const rig = new THREE.Group();
+    scene.add(rig);
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x222222, 1.25));
+    const keyLight = new THREE.DirectionalLight(0xffffff, 2.2);
+    keyLight.position.set(2.5, 4, 4);
+    scene.add(keyLight);
+    const fillLight = new THREE.DirectionalLight(0x8fb7ff, 0.8);
+    fillLight.position.set(-4, 2, -2);
+    scene.add(fillLight);
+    const grid = new THREE.GridHelper(4, 16, 0x3a3a3a, 0x242424);
+    grid.position.y = -1.1;
+    scene.add(grid);
+
+    function resize() {
+      if (disposed) return;
+      const rect = host.getBoundingClientRect();
+      const width = Math.max(1, Math.floor(rect.width));
+      const height = Math.max(1, Math.floor(rect.height));
+      camera.aspect = width / height;
+      camera.updateProjectionMatrix();
+      renderer.setSize(width, height, false);
+    }
+
+    function updateCamera() {
+      const clampedPitch = Math.max(-1.25, Math.min(1.25, pitch));
+      pitch = clampedPitch;
+      const x = Math.sin(yaw) * Math.cos(pitch) * distance;
+      const y = Math.sin(pitch) * distance + 0.25;
+      const z = Math.cos(yaw) * Math.cos(pitch) * distance;
+      camera.position.set(x, y, z);
+      camera.lookAt(0, 0, 0);
+    }
+
+    function animate() {
+      if (disposed) return;
+      updateCamera();
+      renderer.render(scene, camera);
+      animationFrame = window.requestAnimationFrame(animate);
+    }
+
+    function handlePointerDown(event) {
+      event.preventDefault();
+      event.stopPropagation();
+      isDragging = true;
+      lastPointer = { x: event.clientX, y: event.clientY };
+      renderer.domElement.setPointerCapture?.(event.pointerId);
+    }
+
+    function handlePointerMove(event) {
+      if (!isDragging) return;
+      event.preventDefault();
+      const dx = event.clientX - lastPointer.x;
+      const dy = event.clientY - lastPointer.y;
+      yaw -= dx * 0.008;
+      pitch += dy * 0.008;
+      lastPointer = { x: event.clientX, y: event.clientY };
+    }
+
+    function handlePointerUp(event) {
+      isDragging = false;
+      renderer.domElement.releasePointerCapture?.(event.pointerId);
+    }
+
+    function handleWheel(event) {
+      event.preventDefault();
+      event.stopPropagation();
+      distance = Math.max(1.2, Math.min(14, distance + event.deltaY * 0.006));
+    }
+
+    const observer = new ResizeObserver(resize);
+    observer.observe(host);
+    renderer.domElement.addEventListener("pointerdown", handlePointerDown);
+    renderer.domElement.addEventListener("pointermove", handlePointerMove);
+    renderer.domElement.addEventListener("pointerup", handlePointerUp);
+    renderer.domElement.addEventListener("pointercancel", handlePointerUp);
+    renderer.domElement.addEventListener("wheel", handleWheel, { passive: false });
+
+    new GLTFLoader().load(
+      url,
+      (gltf) => {
+        if (disposed) return;
+        modelRoot = gltf.scene || gltf.scenes?.[0] || null;
+        if (!modelRoot) {
+          setState("error");
+          return;
+        }
+
+        const box = new THREE.Box3().setFromObject(modelRoot);
+        const size = box.getSize(new THREE.Vector3());
+        const center = box.getCenter(new THREE.Vector3());
+        const largestSide = Math.max(size.x, size.y, size.z) || 1;
+        const scale = 2.25 / largestSide;
+        modelRoot.scale.setScalar(scale);
+        modelRoot.position.set(-center.x * scale, -center.y * scale, -center.z * scale);
+        rig.add(modelRoot);
+        distance = Math.max(2.4, Math.min(7, 3.1 + largestSide * 0.2));
+        resize();
+        setState("ready");
+      },
+      undefined,
+      () => {
+        if (!disposed) setState("error");
+      }
+    );
+
+    resize();
+    animate();
+
+    return () => {
+      disposed = true;
+      window.cancelAnimationFrame(animationFrame);
+      observer.disconnect();
+      renderer.domElement.removeEventListener("pointerdown", handlePointerDown);
+      renderer.domElement.removeEventListener("pointermove", handlePointerMove);
+      renderer.domElement.removeEventListener("pointerup", handlePointerUp);
+      renderer.domElement.removeEventListener("pointercancel", handlePointerUp);
+      renderer.domElement.removeEventListener("wheel", handleWheel);
+      if (modelRoot) disposeThreeObject(modelRoot);
+      renderer.dispose();
+      host.innerHTML = "";
+    };
+  }, [url]);
+
+  return (
+    <div className={`model-3d-viewer ${state}`} aria-label={label || "3D model viewer"} onPointerDown={(event) => event.stopPropagation()}>
+      <div ref={hostRef} className="model-3d-canvas-host" />
+      {state === "loading" && <span>Loading 3D...</span>}
+      {state === "error" && <span>Could not load 3D model</span>}
+      {state === "empty" && <span>No 3D model</span>}
+    </div>
+  );
+}
+
+function disposeThreeObject(root) {
+  root.traverse((child) => {
+    if (child.geometry?.dispose) child.geometry.dispose();
+    const materials = Array.isArray(child.material) ? child.material : child.material ? [child.material] : [];
+    materials.forEach((material) => {
+      Object.values(material).forEach((value) => {
+        if (value?.isTexture && value.dispose) value.dispose();
+      });
+      material.dispose?.();
+    });
+  });
 }
 
 function ColorIdMattePicker({ imageUrl, node, onUpdate }) {
@@ -5872,6 +6225,11 @@ function getNodeConfig(type) {
       input: [{ id: "sourceIn", label: "Source", color: portColors.preview }],
       output: []
     },
+    model3d: {
+      icon: Box,
+      input: model3DViewInputs.map((input) => ({ id: input.id, label: input.label, color: portColors.image })),
+      output: [{ id: "modelOut", label: "3D", color: portColors.model3d }]
+    },
     imageModel: {
       icon: ImagePlus,
       input: [
@@ -5906,6 +6264,17 @@ function createDefaultNodeData(type, label, count) {
   if (type === "text") return { title, text: "" };
   if (type === "image" || type === "video" || type === "audio") return { title };
   if (type === "preview") return { title, previewScale: 1 };
+  if (type === "model3d") {
+    return {
+      title,
+      model: model3DNames.hunyuanPro,
+      generateType: "Normal",
+      enablePbr: false,
+      faceCount: 500000,
+      resultType: "model3d",
+      settingsOpen: false
+    };
+  }
   if (type === "composer") {
     const composerScene = defaultComposerScene();
     return {
@@ -6017,6 +6386,24 @@ function imageModelSelectionPatch(data = {}, model) {
     model,
     aspectRatio: normalizeImageModelAspectRatio(data.aspectRatio, model)
   };
+}
+
+function normalizeModel3DGenerateType(value) {
+  return value === "Geometry" ? "Geometry" : "Normal";
+}
+
+function model3DFaceCount(value) {
+  const number = Math.round(Number(value));
+  if (!Number.isFinite(number)) return 500000;
+  return Math.min(1500000, Math.max(40000, number));
+}
+
+function model3DInputPortIds() {
+  return model3DViewInputs.map((input) => input.id);
+}
+
+function isModel3DImageInputPort(portId) {
+  return model3DInputPortIds().includes(portId) || portId === "imageIn";
 }
 
 function imageModelAspectRatioOptions(model) {
@@ -6243,7 +6630,7 @@ function outputPortIdsForNode(node) {
 }
 
 function estimatedNodeWidth(type) {
-  if (type === "imageModel" || type === "videoModel" || type === "utility") return 370;
+  if (type === "imageModel" || type === "videoModel" || type === "utility" || type === "model3d") return 370;
   if (type === "camera") return 360;
   if (type === "transfer" || type === "preview") return 335;
   return 310;
@@ -6553,7 +6940,9 @@ async function fetchJsonApi(path, options, label) {
             ? "composerFrame"
             : path.includes("composer-poses")
               ? "composerPoses"
-            : "";
+              : path.includes("generate-3d")
+                ? "generate3d"
+                : "";
       if (!healthResponse.ok || (routeKey && !healthData?.routes?.[routeKey])) {
         throw new Error("The backend is running, but it does not have the updated API routes.");
       }
@@ -6632,6 +7021,50 @@ async function runImageModelGeneration({ node, prompt, aspectRatio, imagePromptI
     text: data.text || "",
     cost: data.cost
   };
+}
+
+async function run3DModelGeneration({ node, incoming, projectId, projectName }) {
+  const imageViewUrls = connected3DViewUrls(incoming);
+  if (!imageViewUrls.front) throw new Error("Connect a front image to the 3D node.");
+
+  const { response, data } = await fetchJsonApi("/api/node/generate-3d", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: node.data.model || model3DNames.hunyuanPro,
+      imageViewUrls,
+      generateType: normalizeModel3DGenerateType(node.data.generateType),
+      enablePbr: Boolean(node.data.enablePbr),
+      faceCount: model3DFaceCount(node.data.faceCount),
+      projectId,
+      projectName,
+      nodeId: node.id,
+      nodeTitle: node.data.title
+    })
+  }, "3D generation");
+  if (!response.ok) throw new Error(data.error || "3D generation failed.");
+
+  return {
+    url: data.model.localUrl,
+    type: "model3d",
+    label: data.model.label || data.model.fileName || "3D model",
+    text: data.text || "",
+    thumbnailUrl: data.thumbnail?.localUrl || "",
+    seed: data.seed,
+    cost: data.cost
+  };
+}
+
+function connected3DViewUrls(incoming = {}) {
+  return Object.fromEntries(
+    model3DViewInputs
+      .map((view) => {
+        const items = view.id === "frontImageIn" ? [...(incoming.frontImageIn || []), ...(incoming.imageIn || [])] : incoming[view.id] || [];
+        const url = connectedAssetUrls(items).at(-1);
+        return [view.view, url || ""];
+      })
+      .filter(([, url]) => url)
+  );
 }
 
 async function runVideoModelGeneration({ node, prompt, incoming, projectId, projectName, index }) {
@@ -6801,8 +7234,9 @@ async function runUtilityVideoGeneration({ node, prompt, incoming, projectId, pr
 
 function normalizedResultItems(resultItems, resultUrl, type) {
   const items = Array.isArray(resultItems) ? resultItems.filter((item) => item?.url) : [];
-  if (items.length) return items.map((item, index) => ({ type, label: `${type === "image" ? "Image" : "Video"} ${index + 1}`, ...item }));
-  return resultUrl ? [{ url: resultUrl, type, label: type === "image" ? "Image 1" : "Video 1" }] : [];
+  const fallbackLabel = mediaResultLabel(type);
+  if (items.length) return items.map((item, index) => ({ type, label: `${fallbackLabel} ${index + 1}`, ...item }));
+  return resultUrl ? [{ url: resultUrl, type, label: `${fallbackLabel} 1` }] : [];
 }
 
 function existingResultItemsForNode(node, type) {
@@ -6811,12 +7245,19 @@ function existingResultItemsForNode(node, type) {
 
 function appendResultItems(previousItems = [], newItems = [], type) {
   const combined = [...previousItems, ...normalizedResultItems(newItems, "", type)].filter((item) => item?.url);
-  const fallbackLabel = type === "image" ? "Image" : "Video";
+  const fallbackLabel = mediaResultLabel(type);
   return combined.map((item, index) => ({
     ...item,
     type: item.type || type,
     label: item.label && !new RegExp(`^${fallbackLabel} \\d+$`).test(item.label) ? item.label : `${fallbackLabel} ${index + 1}`
   }));
+}
+
+function mediaResultLabel(type) {
+  if (type === "image") return "Image";
+  if (type === "video") return "Video";
+  if (type === "model3d") return "3D";
+  return "Result";
 }
 
 function nodeBatchCount(node) {
@@ -6875,7 +7316,9 @@ function previewSelectedIndexForNode(node, previewItems = []) {
 
 function previewMediaType(source, edge) {
   if (source.type === "utility") return utilityResultType(source);
+  if (source.type === "model3d") return "model3d";
   if (source.type === "video" || source.type === "videoModel") return "video";
+  if (/\.(glb|gltf)$/i.test(source.data.resultUrl || "")) return "model3d";
   if (/\.(mp4|mov|webm)$/i.test(source.data.resultUrl || "")) return "video";
   return "image";
 }
@@ -7164,6 +7607,7 @@ function connectedSummary(items = [], fallback) {
 function sourceLabel(source) {
   if (source.type === "camera") return cameraLabel(source);
   if (source.type === "composer") return source.data.title || "Composer";
+  if (source.type === "model3d" && source.data.resultUrl) return source.data.title || "3D model";
   if (source.type === "transfer" && source.data.resultUrl) return "TRANSFER.png";
   if (source.type === "style") return (source.data.stylePreset || "None") === "None" ? "Style" : source.data.stylePreset;
   if (source.type === "utility" && source.data.resultUrl) return utilityResultType(source) === "video" ? "Utility video" : "Utility image";
@@ -8010,7 +8454,7 @@ function normalizeVoidVideoFrameCount(value) {
 }
 
 function isRunnableNode(node) {
-  return ["text", "imageModel", "videoModel", "utility"].includes(node.type) || (node.type === "camera" && node.data.qwenCameraOpen);
+  return ["text", "imageModel", "videoModel", "utility", "model3d"].includes(node.type) || (node.type === "camera" && node.data.qwenCameraOpen);
 }
 
 function buildSelectedRunnableDependencies(nodes, edges) {
@@ -8029,8 +8473,9 @@ function nodeRunPriority(node) {
   if (node?.type === "text") return 0;
   if (node?.type === "camera") return 1;
   if (node?.type === "imageModel") return 2;
-  if (node?.type === "utility") return 3;
-  if (node?.type === "videoModel") return 3;
+  if (node?.type === "model3d") return 3;
+  if (node?.type === "utility") return 4;
+  if (node?.type === "videoModel") return 4;
   return 3;
 }
 
@@ -8038,6 +8483,7 @@ function runStageLabel(type) {
   if (type === "text") return "text";
   if (type === "camera") return "camera";
   if (type === "imageModel") return "image";
+  if (type === "model3d") return "3D";
   if (type === "utility") return "utility";
   if (type === "videoModel") return "video";
   return "selected";
@@ -8285,7 +8731,27 @@ function normalizeCurrentNode(node) {
     };
   }
 
+  if (nextNode.type === "model3d") {
+    return {
+      ...nextNode,
+      data: normalizeModel3DData(data)
+    };
+  }
+
   return nextNode;
+}
+
+function normalizeModel3DData(data = {}) {
+  return {
+    ...data,
+    title: data.title || "3D",
+    model: data.model || model3DNames.hunyuanPro,
+    generateType: normalizeModel3DGenerateType(data.generateType),
+    enablePbr: Boolean(data.enablePbr),
+    faceCount: model3DFaceCount(data.faceCount),
+    resultType: "model3d",
+    batchCount: "1"
+  };
 }
 
 function normalizeImageModelData(data = {}) {
@@ -8486,6 +8952,10 @@ function normalizeEdgeForCurrentGraph(edge, nodeMap) {
   const nextEdge = cloneEdge(edge);
   const target = nodeMap.get(edge.to.nodeId);
 
+  if (target?.type === "model3d" && nextEdge.to.port === "imageIn") {
+    nextEdge.to.port = "frontImageIn";
+  }
+
   if (target?.type === "utility" && !utilityInputPortIds(target.data?.utilityMode, target.data?.utilityImageModel, target.data?.utilityVideoModel).includes(nextEdge.to.port)) {
     return null;
   }
@@ -8516,6 +8986,11 @@ function normalizeEdgeForCurrentGraph(edge, nodeMap) {
     nextEdge.color = utilityOutputType(source) === "video" ? portColors.video : portColors.image;
   }
 
+  if (source.type === "model3d") {
+    nextEdge.from.port = "modelOut";
+    nextEdge.color = portColors.model3d;
+  }
+
   return nextEdge;
 }
 
@@ -8525,6 +9000,7 @@ function isCameraImageEdge(edge, target) {
   if (target?.type === "text" && edge.to.port === "imageIn") return true;
   if (target?.type === "camera" && edge.to.port === "imageIn") return true;
   if (target?.type === "composer" && edge.to.port === "imageIn") return true;
+  if (target?.type === "model3d" && isModel3DImageInputPort(edge.to.port)) return true;
   if (target?.type === "imageModel" && ["imagePromptIn", "transferIn"].includes(edge.to.port)) return true;
   if (target?.type === "videoModel" && ["startFrameIn", "endFrameIn", "referenceImageIn"].includes(edge.to.port)) return true;
   if (target?.type === "utility" && ["imageIn", "referenceImageIn"].includes(edge.to.port)) return true;
