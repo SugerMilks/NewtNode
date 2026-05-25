@@ -404,9 +404,13 @@ const videoModelNames = {
   seedanceFast: "Seedance 2.0 Fast",
   happyHorse: "Happy Horse",
   wanFunControl: "Wan Fun Control",
+  wan27Reference: "Wan 2.7 Reference-to-Video",
   aurora: "Creatify Aurora",
   sam3Video: "SAM 3 Video"
 };
+const wan27ReferenceDurationOptions = ["2 seconds", "3 seconds", "4 seconds", "5 seconds", "6 seconds", "7 seconds", "8 seconds", "9 seconds", "10 seconds"];
+const wan27ReferenceResolutionOptions = ["1080p", "720p"];
+const wan27ReferenceAspectRatioOptions = ["16:9", "9:16", "1:1", "4:3", "3:4"];
 const model3DNames = {
   hunyuanPro: "Hunyuan 3D 3.1 Pro"
 };
@@ -441,6 +445,9 @@ const utilityVideoModelNames = {
   wanFunControl: "Wan Fun Control",
   extractFrame: "Extract Frame",
   colorIdMatte: "Color ID Matte",
+  compositeVideo: "Composite Video",
+  wanVaceMaskToVideo: "Wan VACE Mask-to-Video",
+  wanVaceInpainting: "Wan VACE 14B Inpainting",
   sam3Video: "SAM 3 Video",
   voidVideoInpainting: "VOID Video Inpainting",
   birefnetVideo: "BiRefNet Video",
@@ -483,6 +490,15 @@ const topazUpscalerBillingTierOptions = [
   ["720p-1080p", "720p to 1080p"],
   ["above-1080p", "Above 1080p"]
 ];
+const colorIdMatteVideoOutputOptions = [
+  ["mp4", "MP4 mask"],
+  ["webm", "WebM mask"],
+  ["mov", "ProRes mask"]
+];
+const wanVaceResolutionOptions = ["480p", "580p", "720p"];
+const wanVaceAspectRatioOptions = ["auto", "16:9", "9:16"];
+const wanVaceSamplerOptions = ["unipc", "dpm++", "euler"];
+const wanVaceAccelerationOptions = ["regular", "low", "none"];
 const utilityModelDescriptions = {
   [utilityImageModelNames.colorIdMatte]: "Creates a black and white ID matte from pixels matching a picked source-image color.",
   [utilityImageModelNames.dwpose]: "Creates pose/control maps from a source image for character and body-guided generation.",
@@ -493,6 +509,9 @@ const utilityModelDescriptions = {
   [utilityVideoModelNames.wanFunControl]: "Uses a control video, optional reference image, and prompt to guide a new video.",
   [utilityVideoModelNames.extractFrame]: "Captures the current frame from a connected video and outputs it as a still image.",
   [utilityVideoModelNames.colorIdMatte]: "Creates a black and white ID matte video from frames matching a picked source-video color.",
+  [utilityVideoModelNames.compositeVideo]: "Locally composites a generated layer video over a base video through a connected matte video.",
+  [utilityVideoModelNames.wanVaceMaskToVideo]: "Uses Fal Wan VACE to create a prompted video from a reference image inside a connected mask video.",
+  [utilityVideoModelNames.wanVaceInpainting]: "Uses Fal Wan VACE 14B with source video, mask video, prompt, and optional reference images for masked video generation.",
   [utilityVideoModelNames.sam3Video]: "Segments prompted objects through a video and returns a mask video.",
   [utilityVideoModelNames.voidVideoInpainting]: "Removes an object from a video and inpaints the affected background over time.",
   [utilityVideoModelNames.birefnetVideo]: "Removes a video background with BiRefNet and can optionally return the mask video.",
@@ -699,8 +718,8 @@ export default function NodeEditor({ active = true } = {}) {
       }
     }
 
-    window.addEventListener("pointerdown", handlePointerDown);
-    return () => window.removeEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("pointerdown", handlePointerDown, true);
+    return () => window.removeEventListener("pointerdown", handlePointerDown, true);
   }, [active, contextMenu]);
 
   React.useLayoutEffect(() => {
@@ -1048,6 +1067,15 @@ export default function NodeEditor({ active = true } = {}) {
 
   async function uploadMediaAsset(node, file) {
     if (!file) return;
+    const isModel3DUpload = node.type === "model3d";
+
+    if (isModel3DUpload && !/\.glb$/i.test(file.name || "")) {
+      updateNode(node.id, {
+        status: "error",
+        error: "Open only supports .glb files for 3D nodes."
+      });
+      return;
+    }
 
     pushUndoSnapshot();
     updateNode(node.id, {
@@ -1068,13 +1096,42 @@ export default function NodeEditor({ active = true } = {}) {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Upload failed.");
+      const asset = data.asset || {};
+
+      if (isModel3DUpload) {
+        const nextItems = appendResultItems(
+          existingResultItemsForNode(node, "model3d"),
+          [
+            {
+              url: asset.localUrl,
+              type: "model3d",
+              label: asset.fileName || "Imported GLB"
+            }
+          ],
+          "model3d"
+        );
+
+        updateNode(node.id, {
+          fileName: asset.fileName,
+          storedFileName: asset.storedFileName,
+          mimeType: asset.mimeType,
+          mediaType: "model3d",
+          resultUrl: asset.localUrl,
+          resultItems: nextItems,
+          selectedResultIndex: Math.max(0, nextItems.length - 1),
+          resultType: "model3d",
+          status: "ready",
+          error: ""
+        });
+        return;
+      }
 
       updateNode(node.id, {
-        fileName: data.asset.fileName,
-        storedFileName: data.asset.storedFileName,
-        mimeType: data.asset.mimeType,
-        mediaType: data.asset.mediaType,
-        resultUrl: data.asset.localUrl,
+        fileName: asset.fileName,
+        storedFileName: asset.storedFileName,
+        mimeType: asset.mimeType,
+        mediaType: asset.mediaType,
+        resultUrl: asset.localUrl,
         status: "ready",
         error: ""
       });
@@ -4709,6 +4766,10 @@ function NodeBody({
     const isRifeVideo = isUtilityRifeVideoModel(utilityVideoModel);
     const isExtractFrameVideo = isUtilityExtractFrameVideoModel(utilityVideoModel);
     const isColorIdMatteVideo = isUtilityColorIdMatteModel(utilityVideoModel);
+    const isCompositeVideo = isUtilityCompositeVideoModel(utilityVideoModel);
+    const isWanVaceMaskToVideo = isUtilityWanVaceMaskToVideoModel(utilityVideoModel);
+    const isWanVaceInpaintingVideo = isUtilityWanVaceInpaintingModel(utilityVideoModel);
+    const isWanVaceVideo = isWanVaceMaskToVideo || isWanVaceInpaintingVideo;
     const isBytedanceUpscaler = isUtilityBytedanceUpscalerModel(utilityVideoModel);
     const isTopazUpscaler = isUtilityTopazUpscalerModel(utilityVideoModel);
     const isVideoUpscaler = isUtilityVideoUpscalerModel(utilityVideoModel);
@@ -4728,15 +4789,21 @@ function NodeBody({
           .map((portId) => config.input.find((port) => port.id === portId))
           .filter(Boolean);
     const resultType = node.data.resultType || utilityOutputMediaType;
+    const hasRequiredReferenceVideo = isWanVaceMaskToVideo ? true : Boolean(incoming.referenceVideoIn?.length);
     const canRun = isVideoMode
-      ? Boolean(incoming.referenceVideoIn?.length) &&
+      ? hasRequiredReferenceVideo &&
         (isBirefnetVideo ||
           isRifeVideo ||
           isExtractFrameVideo ||
           isColorIdMatteVideo ||
+          isCompositeVideo ||
+          isWanVaceMaskToVideo ||
           isVideoUpscaler ||
           Boolean(promptValue.trim())) &&
-        (!isColorIdMatteVideo || Boolean(normalizeColorIdMatteColor(node.data.colorIdMatteColor)))
+        (!isColorIdMatteVideo || colorIdMatteRunColors(node.data).length > 0) &&
+        (!isCompositeVideo || Boolean(incoming.maskVideoIn?.length) && (incoming.referenceVideoIn?.length || 0) >= 2) &&
+        (!isWanVaceInpaintingVideo || Boolean(incoming.maskVideoIn?.length) && Boolean(promptValue.trim())) &&
+        (!isWanVaceMaskToVideo || Boolean(incoming.maskVideoIn?.length) && Boolean(incoming.referenceImageIn?.length) && Boolean(promptValue.trim()))
       : Boolean(incoming.imageIn?.length) && (!isSam3Image || Boolean(promptValue.trim())) && (!isColorIdMatte || Boolean(normalizeColorIdMatteColor(node.data.colorIdMatteColor)));
     const utilityRunLabel = isVideoMode
       ? isSam3Video
@@ -4751,11 +4818,17 @@ function NodeBody({
                 ? "Extract Frame"
                 : isColorIdMatteVideo
                   ? "Run Color Matte"
-                  : isBytedanceUpscaler
-                    ? "Run Bytedance Upscale"
-                    : isTopazUpscaler
-                      ? "Run Topaz Upscale"
-                      : "Run Wan Fun Control"
+                  : isCompositeVideo
+                    ? "Composite Video"
+                    : isWanVaceMaskToVideo
+                      ? "Run Mask-to-Video"
+                      : isWanVaceInpaintingVideo
+                        ? "Run Wan VACE"
+                      : isBytedanceUpscaler
+                        ? "Run Bytedance Upscale"
+                        : isTopazUpscaler
+                          ? "Run Topaz Upscale"
+                          : "Run Wan Fun Control"
       : isColorIdMatte
         ? "Run Color Matte"
         : isSam3Image
@@ -4768,6 +4841,16 @@ function NodeBody({
               ? "Run Depth Map"
               : "Run DWPose";
     const utilityDescription = utilityModelDescription(isVideoMode ? utilityVideoModel : utilityImageModel);
+    const referenceVideoLabel = isCompositeVideo
+      ? "Base + Layer"
+      : isWanVaceMaskToVideo
+        ? "Source Video"
+        : isSam3Video || isBirefnetVideo || isRifeVideo || isExtractFrameVideo || isColorIdMatteVideo || isWanVaceInpaintingVideo || isVideoUpscaler
+          ? "Video"
+          : isVoidVideo
+            ? "Source Video"
+            : "Control Video";
+    const referenceVideoPlaceholder = isCompositeVideo ? "Add 2 videos" : isWanVaceMaskToVideo ? "Optional video" : "Add video";
 
     function setMode(nextMode) {
       if (mode === nextMode) return;
@@ -4839,6 +4922,7 @@ function NodeBody({
                   <option>{utilityVideoModelNames.wanFunControl}</option>
                   <option>{utilityVideoModelNames.extractFrame}</option>
                   <option>{utilityVideoModelNames.colorIdMatte}</option>
+                  <option>{utilityVideoModelNames.compositeVideo}</option>
                   <option>{utilityVideoModelNames.voidVideoInpainting}</option>
                   <option>{utilityVideoModelNames.birefnetVideo}</option>
                   <option>{utilityVideoModelNames.rifeVideo}</option>
@@ -4847,12 +4931,12 @@ function NodeBody({
                   <option>{utilityVideoModelNames.sam3Video}</option>
                 </select>
               </NodeRow>
-              {!isBirefnetVideo && !isRifeVideo && !isExtractFrameVideo && !isColorIdMatteVideo && !isVideoUpscaler && (
+              {!isBirefnetVideo && !isRifeVideo && !isExtractFrameVideo && !isColorIdMatteVideo && !isCompositeVideo && !isVideoUpscaler && (
                 <NodeRow label="Prompt" inputPort={settingsOpen ? promptPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
                   <textarea className={promptConnected ? "connected-field" : ""} value={promptValue} readOnly={promptConnected} onChange={(event) => onUpdate(node.id, { prompt: event.target.value })} />
                 </NodeRow>
               )}
-              {!isSam3Video && !isBirefnetVideo && !isRifeVideo && !isExtractFrameVideo && !isColorIdMatteVideo && !isVideoUpscaler && (
+              {!isSam3Video && !isBirefnetVideo && !isRifeVideo && !isExtractFrameVideo && !isColorIdMatteVideo && !isCompositeVideo && !isWanVaceVideo && !isVideoUpscaler && (
                 <NodeRow label="Generations">
                   <select value={node.data.batchCount || "1"} onChange={(event) => onUpdate(node.id, { batchCount: event.target.value })}>
                     {batchOptions.map((option) => (
@@ -4863,8 +4947,8 @@ function NodeBody({
                   </select>
                 </NodeRow>
               )}
-              <NodeRow label={isSam3Video || isBirefnetVideo || isRifeVideo || isExtractFrameVideo || isColorIdMatteVideo || isVideoUpscaler ? "Video" : isVoidVideo ? "Source Video" : "Control Video"} inputPort={settingsOpen ? referenceVideoPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-                <button className={incoming.referenceVideoIn?.length ? "connected-field" : ""}>{connectedSummary(incoming.referenceVideoIn, "Add video")}</button>
+              <NodeRow label={referenceVideoLabel} inputPort={settingsOpen ? referenceVideoPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+                <button className={incoming.referenceVideoIn?.length ? "connected-field" : ""}>{connectedSummary(incoming.referenceVideoIn, referenceVideoPlaceholder)}</button>
               </NodeRow>
               {isSam3Video ? (
                 <NodeRow label="Threshold">
@@ -4874,6 +4958,20 @@ function NodeBody({
                 <ExtractFrameControls videoUrl={connectedAssetUrls(incoming.referenceVideoIn).at(-1)} node={node} onUpdate={onUpdate} />
               ) : isColorIdMatteVideo ? (
                 <ColorIdMatteVideoPicker videoUrl={connectedAssetUrls(incoming.referenceVideoIn).at(-1)} node={node} onUpdate={onUpdate} />
+              ) : isCompositeVideo ? (
+                <CompositeVideoControls incoming={incoming} maskVideoPort={maskVideoPort} settingsOpen={settingsOpen} node={node} onUpdate={onUpdate} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
+              ) : isWanVaceVideo ? (
+                <WanVaceInpaintingControls
+                  incoming={incoming}
+                  referenceImagePort={referenceImagePort}
+                  maskVideoPort={maskVideoPort}
+                  settingsOpen={settingsOpen}
+                  node={node}
+                  onUpdate={onUpdate}
+                  onConnectStart={onConnectStart}
+                  onDisconnectInput={onDisconnectInput}
+                  connectedPortKeys={connectedPortKeys}
+                />
               ) : isVoidVideo ? (
                 <>
                   <NodeRow label="Mask Video" inputPort={settingsOpen ? maskVideoPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
@@ -5286,9 +5384,24 @@ function NodeBody({
               ))}
           </div>
         )}
-        <button className="run-node-button" onClick={() => onRun(node)} disabled={running || !frontConnected}>
-          {running ? "Running 3D..." : "Run 3D"}
-        </button>
+        <div className="model3d-action-row">
+          <label className="model3d-open-button" title="Open GLB">
+            <FolderOpen size={15} />
+            <span>Open</span>
+            <input
+              type="file"
+              accept=".glb,model/gltf-binary"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) onUpload(node, file);
+                event.currentTarget.value = "";
+              }}
+            />
+          </label>
+          <button className="run-node-button" onClick={() => onRun(node)} disabled={running || !frontConnected}>
+            {running ? "Running 3D..." : "Run 3D"}
+          </button>
+        </div>
         <details className="model-settings-drawer" open={settingsOpen} onToggle={(event) => onUpdate(node.id, { settingsOpen: event.currentTarget.open })}>
           <summary>Settings</summary>
           <NodeRow label="Model">
@@ -5451,23 +5564,31 @@ function NodeBody({
   const referenceVideoPort = config.input.find((port) => port.id === "referenceVideoIn");
   const referenceAudioPort = config.input.find((port) => port.id === "referenceAudioIn");
   const isWanFunControl = isWanFunControlModel(node.data.model);
+  const isWan27Reference = isWan27ReferenceModel(node.data.model);
   const isAurora = isAuroraModel(node.data.model);
   const isHappyHorse = isHappyHorseModel(node.data.model);
   const isSam3Video = isSam3VideoModel(node.data.model);
+  const wan27Duration = normalizedWan27ReferenceDurationLabel(node.data.duration);
+  const wan27Resolution = normalizedWan27ReferenceResolution(node.data.resolution);
+  const wan27AspectRatio = normalizedWan27ReferenceAspectRatio(node.data.aspectRatio);
   const happyHorseDuration = normalizedHappyHorseDurationLabel(node.data.duration);
   const happyHorseResolution = normalizedHappyHorseResolution(node.data.resolution);
   const happyHorseAspectRatio = normalizedHappyHorseAspectRatio(node.data.aspectRatio);
   const happyHorseReferenceImageCount = Math.min(incoming.referenceImageIn?.length || 0, 9);
+  const wan27ReferenceImageCount = incoming.referenceImageIn?.length || 0;
+  const wan27ReferenceVideoCount = incoming.referenceVideoIn?.length || 0;
   const settingsOpen = Boolean(node.data.settingsOpen);
   const collapsedPorts = isWanFunControl
     ? [promptPort, referenceVideoPort, referenceImagePort]
-    : isAurora
-      ? [promptPort, referenceImagePort, referenceAudioPort]
-      : isHappyHorse
-        ? [promptPort, referenceImagePort]
-        : isSam3Video
-          ? [promptPort, referenceVideoPort]
-          : [promptPort, startFramePort, endFramePort, referenceImagePort, referenceVideoPort, referenceAudioPort];
+    : isWan27Reference
+      ? [promptPort, referenceImagePort, referenceVideoPort]
+      : isAurora
+        ? [promptPort, referenceImagePort, referenceAudioPort]
+        : isHappyHorse
+          ? [promptPort, referenceImagePort]
+          : isSam3Video
+            ? [promptPort, referenceVideoPort]
+            : [promptPort, startFramePort, endFramePort, referenceImagePort, referenceVideoPort, referenceAudioPort];
   return (
     <div className="node-body model-node-body video-model-body">
       <ResultPane
@@ -5505,6 +5626,7 @@ function NodeBody({
           <select value={node.data.model} onChange={(event) => onUpdate(node.id, videoModelSelectionPatch(node.data, event.target.value))}>
             <option>{videoModelNames.seedance}</option>
             <option>{videoModelNames.seedanceFast}</option>
+            <option>{videoModelNames.wan27Reference}</option>
             <option>{videoModelNames.happyHorse}</option>
             <option>{videoModelNames.aurora}</option>
             {sam3SegmentationModelsEnabled && <option>{videoModelNames.sam3Video}</option>}
@@ -5574,6 +5696,52 @@ function NodeBody({
             </NodeRow>
             <NodeRow label="Seed">
               <input value={node.data.seed || ""} onChange={(event) => onUpdate(node.id, { seed: event.target.value })} placeholder="Random" />
+            </NodeRow>
+          </>
+        ) : isWan27Reference ? (
+          <>
+            <NodeRow label="Reference Images" inputPort={settingsOpen ? referenceImagePort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+              <button className={incoming.referenceImageIn?.length ? "connected-field" : ""}>{`Add Images ( ${wan27ReferenceImageCount} )`}</button>
+            </NodeRow>
+            <NodeRow label="Reference Videos" inputPort={settingsOpen ? referenceVideoPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+              <button className={incoming.referenceVideoIn?.length ? "connected-field" : ""}>{`Add Videos ( ${wan27ReferenceVideoCount} )`}</button>
+            </NodeRow>
+            <NodeRow label="Negative">
+              <textarea value={node.data.negativePrompt || ""} onChange={(event) => onUpdate(node.id, { negativePrompt: event.target.value })} placeholder="Optional negative prompt" />
+            </NodeRow>
+            <NodeRow label="Duration">
+              <select value={wan27Duration} onChange={(event) => onUpdate(node.id, { duration: event.target.value })}>
+                {wan27ReferenceDurationOptions.map((option) => (
+                  <option key={option}>{option}</option>
+                ))}
+              </select>
+            </NodeRow>
+            <NodeRow label="Resolution">
+              <select value={wan27Resolution} onChange={(event) => onUpdate(node.id, { resolution: event.target.value })}>
+                {wan27ReferenceResolutionOptions.map((option) => (
+                  <option key={option}>{option}</option>
+                ))}
+              </select>
+            </NodeRow>
+            <NodeRow label="Aspect Ratio">
+              <select value={wan27AspectRatio} onChange={(event) => onUpdate(node.id, { aspectRatio: event.target.value })}>
+                {wan27ReferenceAspectRatioOptions.map((option) => (
+                  <option key={option}>{option}</option>
+                ))}
+              </select>
+            </NodeRow>
+            <NodeRow label="Multi Shot">
+              <button className={`node-toggle ${node.data.multiShots ? "enabled" : ""}`} onClick={() => onUpdate(node.id, { multiShots: !node.data.multiShots })}>
+                <span />
+              </button>
+            </NodeRow>
+            <NodeRow label="Seed">
+              <input value={node.data.seed || ""} onChange={(event) => onUpdate(node.id, { seed: event.target.value })} placeholder="Random" />
+            </NodeRow>
+            <NodeRow label="Safety Check">
+              <button className={`node-toggle ${node.data.enableSafetyChecker !== false ? "enabled" : ""}`} onClick={() => onUpdate(node.id, { enableSafetyChecker: node.data.enableSafetyChecker === false })}>
+                <span />
+              </button>
             </NodeRow>
           </>
         ) : isAurora ? (
@@ -5682,6 +5850,7 @@ function NodeBody({
       </details>
       {isAurora && <small className="upload-status model-status-note">lipsync model</small>}
       {isHappyHorse && <small className="upload-status model-status-note">reference image model</small>}
+      {isWan27Reference && <small className="upload-status model-status-note">multi-reference image/video model</small>}
       {isSam3Video && <small className="upload-status model-status-note">segmentation mask model</small>}
     </div>
   );
@@ -6087,11 +6256,18 @@ function ColorIdMatteVideoPicker({ videoUrl, node, onUpdate }) {
   const [currentTime, setCurrentTime] = React.useState(0);
   const [pickerStatus, setPickerStatus] = React.useState("");
   const [pickerOpen, setPickerOpen] = React.useState(false);
-  const [pickerView, setPickerView] = React.useState("rgb");
+  const pickerView = normalizeChoice(node.data.colorIdMattePreviewMode, ["overlay", "rgb", "matte"], "overlay");
   const selectedColor = normalizeColorIdMatteColor(node.data.colorIdMatteColor);
   const tolerance = colorIdMatteTolerance(node.data.colorIdMatteTolerance);
   const sampleRadius = colorIdMatteSampleRadius(node.data.colorIdMatteSampleRadius);
   const invert = Boolean(node.data.colorIdMatteInvert);
+  const matteItems = normalizeColorIdMatteItems(node.data.colorIdMatteItems);
+  const matteName = String(node.data.colorIdMatteName || "");
+  const blur = colorIdMatteBlur(node.data.colorIdMatteBlur);
+  const expand = colorIdMatteExpand(node.data.colorIdMatteExpand);
+  const startTime = node.data.colorIdMatteStartTime ?? "";
+  const endTime = node.data.colorIdMatteEndTime ?? "";
+  const outputFormat = normalizeChoice(node.data.colorIdMatteOutputFormat, colorIdMatteVideoOutputOptions.map(([value]) => value), "mp4");
   const selectedHex = selectedColor ? rgbToHex(selectedColor) : "None";
   const sliderMax = duration ? Math.max(0, duration - 0.01) : Math.max(1, currentTime);
 
@@ -6107,14 +6283,14 @@ function ColorIdMatteVideoPicker({ videoUrl, node, onUpdate }) {
       const sourceImageData = drawColorIdMatteVideoCanvas(canvas, video);
       sourceImageDataRef.current = sourceImageData;
       const context = canvas.getContext("2d", { willReadFrequently: true });
-      renderColorIdMattePickerPreview(context, sourceImageData, selectedColor, tolerance, invert, "overlay");
+      renderColorIdMattePickerPreview(context, sourceImageData, selectedColor, tolerance, invert, pickerView);
 
       const largeCanvas = largeCanvasRef.current;
       if (largeCanvas) {
         largeCanvas.width = sourceImageData.width;
         largeCanvas.height = sourceImageData.height;
         const largeContext = largeCanvas.getContext("2d", { willReadFrequently: true });
-        renderColorIdMattePickerPreview(largeContext, sourceImageData, selectedColor, tolerance, invert, pickerView === "matte" && selectedColor ? "matte" : "rgb");
+        renderColorIdMattePickerPreview(largeContext, sourceImageData, selectedColor, tolerance, invert, pickerView);
       }
 
       setPickerStatus("");
@@ -6193,6 +6369,40 @@ function ColorIdMatteVideoPicker({ videoUrl, node, onUpdate }) {
     });
   }
 
+  function setTolerancePreset(value) {
+    const nextTolerance = value === "exact" ? 0 : value === "soft" ? 24 : 64;
+    onUpdate(node.id, { colorIdMatteTolerance: nextTolerance });
+  }
+
+  function addCurrentMatte() {
+    if (!selectedColor) return;
+    const name = matteName.trim() || selectedHex;
+    onUpdate(node.id, {
+      colorIdMatteItems: [
+        ...matteItems,
+        {
+          id: `matte-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          name,
+          color: selectedColor
+        }
+      ],
+      colorIdMatteName: "",
+      error: ""
+    });
+  }
+
+  function updateMatteName(id, name) {
+    onUpdate(node.id, {
+      colorIdMatteItems: matteItems.map((item) => (item.id === id ? { ...item, name } : item))
+    });
+  }
+
+  function removeMatte(id) {
+    onUpdate(node.id, {
+      colorIdMatteItems: matteItems.filter((item) => item.id !== id)
+    });
+  }
+
   return (
     <>
       {videoUrl && (
@@ -6230,6 +6440,41 @@ function ColorIdMatteVideoPicker({ videoUrl, node, onUpdate }) {
           <span>{selectedHex}</span>
         </div>
       </NodeRow>
+      <NodeRow label="Name">
+        <input value={matteName} onChange={(event) => onUpdate(node.id, { colorIdMatteName: event.target.value })} placeholder="Matte name" />
+      </NodeRow>
+      <NodeRow label="Batch">
+        <button type="button" onClick={addCurrentMatte} disabled={!selectedColor}>
+          Add Matte
+        </button>
+      </NodeRow>
+      {matteItems.length > 0 && (
+        <div className="color-id-matte-list">
+          {matteItems.map((item, index) => (
+            <div className="color-id-matte-item" key={item.id}>
+              <span className="color-id-swatch" style={{ backgroundColor: rgbToHex(item.color) }} />
+              <input value={item.name} onChange={(event) => updateMatteName(item.id, event.target.value)} aria-label={`Matte ${index + 1} name`} />
+              <button type="button" onClick={() => removeMatte(item.id)} title="Remove matte" aria-label="Remove matte">
+                <X size={12} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      <NodeRow label="View">
+        <select value={pickerView} onChange={(event) => onUpdate(node.id, { colorIdMattePreviewMode: event.target.value })}>
+          <option value="overlay">Overlay</option>
+          <option value="rgb">RGB</option>
+          <option value="matte">Matte</option>
+        </select>
+      </NodeRow>
+      <NodeRow label="Preset">
+        <div className="color-id-preset-row">
+          <button type="button" onClick={() => setTolerancePreset("exact")}>Exact</button>
+          <button type="button" onClick={() => setTolerancePreset("soft")}>Soft</button>
+          <button type="button" onClick={() => setTolerancePreset("broad")}>Broad</button>
+        </div>
+      </NodeRow>
       <NodeRow label="Tolerance">
         <div className="color-id-slider">
           <input type="range" min="0" max="96" step="1" value={tolerance} onChange={(event) => onUpdate(node.id, { colorIdMatteTolerance: event.target.value })} />
@@ -6249,6 +6494,33 @@ function ColorIdMatteVideoPicker({ videoUrl, node, onUpdate }) {
           <span />
         </button>
       </NodeRow>
+      <NodeRow label="Blur">
+        <div className="color-id-slider">
+          <input type="range" min="0" max="24" step="0.5" value={blur} onChange={(event) => onUpdate(node.id, { colorIdMatteBlur: event.target.value })} />
+          <span>{blur}</span>
+        </div>
+      </NodeRow>
+      <NodeRow label="Expand">
+        <div className="color-id-slider">
+          <input type="range" min="-12" max="12" step="1" value={expand} onChange={(event) => onUpdate(node.id, { colorIdMatteExpand: event.target.value })} />
+          <span>{expand}</span>
+        </div>
+      </NodeRow>
+      <NodeRow label="Range">
+        <div className="inline-two-fields">
+          <input value={startTime} onChange={(event) => onUpdate(node.id, { colorIdMatteStartTime: event.target.value })} placeholder="Start" />
+          <input value={endTime} onChange={(event) => onUpdate(node.id, { colorIdMatteEndTime: event.target.value })} placeholder="End" />
+        </div>
+      </NodeRow>
+      <NodeRow label="Format">
+        <select value={outputFormat} onChange={(event) => onUpdate(node.id, { colorIdMatteOutputFormat: event.target.value })}>
+          {colorIdMatteVideoOutputOptions.map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </select>
+      </NodeRow>
       {pickerStatus && <small className="upload-error color-id-status">{pickerStatus}</small>}
       {pickerOpen && (
         <div className="color-id-picker-modal" role="dialog" aria-modal="true" aria-label="Color ID video matte picker" onPointerDown={(event) => event.stopPropagation()}>
@@ -6259,10 +6531,13 @@ function ColorIdMatteVideoPicker({ videoUrl, node, onUpdate }) {
                 <span>{selectedHex}</span>
               </div>
               <div className="color-id-view-toggle" role="group" aria-label="Picker view">
-                <button type="button" className={pickerView === "rgb" ? "active" : ""} aria-pressed={pickerView === "rgb"} onClick={() => setPickerView("rgb")}>
+                <button type="button" className={pickerView === "overlay" ? "active" : ""} aria-pressed={pickerView === "overlay"} onClick={() => onUpdate(node.id, { colorIdMattePreviewMode: "overlay" })}>
+                  Overlay
+                </button>
+                <button type="button" className={pickerView === "rgb" ? "active" : ""} aria-pressed={pickerView === "rgb"} onClick={() => onUpdate(node.id, { colorIdMattePreviewMode: "rgb" })}>
                   RGB
                 </button>
-                <button type="button" className={pickerView === "matte" ? "active" : ""} aria-pressed={pickerView === "matte"} onClick={() => setPickerView("matte")} disabled={!selectedColor}>
+                <button type="button" className={pickerView === "matte" ? "active" : ""} aria-pressed={pickerView === "matte"} onClick={() => onUpdate(node.id, { colorIdMattePreviewMode: "matte" })} disabled={!selectedColor}>
                   Matte
                 </button>
               </div>
@@ -6285,6 +6560,178 @@ function ColorIdMatteVideoPicker({ videoUrl, node, onUpdate }) {
             </div>
           </div>
         </div>
+      )}
+    </>
+  );
+}
+
+function CompositeVideoControls({ incoming, maskVideoPort, settingsOpen, node, onUpdate, onConnectStart, onDisconnectInput, connectedPortKeys }) {
+  const videoCount = incoming.referenceVideoIn?.length || 0;
+  const maskConnected = Boolean(incoming.maskVideoIn?.length);
+  const blur = colorIdMatteBlur(node.data.compositeMaskBlur);
+  const expand = colorIdMatteExpand(node.data.compositeMaskExpand);
+  const outputFormat = normalizeChoice(node.data.compositeOutputFormat, colorIdMatteVideoOutputOptions.map(([value]) => value), "mp4");
+
+  return (
+    <>
+      <NodeRow label="Mask Video" inputPort={settingsOpen ? maskVideoPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+        <button className={maskConnected ? "connected-field" : ""}>{connectedSummary(incoming.maskVideoIn, "Add mask")}</button>
+      </NodeRow>
+      <NodeRow label="Mode">
+        <div className="utility-mini-note">Reference image and mask video are required. Source video is optional.</div>
+      </NodeRow>
+      <NodeRow label="Inputs">
+        <div className="utility-mini-note">{videoCount >= 2 ? "First video is base, last video is layer." : "Connect base and layer videos to the Video input."}</div>
+      </NodeRow>
+      <NodeRow label="Invert Mask">
+        <button className={`node-toggle ${node.data.compositeInvertMask ? "enabled" : ""}`} onClick={() => onUpdate(node.id, { compositeInvertMask: !node.data.compositeInvertMask })}>
+          <span />
+        </button>
+      </NodeRow>
+      <NodeRow label="Mask Blur">
+        <div className="color-id-slider">
+          <input type="range" min="0" max="24" step="0.5" value={blur} onChange={(event) => onUpdate(node.id, { compositeMaskBlur: event.target.value })} />
+          <span>{blur}</span>
+        </div>
+      </NodeRow>
+      <NodeRow label="Expand">
+        <div className="color-id-slider">
+          <input type="range" min="-12" max="12" step="1" value={expand} onChange={(event) => onUpdate(node.id, { compositeMaskExpand: event.target.value })} />
+          <span>{expand}</span>
+        </div>
+      </NodeRow>
+      <NodeRow label="Format">
+        <select value={outputFormat} onChange={(event) => onUpdate(node.id, { compositeOutputFormat: event.target.value })}>
+          {colorIdMatteVideoOutputOptions.map(([value, label]) => (
+            <option key={value} value={value}>
+              {label.replace("mask", "video")}
+            </option>
+          ))}
+        </select>
+      </NodeRow>
+    </>
+  );
+}
+
+function WanVaceInpaintingControls({ incoming, referenceImagePort, maskVideoPort, settingsOpen, node, onUpdate, onConnectStart, onDisconnectInput, connectedPortKeys }) {
+  const referenceImageConnected = Boolean(incoming.referenceImageIn?.length);
+  const maskConnected = Boolean(incoming.maskVideoIn?.length);
+  const isMaskToVideo = isUtilityWanVaceMaskToVideoModel(node.data.utilityVideoModel);
+
+  return (
+    <>
+      <NodeRow label="Reference Image" inputPort={settingsOpen ? referenceImagePort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+        <button className={referenceImageConnected ? "connected-field" : ""}>{connectedSummary(incoming.referenceImageIn, "Optional image")}</button>
+      </NodeRow>
+      <NodeRow label="Mask Video" inputPort={settingsOpen ? maskVideoPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+        <button className={maskConnected ? "connected-field" : ""}>{connectedSummary(incoming.maskVideoIn, "Add mask")}</button>
+      </NodeRow>
+      <NodeRow label="Negative">
+        <textarea value={node.data.wanVaceNegativePrompt || ""} onChange={(event) => onUpdate(node.id, { wanVaceNegativePrompt: event.target.value })} placeholder="Optional negative prompt" />
+      </NodeRow>
+      <NodeRow label="Resolution">
+        <select value={node.data.wanVaceResolution || "720p"} onChange={(event) => onUpdate(node.id, { wanVaceResolution: event.target.value })}>
+          {wanVaceResolutionOptions.map((option) => (
+            <option key={option} value={option}>
+              {option === "auto" ? "Auto" : option}
+            </option>
+          ))}
+        </select>
+      </NodeRow>
+      <NodeRow label="Aspect">
+        <select value={node.data.wanVaceAspectRatio || "auto"} onChange={(event) => onUpdate(node.id, { wanVaceAspectRatio: event.target.value })}>
+          {wanVaceAspectRatioOptions.map((option) => (
+            <option key={option} value={option}>
+              {option === "auto" ? "Auto" : option}
+            </option>
+          ))}
+        </select>
+      </NodeRow>
+      <NodeRow label="Match Frames">
+        <button className={`node-toggle ${node.data.wanVaceMatchInputNumFrames !== false ? "enabled" : ""}`} onClick={() => onUpdate(node.id, { wanVaceMatchInputNumFrames: node.data.wanVaceMatchInputNumFrames === false })}>
+          <span />
+        </button>
+      </NodeRow>
+      {node.data.wanVaceMatchInputNumFrames === false && (
+        <NodeRow label="Frames">
+          <input type="number" min="81" max="100" value={node.data.wanVaceNumFrames || 81} onChange={(event) => onUpdate(node.id, { wanVaceNumFrames: event.target.value })} />
+        </NodeRow>
+      )}
+      <NodeRow label="Match FPS">
+        <button className={`node-toggle ${node.data.wanVaceMatchInputFps !== false ? "enabled" : ""}`} onClick={() => onUpdate(node.id, { wanVaceMatchInputFps: node.data.wanVaceMatchInputFps === false })}>
+          <span />
+        </button>
+      </NodeRow>
+      {node.data.wanVaceMatchInputFps === false && (
+        <NodeRow label="FPS">
+          <input type="number" min="5" max="24" value={node.data.wanVaceFps || 16} onChange={(event) => onUpdate(node.id, { wanVaceFps: event.target.value })} />
+        </NodeRow>
+      )}
+      <NodeRow label="Steps">
+        <input type="number" min="1" max="60" value={node.data.wanVaceNumInferenceSteps || 30} onChange={(event) => onUpdate(node.id, { wanVaceNumInferenceSteps: event.target.value })} />
+      </NodeRow>
+      {!isMaskToVideo && (
+        <NodeRow label="Guidance">
+          <input type="number" min="0" max="20" step="0.1" value={node.data.wanVaceGuidanceScale || 5} onChange={(event) => onUpdate(node.id, { wanVaceGuidanceScale: event.target.value })} />
+        </NodeRow>
+      )}
+      <NodeRow label="Shift">
+        <input type="number" min="0" max="20" step="0.1" value={node.data.wanVaceShift || 5} onChange={(event) => onUpdate(node.id, { wanVaceShift: event.target.value })} />
+      </NodeRow>
+      {!isMaskToVideo && (
+        <NodeRow label="Sampler">
+          <select value={node.data.wanVaceSampler || "unipc"} onChange={(event) => onUpdate(node.id, { wanVaceSampler: event.target.value })}>
+            {wanVaceSamplerOptions.map((option) => (
+              <option key={option}>{option}</option>
+            ))}
+          </select>
+        </NodeRow>
+      )}
+      <NodeRow label="Prompt Expand">
+        <button className={`node-toggle ${node.data.wanVaceEnablePromptExpansion ? "enabled" : ""}`} onClick={() => onUpdate(node.id, { wanVaceEnablePromptExpansion: !node.data.wanVaceEnablePromptExpansion })}>
+          <span />
+        </button>
+      </NodeRow>
+      <NodeRow label="Preprocess">
+        <button className={`node-toggle ${node.data.wanVacePreprocess ? "enabled" : ""}`} onClick={() => onUpdate(node.id, { wanVacePreprocess: !node.data.wanVacePreprocess })}>
+          <span />
+        </button>
+      </NodeRow>
+      {!isMaskToVideo && (
+        <NodeRow label="Acceleration">
+          <select value={node.data.wanVaceAcceleration || "regular"} onChange={(event) => onUpdate(node.id, { wanVaceAcceleration: event.target.value })}>
+            {wanVaceAccelerationOptions.map((option) => (
+              <option key={option}>{option}</option>
+            ))}
+          </select>
+        </NodeRow>
+      )}
+      <NodeRow label="Safety">
+        <button className={`node-toggle ${node.data.wanVaceEnableSafetyChecker !== false ? "enabled" : ""}`} onClick={() => onUpdate(node.id, { wanVaceEnableSafetyChecker: node.data.wanVaceEnableSafetyChecker === false })}>
+          <span />
+        </button>
+      </NodeRow>
+      {!isMaskToVideo && (
+        <>
+          <NodeRow label="Quality">
+            <select value={node.data.wanVaceVideoQuality || "high"} onChange={(event) => onUpdate(node.id, { wanVaceVideoQuality: event.target.value })}>
+              <option>low</option>
+              <option>medium</option>
+              <option>high</option>
+              <option>maximum</option>
+            </select>
+          </NodeRow>
+          <NodeRow label="Write Mode">
+            <select value={node.data.wanVaceVideoWriteMode || "balanced"} onChange={(event) => onUpdate(node.id, { wanVaceVideoWriteMode: event.target.value })}>
+              <option>fast</option>
+              <option>balanced</option>
+              <option>small</option>
+            </select>
+          </NodeRow>
+          <NodeRow label="Interp Frames">
+            <input type="number" min="0" step="1" value={node.data.wanVaceNumInterpolatedFrames || 0} onChange={(event) => onUpdate(node.id, { wanVaceNumInterpolatedFrames: event.target.value })} />
+          </NodeRow>
+        </>
       )}
     </>
   );
@@ -6649,6 +7096,36 @@ function createDefaultNodeData(type, label, count) {
       colorIdMatteTolerance: 0,
       colorIdMatteSampleRadius: 0,
       colorIdMatteInvert: false,
+      colorIdMatteName: "",
+      colorIdMatteItems: [],
+      colorIdMattePreviewMode: "overlay",
+      colorIdMatteBlur: 0,
+      colorIdMatteExpand: 0,
+      colorIdMatteStartTime: "",
+      colorIdMatteEndTime: "",
+      colorIdMatteOutputFormat: "mp4",
+      compositeInvertMask: false,
+      compositeMaskBlur: 0,
+      compositeMaskExpand: 0,
+      compositeOutputFormat: "mp4",
+      wanVaceNegativePrompt: "",
+      wanVaceMatchInputNumFrames: true,
+      wanVaceNumFrames: 81,
+      wanVaceMatchInputFps: true,
+      wanVaceFps: 16,
+      wanVaceResolution: "720p",
+      wanVaceAspectRatio: "auto",
+      wanVaceNumInferenceSteps: 30,
+      wanVaceGuidanceScale: 5,
+      wanVaceSampler: "unipc",
+      wanVaceShift: 5,
+      wanVaceEnableSafetyChecker: true,
+      wanVaceEnablePromptExpansion: false,
+      wanVacePreprocess: false,
+      wanVaceAcceleration: "regular",
+      wanVaceVideoQuality: "high",
+      wanVaceVideoWriteMode: "balanced",
+      wanVaceNumInterpolatedFrames: 0,
       sam3VideoDetectionThreshold: 0.5,
       prompt: "",
       batchCount: "1",
@@ -6705,6 +7182,10 @@ function createDefaultNodeData(type, label, count) {
     resolution: "720p",
     aspectRatio: "16:9 (Landscape)",
     generateAudio: true,
+    negativePrompt: "",
+    multiShots: false,
+    enableSafetyChecker: true,
+    seed: "",
     batchCount: "1"
   };
 }
@@ -6757,7 +7238,13 @@ function isOpenAiImageModel(model) {
 }
 
 function isWanFunControlModel(model) {
-  return String(model || "").toLowerCase().includes("wan");
+  const normalized = String(model || "").toLowerCase();
+  return normalized.includes("wan fun") || normalized.includes("wan-fun") || normalized === "wan";
+}
+
+function isWan27ReferenceModel(model) {
+  const normalized = String(model || "").toLowerCase();
+  return normalized.includes("wan 2.7") || normalized.includes("wan2.7") || normalized.includes("reference-to-video");
 }
 
 function isAuroraModel(model) {
@@ -6771,6 +7258,19 @@ function isHappyHorseModel(model) {
 }
 
 function videoModelSelectionPatch(data = {}, model) {
+  if (isWan27ReferenceModel(model)) {
+    return {
+      model,
+      duration: isWan27ReferenceModel(data.model) ? normalizedWan27ReferenceDurationLabel(data.duration) : "5 seconds",
+      resolution: isWan27ReferenceModel(data.model) ? normalizedWan27ReferenceResolution(data.resolution) : "1080p",
+      aspectRatio: isWan27ReferenceModel(data.model) ? normalizedWan27ReferenceAspectRatio(data.aspectRatio) : "16:9",
+      negativePrompt: data.negativePrompt || "",
+      multiShots: Boolean(data.multiShots),
+      enableSafetyChecker: data.enableSafetyChecker !== false,
+      seed: data.seed || ""
+    };
+  }
+
   if (!isHappyHorseModel(model)) {
     return { model };
   }
@@ -6826,6 +7326,21 @@ function isUtilityColorIdMatteModel(model) {
   return normalized.includes("color") && normalized.includes("matte");
 }
 
+function isUtilityCompositeVideoModel(model) {
+  const normalized = String(model || "").toLowerCase();
+  return normalized.includes("composite");
+}
+
+function isUtilityWanVaceMaskToVideoModel(model) {
+  const normalized = String(model || "").toLowerCase();
+  return normalized.includes("vace") && normalized.includes("mask");
+}
+
+function isUtilityWanVaceInpaintingModel(model) {
+  const normalized = String(model || "").toLowerCase();
+  return normalized.includes("vace") && normalized.includes("inpaint");
+}
+
 function isUtilitySam3ImageModel(model) {
   const normalized = String(model || "").toLowerCase();
   return normalized.includes("sam") && normalized.includes("image");
@@ -6868,7 +7383,7 @@ function isUtilityVideoUpscalerModel(model) {
 
 function isUtilityVoidVideoModel(model) {
   const normalized = String(model || "").toLowerCase();
-  return normalized.includes("void") || normalized.includes("inpaint");
+  return normalized.includes("void") || (normalized.includes("inpaint") && !normalized.includes("vace") && !normalized.includes("wan"));
 }
 
 function utilityMode(node) {
@@ -6893,6 +7408,9 @@ function utilityInputPortIds(mode, imageModel = utilityImageModelNames.dwpose, v
   if (isUtilityRifeVideoModel(videoModel)) return ["referenceVideoIn"];
   if (isUtilityExtractFrameVideoModel(videoModel)) return ["referenceVideoIn"];
   if (isUtilityColorIdMatteModel(videoModel)) return ["referenceVideoIn"];
+  if (isUtilityCompositeVideoModel(videoModel)) return ["referenceVideoIn", "maskVideoIn"];
+  if (isUtilityWanVaceMaskToVideoModel(videoModel)) return ["promptIn", "referenceImageIn", "referenceVideoIn", "maskVideoIn"];
+  if (isUtilityWanVaceInpaintingModel(videoModel)) return ["promptIn", "referenceImageIn", "referenceVideoIn", "maskVideoIn"];
   if (isUtilityVideoUpscalerModel(videoModel)) return ["referenceVideoIn"];
   if (isUtilityVoidVideoModel(videoModel)) return ["promptIn", "referenceVideoIn", "maskVideoIn"];
   return isUtilitySam3VideoModel(videoModel) ? ["promptIn", "referenceVideoIn"] : ["promptIn", "referenceImageIn", "referenceVideoIn"];
@@ -6911,6 +7429,8 @@ function normalizedUtilityImageModelName(model) {
 function normalizedUtilityVideoModelName(model) {
   const normalized = String(model || "").toLowerCase();
   if (normalized.includes("color") && normalized.includes("matte")) return utilityVideoModelNames.colorIdMatte;
+  if (normalized.includes("composite")) return utilityVideoModelNames.compositeVideo;
+  if (normalized.includes("vace") || (normalized.includes("wan") && (normalized.includes("mask") || normalized.includes("inpaint")))) return utilityVideoModelNames.wanFunControl;
   if (normalized.includes("sam") && normalized.includes("video")) return utilityVideoModelNames.sam3Video;
   if (normalized.includes("birefnet")) return utilityVideoModelNames.birefnetVideo;
   if (normalized.includes("rife")) return utilityVideoModelNames.rifeVideo;
@@ -7353,6 +7873,21 @@ async function runImageModelGeneration({ node, prompt, aspectRatio, imagePromptI
   };
 }
 
+function normalizedWan27ReferenceDurationLabel(value) {
+  const number = Math.min(10, Math.max(2, Math.round(Number(String(value || "").match(/\d+/)?.[0]) || 5)));
+  return `${number} seconds`;
+}
+
+function normalizedWan27ReferenceResolution(value) {
+  const normalized = String(value || "1080p");
+  return wan27ReferenceResolutionOptions.includes(normalized) ? normalized : "1080p";
+}
+
+function normalizedWan27ReferenceAspectRatio(value) {
+  const normalized = String(value || "16:9").match(/\d+:\d+/)?.[0] || "16:9";
+  return wan27ReferenceAspectRatioOptions.includes(normalized) ? normalized : "16:9";
+}
+
 async function run3DModelGeneration({ node, incoming, projectId, projectName }) {
   const imageViewUrls = connected3DViewUrls(incoming);
   if (!imageViewUrls.front) throw new Error("Connect a front image to the 3D node.");
@@ -7415,6 +7950,10 @@ async function runVideoModelGeneration({ node, prompt, incoming, projectId, proj
       referenceImageUrls: connectedAssetUrls(incoming.referenceImageIn),
       referenceVideoUrls: connectedAssetUrls(incoming.referenceVideoIn),
       referenceAudioUrls: connectedAssetUrls(incoming.referenceAudioIn),
+      wan27Reference: {
+        negativePrompt: node.data.negativePrompt || "",
+        multiShots: Boolean(node.data.multiShots)
+      },
       wanFunControl: {
         preprocessVideo: node.data.preprocessVideo !== false,
         preprocessType: node.data.preprocessType || "depth",
@@ -7478,7 +8017,64 @@ async function runUtilityVideoGeneration({ node, prompt, incoming, projectId, pr
         selectedColor: normalizeColorIdMatteColor(node.data.colorIdMatteColor) ? rgbToHex(normalizeColorIdMatteColor(node.data.colorIdMatteColor)) : "",
         tolerance: colorIdMatteTolerance(node.data.colorIdMatteTolerance),
         sampleRadius: colorIdMatteSampleRadius(node.data.colorIdMatteSampleRadius),
-        invert: Boolean(node.data.colorIdMatteInvert)
+        invert: Boolean(node.data.colorIdMatteInvert),
+        matteName: node.data.colorIdMatteName || "",
+        mattes: colorIdMatteRunColors(node.data).map((item) => ({
+          id: item.id,
+          name: item.name,
+          selectedColor: rgbToHex(item.color)
+        })),
+        blur: colorIdMatteBlur(node.data.colorIdMatteBlur),
+        expand: colorIdMatteExpand(node.data.colorIdMatteExpand),
+        startTime: node.data.colorIdMatteStartTime ?? "",
+        endTime: node.data.colorIdMatteEndTime ?? "",
+        outputFormat: node.data.colorIdMatteOutputFormat || "mp4"
+      },
+      compositeVideo: {
+        invertMask: Boolean(node.data.compositeInvertMask),
+        maskBlur: colorIdMatteBlur(node.data.compositeMaskBlur),
+        maskExpand: colorIdMatteExpand(node.data.compositeMaskExpand),
+        outputFormat: node.data.compositeOutputFormat || "mp4"
+      },
+      wanVaceMaskToVideo: {
+        negativePrompt: node.data.wanVaceNegativePrompt || "",
+        matchInputNumFrames: node.data.wanVaceMatchInputNumFrames !== false,
+        numFrames: node.data.wanVaceNumFrames || 81,
+        matchInputFps: node.data.wanVaceMatchInputFps !== false,
+        fps: node.data.wanVaceFps || 16,
+        resolution: node.data.wanVaceResolution || "720p",
+        aspectRatio: node.data.wanVaceAspectRatio || "auto",
+        numInferenceSteps: node.data.wanVaceNumInferenceSteps || 30,
+        guidanceScale: node.data.wanVaceGuidanceScale || 5,
+        sampler: node.data.wanVaceSampler || "unipc",
+        shift: node.data.wanVaceShift || 5,
+        enableSafetyChecker: node.data.wanVaceEnableSafetyChecker !== false,
+        enablePromptExpansion: Boolean(node.data.wanVaceEnablePromptExpansion),
+        preprocess: Boolean(node.data.wanVacePreprocess),
+        acceleration: node.data.wanVaceAcceleration || "regular",
+        videoQuality: node.data.wanVaceVideoQuality || "high",
+        videoWriteMode: node.data.wanVaceVideoWriteMode || "balanced",
+        numInterpolatedFrames: node.data.wanVaceNumInterpolatedFrames || 0
+      },
+      wanVaceInpainting: {
+        negativePrompt: node.data.wanVaceNegativePrompt || "",
+        matchInputNumFrames: node.data.wanVaceMatchInputNumFrames !== false,
+        numFrames: node.data.wanVaceNumFrames || 81,
+        matchInputFps: node.data.wanVaceMatchInputFps !== false,
+        fps: node.data.wanVaceFps || 16,
+        resolution: node.data.wanVaceResolution || "720p",
+        aspectRatio: node.data.wanVaceAspectRatio || "auto",
+        numInferenceSteps: node.data.wanVaceNumInferenceSteps || 30,
+        guidanceScale: node.data.wanVaceGuidanceScale || 5,
+        sampler: node.data.wanVaceSampler || "unipc",
+        shift: node.data.wanVaceShift || 5,
+        enableSafetyChecker: node.data.wanVaceEnableSafetyChecker !== false,
+        enablePromptExpansion: Boolean(node.data.wanVaceEnablePromptExpansion),
+        preprocess: Boolean(node.data.wanVacePreprocess),
+        acceleration: node.data.wanVaceAcceleration || "regular",
+        videoQuality: node.data.wanVaceVideoQuality || "high",
+        videoWriteMode: node.data.wanVaceVideoWriteMode || "balanced",
+        numInterpolatedFrames: node.data.wanVaceNumInterpolatedFrames || 0
       },
       voidVideoInpainting: {
         maskPrompt: node.data.voidMaskPrompt || "",
@@ -7887,6 +8483,51 @@ function colorIdMatteTolerance(value) {
 function colorIdMatteSampleRadius(value) {
   const number = Math.round(Number(value));
   return Number.isFinite(number) ? Math.min(3, Math.max(0, number)) : 0;
+}
+
+function colorIdMatteBlur(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.min(24, Math.max(0, number)) : 0;
+}
+
+function colorIdMatteExpand(value) {
+  const number = Math.round(Number(value));
+  return Number.isFinite(number) ? Math.min(12, Math.max(-12, number)) : 0;
+}
+
+function normalizeColorIdMatteItems(items = []) {
+  if (!Array.isArray(items)) return [];
+  return items
+    .map((item, index) => {
+      const color = normalizeColorIdMatteColor(item?.color || item?.selectedColor);
+      if (!color) return null;
+      return {
+        id: String(item?.id || `matte-${index + 1}`),
+        name: String(item?.name || `Matte ${index + 1}`).trim() || `Matte ${index + 1}`,
+        color
+      };
+    })
+    .filter(Boolean)
+    .slice(0, 16);
+}
+
+function colorIdMatteRunColors(data = {}) {
+  const items = normalizeColorIdMatteItems(data.colorIdMatteItems);
+  if (items.length) return items;
+  const color = normalizeColorIdMatteColor(data.colorIdMatteColor);
+  return color
+    ? [
+        {
+          id: "selected",
+          name: String(data.colorIdMatteName || "Color ID Matte").trim() || "Color ID Matte",
+          color
+        }
+      ]
+    : [];
+}
+
+function normalizeChoice(value, options = [], fallback) {
+  return options.includes(value) ? value : fallback;
 }
 
 function buildEffectiveImagePrompt(prompt, items = [], aspectRatio) {
@@ -9149,6 +9790,36 @@ function normalizeUtilityData(data = {}) {
     colorIdMatteTolerance: colorIdMatteTolerance(data.colorIdMatteTolerance),
     colorIdMatteSampleRadius: colorIdMatteSampleRadius(data.colorIdMatteSampleRadius),
     colorIdMatteInvert: Boolean(data.colorIdMatteInvert),
+    colorIdMatteName: String(data.colorIdMatteName || ""),
+    colorIdMatteItems: normalizeColorIdMatteItems(data.colorIdMatteItems),
+    colorIdMattePreviewMode: normalizeChoice(data.colorIdMattePreviewMode, ["overlay", "rgb", "matte"], "overlay"),
+    colorIdMatteBlur: colorIdMatteBlur(data.colorIdMatteBlur),
+    colorIdMatteExpand: colorIdMatteExpand(data.colorIdMatteExpand),
+    colorIdMatteStartTime: data.colorIdMatteStartTime ?? "",
+    colorIdMatteEndTime: data.colorIdMatteEndTime ?? "",
+    colorIdMatteOutputFormat: normalizeChoice(data.colorIdMatteOutputFormat, colorIdMatteVideoOutputOptions.map(([value]) => value), "mp4"),
+    compositeInvertMask: Boolean(data.compositeInvertMask),
+    compositeMaskBlur: colorIdMatteBlur(data.compositeMaskBlur),
+    compositeMaskExpand: colorIdMatteExpand(data.compositeMaskExpand),
+    compositeOutputFormat: normalizeChoice(data.compositeOutputFormat, colorIdMatteVideoOutputOptions.map(([value]) => value), "mp4"),
+    wanVaceNegativePrompt: String(data.wanVaceNegativePrompt || ""),
+    wanVaceMatchInputNumFrames: data.wanVaceMatchInputNumFrames !== false,
+    wanVaceNumFrames: data.wanVaceNumFrames || 81,
+    wanVaceMatchInputFps: data.wanVaceMatchInputFps !== false,
+    wanVaceFps: data.wanVaceFps || 16,
+    wanVaceResolution: normalizeChoice(data.wanVaceResolution, wanVaceResolutionOptions, "720p"),
+    wanVaceAspectRatio: normalizeChoice(data.wanVaceAspectRatio, wanVaceAspectRatioOptions, "auto"),
+    wanVaceNumInferenceSteps: data.wanVaceNumInferenceSteps || 30,
+    wanVaceGuidanceScale: data.wanVaceGuidanceScale || 5,
+    wanVaceSampler: normalizeChoice(data.wanVaceSampler, wanVaceSamplerOptions, "unipc"),
+    wanVaceShift: data.wanVaceShift || 5,
+    wanVaceEnableSafetyChecker: data.wanVaceEnableSafetyChecker !== false,
+    wanVaceEnablePromptExpansion: Boolean(data.wanVaceEnablePromptExpansion),
+    wanVacePreprocess: Boolean(data.wanVacePreprocess),
+    wanVaceAcceleration: normalizeChoice(data.wanVaceAcceleration, wanVaceAccelerationOptions, "regular"),
+    wanVaceVideoQuality: normalizeChoice(data.wanVaceVideoQuality, ["low", "medium", "high", "maximum"], "high"),
+    wanVaceVideoWriteMode: normalizeChoice(data.wanVaceVideoWriteMode, ["fast", "balanced", "small"], "balanced"),
+    wanVaceNumInterpolatedFrames: Math.max(0, Math.round(Number(data.wanVaceNumInterpolatedFrames || 0))),
     sam3VideoDetectionThreshold: data.sam3VideoDetectionThreshold ?? 0.5,
     extractFrameTime: data.extractFrameTime ?? 0,
     extractFrameFormat: data.extractFrameFormat === "jpeg" ? "jpeg" : "png",

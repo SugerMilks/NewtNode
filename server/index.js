@@ -49,6 +49,12 @@ const falTextRequestCost = Number(process.env.FAL_TEXT_REQUEST_COST || 0.001);
 const falVisionTextUnitCost = Number(process.env.FAL_VISION_TEXT_UNIT_COST || 0.01);
 const falVideoTextUnitCost = Number(process.env.FAL_VIDEO_TEXT_UNIT_COST || 0.01);
 const wanFunControlCostPerSecond = 0.1;
+const wan27ReferenceVideoCostPerSecond = Number(process.env.WAN_2_7_REFERENCE_VIDEO_COST_PER_SECOND || 0.1);
+const wanVaceCostPerSecond = {
+  "480p": 0.04,
+  "580p": 0.06,
+  "720p": 0.08
+};
 const voidVideoInpaintingBaseCost = 0.05;
 const voidVideoInpaintingPass2Cost = 0.05;
 const voidVideoInpaintingSam3QuadMaskCost = 0.05;
@@ -75,7 +81,8 @@ const openAiTextApiKey = process.env.OPENAI_TEXT_API_KEY || process.env.OPENAI_A
 const openAiImageApiKey = process.env.OPENAI_IMAGE_API_KEY || process.env.OPENAI_API_KEY;
 const textLlmProvider = String(process.env.TEXT_LLM_PROVIDER || "fal").toLowerCase();
 const falTextModel = process.env.FAL_TEXT_MODEL || "openai/gpt-4o";
-const falVisionTextModel = process.env.FAL_VISION_TEXT_MODEL || falTextModel;
+const falVisionTextModel = process.env.FAL_VISION_TEXT_MODEL || "google/gemini-2.5-flash";
+const falVisionTextFallbackModel = process.env.FAL_VISION_TEXT_FALLBACK_MODEL || "google/gemini-2.5-flash";
 const falVideoTextModel = process.env.FAL_VIDEO_TEXT_MODEL || "google/gemini-2.5-flash";
 const sam3SegmentationModelsEnabled = false; // Flip back to true when revisiting SAM 3 segmentation.
 const birefnetModelOptions = ["General Use (Light)", "General Use (Light 2K)", "General Use (Heavy)", "Matting", "Portrait", "General Use (Dynamic)"];
@@ -200,6 +207,9 @@ app.get("/api/health", (_req, res) => {
       utilityVideo: true,
       colorIdMatte: true,
       colorIdVideoMatte: true,
+      compositeVideo: true,
+      wanVaceMaskToVideo: true,
+      wanVaceInpainting: true,
       composerFrame: true,
       composerPoses: true,
       apiJsonErrors: true,
@@ -272,6 +282,20 @@ app.get("/api/stats", async (_req, res) => {
       utility: {
         wanFunControl: {
           costPerSecond: wanFunControlCostPerSecond,
+          currency: "USD"
+        },
+        wanVaceMaskToVideo: {
+          costPerSecond480p: wanVaceCostPerSecond["480p"],
+          costPerSecond580p: wanVaceCostPerSecond["580p"],
+          costPerSecond720p: wanVaceCostPerSecond["720p"],
+          billingFps: 16,
+          currency: "USD"
+        },
+        wanVaceInpainting: {
+          costPerSecond480p: wanVaceCostPerSecond["480p"],
+          costPerSecond580p: wanVaceCostPerSecond["580p"],
+          costPerSecond720p: wanVaceCostPerSecond["720p"],
+          billingFps: 16,
           currency: "USD"
         },
         voidVideoInpainting: {
@@ -483,15 +507,17 @@ app.post("/api/node/upload-asset", upload.single("asset"), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: "No asset uploaded." });
   }
+  const extensionMimeType = mimeForExtension(path.extname(req.file.originalname).toLowerCase());
+  const mimeType = req.file.mimetype && req.file.mimetype !== "application/octet-stream" ? req.file.mimetype : extensionMimeType;
 
   res.json({
     asset: {
       localUrl: `/uploads/${req.file.filename}`,
       fileName: req.file.originalname,
       storedFileName: req.file.filename,
-      mimeType: req.file.mimetype || "application/octet-stream",
+      mimeType,
       size: req.file.size,
-      mediaType: mediaTypeForMime(req.file.mimetype)
+      mediaType: mediaTypeForMime(mimeType)
     }
   });
 });
@@ -1445,6 +1471,14 @@ app.post("/api/node/utility-video", async (req, res) => {
       });
     }
 
+    if (selectedVideoModel.provider === "local-composite-video") {
+      return runCompositeUtilityVideo(req, res, {
+        referenceVideoUrls,
+        maskVideoUrls,
+        selectedVideoModel
+      });
+    }
+
     if (!process.env.FAL_KEY) {
       return res.status(400).json({ error: "Missing FAL_KEY in .env." });
     }
@@ -1463,6 +1497,26 @@ app.post("/api/node/utility-video", async (req, res) => {
     if (selectedVideoModel.provider === "fal-void-video-inpainting") {
       return runVoidVideoInpaintingUtility(req, res, {
         prompt,
+        referenceVideoUrls,
+        maskVideoUrls,
+        selectedVideoModel
+      });
+    }
+
+    if (selectedVideoModel.provider === "fal-wan-vace-mask-to-video") {
+      return runWanVaceMaskToVideoUtility(req, res, {
+        prompt,
+        referenceImageUrls,
+        referenceVideoUrls,
+        maskVideoUrls,
+        selectedVideoModel
+      });
+    }
+
+    if (selectedVideoModel.provider === "fal-wan-vace-inpainting") {
+      return runWanVaceInpaintingUtility(req, res, {
+        prompt,
+        referenceImageUrls,
         referenceVideoUrls,
         maskVideoUrls,
         selectedVideoModel
@@ -1620,6 +1674,26 @@ async function runColorIdMatteUtilityVideo(req, res, { referenceVideoUrls }) {
   return res.json(await createColorIdMatteVideoResult({ body: req.body, sourceVideoUrl }));
 }
 
+async function runCompositeUtilityVideo(req, res, { referenceVideoUrls, maskVideoUrls }) {
+  if (referenceVideoUrls.length < 2) {
+    return res.status(400).json({ error: "Composite Video requires a base video and a layer video connected to Video." });
+  }
+
+  const maskVideoUrl = firstLocalOutput(maskVideoUrls);
+  if (!maskVideoUrl) {
+    return res.status(400).json({ error: "Composite Video requires a connected mask video." });
+  }
+
+  return res.json(
+    await createCompositeVideoResult({
+      body: req.body,
+      baseVideoUrl: firstLocalOutput(referenceVideoUrls),
+      layerVideoUrl: firstLocalOutput(referenceVideoUrls.slice(-1)),
+      maskVideoUrl
+    })
+  );
+}
+
 app.post("/api/node/generate-video", async (req, res) => {
   try {
     if (!process.env.FAL_KEY) {
@@ -1642,6 +1716,15 @@ app.post("/api/node/generate-video", async (req, res) => {
         prompt,
         referenceImageUrls: Array.isArray(req.body.referenceImageUrls) ? req.body.referenceImageUrls.filter(isLocalAssetUrl) : [],
         referenceVideoUrls: Array.isArray(req.body.referenceVideoUrls) ? req.body.referenceVideoUrls.filter(isLocalAssetUrl) : []
+      });
+    }
+
+    if (selectedVideoModel.provider === "fal-wan-2-7-reference-to-video") {
+      return runWan27ReferenceVideo(req, res, {
+        prompt,
+        referenceImageUrls: Array.isArray(req.body.referenceImageUrls) ? req.body.referenceImageUrls.filter(isLocalAssetUrl) : [],
+        referenceVideoUrls: Array.isArray(req.body.referenceVideoUrls) ? req.body.referenceVideoUrls.filter(isLocalAssetUrl) : [],
+        selectedVideoModel
       });
     }
 
@@ -2194,6 +2277,95 @@ async function runWanFunControlVideo(req, res, { prompt, referenceImageUrls, ref
   });
 }
 
+async function runWan27ReferenceVideo(req, res, { prompt, referenceImageUrls, referenceVideoUrls, selectedVideoModel }) {
+  const options = req.body.wan27Reference || {};
+  const endpoint = selectedVideoModel.id;
+  const duration = normalizeWan27ReferenceDuration(req.body.duration);
+  const resolution = normalizeChoice(req.body.resolution, ["720p", "1080p"], "1080p");
+  const aspectRatio = normalizeWan27ReferenceAspectRatio(req.body.aspectRatio);
+  const negativePrompt = String(options.negativePrompt || req.body.negativePrompt || "").slice(0, 500);
+  const seed = optionalInteger(req.body.seed);
+  const input = {
+    prompt,
+    negative_prompt: negativePrompt,
+    aspect_ratio: aspectRatio,
+    resolution,
+    duration,
+    multi_shots: Boolean(options.multiShots),
+    enable_safety_checker: req.body.enableSafetyChecker !== false
+  };
+
+  if (seed !== undefined) input.seed = Math.min(2147483647, Math.max(0, seed));
+  if (referenceImageUrls.length) input.reference_image_urls = await Promise.all(referenceImageUrls.map(uploadLocalOutputToFal));
+  if (referenceVideoUrls.length) input.reference_video_urls = await Promise.all(referenceVideoUrls.map(uploadLocalOutputToFal));
+
+  const referenceVideoDurations = await localVideoDurations(referenceVideoUrls);
+  const result = await subscribeFal(endpoint, { input, logs: true });
+  const remoteVideo = result?.data?.video;
+
+  if (!remoteVideo?.url) {
+    return res.status(502).json({ error: "Fal returned no Wan 2.7 video URL.", raw: result?.data });
+  }
+
+  const output = await downloadVideo(remoteVideo.url, "wan-2-7-reference-to-video");
+  const outputVideo = enrichVideoMetadata(remoteVideo, await probeVideoFile(output.filePath));
+  const cost = estimateWan27ReferenceVideoCost({
+    endpoint,
+    duration,
+    outputVideo,
+    referenceVideoDurations,
+    resolution,
+    aspectRatio
+  });
+
+  await appendHistory({
+    id: result.requestId || randomUUID(),
+    createdAt: new Date().toISOString(),
+    mediaType: "video",
+    provider: "fal.ai",
+    modelName: selectedVideoModel.displayName,
+    endpoint,
+    mode: "Wan 2.7 reference-to-video",
+    prompt,
+    submittedPrompt: prompt,
+    project: projectFromBody(req.body),
+    node: nodeFromBody(req.body),
+    settings: {
+      model: selectedVideoModel.displayName,
+      negativePrompt,
+      duration,
+      resolution,
+      aspectRatio,
+      multiShots: input.multi_shots,
+      enableSafetyChecker: input.enable_safety_checker,
+      referenceImageCount: referenceImageUrls.length,
+      referenceVideoCount: referenceVideoUrls.length,
+      referenceVideoDurations,
+      actualPrompt: result?.data?.actual_prompt || null,
+      seed: result?.data?.seed ?? input.seed ?? null
+    },
+    cost,
+    remoteVideo: outputVideo,
+    localVideo: output.publicPath,
+    outputFileName: output.fileName,
+    outputBytes: output.bytes
+  });
+
+  return res.json({
+    requestId: result.requestId,
+    seed: result?.data?.seed ?? input.seed,
+    endpoint,
+    modelName: selectedVideoModel.displayName,
+    actualPrompt: result?.data?.actual_prompt || "",
+    cost,
+    video: {
+      ...outputVideo,
+      localUrl: output.publicPath,
+      fileName: output.fileName
+    }
+  });
+}
+
 async function runVoidVideoInpaintingUtility(req, res, { prompt, referenceVideoUrls, maskVideoUrls, selectedVideoModel }) {
   const videoUrl = firstLocalOutput(referenceVideoUrls);
   if (!videoUrl) {
@@ -2290,6 +2462,242 @@ async function runVoidVideoInpaintingUtility(req, res, { prompt, referenceVideoU
         fileName: output.fileName
       }
     ]
+  });
+}
+
+async function runWanVaceMaskToVideoUtility(req, res, { prompt, referenceImageUrls, referenceVideoUrls, maskVideoUrls, selectedVideoModel }) {
+  const maskVideoUrl = firstLocalOutput(maskVideoUrls);
+  if (!maskVideoUrl) {
+    return res.status(400).json({ error: "Wan VACE Mask-to-Video requires a connected mask video." });
+  }
+
+  if (!referenceImageUrls.length) {
+    return res.status(400).json({ error: "Wan VACE Mask-to-Video requires a connected reference image." });
+  }
+
+  const endpoint = selectedVideoModel.id;
+  const options = req.body.wanVaceMaskToVideo || req.body.wanVaceInpainting || {};
+  const resolution = normalizeChoice(options.resolution, ["480p", "580p", "720p"], "720p");
+  const videoUrl = firstLocalOutput(referenceVideoUrls);
+  const aspectRatio = await resolveWanVaceMaskToVideoAspectRatio({
+    value: options.aspectRatio,
+    videoUrl,
+    maskVideoUrl
+  });
+  const preparedMedia = await prepareWanVaceMaskToVideoMedia({
+    videoUrl,
+    maskVideoUrl,
+    referenceImageUrls: referenceImageUrls.slice(0, 4),
+    aspectRatio
+  });
+  const refImageUrls = await Promise.all(preparedMedia.referenceImageUrls.map((url) => uploadLocalOutputToFal(url)));
+  const input = {
+    prompt,
+    negative_prompt: String(options.negativePrompt || ""),
+    task: "inpainting",
+    num_frames: clampInteger(options.numFrames, 81, 100, 81),
+    frames_per_second: clampInteger(options.fps, 5, 24, 16),
+    shift: clampNumber(options.shift, 0, 20, 5),
+    resolution,
+    aspect_ratio: aspectRatio,
+    num_inference_steps: clampInteger(options.numInferenceSteps, 1, 60, 30),
+    mask_video_url: await uploadLocalOutputToFal(preparedMedia.maskVideoUrl),
+    ref_image_urls: refImageUrls,
+    enable_safety_checker: options.enableSafetyChecker !== false,
+    enable_prompt_expansion: Boolean(options.enablePromptExpansion),
+    preprocess: Boolean(options.preprocess)
+  };
+  const seed = optionalInteger(options.seed);
+  if (preparedMedia.videoUrl) input.video_url = await uploadLocalOutputToFal(preparedMedia.videoUrl);
+  if (seed !== undefined) input.seed = seed;
+
+  const result = await subscribeFal(endpoint, { input, logs: true });
+  const remoteVideo = normalizeFalFile(result?.data?.video);
+  if (!remoteVideo?.url) {
+    return res.status(502).json({ error: "Fal returned no Wan VACE Mask-to-Video URL.", raw: result?.data });
+  }
+
+  const output = await downloadVideo(remoteVideo.url, "wan-vace-mask-to-video");
+  const outputVideo = enrichVideoMetadata(remoteVideo, await probeVideoFile(output.filePath));
+  const cost = estimateWanVaceInpaintingCost({
+    endpoint,
+    resolution,
+    outputVideo,
+    matchInputNumFrames: true,
+    numFrames: input.num_frames,
+    matchInputFps: true,
+    fps: input.frames_per_second
+  });
+
+  await appendHistory({
+    id: result.requestId || randomUUID(),
+    createdAt: new Date().toISOString(),
+    mediaType: "video",
+    provider: "fal.ai",
+    modelName: selectedVideoModel.displayName,
+    endpoint,
+    mode: "Wan VACE mask-to-video",
+    prompt,
+    submittedPrompt: prompt,
+    project: projectFromBody(req.body),
+    node: nodeFromBody(req.body),
+    settings: {
+      task: input.task,
+      resolution,
+      aspectRatio,
+      numFrames: input.num_frames,
+      fps: input.frames_per_second,
+      numInferenceSteps: input.num_inference_steps,
+      shift: input.shift,
+      sourceVideoCount: preparedMedia.videoUrl ? 1 : 0,
+      maskVideoCount: 1,
+      referenceImageCount: refImageUrls.length,
+      paddedMedia: preparedMedia.paddedMedia,
+      enableSafetyChecker: input.enable_safety_checker,
+      enablePromptExpansion: input.enable_prompt_expansion,
+      preprocess: input.preprocess,
+      seed: result?.data?.seed ?? input.seed ?? null
+    },
+    cost,
+    remoteVideo: outputVideo,
+    localVideo: output.publicPath,
+    outputFileName: output.fileName,
+    outputBytes: output.bytes
+  });
+
+  return res.json({
+    requestId: result.requestId,
+    endpoint,
+    modelName: selectedVideoModel.displayName,
+    seed: result?.data?.seed ?? input.seed,
+    cost,
+    video: {
+      ...outputVideo,
+      label: "Wan VACE Mask-to-Video",
+      localUrl: output.publicPath,
+      fileName: output.fileName
+    }
+  });
+}
+
+async function runWanVaceInpaintingUtility(req, res, { prompt, referenceImageUrls, referenceVideoUrls, maskVideoUrls, selectedVideoModel }) {
+  const videoUrl = firstLocalOutput(referenceVideoUrls);
+  if (!videoUrl) {
+    return res.status(400).json({ error: "Wan VACE Inpainting requires a connected source video." });
+  }
+
+  const maskVideoUrl = firstLocalOutput(maskVideoUrls);
+  if (!maskVideoUrl) {
+    return res.status(400).json({ error: "Wan VACE Inpainting requires a connected mask video." });
+  }
+
+  const endpoint = selectedVideoModel.id;
+  const options = req.body.wanVaceInpainting || {};
+  const matchInputNumFrames = options.matchInputNumFrames !== false;
+  const matchInputFps = options.matchInputFps !== false;
+  const resolution = normalizeChoice(options.resolution, ["auto", "240p", "360p", "480p", "580p", "720p"], "auto");
+  const aspectRatio = normalizeChoice(options.aspectRatio, ["auto", "16:9", "1:1", "9:16"], "auto");
+  const refImageUrls = await Promise.all(referenceImageUrls.slice(0, 4).map((url) => uploadLocalOutputToFal(url)));
+  const input = {
+    prompt,
+    negative_prompt: String(options.negativePrompt || ""),
+    match_input_num_frames: matchInputNumFrames,
+    match_input_frames_per_second: matchInputFps,
+    resolution,
+    aspect_ratio: aspectRatio,
+    num_inference_steps: clampInteger(options.numInferenceSteps, 1, 60, 30),
+    guidance_scale: clampNumber(options.guidanceScale, 0, 20, 5),
+    sampler: normalizeChoice(options.sampler, ["unipc", "dpm++", "euler"], "unipc"),
+    shift: clampNumber(options.shift, 0, 20, 5),
+    video_url: await uploadLocalOutputToFal(videoUrl),
+    mask_video_url: await uploadLocalOutputToFal(maskVideoUrl),
+    enable_safety_checker: options.enableSafetyChecker !== false,
+    enable_prompt_expansion: Boolean(options.enablePromptExpansion),
+    preprocess: Boolean(options.preprocess),
+    acceleration: normalizeChoice(options.acceleration, ["none", "low", "regular"], "regular"),
+    video_quality: normalizeChoice(options.videoQuality, ["low", "medium", "high", "maximum"], "high"),
+    video_write_mode: normalizeChoice(options.videoWriteMode, ["fast", "balanced", "small"], "balanced"),
+    num_interpolated_frames: Math.max(0, Math.round(Number(options.numInterpolatedFrames || 0))),
+    sync_mode: false,
+    return_frames_zip: false
+  };
+  if (refImageUrls.length) input.ref_image_urls = refImageUrls;
+  const seed = optionalInteger(options.seed);
+  if (!matchInputNumFrames) input.num_frames = clampInteger(options.numFrames, 81, 241, 81);
+  if (!matchInputFps) input.frames_per_second = clampInteger(options.fps, 5, 30, 16);
+  if (seed !== undefined) input.seed = seed;
+
+  const result = await subscribeFal(endpoint, { input, logs: true });
+  const remoteVideo = normalizeFalFile(result?.data?.video);
+  if (!remoteVideo?.url) {
+    return res.status(502).json({ error: "Fal returned no Wan VACE video URL.", raw: result?.data });
+  }
+
+  const output = await downloadVideo(remoteVideo.url, "wan-vace-inpainting");
+  const outputVideo = enrichVideoMetadata(remoteVideo, await probeVideoFile(output.filePath));
+  const cost = estimateWanVaceInpaintingCost({
+    endpoint,
+    resolution,
+    outputVideo,
+    matchInputNumFrames,
+    numFrames: input.num_frames,
+    matchInputFps,
+    fps: input.frames_per_second
+  });
+
+  await appendHistory({
+    id: result.requestId || randomUUID(),
+    createdAt: new Date().toISOString(),
+    mediaType: "video",
+    provider: "fal.ai",
+    modelName: selectedVideoModel.displayName,
+    endpoint,
+    mode: "Wan VACE inpainting",
+    prompt,
+    submittedPrompt: prompt,
+    project: projectFromBody(req.body),
+    node: nodeFromBody(req.body),
+    settings: {
+      matchInputNumFrames,
+      numFrames: input.num_frames || null,
+      matchInputFps,
+      fps: input.frames_per_second || null,
+      resolution,
+      aspectRatio,
+      numInferenceSteps: input.num_inference_steps,
+      guidanceScale: input.guidance_scale,
+      sampler: input.sampler,
+      shift: input.shift,
+      referenceImageCount: refImageUrls.length,
+      maskVideoCount: 1,
+      enableSafetyChecker: input.enable_safety_checker,
+      enablePromptExpansion: input.enable_prompt_expansion,
+      preprocess: input.preprocess,
+      acceleration: input.acceleration,
+      videoQuality: input.video_quality,
+      videoWriteMode: input.video_write_mode,
+      numInterpolatedFrames: input.num_interpolated_frames,
+      seed: result?.data?.seed ?? input.seed ?? null
+    },
+    cost,
+    remoteVideo: outputVideo,
+    localVideo: output.publicPath,
+    outputFileName: output.fileName,
+    outputBytes: output.bytes
+  });
+
+  return res.json({
+    requestId: result.requestId,
+    endpoint,
+    modelName: selectedVideoModel.displayName,
+    seed: result?.data?.seed ?? input.seed,
+    cost,
+    video: {
+      ...outputVideo,
+      label: "Wan VACE",
+      localUrl: output.publicPath,
+      fileName: output.fileName
+    }
   });
 }
 
@@ -3100,6 +3508,193 @@ async function probeVideoFile(filePath) {
   }
 }
 
+async function localVideoDurations(urls = []) {
+  const durations = [];
+  for (const url of urls) {
+    try {
+      const source = resolveLocalAssetPathFromUrl(url);
+      const metadata = await probeVideoFile(source.filePath);
+      durations.push(positiveNumber(metadata.duration) || 0);
+    } catch {
+      durations.push(0);
+    }
+  }
+
+  return durations;
+}
+
+async function resolveWanVaceMaskToVideoAspectRatio({ value, videoUrl, maskVideoUrl }) {
+  const requested = normalizeChoice(value, ["auto", "16:9", "9:16"], "auto");
+  if (requested !== "auto") return requested;
+
+  for (const sourceUrl of [videoUrl, maskVideoUrl]) {
+    if (!sourceUrl) continue;
+    try {
+      const source = resolveLocalAssetPathFromUrl(sourceUrl);
+      const metadata = await probeVideoFile(source.filePath);
+      const width = positiveNumber(metadata.width);
+      const height = positiveNumber(metadata.height);
+      if (width && height) return wanVaceAspectRatioFromDimensions(width, height);
+    } catch {
+      // Try the next source, then fall back to landscape.
+    }
+  }
+
+  return "16:9";
+}
+
+function wanVaceAspectRatioFromDimensions(width, height) {
+  const w = Number(width || 0);
+  const h = Number(height || 0);
+  if (w <= 0 || h <= 0) return "16:9";
+  if (Math.abs(w - h) / Math.max(w, h) <= 0.04) return "16:9";
+  return w > h ? "16:9" : "9:16";
+}
+
+async function prepareWanVaceMaskToVideoMedia({ videoUrl, maskVideoUrl, referenceImageUrls = [], aspectRatio }) {
+  const paddedMedia = [];
+  const preparedMask = await prepareLocalMediaForWanVaceAspect({
+    publicPath: maskVideoUrl,
+    aspectRatio,
+    kind: "wan-vace-mask-video",
+    mediaType: "video"
+  });
+  const preparedSource = videoUrl
+    ? await prepareLocalMediaForWanVaceAspect({
+        publicPath: videoUrl,
+        aspectRatio,
+        kind: "wan-vace-source-video",
+        mediaType: "video"
+      })
+    : null;
+  const preparedReferences = [];
+
+  for (const referenceImageUrl of referenceImageUrls) {
+    preparedReferences.push(
+      await prepareLocalMediaForWanVaceAspect({
+        publicPath: referenceImageUrl,
+        aspectRatio,
+        kind: "wan-vace-reference-image",
+        mediaType: "image"
+      })
+    );
+  }
+
+  for (const item of [preparedMask, preparedSource, ...preparedReferences]) {
+    if (item?.wasPadded) paddedMedia.push(item.summary);
+  }
+
+  return {
+    maskVideoUrl: preparedMask.publicPath,
+    videoUrl: preparedSource?.publicPath || "",
+    referenceImageUrls: preparedReferences.map((item) => item.publicPath),
+    paddedMedia
+  };
+}
+
+async function prepareLocalMediaForWanVaceAspect({ publicPath, aspectRatio, kind, mediaType }) {
+  const asset = resolveLocalAssetPathFromUrl(publicPath);
+  const metadata = mediaType === "video" ? await probeVideoFile(asset.filePath) : await probeLocalImageFile(asset.filePath, asset.fileName);
+  const width = positiveNumber(metadata.width);
+  const height = positiveNumber(metadata.height);
+
+  if (!width || !height) {
+    return {
+      publicPath,
+      wasPadded: false,
+      summary: null
+    };
+  }
+
+  const target = paddedDimensionsForAspect({ width, height, aspectRatio });
+  if (!target.needsPadding) {
+    return {
+      publicPath,
+      wasPadded: false,
+      summary: null
+    };
+  }
+
+  const extension = mediaType === "video" ? ".mp4" : ".png";
+  const fileName = uniqueOutputFileName(`${kind}-padded-${aspectRatio.replace(":", "x")}`, extension);
+  const outputPath = path.join(outputsDir, fileName);
+
+  if (mediaType === "video") {
+    await padVideoWithFfmpeg({
+      sourcePath: asset.filePath,
+      outputPath,
+      targetWidth: target.width,
+      targetHeight: target.height
+    });
+  } else {
+    await padImageWithFfmpeg({
+      sourcePath: asset.filePath,
+      outputPath,
+      targetWidth: target.width,
+      targetHeight: target.height
+    });
+  }
+
+  return {
+    publicPath: `/outputs/${fileName}`,
+    wasPadded: true,
+    summary: {
+      kind,
+      sourceUrl: localPublicPathFromUrl(publicPath),
+      paddedUrl: `/outputs/${fileName}`,
+      originalWidth: width,
+      originalHeight: height,
+      paddedWidth: target.width,
+      paddedHeight: target.height,
+      aspectRatio
+    }
+  };
+}
+
+async function probeLocalImageFile(filePath, fileName = "") {
+  try {
+    const buffer = await readFile(filePath);
+    return imageDimensionsFromBuffer(buffer, mimeForExtension(path.extname(fileName).toLowerCase())) || {};
+  } catch {
+    return {};
+  }
+}
+
+function paddedDimensionsForAspect({ width, height, aspectRatio }) {
+  const sourceWidth = Math.max(1, Math.round(Number(width || 0)));
+  const sourceHeight = Math.max(1, Math.round(Number(height || 0)));
+  const targetRatio = aspectRatioNumber(aspectRatio === "9:16" ? "9:16" : "16:9");
+  const currentRatio = sourceWidth / sourceHeight;
+  const tolerance = Math.log(1.04);
+
+  if (Math.abs(Math.log(currentRatio / targetRatio)) <= tolerance) {
+    return {
+      width: ensureEven(sourceWidth),
+      height: ensureEven(sourceHeight),
+      needsPadding: false
+    };
+  }
+
+  if (currentRatio < targetRatio) {
+    return {
+      width: ensureEven(Math.ceil(sourceHeight * targetRatio)),
+      height: ensureEven(sourceHeight),
+      needsPadding: true
+    };
+  }
+
+  return {
+    width: ensureEven(sourceWidth),
+    height: ensureEven(Math.ceil(sourceWidth / targetRatio)),
+    needsPadding: true
+  };
+}
+
+function ensureEven(value) {
+  const number = Math.max(2, Math.ceil(Number(value || 2)));
+  return number % 2 === 0 ? number : number + 1;
+}
+
 async function createExtractFrameResult({ body, sourceVideoUrl }) {
   let outputPath = "";
   try {
@@ -3183,13 +3778,13 @@ async function createExtractFrameResult({ body, sourceVideoUrl }) {
 }
 
 async function createColorIdMatteVideoResult({ body, sourceVideoUrl }) {
-  let outputPath = "";
+  const outputPaths = [];
   try {
     const sourceVideo = resolveLocalAssetPathFromUrl(sourceVideoUrl);
     const metadata = await probeVideoFile(sourceVideo.filePath);
     const options = body.colorIdMatte && typeof body.colorIdMatte === "object" ? body.colorIdMatte : body;
-    const selectedColor = normalizeColorIdHex(options.selectedColor || options.colorIdMatteColor || options.selected_color);
-    if (!selectedColor) {
+    const mattes = normalizedColorIdVideoMattes(options);
+    if (!mattes.length) {
       const error = new Error("Pick a color in the Utility node.");
       error.status = 400;
       throw error;
@@ -3198,31 +3793,56 @@ async function createColorIdMatteVideoResult({ body, sourceVideoUrl }) {
     const tolerance = clampInteger(options.tolerance, 0, 96, 0);
     const sampleRadius = clampInteger(options.sampleRadius, 0, 3, 0);
     const invert = Boolean(options.invert);
-    const fileName = uniqueOutputFileName("color-id-video-matte", ".mp4");
-    outputPath = path.join(outputsDir, fileName);
-
-    await createColorIdMatteVideoWithFfmpeg({
-      sourcePath: sourceVideo.filePath,
-      outputPath,
-      selectedColor,
-      tolerance,
-      invert
-    });
-
-    const outputStats = await stat(outputPath);
-    const outputMetadata = await probeVideoFile(outputPath);
-    const localUrl = `/outputs/${fileName}`;
-    const text = `Color ID video matte for ${selectedColor}.`;
+    const blur = clampNumber(options.blur, 0, 24, 0);
+    const expand = clampInteger(options.expand, -12, 12, 0);
+    const startTime = optionalNumber(options.startTime);
+    const endTime = optionalNumber(options.endTime);
+    const outputFormat = normalizeVideoOutputFormat(options.outputFormat);
+    const text = mattes.length === 1 ? `Color ID video matte for ${mattes[0].color}.` : `${mattes.length} Color ID video mattes.`;
     const cost = {
       amountUsd: 0,
       currency: "USD",
       unitRateUsd: 0,
-      units: 1,
+      units: mattes.length,
       unit: "local video mask",
       mediaType: "video",
       pricingBasis: "Local ffmpeg Color ID video matte generation",
       pricingSource: "local-color-id-video-matte"
     };
+    const videos = [];
+
+    for (const matte of mattes) {
+      const extension = videoOutputExtension(outputFormat);
+      const fileName = uniqueOutputFileName(safeOutputKind(`color-id-video-matte-${matte.name}`), extension);
+      const outputPath = path.join(outputsDir, fileName);
+      outputPaths.push(outputPath);
+
+      await createColorIdMatteVideoWithFfmpeg({
+        sourcePath: sourceVideo.filePath,
+        outputPath,
+        selectedColor: matte.color,
+        tolerance,
+        invert,
+        blur,
+        expand,
+        startTime,
+        endTime,
+        outputFormat
+      });
+
+      const outputStats = await stat(outputPath);
+      const outputMetadata = await probeVideoFile(outputPath);
+      videos.push({
+        label: matte.name,
+        localUrl: `/outputs/${fileName}`,
+        fileName,
+        mimeType: videoOutputMimeType(outputFormat),
+        bytes: outputStats.size,
+        metadata: outputMetadata,
+        color: matte.color
+      });
+    }
+    const outputBytes = videos.reduce((sum, item) => sum + item.bytes, 0);
 
     await appendHistory({
       id: randomUUID(),
@@ -3239,15 +3859,109 @@ async function createColorIdMatteVideoResult({ body, sourceVideoUrl }) {
       settings: {
         model: "Color ID Matte",
         sourceVideoUrl,
-        selectedColor,
+        mattes: mattes.map((matte) => ({ name: matte.name, selectedColor: matte.color })),
         tolerance,
         sampleRadius,
         invert,
+        blur,
+        expand,
+        startTime: startTime ?? null,
+        endTime: endTime ?? null,
+        outputFormat,
         width: metadata.width || null,
         height: metadata.height || null,
         fps: metadata.fps || null,
         duration: metadata.duration || null,
         frames: metadata.num_frames || null,
+        ffmpeg: path.basename(ffmpegBinaryPath)
+      },
+      cost,
+      localVideo: videos[0]?.localUrl,
+      outputFileName: videos[0]?.fileName,
+      outputBytes,
+      text
+    });
+
+    return {
+      modelName: "Color ID Matte",
+      text,
+      cost,
+      video: enrichVideoMetadata(videos[0], videos[0]?.metadata),
+      videos: videos.map((video) => enrichVideoMetadata(video, video.metadata))
+    };
+  } catch (error) {
+    await Promise.all(outputPaths.map((outputPath) => rm(outputPath, { force: true }).catch(() => {})));
+    throw error;
+  }
+}
+
+async function createCompositeVideoResult({ body, baseVideoUrl, layerVideoUrl, maskVideoUrl }) {
+  let outputPath = "";
+  try {
+    const baseVideo = resolveLocalAssetPathFromUrl(baseVideoUrl);
+    const layerVideo = resolveLocalAssetPathFromUrl(layerVideoUrl);
+    const maskVideo = resolveLocalAssetPathFromUrl(maskVideoUrl);
+    const baseMetadata = await probeVideoFile(baseVideo.filePath);
+    const options = body.compositeVideo && typeof body.compositeVideo === "object" ? body.compositeVideo : {};
+    const outputFormat = normalizeVideoOutputFormat(options.outputFormat);
+    const fileName = uniqueOutputFileName("composite-video", videoOutputExtension(outputFormat));
+    outputPath = path.join(outputsDir, fileName);
+    const invertMask = Boolean(options.invertMask);
+    const maskBlur = clampNumber(options.maskBlur, 0, 24, 0);
+    const maskExpand = clampInteger(options.maskExpand, -12, 12, 0);
+
+    await compositeVideoWithFfmpeg({
+      basePath: baseVideo.filePath,
+      layerPath: layerVideo.filePath,
+      maskPath: maskVideo.filePath,
+      outputPath,
+      baseMetadata,
+      invertMask,
+      maskBlur,
+      maskExpand,
+      outputFormat
+    });
+
+    const outputStats = await stat(outputPath);
+    const outputMetadata = await probeVideoFile(outputPath);
+    const localUrl = `/outputs/${fileName}`;
+    const text = "Composite video.";
+    const cost = {
+      amountUsd: 0,
+      currency: "USD",
+      unitRateUsd: 0,
+      units: 1,
+      unit: "local composite",
+      mediaType: "video",
+      pricingBasis: "Local ffmpeg masked video composite",
+      pricingSource: "local-composite-video"
+    };
+
+    await appendHistory({
+      id: randomUUID(),
+      createdAt: new Date().toISOString(),
+      mediaType: "video",
+      provider: "local",
+      modelName: "Composite Video",
+      endpoint: "local/composite-video",
+      mode: "Masked video composite",
+      prompt: text,
+      submittedPrompt: text,
+      project: projectFromBody(body),
+      node: nodeFromBody(body),
+      settings: {
+        model: "Composite Video",
+        baseVideoUrl,
+        layerVideoUrl,
+        maskVideoUrl,
+        invertMask,
+        maskBlur,
+        maskExpand,
+        outputFormat,
+        width: outputMetadata.width || baseMetadata.width || null,
+        height: outputMetadata.height || baseMetadata.height || null,
+        fps: outputMetadata.fps || baseMetadata.fps || null,
+        duration: outputMetadata.duration || null,
         ffmpeg: path.basename(ffmpegBinaryPath)
       },
       cost,
@@ -3258,15 +3972,15 @@ async function createColorIdMatteVideoResult({ body, sourceVideoUrl }) {
     });
 
     return {
-      modelName: "Color ID Matte",
+      modelName: "Composite Video",
       text,
       cost,
       video: enrichVideoMetadata(
         {
-          label: "Color ID Matte",
+          label: "Composite Video",
           localUrl,
           fileName,
-          mimeType: "video/mp4"
+          mimeType: videoOutputMimeType(outputFormat)
         },
         outputMetadata
       )
@@ -3302,8 +4016,68 @@ async function extractVideoFrameWithFfmpeg({ sourcePath, outputPath, frameTime, 
   await runFfmpeg(args, "Extract frame");
 }
 
-async function createColorIdMatteVideoWithFfmpeg({ sourcePath, outputPath, selectedColor, tolerance, invert }) {
-  const filter = colorIdVideoMatteFilter({ selectedColor, tolerance, invert });
+async function createColorIdMatteVideoWithFfmpeg({ sourcePath, outputPath, selectedColor, tolerance, invert, blur, expand, startTime, endTime, outputFormat }) {
+  const filter = colorIdVideoMatteFilter({ selectedColor, tolerance, invert, blur, expand, startTime, endTime });
+  const args = [
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-y",
+    "-i",
+    sourcePath,
+    "-map",
+    "0:v:0",
+    "-vf",
+    filter,
+    "-an"
+  ];
+
+  addVideoEncoderArgs(args, outputFormat);
+  args.push(outputPath);
+  await runFfmpeg(args, "Color ID video matte", 600000);
+}
+
+async function compositeVideoWithFfmpeg({ basePath, layerPath, maskPath, outputPath, baseMetadata, invertMask, maskBlur, maskExpand, outputFormat }) {
+  const width = Math.max(2, Math.round(Number(baseMetadata.width || 0)) || 1280);
+  const height = Math.max(2, Math.round(Number(baseMetadata.height || 0)) || 720);
+  const maskFilters = ["setpts=PTS-STARTPTS", `scale=${width}:${height}:flags=bicubic`, "format=gray"];
+  if (invertMask) maskFilters.push("negate");
+  maskFilters.push(...matteCleanupFilterParts({ blur: maskBlur, expand: maskExpand }));
+
+  const filter = [
+    `[0:v]setpts=PTS-STARTPTS,format=rgba[base]`,
+    `[1:v]setpts=PTS-STARTPTS,scale=${width}:${height}:flags=bicubic,format=rgb24[layer]`,
+    `[2:v]${maskFilters.join(",")}[mask]`,
+    "[layer][mask]alphamerge[layer_alpha]",
+    "[base][layer_alpha]overlay=shortest=1:format=auto,format=yuv420p[out]"
+  ].join(";");
+  const args = [
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-y",
+    "-i",
+    basePath,
+    "-i",
+    layerPath,
+    "-i",
+    maskPath,
+    "-filter_complex",
+    filter,
+    "-map",
+    "[out]",
+    "-map",
+    "0:a?",
+    "-shortest"
+  ];
+
+  addVideoEncoderArgs(args, outputFormat);
+  args.push("-c:a", "aac", outputPath);
+  await runFfmpeg(args, "Composite video", 600000);
+}
+
+async function padVideoWithFfmpeg({ sourcePath, outputPath, targetWidth, targetHeight }) {
+  const filter = `pad=${targetWidth}:${targetHeight}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,format=yuv420p`;
   const args = [
     "-hide_banner",
     "-loglevel",
@@ -3327,19 +4101,125 @@ async function createColorIdMatteVideoWithFfmpeg({ sourcePath, outputPath, selec
     outputPath
   ];
 
-  await runFfmpeg(args, "Color ID video matte", 600000);
+  await runFfmpeg(args, "Pad video", 600000);
 }
 
-function colorIdVideoMatteFilter({ selectedColor, tolerance, invert }) {
+async function padImageWithFfmpeg({ sourcePath, outputPath, targetWidth, targetHeight }) {
+  const filter = `pad=${targetWidth}:${targetHeight}:(ow-iw)/2:(oh-ih)/2:color=black,format=rgb24`;
+  const args = [
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-y",
+    "-i",
+    sourcePath,
+    "-vf",
+    filter,
+    "-frames:v",
+    "1",
+    outputPath
+  ];
+
+  await runFfmpeg(args, "Pad image");
+}
+
+function colorIdVideoMatteFilter({ selectedColor, tolerance, invert, blur, expand, startTime, endTime }) {
   const color = selectedColor.replace("#", "0x");
   const similarity = colorIdVideoSimilarity(tolerance);
-  const alphaMask = `format=rgba,colorkey=${color}:${similarity.toFixed(4)}:0.0,alphaextract`;
-  return invert ? `${alphaMask},format=yuv420p` : `${alphaMask},negate,format=yuv420p`;
+  const filters = ["format=rgba", `colorkey=${color}:${similarity.toFixed(4)}:0.0`, "alphaextract"];
+  if (!invert) filters.push("negate");
+  filters.push(...matteCleanupFilterParts({ blur, expand }));
+  const trim = videoTrimFilterPart(startTime, endTime);
+  if (trim) filters.push(trim, "setpts=PTS-STARTPTS");
+  filters.push("format=yuv420p");
+  return filters.join(",");
+}
+
+function matteCleanupFilterParts({ blur = 0, expand = 0 } = {}) {
+  const filters = [];
+  const expandCount = clampInteger(expand, -12, 12, 0);
+  for (let index = 0; index < Math.abs(expandCount); index += 1) {
+    filters.push(expandCount > 0 ? "dilation" : "erosion");
+  }
+  const blurRadius = clampNumber(blur, 0, 24, 0);
+  if (blurRadius > 0) filters.push(`boxblur=${blurRadius}:1`);
+  return filters;
+}
+
+function videoTrimFilterPart(startTime, endTime) {
+  const start = optionalNumber(startTime);
+  const end = optionalNumber(endTime);
+  const parts = [];
+  if (start !== undefined && start >= 0) parts.push(`start=${formatFfmpegSeconds(start)}`);
+  if (end !== undefined && end > 0 && (start === undefined || end > start)) parts.push(`end=${formatFfmpegSeconds(end)}`);
+  return parts.length ? `trim=${parts.join(":")}` : "";
 }
 
 function colorIdVideoSimilarity(tolerance) {
   const normalizedTolerance = clampInteger(tolerance, 0, 96, 0);
   return Math.min(1, Math.max(0.01, normalizedTolerance / 255));
+}
+
+function normalizedColorIdVideoMattes(options = {}) {
+  const rawMattes = Array.isArray(options.mattes) ? options.mattes : [];
+  const mattes = rawMattes
+    .map((item, index) => {
+      const color = normalizeColorIdHex(item?.selectedColor || item?.color);
+      if (!color) return null;
+      const name = String(item?.name || `Matte ${index + 1}`).trim() || `Matte ${index + 1}`;
+      return { name, color };
+    })
+    .filter(Boolean)
+    .slice(0, 16);
+
+  if (mattes.length) return mattes;
+
+  const selectedColor = normalizeColorIdHex(options.selectedColor || options.colorIdMatteColor || options.selected_color);
+  if (!selectedColor) return [];
+  return [
+    {
+      name: String(options.matteName || "Color ID Matte").trim() || "Color ID Matte",
+      color: selectedColor
+    }
+  ];
+}
+
+function normalizeVideoOutputFormat(value) {
+  const normalized = String(value || "mp4").toLowerCase();
+  if (normalized === "webm") return "webm";
+  if (normalized === "mov" || normalized.includes("prores")) return "mov";
+  return "mp4";
+}
+
+function videoOutputExtension(format) {
+  const normalized = normalizeVideoOutputFormat(format);
+  if (normalized === "webm") return ".webm";
+  if (normalized === "mov") return ".mov";
+  return ".mp4";
+}
+
+function videoOutputMimeType(format) {
+  const normalized = normalizeVideoOutputFormat(format);
+  if (normalized === "webm") return "video/webm";
+  if (normalized === "mov") return "video/quicktime";
+  return "video/mp4";
+}
+
+function safeOutputKind(value) {
+  return String(value || "output").replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "") || "output";
+}
+
+function addVideoEncoderArgs(args, outputFormat) {
+  const format = normalizeVideoOutputFormat(outputFormat);
+  if (format === "webm") {
+    args.push("-c:v", "libvpx-vp9", "-crf", "18", "-b:v", "0", "-pix_fmt", "yuv420p");
+    return;
+  }
+  if (format === "mov") {
+    args.push("-c:v", "prores_ks", "-profile:v", "3", "-pix_fmt", "yuv422p10le");
+    return;
+  }
+  args.push("-c:v", "libx264", "-preset", "veryfast", "-crf", "14", "-pix_fmt", "yuv420p");
 }
 
 async function runFfmpeg(args, label, timeoutMs = 120000) {
@@ -3948,6 +4828,29 @@ function estimateHappyHorseCost({ duration, resolution, endpoint }) {
   };
 }
 
+function estimateWan27ReferenceVideoCost({ endpoint, duration, outputVideo, referenceVideoDurations = [], resolution, aspectRatio }) {
+  const outputSeconds = positiveNumber(outputVideo?.duration) || positiveNumber(duration) || 5;
+  const inputVideoSeconds = referenceVideoDurations.reduce((total, seconds) => total + (positiveNumber(seconds) || 0), 0);
+  const billableSeconds = outputSeconds + inputVideoSeconds;
+
+  return {
+    amountUsd: roundCurrency(billableSeconds * wan27ReferenceVideoCostPerSecond),
+    currency: "USD",
+    unitRateUsd: wan27ReferenceVideoCostPerSecond,
+    units: roundUsageUnits(billableSeconds),
+    unit: "video second",
+    mediaType: "video",
+    resolution,
+    aspectRatio,
+    outputDurationSeconds: outputSeconds,
+    referenceVideoDurationSeconds: roundUsageUnits(inputVideoSeconds),
+    pricingBasis: "Wan 2.7 Reference-to-Video fal.ai estimate at $0.10 per output second plus connected reference video seconds",
+    pricingSource: "fal-model-page-2026-05-25",
+    endpoint,
+    routeKind: "reference-to-video"
+  };
+}
+
 function seedanceBillingDimensions(resolution, aspectRatio) {
   const normalizedResolution = normalizeChoice(resolution, ["480p", "720p", "1080p"], "720p");
   const normalizedAspectRatio = normalizeAspectRatio(aspectRatio);
@@ -3983,6 +4886,60 @@ function estimateWanFunControlCost({ endpoint, matchInputNumFrames, numFrames, m
     matchInputFps,
     fps: fps || null
   };
+}
+
+function estimateWanVaceInpaintingCost({ endpoint, resolution, outputVideo, matchInputNumFrames, numFrames, matchInputFps, fps }) {
+  const billingResolution = resolveWanVaceBillingResolution(resolution, outputVideo);
+  const unitRateUsd = wanVaceCostPerSecond[billingResolution] || wanVaceCostPerSecond["480p"];
+  const frameCount = wanVaceBillingFrames(outputVideo, numFrames);
+  const billingFps = 16;
+  const seconds = frameCount ? frameCount / billingFps : positiveNumber(outputVideo?.duration);
+
+  return {
+    amountUsd: seconds ? roundCurrency(seconds * unitRateUsd) : null,
+    currency: "USD",
+    unitRateUsd,
+    units: seconds ? roundUsageUnits(seconds) : null,
+    unit: "video second",
+    mediaType: "video",
+    resolution,
+    billingResolution,
+    durationSeconds: positiveNumber(outputVideo?.duration),
+    billingFrames: frameCount || null,
+    billingFps,
+    matchInputNumFrames,
+    numFrames: numFrames || null,
+    matchInputFps,
+    fps: fps || null,
+    pricingBasis: seconds
+      ? "Wan VACE fal.ai per-video-second estimate; video seconds are calculated at 16 frames per second"
+      : "Wan VACE fal.ai per-video-second estimate; local duration/frame count unavailable",
+    pricingSource: "fal-model-page-2026-05-25",
+    endpoint
+  };
+}
+
+function resolveWanVaceBillingResolution(resolution, outputVideo = {}) {
+  const configured = normalizeChoice(resolution, ["auto", "240p", "360p", "480p", "580p", "720p"], "auto");
+  if (wanVaceCostPerSecond[configured]) return configured;
+
+  const width = Number(outputVideo.width || outputVideo.metadata?.width || 0);
+  const height = Number(outputVideo.height || outputVideo.metadata?.height || 0);
+  const shortSide = width > 0 && height > 0 ? Math.min(width, height) : 0;
+  if (shortSide >= 700) return "720p";
+  if (shortSide >= 560) return "580p";
+  return "480p";
+}
+
+function wanVaceBillingFrames(outputVideo = {}, fallbackFrames) {
+  const metadataFrames = positiveNumber(outputVideo.num_frames || outputVideo.frames || outputVideo.frame_count || outputVideo.frameCount);
+  if (metadataFrames) return Math.round(metadataFrames);
+  const configuredFrames = positiveNumber(fallbackFrames);
+  if (configuredFrames) return Math.round(configuredFrames);
+  const duration = positiveNumber(outputVideo.duration);
+  const fps = positiveNumber(outputVideo.fps);
+  if (duration && fps) return Math.round(duration * fps);
+  return null;
 }
 
 function estimateAuroraCost({ endpoint, resolution, duration }) {
@@ -4349,6 +5306,16 @@ function durationToSeconds(duration) {
   return Math.max(1, Number(match?.[0] || 15));
 }
 
+function normalizeWan27ReferenceDuration(value) {
+  const match = String(value || "5").match(/\d+/);
+  return Math.min(10, Math.max(2, Number(match?.[0] || 5)));
+}
+
+function normalizeWan27ReferenceAspectRatio(value) {
+  const ratio = String(value || "16:9").match(/\d+:\d+/)?.[0] || "16:9";
+  return normalizeChoice(ratio, ["16:9", "9:16", "1:1", "4:3", "3:4"], "16:9");
+}
+
 function positiveNumber(value) {
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? number : null;
@@ -4508,20 +5475,35 @@ async function describeImageInputs(imageInputs) {
   if (!imageInputs.length) return { descriptions: [], usages: [] };
 
   const imageUrls = await Promise.all(imageInputs.map((item) => localAssetToFalUrl(item.url)));
-  const data = await subscribeFal("openrouter/router/vision", {
-    input: {
-      image_urls: imageUrls,
-      prompt: "Describe these images as concise visual prompt context. Focus on subject, setting, composition, camera, lighting, palette, mood, materials, and any important details.",
-      system_prompt: "Return only useful prompt context. Do not use markdown.",
-      model: falVisionTextModel
-    },
-    logs: true
-  });
+  const data = await describeImagesWithFalVision(imageUrls, falVisionTextModel);
   const description = extractFalText(data).trim();
   return {
     descriptions: description ? [`Connected images: ${description}`] : [],
     usages: [falResultUsage(data)].filter(Boolean)
   };
+}
+
+async function describeImagesWithFalVision(imageUrls, model) {
+  const input = {
+    image_urls: imageUrls,
+    prompt: "Describe these images as concise visual prompt context. Focus on subject, setting, composition, camera, lighting, palette, mood, materials, and any important details.",
+    system_prompt: "Return only useful prompt context. Do not use markdown.",
+    model
+  };
+
+  try {
+    return await subscribeFal("openrouter/router/vision", { input, logs: true });
+  } catch (error) {
+    if (!falVisionTextFallbackModel || falVisionTextFallbackModel === model) throw error;
+    console.warn(`Fal vision model ${model} failed; retrying with ${falVisionTextFallbackModel}.`, error?.message || error);
+    return subscribeFal("openrouter/router/vision", {
+      input: {
+        ...input,
+        model: falVisionTextFallbackModel
+      },
+      logs: true
+    });
+  }
 }
 
 async function describeVideoInputs(videoInputs) {
@@ -4710,6 +5692,15 @@ function resolveUtilityVideoModel(model) {
     };
   }
 
+  if (normalized.includes("composite")) {
+    return {
+      provider: "local-composite-video",
+      displayName: "Composite Video",
+      id: "local/composite-video",
+      requiresPrompt: false
+    };
+  }
+
   if (normalized.includes("extract") || normalized.includes("current frame") || normalized.includes("video frame")) {
     return {
       provider: "local-extract-frame",
@@ -4761,6 +5752,24 @@ function resolveUtilityVideoModel(model) {
       displayName: "Topaz Video Upscale",
       id: "fal-ai/topaz/upscale/video",
       requiresPrompt: false
+    };
+  }
+
+  if (normalized.includes("vace") && normalized.includes("inpainting") && !normalized.includes("mask")) {
+    return {
+      provider: "fal-wan-vace-inpainting",
+      displayName: "Wan VACE 14B Inpainting",
+      id: "fal-ai/wan-vace-14b/inpainting",
+      requiresPrompt: true
+    };
+  }
+
+  if (normalized.includes("vace") || (normalized.includes("wan") && (normalized.includes("mask") || normalized.includes("inpaint")))) {
+    return {
+      provider: "fal-wan-vace-mask-to-video",
+      displayName: "Wan VACE Mask-to-Video",
+      id: "fal-ai/wan-vace",
+      requiresPrompt: true
     };
   }
 
@@ -4817,6 +5826,15 @@ function resolveVideoModel(model) {
       displayName: "Happy Horse",
       id: "alibaba/happy-horse/reference-to-video",
       speed: "happy-horse"
+    };
+  }
+
+  if (normalized.includes("wan 2.7") || normalized.includes("wan2.7") || normalized.includes("reference-to-video")) {
+    return {
+      provider: "fal-wan-2-7-reference-to-video",
+      displayName: "Wan 2.7 Reference-to-Video",
+      id: "fal-ai/wan/v2.7/reference-to-video",
+      speed: "wan-2.7"
     };
   }
 
