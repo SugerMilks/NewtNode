@@ -20,6 +20,7 @@ const savedWorkflowsDir = path.join(rootDir, "saved_workflows");
 const dataDir = path.join(__dirname, "data");
 const historyPath = path.join(dataDir, "history.json");
 const nodeProjectsPath = path.join(dataDir, "node-projects.json");
+const moodBoardOutputFileName = "MOOD_BOARD.png";
 let historyWriteQueue = Promise.resolve();
 const port = Number(process.env.PORT || 3333);
 const seedanceStandardCostPerSecond = Number(process.env.SEEDANCE_STANDARD_COST_PER_SECOND || 0.014);
@@ -264,13 +265,13 @@ app.post("/api/node/upload-transfer-collage", upload.single("asset"), async (req
 
 async function handleTransferCollageUpload(req, res) {
   if (!req.file) {
-    return res.status(400).json({ error: "No transfer collage uploaded." });
+    return res.status(400).json({ error: "No mood board collage uploaded." });
   }
 
-  const nodeId = safePathSegment(req.body.nodeId || "transfer");
+  const nodeId = safePathSegment(req.body.nodeId || "mood-board");
   const transferDir = path.join(uploadsDir, "transfers", nodeId);
-  const storedFileName = path.join("transfers", nodeId, "TRANSFER.png");
-  const targetPath = path.join(transferDir, "TRANSFER.png");
+  const storedFileName = path.join("transfers", nodeId, moodBoardOutputFileName);
+  const targetPath = path.join(transferDir, moodBoardOutputFileName);
 
   await mkdir(transferDir, { recursive: true });
   await rm(targetPath, { force: true });
@@ -279,7 +280,7 @@ async function handleTransferCollageUpload(req, res) {
   res.json({
     asset: {
       localUrl: `/uploads/${storedFileName.split(path.sep).join("/")}`,
-      fileName: "TRANSFER.png",
+      fileName: moodBoardOutputFileName,
       storedFileName: storedFileName.split(path.sep).join("/"),
       mimeType: "image/png",
       size: req.file.size,
@@ -1136,8 +1137,20 @@ app.post("/api/node/generate-video", async (req, res) => {
     const speedPrefix = speed === "fast" ? "fast/" : "";
     const startFrameUrl = firstLocalOutput(req.body.startFrameUrls);
     const endFrameUrl = firstLocalOutput(req.body.endFrameUrls);
-    const referenceImageUrls = Array.isArray(req.body.referenceImageUrls) ? req.body.referenceImageUrls.filter(isLocalAssetUrl) : [];
-    const referenceVideoUrls = Array.isArray(req.body.referenceVideoUrls) ? req.body.referenceVideoUrls.filter(isLocalAssetUrl) : [];
+    const rawReferenceImageUrls = Array.isArray(req.body.referenceImageUrls) ? req.body.referenceImageUrls : [];
+    const rawReferenceImageLabels = Array.isArray(req.body.referenceImageLabels) ? req.body.referenceImageLabels : [];
+    const referenceImages = rawReferenceImageUrls
+      .map((url, index) => ({ url, label: rawReferenceImageLabels[index] }))
+      .filter(({ url }) => isLocalAssetUrl(url));
+    const referenceImageUrls = referenceImages.map(({ url }) => url);
+    const referenceImageNames = normalizeReferenceNames(referenceImages.map(({ label }) => label), referenceImageUrls.length);
+    const rawReferenceVideoUrls = Array.isArray(req.body.referenceVideoUrls) ? req.body.referenceVideoUrls : [];
+    const rawReferenceVideoLabels = Array.isArray(req.body.referenceVideoLabels) ? req.body.referenceVideoLabels : [];
+    const referenceVideos = rawReferenceVideoUrls
+      .map((url, index) => ({ url, label: rawReferenceVideoLabels[index] }))
+      .filter(({ url }) => isLocalAssetUrl(url));
+    const referenceVideoUrls = referenceVideos.map(({ url }) => url);
+    const referenceVideoNames = normalizeReferenceNames(referenceVideos.map(({ label }) => label), referenceVideoUrls.length, "Video");
     const referenceAudioUrls = Array.isArray(req.body.referenceAudioUrls) ? req.body.referenceAudioUrls.filter(isLocalAssetUrl) : [];
     const resolution = normalizeChoice(req.body.resolution, ["480p", "720p", "1080p"], "720p");
     const duration = normalizeDuration(req.body.duration);
@@ -1147,12 +1160,19 @@ app.post("/api/node/generate-video", async (req, res) => {
     let routeKind = "text-to-video";
     if (startFrameUrl) {
       routeKind = "image-to-video";
-    } else if (referenceImageUrls.length) {
+    } else if (referenceImageUrls.length || referenceVideoUrls.length || referenceAudioUrls.length) {
       routeKind = "reference-to-video";
     }
 
+    const submittedPrompt =
+      routeKind === "reference-to-video"
+        ? rewriteReferenceMentions(prompt, {
+            imageNames: referenceImageNames,
+            videoNames: referenceVideoNames
+          })
+        : prompt;
     const input = {
-      prompt,
+      prompt: submittedPrompt,
       resolution,
       duration,
       aspect_ratio: aspectRatio,
@@ -1167,7 +1187,15 @@ app.post("/api/node/generate-video", async (req, res) => {
     }
 
     if (routeKind === "reference-to-video") {
-      input.image_urls = await Promise.all(referenceImageUrls.map(uploadLocalOutputToFal));
+      if (referenceImageUrls.length) {
+        input.image_urls = await Promise.all(referenceImageUrls.map(uploadLocalOutputToFal));
+      }
+      if (referenceVideoUrls.length) {
+        input.video_urls = await Promise.all(referenceVideoUrls.map(uploadLocalOutputToFal));
+      }
+      if (referenceAudioUrls.length) {
+        input.audio_urls = await Promise.all(referenceAudioUrls.slice(0, 3).map(uploadLocalOutputToFal));
+      }
     }
 
     const endpoint = `bytedance/seedance-2.0/${speedPrefix}${routeKind}`;
@@ -1195,7 +1223,7 @@ app.post("/api/node/generate-video", async (req, res) => {
       endpoint,
       mode: routeKindLabel(routeKind, speed),
       prompt,
-      submittedPrompt: prompt,
+      submittedPrompt,
       project: projectFromBody(req.body),
       node: nodeFromBody(req.body),
       settings: {
@@ -1207,7 +1235,9 @@ app.post("/api/node/generate-video", async (req, res) => {
         startFrameCount: startFrameUrl ? 1 : 0,
         endFrameCount: endFrameUrl ? 1 : 0,
         referenceImageCount: referenceImageUrls.length,
+        referenceImageNames,
         referenceVideoCount: referenceVideoUrls.length,
+        referenceVideoNames,
         referenceAudioCount: referenceAudioUrls.length,
         seed: result?.data?.seed ?? null
       },
@@ -1222,6 +1252,7 @@ app.post("/api/node/generate-video", async (req, res) => {
       requestId: result.requestId,
       seed: result?.data?.seed,
       endpoint,
+      submittedPrompt,
       cost,
       video: {
         ...remoteVideo,
@@ -1839,19 +1870,32 @@ function parseReferenceNames(rawValue, count) {
     names = [];
   }
 
+  return normalizeReferenceNames(names, count);
+}
+
+function normalizeReferenceNames(names, count, fallbackPrefix = "Image") {
   const usedNames = new Set();
   return Array.from({ length: count }, (_value, index) => {
-    const fallback = `Image${index + 1}`;
-    const baseName = cleanReferenceName(names[index]) || fallback;
+    const fallback = `${fallbackPrefix}${index + 1}`;
+    const baseName = cleanReferenceName(Array.isArray(names) ? names[index] : "") || fallback;
     return uniqueReferenceName(baseName, usedNames);
   });
 }
 
 function rewriteReferenceMentions(prompt, referenceNames) {
-  const mentionMap = new Map();
+  if (Array.isArray(referenceNames)) {
+    return rewriteReferenceMentions(prompt, { imageNames: referenceNames });
+  }
 
-  referenceNames.forEach((name, index) => {
+  const mentionMap = new Map();
+  const imageNames = referenceNames?.imageNames || [];
+  const videoNames = referenceNames?.videoNames || [];
+
+  imageNames.forEach((name, index) => {
     mentionMap.set(name.toLowerCase(), `@Image${index + 1}`);
+  });
+  videoNames.forEach((name, index) => {
+    mentionMap.set(name.toLowerCase(), `@Video${index + 1}`);
   });
 
   return prompt.replace(/@([A-Za-z0-9_-]+)/g, (fullMatch, name) => mentionMap.get(name.toLowerCase()) || fullMatch);
@@ -1873,9 +1917,9 @@ function cleanImagePromptLabel(value) {
 }
 
 function safePathSegment(value) {
-  return String(value || "transfer")
+  return String(value || "mood-board")
     .replace(/[^A-Za-z0-9_-]/g, "-")
-    .slice(0, 80) || "transfer";
+    .slice(0, 80) || "mood-board";
 }
 
 function safeWorkflowFileName(value) {
