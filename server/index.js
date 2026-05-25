@@ -199,6 +199,7 @@ app.get("/api/health", (_req, res) => {
       utilityImage: true,
       utilityVideo: true,
       colorIdMatte: true,
+      colorIdVideoMatte: true,
       composerFrame: true,
       composerPoses: true,
       apiJsonErrors: true,
@@ -1437,6 +1438,13 @@ app.post("/api/node/utility-video", async (req, res) => {
       });
     }
 
+    if (selectedVideoModel.provider === "local-color-id-video-matte") {
+      return runColorIdMatteUtilityVideo(req, res, {
+        referenceVideoUrls,
+        selectedVideoModel
+      });
+    }
+
     if (!process.env.FAL_KEY) {
       return res.status(400).json({ error: "Missing FAL_KEY in .env." });
     }
@@ -1601,6 +1609,15 @@ async function runExtractFrameUtilityVideo(req, res, { referenceVideoUrls }) {
   }
 
   return res.json(await createExtractFrameResult({ body: req.body, sourceVideoUrl }));
+}
+
+async function runColorIdMatteUtilityVideo(req, res, { referenceVideoUrls }) {
+  const sourceVideoUrl = referenceVideoUrls.at(-1);
+  if (!sourceVideoUrl) {
+    return res.status(400).json({ error: "Color ID Matte requires a connected video." });
+  }
+
+  return res.json(await createColorIdMatteVideoResult({ body: req.body, sourceVideoUrl }));
 }
 
 app.post("/api/node/generate-video", async (req, res) => {
@@ -3165,6 +3182,101 @@ async function createExtractFrameResult({ body, sourceVideoUrl }) {
   }
 }
 
+async function createColorIdMatteVideoResult({ body, sourceVideoUrl }) {
+  let outputPath = "";
+  try {
+    const sourceVideo = resolveLocalAssetPathFromUrl(sourceVideoUrl);
+    const metadata = await probeVideoFile(sourceVideo.filePath);
+    const options = body.colorIdMatte && typeof body.colorIdMatte === "object" ? body.colorIdMatte : body;
+    const selectedColor = normalizeColorIdHex(options.selectedColor || options.colorIdMatteColor || options.selected_color);
+    if (!selectedColor) {
+      const error = new Error("Pick a color in the Utility node.");
+      error.status = 400;
+      throw error;
+    }
+
+    const tolerance = clampInteger(options.tolerance, 0, 96, 0);
+    const sampleRadius = clampInteger(options.sampleRadius, 0, 3, 0);
+    const invert = Boolean(options.invert);
+    const fileName = uniqueOutputFileName("color-id-video-matte", ".mp4");
+    outputPath = path.join(outputsDir, fileName);
+
+    await createColorIdMatteVideoWithFfmpeg({
+      sourcePath: sourceVideo.filePath,
+      outputPath,
+      selectedColor,
+      tolerance,
+      invert
+    });
+
+    const outputStats = await stat(outputPath);
+    const outputMetadata = await probeVideoFile(outputPath);
+    const localUrl = `/outputs/${fileName}`;
+    const text = `Color ID video matte for ${selectedColor}.`;
+    const cost = {
+      amountUsd: 0,
+      currency: "USD",
+      unitRateUsd: 0,
+      units: 1,
+      unit: "local video mask",
+      mediaType: "video",
+      pricingBasis: "Local ffmpeg Color ID video matte generation",
+      pricingSource: "local-color-id-video-matte"
+    };
+
+    await appendHistory({
+      id: randomUUID(),
+      createdAt: new Date().toISOString(),
+      mediaType: "video",
+      provider: "local",
+      modelName: "Color ID Matte",
+      endpoint: "local/color-id-video-matte",
+      mode: "Color ID video matte",
+      prompt: text,
+      submittedPrompt: text,
+      project: projectFromBody(body),
+      node: nodeFromBody(body),
+      settings: {
+        model: "Color ID Matte",
+        sourceVideoUrl,
+        selectedColor,
+        tolerance,
+        sampleRadius,
+        invert,
+        width: metadata.width || null,
+        height: metadata.height || null,
+        fps: metadata.fps || null,
+        duration: metadata.duration || null,
+        frames: metadata.num_frames || null,
+        ffmpeg: path.basename(ffmpegBinaryPath)
+      },
+      cost,
+      localVideo: localUrl,
+      outputFileName: fileName,
+      outputBytes: outputStats.size,
+      text
+    });
+
+    return {
+      modelName: "Color ID Matte",
+      text,
+      cost,
+      video: enrichVideoMetadata(
+        {
+          label: "Color ID Matte",
+          localUrl,
+          fileName,
+          mimeType: "video/mp4"
+        },
+        outputMetadata
+      )
+    };
+  } catch (error) {
+    if (outputPath) await rm(outputPath, { force: true }).catch(() => {});
+    throw error;
+  }
+}
+
 async function extractVideoFrameWithFfmpeg({ sourcePath, outputPath, frameTime, format }) {
   const args = [
     "-hide_banner",
@@ -3188,6 +3300,46 @@ async function extractVideoFrameWithFfmpeg({ sourcePath, outputPath, frameTime, 
 
   args.push(outputPath);
   await runFfmpeg(args, "Extract frame");
+}
+
+async function createColorIdMatteVideoWithFfmpeg({ sourcePath, outputPath, selectedColor, tolerance, invert }) {
+  const filter = colorIdVideoMatteFilter({ selectedColor, tolerance, invert });
+  const args = [
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-y",
+    "-i",
+    sourcePath,
+    "-map",
+    "0:v:0",
+    "-vf",
+    filter,
+    "-an",
+    "-c:v",
+    "libx264",
+    "-preset",
+    "veryfast",
+    "-crf",
+    "14",
+    "-pix_fmt",
+    "yuv420p",
+    outputPath
+  ];
+
+  await runFfmpeg(args, "Color ID video matte", 600000);
+}
+
+function colorIdVideoMatteFilter({ selectedColor, tolerance, invert }) {
+  const color = selectedColor.replace("#", "0x");
+  const similarity = colorIdVideoSimilarity(tolerance);
+  const alphaMask = `format=rgba,colorkey=${color}:${similarity.toFixed(4)}:0.0,alphaextract`;
+  return invert ? `${alphaMask},format=yuv420p` : `${alphaMask},negate,format=yuv420p`;
+}
+
+function colorIdVideoSimilarity(tolerance) {
+  const normalizedTolerance = clampInteger(tolerance, 0, 96, 0);
+  return Math.min(1, Math.max(0.01, normalizedTolerance / 255));
 }
 
 async function runFfmpeg(args, label, timeoutMs = 120000) {
@@ -4549,6 +4701,15 @@ function resolveUtilityImageModel(model) {
 
 function resolveUtilityVideoModel(model) {
   const normalized = String(model || "").toLowerCase();
+  if (normalized.includes("color") && normalized.includes("matte")) {
+    return {
+      provider: "local-color-id-video-matte",
+      displayName: "Color ID Matte",
+      id: "local/color-id-video-matte",
+      requiresPrompt: false
+    };
+  }
+
   if (normalized.includes("extract") || normalized.includes("current frame") || normalized.includes("video frame")) {
     return {
       provider: "local-extract-frame",
@@ -5154,6 +5315,11 @@ function clampNumber(value, min, max, fallback) {
   const number = Number(value);
   if (!Number.isFinite(number)) return fallback;
   return Math.min(max, Math.max(min, number));
+}
+
+function normalizeColorIdHex(value) {
+  const match = String(value || "").trim().match(/^#?([0-9a-f]{6})$/i);
+  return match ? `#${match[1].toLowerCase()}` : "";
 }
 
 function optionalNumber(value) {

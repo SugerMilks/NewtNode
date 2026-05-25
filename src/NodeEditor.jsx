@@ -384,7 +384,18 @@ const maxZoom = 1.9;
 const nodeDraftStorageKey = "seedance-node-editor-draft-v1";
 const previewBaseWidth = 330;
 const previewScaleFloor = 0.05;
-const groupPalette = ["#3d85ff", "#f0c83b", "#58ce63", "#9b5cff", "#ff4fb3", "#ff8b35"];
+const namedColorPalette = [
+  { label: "Red", color: "#ff3b30" },
+  { label: "Green", color: "#58ce63" },
+  { label: "Blue", color: "#3d85ff" },
+  { label: "Cyan", color: "#14d8c8" },
+  { label: "Magenta", color: "#ff4fb3" },
+  { label: "Yellow", color: "#f0c83b" },
+  { label: "Orange", color: "#ff8b35" },
+  { label: "Purple", color: "#9b5cff" }
+];
+const groupPalette = namedColorPalette.map((item) => item.color);
+const nodeColorPalette = [{ label: "Neutral", color: "" }, ...namedColorPalette];
 const groupPadding = { x: 42, top: 62, bottom: 42 };
 const groupSizeFloor = 1;
 const imageRunStaggerMs = 850;
@@ -429,6 +440,7 @@ const patinaMapOptions = [
 const utilityVideoModelNames = {
   wanFunControl: "Wan Fun Control",
   extractFrame: "Extract Frame",
+  colorIdMatte: "Color ID Matte",
   sam3Video: "SAM 3 Video",
   voidVideoInpainting: "VOID Video Inpainting",
   birefnetVideo: "BiRefNet Video",
@@ -480,6 +492,7 @@ const utilityModelDescriptions = {
   [utilityImageModelNames.birefnetImage]: "Removes an image background with BiRefNet and can optionally return the mask.",
   [utilityVideoModelNames.wanFunControl]: "Uses a control video, optional reference image, and prompt to guide a new video.",
   [utilityVideoModelNames.extractFrame]: "Captures the current frame from a connected video and outputs it as a still image.",
+  [utilityVideoModelNames.colorIdMatte]: "Creates a black and white ID matte video from frames matching a picked source-video color.",
   [utilityVideoModelNames.sam3Video]: "Segments prompted objects through a video and returns a mask video.",
   [utilityVideoModelNames.voidVideoInpainting]: "Removes an object from a video and inpaints the affected background over time.",
   [utilityVideoModelNames.birefnetVideo]: "Removes a video background with BiRefNet and can optionally return the mask video.",
@@ -492,6 +505,7 @@ const sam3SegmentationModelsEnabled = false; // Flip back to true when revisitin
 export default function NodeEditor({ active = true } = {}) {
   const canvasRef = React.useRef(null);
   const projectMenuRef = React.useRef(null);
+  const contextMenuRef = React.useRef(null);
   const workflowFileInputRef = React.useRef(null);
   const localWorkflowHandleRef = React.useRef(null);
   const undoStackRef = React.useRef([]);
@@ -687,6 +701,23 @@ export default function NodeEditor({ active = true } = {}) {
 
     window.addEventListener("pointerdown", handlePointerDown);
     return () => window.removeEventListener("pointerdown", handlePointerDown);
+  }, [active, contextMenu]);
+
+  React.useLayoutEffect(() => {
+    if (!active || !contextMenu) return;
+    const canvas = canvasRef.current;
+    const menu = contextMenuRef.current;
+    if (!canvas || !menu) return;
+
+    const canvasRect = canvas.getBoundingClientRect();
+    const menuRect = menu.getBoundingClientRect();
+    const nextPosition = clampContextMenuPosition(contextMenu.x, contextMenu.y, canvasRect, {
+      width: menuRect.width,
+      height: menuRect.height
+    });
+
+    if (Math.abs(nextPosition.x - contextMenu.x) < 0.5 && Math.abs(nextPosition.y - contextMenu.y) < 0.5) return;
+    setContextMenu((current) => (current ? { ...current, x: nextPosition.x, y: nextPosition.y } : current));
   }, [active, contextMenu]);
 
   React.useEffect(() => {
@@ -2278,7 +2309,8 @@ export default function NodeEditor({ active = true } = {}) {
         utilityMode(currentNode) === "video" &&
         (isUtilitySam3VideoModel(currentNode.data.utilityVideoModel) ||
           isUtilityBirefnetVideoModel(currentNode.data.utilityVideoModel) ||
-          isUtilityExtractFrameVideoModel(currentNode.data.utilityVideoModel)));
+          isUtilityExtractFrameVideoModel(currentNode.data.utilityVideoModel) ||
+          isUtilityColorIdMatteModel(currentNode.data.utilityVideoModel)));
     const batchCount = isSingleRunSegmentation ? 1 : nodeBatchCount(currentNode);
     const previousImageResults = existingResultItemsForNode(currentNode, "image");
     const previousVideoResults = existingResultItemsForNode(currentNode, "video");
@@ -2756,7 +2788,7 @@ export default function NodeEditor({ active = true } = {}) {
           />
         )}
         {contextMenu && (
-          <div className={`node-context-menu ${contextMenu.pendingConnection ? "pending-connection" : ""}`} style={{ left: contextMenu.x, top: contextMenu.y }}>
+          <div ref={contextMenuRef} className={`node-context-menu ${contextMenu.pendingConnection ? "pending-connection" : ""}`} style={{ left: contextMenu.x, top: contextMenu.y }}>
             {nodeCatalog.map((item) => {
               const Icon = item.icon;
               return (
@@ -2883,6 +2915,71 @@ function GroupBackdrop({ group, onDragStart, onResizeStart, onUpdate, onRemove }
   );
 }
 
+function nodeColorForData(data = {}) {
+  return groupPalette.includes(data.nodeColor) ? data.nodeColor : "";
+}
+
+function NodeColorPicker({ color, onChange }) {
+  const pickerRef = React.useRef(null);
+  const [open, setOpen] = React.useState(false);
+  const activeOption = nodeColorPalette.find((option) => option.color === color) || nodeColorPalette[0];
+
+  React.useEffect(() => {
+    if (!open) return undefined;
+
+    function handlePointerDown(event) {
+      if (!pickerRef.current?.contains(event.target)) setOpen(false);
+    }
+
+    function handleKeyDown(event) {
+      if (event.key === "Escape") setOpen(false);
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open]);
+
+  function selectColor(nextColor) {
+    onChange(nextColor);
+    setOpen(false);
+  }
+
+  return (
+    <div className="node-color-picker" ref={pickerRef} onPointerDown={(event) => event.stopPropagation()}>
+      <button
+        type="button"
+        className={`node-color-current ${activeOption.color ? "" : "neutral"}`}
+        style={{ "--swatch-color": activeOption.color || "#202020" }}
+        onClick={() => setOpen((value) => !value)}
+        title={`Node color: ${activeOption.label}`}
+        aria-label={`Node color: ${activeOption.label}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+      />
+      {open && (
+        <div className="node-color-menu" role="menu" aria-label="Node color">
+          {nodeColorPalette.map((option) => (
+            <button
+              key={option.label}
+              type="button"
+              className={`node-color-swatch ${option.color ? "" : "neutral"} ${option.color === color ? "active" : ""}`}
+              style={{ "--swatch-color": option.color || "#202020" }}
+              onClick={() => selectColor(option.color)}
+              title={option.label}
+              aria-label={option.label}
+              role="menuitem"
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function isCanvasSurface(target, canvas) {
   return target === canvas || target.classList?.contains("node-scene") || target.classList?.contains("edge-layer");
 }
@@ -2911,6 +3008,7 @@ function NodeCard({
 }) {
   const config = getNodeConfig(node.type);
   const Icon = config.icon;
+  const nodeColor = nodeColorForData(node.data);
   const [editingTitle, setEditingTitle] = React.useState(false);
   const [draftTitle, setDraftTitle] = React.useState(node.data.title || "");
 
@@ -2934,8 +3032,12 @@ function NodeCard({
 
   return (
     <article
-      className={`node-card ${node.type === "composer" ? "node-type-composer" : `${node.type} node-type-${node.type}`} ${selected ? "selected" : ""}`}
-      style={{ transform: `translate(${node.x}px, ${node.y}px)`, "--preview-scale": node.data.previewScale || 1 }}
+      className={`node-card ${node.type === "composer" ? "node-type-composer" : `${node.type} node-type-${node.type}`} ${nodeColor ? "has-node-color" : ""} ${selected ? "selected" : ""}`}
+      style={{
+        transform: `translate(${node.x}px, ${node.y}px)`,
+        "--preview-scale": node.data.previewScale || 1,
+        "--node-color": nodeColor || "transparent"
+      }}
       data-node-card-id={node.id}
       onPointerDown={(event) => onDragStart(event, node)}
     >
@@ -2981,6 +3083,7 @@ function NodeCard({
               {node.data.title}
             </span>
           )}
+          <NodeColorPicker color={nodeColor} onChange={(color) => onUpdate(node.id, { nodeColor: color })} />
         </span>
         <button onClick={() => onRemove(node.id)} title="Remove node">
           <X size={14} />
@@ -4605,6 +4708,7 @@ function NodeBody({
     const isBirefnetVideo = isUtilityBirefnetVideoModel(utilityVideoModel);
     const isRifeVideo = isUtilityRifeVideoModel(utilityVideoModel);
     const isExtractFrameVideo = isUtilityExtractFrameVideoModel(utilityVideoModel);
+    const isColorIdMatteVideo = isUtilityColorIdMatteModel(utilityVideoModel);
     const isBytedanceUpscaler = isUtilityBytedanceUpscalerModel(utilityVideoModel);
     const isTopazUpscaler = isUtilityTopazUpscalerModel(utilityVideoModel);
     const isVideoUpscaler = isUtilityVideoUpscalerModel(utilityVideoModel);
@@ -4625,7 +4729,14 @@ function NodeBody({
           .filter(Boolean);
     const resultType = node.data.resultType || utilityOutputMediaType;
     const canRun = isVideoMode
-      ? Boolean(incoming.referenceVideoIn?.length) && (isBirefnetVideo || isRifeVideo || isExtractFrameVideo || isVideoUpscaler || Boolean(promptValue.trim()))
+      ? Boolean(incoming.referenceVideoIn?.length) &&
+        (isBirefnetVideo ||
+          isRifeVideo ||
+          isExtractFrameVideo ||
+          isColorIdMatteVideo ||
+          isVideoUpscaler ||
+          Boolean(promptValue.trim())) &&
+        (!isColorIdMatteVideo || Boolean(normalizeColorIdMatteColor(node.data.colorIdMatteColor)))
       : Boolean(incoming.imageIn?.length) && (!isSam3Image || Boolean(promptValue.trim())) && (!isColorIdMatte || Boolean(normalizeColorIdMatteColor(node.data.colorIdMatteColor)));
     const utilityRunLabel = isVideoMode
       ? isSam3Video
@@ -4638,11 +4749,13 @@ function NodeBody({
               ? "Run RIFE"
               : isExtractFrameVideo
                 ? "Extract Frame"
-                : isBytedanceUpscaler
-                  ? "Run Bytedance Upscale"
-                  : isTopazUpscaler
-                    ? "Run Topaz Upscale"
-                    : "Run Wan Fun Control"
+                : isColorIdMatteVideo
+                  ? "Run Color Matte"
+                  : isBytedanceUpscaler
+                    ? "Run Bytedance Upscale"
+                    : isTopazUpscaler
+                      ? "Run Topaz Upscale"
+                      : "Run Wan Fun Control"
       : isColorIdMatte
         ? "Run Color Matte"
         : isSam3Image
@@ -4725,6 +4838,7 @@ function NodeBody({
                 <select value={utilityVideoModel} onChange={(event) => onUpdate(node.id, { utilityVideoModel: event.target.value, resultUrl: "", resultItems: [], resultType: utilityVideoOutputType(event.target.value), error: "" })}>
                   <option>{utilityVideoModelNames.wanFunControl}</option>
                   <option>{utilityVideoModelNames.extractFrame}</option>
+                  <option>{utilityVideoModelNames.colorIdMatte}</option>
                   <option>{utilityVideoModelNames.voidVideoInpainting}</option>
                   <option>{utilityVideoModelNames.birefnetVideo}</option>
                   <option>{utilityVideoModelNames.rifeVideo}</option>
@@ -4733,12 +4847,12 @@ function NodeBody({
                   <option>{utilityVideoModelNames.sam3Video}</option>
                 </select>
               </NodeRow>
-              {!isBirefnetVideo && !isRifeVideo && !isExtractFrameVideo && !isVideoUpscaler && (
+              {!isBirefnetVideo && !isRifeVideo && !isExtractFrameVideo && !isColorIdMatteVideo && !isVideoUpscaler && (
                 <NodeRow label="Prompt" inputPort={settingsOpen ? promptPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
                   <textarea className={promptConnected ? "connected-field" : ""} value={promptValue} readOnly={promptConnected} onChange={(event) => onUpdate(node.id, { prompt: event.target.value })} />
                 </NodeRow>
               )}
-              {!isSam3Video && !isBirefnetVideo && !isRifeVideo && !isExtractFrameVideo && !isVideoUpscaler && (
+              {!isSam3Video && !isBirefnetVideo && !isRifeVideo && !isExtractFrameVideo && !isColorIdMatteVideo && !isVideoUpscaler && (
                 <NodeRow label="Generations">
                   <select value={node.data.batchCount || "1"} onChange={(event) => onUpdate(node.id, { batchCount: event.target.value })}>
                     {batchOptions.map((option) => (
@@ -4749,7 +4863,7 @@ function NodeBody({
                   </select>
                 </NodeRow>
               )}
-              <NodeRow label={isSam3Video || isBirefnetVideo || isRifeVideo || isExtractFrameVideo || isVideoUpscaler ? "Video" : isVoidVideo ? "Source Video" : "Control Video"} inputPort={settingsOpen ? referenceVideoPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+              <NodeRow label={isSam3Video || isBirefnetVideo || isRifeVideo || isExtractFrameVideo || isColorIdMatteVideo || isVideoUpscaler ? "Video" : isVoidVideo ? "Source Video" : "Control Video"} inputPort={settingsOpen ? referenceVideoPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
                 <button className={incoming.referenceVideoIn?.length ? "connected-field" : ""}>{connectedSummary(incoming.referenceVideoIn, "Add video")}</button>
               </NodeRow>
               {isSam3Video ? (
@@ -4758,6 +4872,8 @@ function NodeBody({
                 </NodeRow>
               ) : isExtractFrameVideo ? (
                 <ExtractFrameControls videoUrl={connectedAssetUrls(incoming.referenceVideoIn).at(-1)} node={node} onUpdate={onUpdate} />
+              ) : isColorIdMatteVideo ? (
+                <ColorIdMatteVideoPicker videoUrl={connectedAssetUrls(incoming.referenceVideoIn).at(-1)} node={node} onUpdate={onUpdate} />
               ) : isVoidVideo ? (
                 <>
                   <NodeRow label="Mask Video" inputPort={settingsOpen ? maskVideoPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
@@ -5962,6 +6078,218 @@ function ColorIdMattePicker({ imageUrl, node, onUpdate }) {
   );
 }
 
+function ColorIdMatteVideoPicker({ videoUrl, node, onUpdate }) {
+  const videoRef = React.useRef(null);
+  const canvasRef = React.useRef(null);
+  const largeCanvasRef = React.useRef(null);
+  const sourceImageDataRef = React.useRef(null);
+  const [duration, setDuration] = React.useState(0);
+  const [currentTime, setCurrentTime] = React.useState(0);
+  const [pickerStatus, setPickerStatus] = React.useState("");
+  const [pickerOpen, setPickerOpen] = React.useState(false);
+  const [pickerView, setPickerView] = React.useState("rgb");
+  const selectedColor = normalizeColorIdMatteColor(node.data.colorIdMatteColor);
+  const tolerance = colorIdMatteTolerance(node.data.colorIdMatteTolerance);
+  const sampleRadius = colorIdMatteSampleRadius(node.data.colorIdMatteSampleRadius);
+  const invert = Boolean(node.data.colorIdMatteInvert);
+  const selectedHex = selectedColor ? rgbToHex(selectedColor) : "None";
+  const sliderMax = duration ? Math.max(0, duration - 0.01) : Math.max(1, currentTime);
+
+  const drawVideoFrame = React.useCallback(() => {
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    if (!canvas || !videoUrl || !video?.videoWidth || !video?.videoHeight) {
+      sourceImageDataRef.current = null;
+      return;
+    }
+
+    try {
+      const sourceImageData = drawColorIdMatteVideoCanvas(canvas, video);
+      sourceImageDataRef.current = sourceImageData;
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      renderColorIdMattePickerPreview(context, sourceImageData, selectedColor, tolerance, invert, "overlay");
+
+      const largeCanvas = largeCanvasRef.current;
+      if (largeCanvas) {
+        largeCanvas.width = sourceImageData.width;
+        largeCanvas.height = sourceImageData.height;
+        const largeContext = largeCanvas.getContext("2d", { willReadFrequently: true });
+        renderColorIdMattePickerPreview(largeContext, sourceImageData, selectedColor, tolerance, invert, pickerView === "matte" && selectedColor ? "matte" : "rgb");
+      }
+
+      setPickerStatus("");
+    } catch (error) {
+      sourceImageDataRef.current = null;
+      setPickerStatus(error.message || "Could not read video frame.");
+    }
+  }, [videoUrl, selectedColor?.r, selectedColor?.g, selectedColor?.b, tolerance, invert, pickerView]);
+
+  React.useEffect(() => {
+    setDuration(0);
+    setCurrentTime(0);
+    setPickerOpen(false);
+    sourceImageDataRef.current = null;
+  }, [videoUrl]);
+
+  React.useEffect(() => {
+    drawVideoFrame();
+  }, [drawVideoFrame, pickerOpen]);
+
+  React.useEffect(() => {
+    if (!pickerOpen) return undefined;
+    function handleKeyDown(event) {
+      if (event.key === "Escape") setPickerOpen(false);
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [pickerOpen]);
+
+  function handleLoadedMetadata(event) {
+    const video = event.currentTarget;
+    const nextDuration = Number.isFinite(video.duration) ? Math.max(0, video.duration) : 0;
+    setDuration(nextDuration);
+    const nextTime = nextDuration ? Math.min(currentTime, Math.max(0, nextDuration - 0.01)) : currentTime;
+    if (Math.abs(video.currentTime - nextTime) > 0.05) {
+      try {
+        video.currentTime = nextTime;
+      } catch {
+        // Some browsers reject seeks before metadata is ready.
+      }
+    } else {
+      drawVideoFrame();
+    }
+  }
+
+  function handleSeeked(event) {
+    setCurrentTime(event.currentTarget.currentTime || 0);
+    drawVideoFrame();
+  }
+
+  function seekVideo(value) {
+    const time = duration ? clamp(Number(value) || 0, 0, Math.max(0, duration - 0.01)) : Math.max(0, Number(value) || 0);
+    setCurrentTime(time);
+    const video = videoRef.current;
+    if (!video) return;
+    try {
+      video.currentTime = time;
+    } catch {
+      drawVideoFrame();
+    }
+  }
+
+  function pickColor(event, canvas = canvasRef.current) {
+    const imageData = sourceImageDataRef.current;
+    if (!canvas || !imageData) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const x = Math.min(imageData.width - 1, Math.max(0, Math.floor((event.clientX - rect.left) * (imageData.width / rect.width))));
+    const y = Math.min(imageData.height - 1, Math.max(0, Math.floor((event.clientY - rect.top) * (imageData.height / rect.height))));
+    const color = averageColorFromImageData(imageData, x, y, sampleRadius);
+    if (!color) return;
+
+    onUpdate(node.id, {
+      colorIdMatteColor: color,
+      error: ""
+    });
+  }
+
+  return (
+    <>
+      {videoUrl && (
+        <video
+          ref={videoRef}
+          src={videoUrl}
+          preload="metadata"
+          muted
+          playsInline
+          className="color-id-video-source"
+          onLoadedMetadata={handleLoadedMetadata}
+          onSeeked={handleSeeked}
+          onLoadedData={drawVideoFrame}
+        />
+      )}
+      <NodeRow label="Picker">
+        <div className="color-id-picker-shell">
+          <div className={`color-id-picker ${videoUrl ? "" : "empty"}`} onPointerDown={(event) => event.stopPropagation()}>
+            {videoUrl ? <canvas ref={canvasRef} onClick={(event) => pickColor(event)} title="Pick color from current frame" /> : <span>No video</span>}
+          </div>
+          <button type="button" className="color-id-enlarge-button" onClick={() => setPickerOpen(true)} disabled={!videoUrl}>
+            Enlarge
+          </button>
+        </div>
+      </NodeRow>
+      <NodeRow label="Frame">
+        <div className="color-id-slider">
+          <input type="range" min="0" max={sliderMax || 1} step="0.033" value={Math.min(currentTime, sliderMax || 1)} onChange={(event) => seekVideo(event.target.value)} disabled={!videoUrl} />
+          <span>{formatFrameTimeDisplay(currentTime)}</span>
+        </div>
+      </NodeRow>
+      <NodeRow label="Selected">
+        <div className="color-id-selected">
+          <span className="color-id-swatch" style={{ backgroundColor: selectedColor ? rgbToHex(selectedColor) : "transparent" }} />
+          <span>{selectedHex}</span>
+        </div>
+      </NodeRow>
+      <NodeRow label="Tolerance">
+        <div className="color-id-slider">
+          <input type="range" min="0" max="96" step="1" value={tolerance} onChange={(event) => onUpdate(node.id, { colorIdMatteTolerance: event.target.value })} />
+          <span>{tolerance}</span>
+        </div>
+      </NodeRow>
+      <NodeRow label="Sample">
+        <select value={String(sampleRadius)} onChange={(event) => onUpdate(node.id, { colorIdMatteSampleRadius: event.target.value })}>
+          <option value="0">1 px</option>
+          <option value="1">3 px</option>
+          <option value="2">5 px</option>
+          <option value="3">7 px</option>
+        </select>
+      </NodeRow>
+      <NodeRow label="Invert">
+        <button className={`node-toggle ${invert ? "enabled" : ""}`} onClick={() => onUpdate(node.id, { colorIdMatteInvert: !invert })}>
+          <span />
+        </button>
+      </NodeRow>
+      {pickerStatus && <small className="upload-error color-id-status">{pickerStatus}</small>}
+      {pickerOpen && (
+        <div className="color-id-picker-modal" role="dialog" aria-modal="true" aria-label="Color ID video matte picker" onPointerDown={(event) => event.stopPropagation()}>
+          <div className="color-id-picker-modal-panel">
+            <div className="color-id-picker-modal-header">
+              <div className="color-id-selected">
+                <span className="color-id-swatch" style={{ backgroundColor: selectedColor ? rgbToHex(selectedColor) : "transparent" }} />
+                <span>{selectedHex}</span>
+              </div>
+              <div className="color-id-view-toggle" role="group" aria-label="Picker view">
+                <button type="button" className={pickerView === "rgb" ? "active" : ""} aria-pressed={pickerView === "rgb"} onClick={() => setPickerView("rgb")}>
+                  RGB
+                </button>
+                <button type="button" className={pickerView === "matte" ? "active" : ""} aria-pressed={pickerView === "matte"} onClick={() => setPickerView("matte")} disabled={!selectedColor}>
+                  Matte
+                </button>
+              </div>
+              <button type="button" className="color-id-picker-close" onClick={() => setPickerOpen(false)} title="Close picker">
+                <X size={17} />
+              </button>
+            </div>
+            <div className="color-id-picker-large">
+              <canvas ref={largeCanvasRef} onClick={(event) => pickColor(event, largeCanvasRef.current)} title="Pick color from current frame" />
+            </div>
+            <div className="color-id-modal-controls">
+              <span>Frame</span>
+              <input type="range" min="0" max={sliderMax || 1} step="0.033" value={Math.min(currentTime, sliderMax || 1)} onChange={(event) => seekVideo(event.target.value)} />
+              <strong>{formatFrameTimeDisplay(currentTime)}</strong>
+            </div>
+            <div className="color-id-modal-controls">
+              <span>Tolerance</span>
+              <input type="range" min="0" max="96" step="1" value={tolerance} onChange={(event) => onUpdate(node.id, { colorIdMatteTolerance: event.target.value })} />
+              <strong>{tolerance}</strong>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 function ExtractFrameControls({ videoUrl, node, onUpdate }) {
   const videoRef = React.useRef(null);
   const largeVideoRef = React.useRef(null);
@@ -6564,6 +6892,7 @@ function utilityInputPortIds(mode, imageModel = utilityImageModelNames.dwpose, v
   if (isUtilityBirefnetVideoModel(videoModel)) return ["referenceVideoIn"];
   if (isUtilityRifeVideoModel(videoModel)) return ["referenceVideoIn"];
   if (isUtilityExtractFrameVideoModel(videoModel)) return ["referenceVideoIn"];
+  if (isUtilityColorIdMatteModel(videoModel)) return ["referenceVideoIn"];
   if (isUtilityVideoUpscalerModel(videoModel)) return ["referenceVideoIn"];
   if (isUtilityVoidVideoModel(videoModel)) return ["promptIn", "referenceVideoIn", "maskVideoIn"];
   return isUtilitySam3VideoModel(videoModel) ? ["promptIn", "referenceVideoIn"] : ["promptIn", "referenceImageIn", "referenceVideoIn"];
@@ -6581,6 +6910,7 @@ function normalizedUtilityImageModelName(model) {
 
 function normalizedUtilityVideoModelName(model) {
   const normalized = String(model || "").toLowerCase();
+  if (normalized.includes("color") && normalized.includes("matte")) return utilityVideoModelNames.colorIdMatte;
   if (normalized.includes("sam") && normalized.includes("video")) return utilityVideoModelNames.sam3Video;
   if (normalized.includes("birefnet")) return utilityVideoModelNames.birefnetVideo;
   if (normalized.includes("rife")) return utilityVideoModelNames.rifeVideo;
@@ -7144,6 +7474,12 @@ async function runUtilityVideoGeneration({ node, prompt, incoming, projectId, pr
       sam3Video: {
         detectionThreshold: node.data.sam3VideoDetectionThreshold ?? 0.5
       },
+      colorIdMatte: {
+        selectedColor: normalizeColorIdMatteColor(node.data.colorIdMatteColor) ? rgbToHex(normalizeColorIdMatteColor(node.data.colorIdMatteColor)) : "",
+        tolerance: colorIdMatteTolerance(node.data.colorIdMatteTolerance),
+        sampleRadius: colorIdMatteSampleRadius(node.data.colorIdMatteSampleRadius),
+        invert: Boolean(node.data.colorIdMatteInvert)
+      },
       voidVideoInpainting: {
         maskPrompt: node.data.voidMaskPrompt || "",
         enablePass2Refinement: Boolean(node.data.voidPass2Refinement),
@@ -7412,6 +7748,17 @@ function drawColorIdMattePickerCanvas(canvas, image) {
   const context = canvas.getContext("2d", { willReadFrequently: true });
   context.clearRect(0, 0, width, height);
   context.drawImage(image, 0, 0, width, height);
+  return context.getImageData(0, 0, width, height);
+}
+
+function drawColorIdMatteVideoCanvas(canvas, video) {
+  const width = video.videoWidth || 1;
+  const height = video.videoHeight || 1;
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  context.clearRect(0, 0, width, height);
+  context.drawImage(video, 0, 0, width, height);
   return context.getImageData(0, 0, width, height);
 }
 
@@ -9057,14 +9404,21 @@ function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
-function clampContextMenuPosition(x, y, rect) {
-  const maxX = Math.max(contextMenuSize.inset, rect.width - contextMenuSize.width - contextMenuSize.inset);
-  const maxY = Math.max(contextMenuSize.inset, rect.height - contextMenuSize.height - contextMenuSize.inset);
+function clampContextMenuPosition(x, y, rect, menuSize = contextMenuSize) {
+  const width = positiveDimension(menuSize.width, contextMenuSize.width);
+  const height = positiveDimension(menuSize.height, contextMenuSize.height);
+  const maxX = Math.max(contextMenuSize.inset, rect.width - width - contextMenuSize.inset);
+  const maxY = Math.max(contextMenuSize.inset, rect.height - height - contextMenuSize.inset);
 
   return {
     x: clamp(x, contextMenuSize.inset, maxX),
     y: clamp(y, contextMenuSize.inset, maxY)
   };
+}
+
+function positiveDimension(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : fallback;
 }
 
 function positiveModulo(value, divisor) {

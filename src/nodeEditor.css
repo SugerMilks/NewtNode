@@ -534,11 +534,29 @@
   user-select: none;
 }
 
+.node-card.has-node-color {
+  border-color: color-mix(in srgb, var(--node-color) 48%, rgba(255, 255, 255, 0.12));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--node-color) 16%, #202020) 0%,
+      color-mix(in srgb, var(--node-color) 7%, #202020) 100%
+    );
+}
+
 .node-card.selected {
   border-color: rgba(221, 198, 49, 0.52);
   box-shadow:
     0 20px 50px rgba(0, 0, 0, 0.32),
     0 0 0 2px rgba(221, 198, 49, 0.12);
+}
+
+.node-card.has-node-color.selected {
+  border-color: color-mix(in srgb, var(--node-color) 45%, rgba(221, 198, 49, 0.68));
+  box-shadow:
+    0 20px 50px rgba(0, 0, 0, 0.32),
+    0 0 0 2px rgba(221, 198, 49, 0.14),
+    0 0 0 4px color-mix(in srgb, var(--node-color) 16%, transparent);
 }
 
 .node-card.imageModel,
@@ -591,6 +609,11 @@
   cursor: grab;
 }
 
+.node-card.has-node-color .node-title {
+  color: color-mix(in srgb, var(--node-color) 24%, rgba(244, 240, 232, 0.7));
+  background: color-mix(in srgb, var(--node-color) 12%, transparent);
+}
+
 .node-title:active {
   cursor: grabbing;
 }
@@ -602,6 +625,13 @@
   min-width: 0;
   flex: 1;
   font-weight: 720;
+}
+
+.node-color-picker {
+  position: relative;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
 }
 
 .node-title-name {
@@ -646,6 +676,77 @@
 .node-title button:hover {
   color: #fff;
   background: rgba(255, 255, 255, 0.08);
+}
+
+.node-title .node-color-current,
+.node-title .node-color-swatch {
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  min-height: 18px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 5px;
+  color: transparent;
+  background: var(--swatch-color);
+}
+
+.node-title .node-color-current:hover,
+.node-title .node-color-swatch:hover {
+  color: transparent;
+  background: var(--swatch-color);
+  transform: scale(1.06);
+}
+
+.node-title .node-color-current.neutral,
+.node-title .node-color-current.neutral:hover,
+.node-title .node-color-swatch.neutral,
+.node-title .node-color-swatch.neutral:hover {
+  background:
+    linear-gradient(45deg, rgba(255, 255, 255, 0.18) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(255, 255, 255, 0.18) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(255, 255, 255, 0.18) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(255, 255, 255, 0.18) 75%),
+    #202020;
+  background-position: 0 0, 0 4px, 4px -4px, -4px 0;
+  background-size: 8px 8px;
+}
+
+.node-title .node-color-current {
+  position: relative;
+}
+
+.node-title .node-color-current::after {
+  content: "";
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 4px;
+  height: 4px;
+  border-right: 1px solid rgba(244, 240, 232, 0.82);
+  border-bottom: 1px solid rgba(244, 240, 232, 0.82);
+}
+
+.node-color-menu {
+  position: absolute;
+  top: 27px;
+  left: 50%;
+  z-index: 45;
+  display: grid;
+  grid-template-columns: repeat(3, 18px);
+  gap: 7px;
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(24, 24, 24, 0.98);
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.46);
+  transform: translateX(-50%);
+}
+
+.node-title .node-color-swatch.active {
+  box-shadow:
+    0 0 0 2px rgba(244, 240, 232, 0.78),
+    0 0 0 4px rgba(0, 0, 0, 0.3);
 }
 
 .inline-port {
@@ -2199,6 +2300,14 @@
   max-height: 185px;
   object-fit: contain;
   cursor: crosshair;
+}
+
+.color-id-video-source {
+  position: fixed;
+  width: 1px;
+  height: 1px;
+  pointer-events: none;
+  opacity: 0;
 }
 
 .color-id-enlarge-button {
