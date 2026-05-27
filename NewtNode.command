@@ -4,6 +4,10 @@ set -e
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 LOG_DIR="$ROOT_DIR/.newtnode_logs"
 URL="http://127.0.0.1:5173/"
+API_HEALTH_URL="http://127.0.0.1:3333/api/health"
+
+# Finder and Dock launches do not always inherit Homebrew's Node.js path.
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 
 cd "$ROOT_DIR"
 mkdir -p "$LOG_DIR"
@@ -17,7 +21,7 @@ if ! lsof -ti tcp:5173 >/dev/null 2>&1; then
 fi
 
 for _ in {1..80}; do
-  if curl -fsS "$URL" >/dev/null 2>&1; then
+  if curl -fsS "$URL" >/dev/null 2>&1 && curl -fsS "$API_HEALTH_URL" >/dev/null 2>&1; then
     break
   fi
   sleep 0.25

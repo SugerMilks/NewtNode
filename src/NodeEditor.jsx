@@ -93,11 +93,10 @@ const composerMannequinModelScale = 1.45;
 const composerReferencePrompt =
   "Use the connected Composer frame as a strict composition and blocking control image. Preserve its camera angle, framing, horizon/floor plane, subject silhouette, pose direction, major object positions, scale relationships, and negative space. Translate the simple maquette and proxy objects into the requested final subject matter, but do not copy viewport guide lines, grid lines, flat blue material, or simple primitive geometry as final image details.";
 const transferPromptSuffix =
-  "Only use the uploaded collage reference image labeled TRANSFER.png as a transfer reference for color grading, grain style, texture, lighting, and camera qualities. The generated image should NOT take content, layout, subjects, or composition from TRANSFER.png directly; only use it as a visual transfer guide.";
+  "Only use the uploaded image labeled MOOD_BOARD.png as a reference for overall style, color grading and image qualities. The generated image should NOT take any elements, subjects, or compositional framing of the content from MOOD_BOARD.png directly; only use MOOD_BOARD.png as a visual guide to transfer the style to the generation.";
 let composerMannequinAsset = null;
 let composerMannequinAssetPromise = null;
 let composerMannequinAssetFailed = false;
-  "Only use the uploaded collage reference image labeled MOOD_BOARD.png as a mood board reference for color grading, grain style, texture, lighting, and camera qualities. The generated image should NOT take content, layout, subjects, or composition from MOOD_BOARD.png directly; only use it as a visual guide.";
 const stylePresetPrompts = {
   None: "",
   Cinematic:
@@ -1414,7 +1413,6 @@ export default function NodeEditor({ active = true } = {}) {
       locked: false,
       resultUrl: "",
       resultItems: [],
-      compiledPortraitUrl: "",
       compiledWardrobeUrl: "",
       characterVariantNotice: "",
       error: ""
@@ -1501,7 +1499,6 @@ export default function NodeEditor({ active = true } = {}) {
         characterTab: "sheet",
         characterSheetVariants: variants,
         activeWardrobeId: selectedVariant.wardrobeId === characterDefaultWardrobeId ? "" : selectedVariant.wardrobeId,
-        compiledPortraitUrl: portrait.localUrl,
         compiledTraitPrompt: characterTraitPrompt(node.data),
         compiledVoicePrompt: selectedVoice ? characterVoicePrompt : "",
         characterBatchProgress: null,
@@ -1528,7 +1525,6 @@ export default function NodeEditor({ active = true } = {}) {
       resultUrl: "",
       resultItems: [],
       fileName: "",
-      compiledPortraitUrl: "",
       compiledWardrobeUrl: "",
       compiledTraitPrompt: "",
       compiledVoicePrompt: "",
@@ -7935,7 +7931,6 @@ function createDefaultNodeData(type, label, count) {
       characterTab: "build",
       activated: false,
       locked: false,
-      compiledPortraitUrl: "",
       compiledWardrobeUrl: "",
       compiledTraitPrompt: "",
       compiledVoicePrompt: "",
@@ -9468,13 +9463,7 @@ function connectedImagePromptItems(items = []) {
     .flatMap(({ source }) => {
       if (!source.data.resultUrl) return null;
       if (source.type === "character") {
-        const portraitUrl = source.data.compiledPortraitUrl || source.data.characterPortrait?.localUrl;
-        return [
-          ...(portraitUrl
-            ? [{ url: portraitUrl, label: characterPortraitReferenceLabel(source, namedCharacterReferences) }]
-            : []),
-          { url: source.data.resultUrl, label: characterReferenceLabel(source, namedCharacterReferences) }
-        ];
+        return { url: source.data.resultUrl, label: characterReferenceLabel(source, namedCharacterReferences) };
       }
       return {
         url: source.data.resultUrl,
@@ -9824,12 +9813,8 @@ function buildEffectiveVideoPrompt(prompt, incoming = {}) {
 
 function characterImagePromptPieces(source, namedCharacterReferences = false) {
   const sheetLabel = characterReferenceLabel(source, namedCharacterReferences);
-  const portraitLabel = (source.data.compiledPortraitUrl || source.data.characterPortrait?.localUrl) ? characterPortraitReferenceLabel(source, namedCharacterReferences) : "";
-  const identitySource = portraitLabel
-    ? `Use "${portraitLabel}" as the identity authority for the character's face and recognizable physical appearance. Use "${sheetLabel}" for the selected wardrobe and supporting body proportions.`
-    : `Use "${sheetLabel}" as the identity, selected wardrobe, and body-proportion authority for the character.`;
   return [
-    `CHARACTER REFERENCE: ${identitySource} Render this same recognizable character in the requested scene and keep the selected outfit consistent.`,
+    `CHARACTER REFERENCE: Use "${sheetLabel}" as the only identity, selected wardrobe, and body-proportion authority for the character. Render this same recognizable character in the requested scene and keep the selected outfit consistent.`,
     characterGenerationPhysicalDetailsPrompt(source.data),
     characterTraitPrompt(source.data)
   ].filter(Boolean);
@@ -9914,8 +9899,8 @@ function activeConnectedCharacterSources(items = []) {
 function resolveImageCharacterMentions(prompt, characterSources = [], namedCharacterReferences = false) {
   return characterSources.reduce((value, source) => {
     const replacement = namedCharacterReferences
-      ? `the character in the reference images labeled "${characterReferenceLabel(source, true)}"`
-      : "the character in the connected reference images";
+      ? `the character in the reference sheet labeled "${characterReferenceLabel(source, true)}"`
+      : "the character in the connected character sheet";
     return replacePromptTag(value, characterTag(source), replacement);
   }, String(prompt || ""));
 }
@@ -9931,10 +9916,6 @@ function replacePromptTag(prompt, tag, replacement) {
 
 function characterReferenceLabel(node, namedCharacterReferences = false) {
   return namedCharacterReferences ? `${characterTag(node)} character identity sheet` : "The Character identity sheet";
-}
-
-function characterPortraitReferenceLabel(node, namedCharacterReferences = false) {
-  return namedCharacterReferences ? `${characterTag(node)} primary portrait reference` : "The Character primary portrait reference";
 }
 
 function cameraPromptPieces(source) {
