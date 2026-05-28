@@ -22,13 +22,17 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Palette,
+  Pause,
   Play,
   Plus,
   Save,
   Trash2,
   Type,
   Unlock,
+  UserRound,
   Video,
+  Volume2,
+  VolumeX,
   Wrench,
   X
 } from "lucide-react";
@@ -37,10 +41,11 @@ import "./nodeEditor.css";
 const nodeCatalog = [
   { type: "text", label: "Text", icon: Type },
   { type: "image", label: "Image", icon: FileImage },
+  { type: "character", label: "Character", icon: UserRound },
   { type: "camera", label: "Camera", icon: Camera },
   { type: "composer", label: "Composer", icon: Box },
   { type: "style", label: "Style", icon: Palette },
-  { type: "transfer", label: "Transfer", icon: Compass },
+  { type: "transfer", label: "Mood Board", icon: Compass },
   { type: "utility", label: "Utility", icon: Wrench },
   { type: "video", label: "Video", icon: Video },
   { type: "audio", label: "Audio", icon: FileAudio },
@@ -56,6 +61,7 @@ const portColors = {
   camera: "#ef4444",
   style: "#9b5cff",
   transfer: "#ff4fb3",
+  character: "#27d5e8",
   video: "#58ce63",
   audio: "#ff8b35",
   model3d: "#14d8c8",
@@ -63,6 +69,19 @@ const portColors = {
 };
 
 const maxTransferImages = 6;
+const moodBoardOutputFileName = "MOOD_BOARD.png";
+const maxCharacterWardrobes = 8;
+const maxCharacterVoices = 8;
+const characterDefaultWardrobeId = "__default-wardrobe__";
+const characterSheetPrompt =
+  "Make one image:\n\nStudy the reference image of the character and preserve the person's identity, physical features, proportions, image quality, and visual style as closely as possible.\n\nCreate one high-resolution horizontal character photo sheet on a clean white background. The final image must contain exactly six panels and exactly six total depictions of the same character. Follow this fixed layout precisely:\n- On the left side, place two tall vertical full-body panels side by side: one full body front view, then one full body side profile.\n- On the right side, place four equal 1:1 square face close-up panels in a clean 2 by 2 grid: top left is a left side face profile, top right is a right side face profile, bottom left is a front face portrait with a resting neutral expression, and bottom right is a front face portrait with a natural talking expression with the mouth slightly open.\n\nEach panel must contain exactly one view only. Keep the grid clean, evenly spaced, and clearly separated by simple white spacing. Do not generate any additional views, duplicate depictions, merged two-in-one panels, alternate variations, split sheets, comparison images, multiple sheets, text, labels, props, frames, or borders.";
+const characterBasicWardrobePrompt =
+  "Wardrobe rule: use exactly one outfit across all six views. Replace the current wardrobe with a minimal form-fitting plain black one-piece wardrobe, consistently worn in every panel. Do not show the original wardrobe, alternate clothing, or a wardrobe comparison. No nudity; editorial fashion styling only.";
+const characterWardrobePrompt =
+  "Wardrobe rule: use exactly one outfit across all six views. Study the selected wardrobe sheet reference and apply only the clothing design, garments, materials, colors, and styling from that reference consistently to the character in every panel. If any person, model, face, body, skin, hair, pose, environment, background, text, or unrelated subject appears in the wardrobe reference, ignore it completely. Do not transfer the wardrobe reference person's identity, anatomy, facial features, pose, body shape, or composition. The character portrait reference is the only source for character identity. Do not show the basic black outfit, the original wardrobe, alternate clothing, or a wardrobe comparison. No nudity; editorial fashion styling only.";
+const characterVoicePrompt =
+  "Use the provided dialogue audio file for the character and make sure the dialogue is seamlessly and realistically integrated into the scene with professional mixing techniques.";
+const characterTraitOptions = ["serious", "pleasant", "happy", "angry", "sad", "silly", "confident", "content", "excited", "passionate", "fanatic", "anxious", "scared", "arrogant", "stubborn", "curious"];
 const batchOptions = ["1", "2", "3", "4"];
 const imageModelAutoAspectRatio = "Auto";
 const nanoImageAspectRatios = ["21:9", "16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3", "4:5", "5:4"];
@@ -74,7 +93,7 @@ const composerMannequinModelScale = 1.45;
 const composerReferencePrompt =
   "Use the connected Composer frame as a strict composition and blocking control image. Preserve its camera angle, framing, horizon/floor plane, subject silhouette, pose direction, major object positions, scale relationships, and negative space. Translate the simple maquette and proxy objects into the requested final subject matter, but do not copy viewport guide lines, grid lines, flat blue material, or simple primitive geometry as final image details.";
 const transferPromptSuffix =
-  "Only use the uploaded collage reference image labeled TRANSFER.png as a transfer reference for color grading, grain style, texture, lighting, and camera qualities. The generated image should NOT take content, layout, subjects, or composition from TRANSFER.png directly; only use it as a visual transfer guide.";
+  "Only use the uploaded image labeled MOOD_BOARD.png as a reference for overall style, color grading and image qualities. The generated image should NOT take any elements, subjects, or compositional framing of the content from MOOD_BOARD.png directly; only use MOOD_BOARD.png as a visual guide to transfer the style to the generation.";
 let composerMannequinAsset = null;
 let composerMannequinAssetPromise = null;
 let composerMannequinAssetFailed = false;
@@ -396,6 +415,7 @@ const namedColorPalette = [
 ];
 const groupPalette = namedColorPalette.map((item) => item.color);
 const nodeColorPalette = [{ label: "Neutral", color: "" }, ...namedColorPalette];
+const referenceTagPalette = ["#4d8dff", "#ff4fb3", "#9b5cff", "#58ce63", "#ff8b35", "#f0c83b"];
 const groupPadding = { x: 42, top: 62, bottom: 42 };
 const groupSizeFloor = 1;
 const imageRunStaggerMs = 850;
@@ -428,6 +448,7 @@ const model3DDescription =
   "Generates a GLB 3D model from connected view images. Front is required; Back, Left, Right, Top, Bottom, Left Front, and Right Front are optional.";
 const utilityImageModelNames = {
   colorIdMatte: "Color ID Matte",
+  stillFrame: "Grab Still Frame",
   dwpose: "DWPose",
   depthAnything: "Depth Anything",
   patina: "Patina",
@@ -501,6 +522,7 @@ const wanVaceSamplerOptions = ["unipc", "dpm++", "euler"];
 const wanVaceAccelerationOptions = ["regular", "low", "none"];
 const utilityModelDescriptions = {
   [utilityImageModelNames.colorIdMatte]: "Creates a black and white ID matte from pixels matching a picked source-image color.",
+  [utilityImageModelNames.stillFrame]: "Extracts a still PNG frame from a connected video locally, without an API call.",
   [utilityImageModelNames.dwpose]: "Creates pose/control maps from a source image for character and body-guided generation.",
   [utilityImageModelNames.depthAnything]: "Extracts a depth map from an image for depth-aware control and composition.",
   [utilityImageModelNames.patina]: "Generates PBR texture maps such as basecolor, normal, roughness, metalness, and height.",
@@ -559,6 +581,7 @@ export default function NodeEditor({ active = true } = {}) {
   const selectedNodeSet = React.useMemo(() => new Set(selectedNodeIds), [selectedNodeIds]);
   const activeEdgeIds = React.useMemo(() => buildActiveEdgeIds(nodes, edges), [nodes, edges]);
   const inactiveEdgeIds = React.useMemo(() => buildInactiveEdgeIds(nodes, edges), [nodes, edges]);
+  const referenceTagHighlights = React.useMemo(() => buildReferenceTagHighlights(nodes, incomingByNode), [nodes, incomingByNode]);
   const selectedRunnableNodes = React.useMemo(
     () => nodes.filter((node) => selectedNodeSet.has(node.id) && isRunnableNode(node) && node.data.status !== "running"),
     [nodes, selectedNodeSet]
@@ -1031,6 +1054,8 @@ export default function NodeEditor({ active = true } = {}) {
 
   function updateNode(nodeId, patch) {
     let nextUtilityData = null;
+    let nextCameraData = null;
+    const cameraPresetChanged = ["shotPreset", "lensPreset", "typePreset"].some((key) => Object.prototype.hasOwnProperty.call(patch, key));
     setNodes((current) => {
       const shouldUpdateConnectedPreviews = Array.isArray(patch.resultItems) && patch.resultItems.some((item) => item?.url);
       const nextNodes = current.map((node) =>
@@ -1041,6 +1066,7 @@ export default function NodeEditor({ active = true } = {}) {
                 ...patch
               };
               if (node.type === "utility") nextUtilityData = data;
+              if (node.type === "camera") nextCameraData = data;
               return {
                 ...node,
                 data
@@ -1062,6 +1088,14 @@ export default function NodeEditor({ active = true } = {}) {
           return !staleOutput && !inactiveInput;
         })
       );
+    }
+
+    if (nextCameraData && cameraPresetChanged && !hasCameraPreset({ data: nextCameraData })) {
+      setEdges((current) => current.filter((edge) => !(edge.from.nodeId === nodeId && edge.from.port === "cameraOut")));
+      setSelectedEdgeId((current) => {
+        const selectedEdge = edgesRef.current.find((edge) => edge.id === current);
+        return selectedEdge?.from.nodeId === nodeId && selectedEdge?.from.port === "cameraOut" ? null : current;
+      });
     }
   }
 
@@ -1277,6 +1311,247 @@ export default function NodeEditor({ active = true } = {}) {
     }
   }
 
+  async function uploadCharacterPortrait(node, file) {
+    if (!file || !file.type.startsWith("image/")) return;
+
+    pushUndoSnapshot();
+    updateNode(node.id, { status: "uploading", error: "" });
+
+    try {
+      const asset = await uploadNodeAsset(file, "character");
+      updateNode(node.id, {
+        characterPortrait: asset,
+        status: "ready",
+        error: ""
+      });
+    } catch (error) {
+      updateNode(node.id, { status: "error", error: error.message });
+    }
+  }
+
+  async function uploadCharacterWardrobes(node, fileList) {
+    const existing = Array.isArray(node.data.characterWardrobes) ? node.data.characterWardrobes : [];
+    const files = Array.from(fileList || [])
+      .filter((file) => file.type.startsWith("image/"))
+      .slice(0, maxCharacterWardrobes - existing.length);
+    if (!files.length) return;
+
+    pushUndoSnapshot();
+    updateNode(node.id, { status: "uploading", error: "" });
+
+    try {
+      const assets = [];
+      for (const file of files) {
+        const asset = await uploadNodeAsset(file, "character");
+        assets.push({ ...asset, id: `character-wardrobe-${Date.now()}-${assets.length}` });
+      }
+      const nextWardrobes = [...existing, ...assets].slice(0, maxCharacterWardrobes);
+      updateNode(node.id, {
+        characterWardrobes: nextWardrobes,
+        activeWardrobeId: node.data.activeWardrobeId || nextWardrobes[0]?.id || "",
+        status: "ready",
+        error: ""
+      });
+    } catch (error) {
+      updateNode(node.id, { status: "error", error: error.message });
+    }
+  }
+
+  async function uploadCharacterVoices(node, fileList) {
+    const existing = Array.isArray(node.data.characterVoices) ? node.data.characterVoices : [];
+    const files = Array.from(fileList || [])
+      .filter((file) => file.type.startsWith("audio/"))
+      .slice(0, maxCharacterVoices - existing.length);
+    if (!files.length) return;
+
+    pushUndoSnapshot();
+    updateNode(node.id, { status: "uploading", error: "" });
+
+    try {
+      const assets = [];
+      for (const file of files) {
+        const asset = await uploadNodeAsset(file, "character");
+        assets.push({ ...asset, id: `character-voice-${Date.now()}-${assets.length}` });
+      }
+      const nextVoices = [...existing, ...assets].slice(0, maxCharacterVoices);
+      updateNode(node.id, {
+        characterVoices: nextVoices,
+        activeVoiceId: node.data.activeVoiceId || nextVoices[0]?.id || "",
+        status: "ready",
+        error: ""
+      });
+    } catch (error) {
+      updateNode(node.id, { status: "error", error: error.message });
+    }
+  }
+
+  function removeCharacterWardrobe(nodeId, wardrobeId) {
+    const node = nodesRef.current.find((item) => item.id === nodeId);
+    if (!node) return;
+    const wardrobes = (node.data.characterWardrobes || []).filter((item) => item.id !== wardrobeId);
+    const variants = (node.data.characterSheetVariants || []).filter((variant) => variant.wardrobeId !== wardrobeId);
+    const activeWardrobeId = node.data.activeWardrobeId === wardrobeId ? wardrobes[0]?.id || "" : node.data.activeWardrobeId;
+    const selectedVariant = characterSheetVariantForWardrobeId({ ...node.data, characterSheetVariants: variants }, activeWardrobeId);
+    pushUndoSnapshot();
+    const patch = {
+      characterWardrobes: wardrobes,
+      activeWardrobeId
+    };
+    if (node.data.locked && selectedVariant) {
+      updateNode(nodeId, {
+        ...patch,
+        characterSheetVariants: variants,
+        ...characterVariantDisplayPatch(selectedVariant),
+        characterVariantNotice: ""
+      });
+      return;
+    }
+    updateNode(nodeId, {
+      ...patch,
+      characterSheetVariants: [],
+      activated: false,
+      locked: false,
+      resultUrl: "",
+      resultItems: [],
+      compiledWardrobeUrl: "",
+      characterVariantNotice: "",
+      error: ""
+    });
+  }
+
+  function removeCharacterVoice(nodeId, voiceId) {
+    const node = nodesRef.current.find((item) => item.id === nodeId);
+    if (!node) return;
+    const voices = (node.data.characterVoices || []).filter((item) => item.id !== voiceId);
+    pushUndoSnapshot();
+    updateNode(nodeId, {
+      characterVoices: voices,
+      activeVoiceId: node.data.activeVoiceId === voiceId ? voices[0]?.id || "" : node.data.activeVoiceId,
+      error: ""
+    });
+  }
+
+  async function activateCharacterNode(node) {
+    const portrait = node.data.characterPortrait;
+    const name = String(node.data.characterName || "").trim();
+    if (!portrait?.localUrl) {
+      updateNode(node.id, { error: "Upload a character portrait first." });
+      return;
+    }
+    if (!name) {
+      updateNode(node.id, { error: "Enter a character name before locking." });
+      return;
+    }
+
+    const wardrobes = Array.isArray(node.data.characterWardrobes) ? node.data.characterWardrobes : [];
+    const wardrobeOptions = wardrobes.length ? wardrobes : [null];
+    const desiredWardrobeId = characterWardrobeVariantId(activeCharacterWardrobe(node));
+    const selectedVoice = activeCharacterVoice(node);
+    const physicalDetailsPrompt = characterPhysicalDetailsPrompt(node.data);
+    let completedVariantCount = 0;
+
+    try {
+      updateNode(node.id, {
+        status: "compiling",
+        characterBatchProgress: { completed: 0, total: wardrobeOptions.length },
+        characterVariantNotice: "",
+        error: ""
+      });
+      const results = await Promise.allSettled(
+        wardrobeOptions.map(async (wardrobe) => {
+          try {
+            const prompt = [characterSheetPrompt, wardrobe ? characterWardrobePrompt : characterBasicWardrobePrompt, physicalDetailsPrompt].filter(Boolean).join("\n\n");
+            const generated = await runCharacterSheetGeneration({
+              node,
+              prompt,
+              portrait,
+              wardrobe,
+              projectId,
+              projectName
+            });
+            return {
+              wardrobeId: characterWardrobeVariantId(wardrobe),
+              wardrobeUrl: wardrobe?.localUrl || "",
+              wardrobeFileName: wardrobe?.fileName || "Default black wardrobe",
+              generated
+            };
+          } finally {
+            completedVariantCount += 1;
+            updateNode(node.id, {
+              characterBatchProgress: { completed: completedVariantCount, total: wardrobeOptions.length }
+            });
+          }
+        })
+      );
+      const variants = results.filter((result) => result.status === "fulfilled").map((result) => result.value);
+      const failures = results.filter((result) => result.status === "rejected");
+      if (!variants.length) {
+        throw failures[0]?.reason || new Error("Character sheet generation failed.");
+      }
+      const selectedVariant = variants.find((variant) => variant.wardrobeId === desiredWardrobeId) || variants[0];
+      const variantNotice = failures.length
+        ? `${failures.length} outfit sheet${failures.length === 1 ? "" : "s"} could not be generated.`
+        : "";
+      pushUndoSnapshot();
+      updateNode(node.id, {
+        activated: true,
+        locked: true,
+        characterTab: "sheet",
+        characterSheetVariants: variants,
+        activeWardrobeId: selectedVariant.wardrobeId === characterDefaultWardrobeId ? "" : selectedVariant.wardrobeId,
+        compiledTraitPrompt: characterTraitPrompt(node.data),
+        compiledVoicePrompt: selectedVoice ? characterVoicePrompt : "",
+        characterBatchProgress: null,
+        characterVariantNotice: variantNotice,
+        ...characterVariantDisplayPatch(selectedVariant),
+        status: "ready",
+        error: ""
+      });
+    } catch (error) {
+      updateNode(node.id, {
+        status: "error",
+        characterBatchProgress: null,
+        error: error.message
+      });
+    }
+  }
+
+  function unlockCharacterNode(nodeId) {
+    pushUndoSnapshot();
+    updateNode(nodeId, {
+      activated: false,
+      locked: false,
+      characterTab: "build",
+      resultUrl: "",
+      resultItems: [],
+      fileName: "",
+      compiledWardrobeUrl: "",
+      compiledTraitPrompt: "",
+      compiledVoicePrompt: "",
+      characterSheetVariants: [],
+      characterBatchProgress: null,
+      characterVariantNotice: "",
+      status: "ready",
+      error: ""
+    });
+  }
+
+  async function uploadNodeAsset(file, nodeType) {
+    const form = new FormData();
+    form.append("asset", file);
+    form.append("nodeType", nodeType);
+    const response = await fetch("/api/node/upload-asset", { method: "POST", body: form });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Upload failed.");
+    return {
+      fileName: data.asset.fileName,
+      storedFileName: data.asset.storedFileName,
+      mimeType: data.asset.mimeType,
+      mediaType: data.asset.mediaType,
+      localUrl: data.asset.localUrl
+    };
+  }
+
   function removeTransferImage(nodeId, imageId) {
     pushUndoSnapshot();
     updateNode(nodeId, {
@@ -1291,17 +1566,18 @@ export default function NodeEditor({ active = true } = {}) {
     setSelectedEdgeId(null);
   }
 
-  function startPreviewResize(event, node) {
+  function startPreviewResize(event, node, scaleKey = "previewScale") {
     event.preventDefault();
     event.stopPropagation();
     pushUndoSnapshot();
     event.currentTarget.setPointerCapture(event.pointerId);
     const pointer = screenToScene(event.clientX, event.clientY);
     setDragState({
-      type: "previewResize",
+      type: "nodeScaleResize",
       nodeId: node.id,
+      scaleKey,
       startPointer: pointer,
-      startScale: Number(node.data.previewScale || 1)
+      startScale: Number(node.data[scaleKey] || 1)
     });
   }
 
@@ -1316,7 +1592,7 @@ export default function NodeEditor({ active = true } = {}) {
       setCompilingTransferNodeId(node.id);
       updateNode(node.id, { status: "compiling", error: "" });
       const collageBlob = await createTransferCollageBlob(transferImages);
-      const transferFile = new File([collageBlob], "TRANSFER.png", { type: "image/png" });
+      const transferFile = new File([collageBlob], moodBoardOutputFileName, { type: "image/png" });
       const form = new FormData();
       form.append("asset", transferFile);
       form.append("nodeId", node.id);
@@ -1326,7 +1602,7 @@ export default function NodeEditor({ active = true } = {}) {
         body: form
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Could not compile TRANSFER.png.");
+      if (!response.ok) throw new Error(data.error || `Could not compile ${moodBoardOutputFileName}.`);
 
       pushUndoSnapshot();
       updateNode(node.id, {
@@ -1467,11 +1743,12 @@ export default function NodeEditor({ active = true } = {}) {
       setSelectedNodeIds([...new Set([...dragState.baseSelection, ...selected])]);
     }
 
-    if (dragState?.type === "previewResize") {
+    if (dragState?.type === "nodeScaleResize") {
       const deltaX = pointer.x - dragState.startPointer.x;
       const deltaY = pointer.y - dragState.startPointer.y;
-      const nextScale = Math.max(previewScaleFloor, dragState.startScale + Math.max(deltaX, deltaY) / previewBaseWidth);
-      updateNode(dragState.nodeId, { previewScale: roundPreviewScale(nextScale) });
+      const minScale = dragState.scaleKey === "previewScale" ? previewScaleFloor : 1;
+      const nextScale = Math.max(minScale, dragState.startScale + Math.max(deltaX, deltaY) / previewBaseWidth);
+      updateNode(dragState.nodeId, { [dragState.scaleKey]: roundPreviewScale(nextScale) });
     }
 
     if (draftEdge) {
@@ -1588,6 +1865,32 @@ export default function NodeEditor({ active = true } = {}) {
   }
 
   function handleCanvasWheel(event) {
+    if (!event.ctrlKey && !event.metaKey) {
+      const wardrobeScroller = event.target.closest(".character-thumb-strip");
+      if (wardrobeScroller) {
+        event.preventDefault();
+        event.stopPropagation();
+        wardrobeScroller.scrollLeft += event.deltaX + event.deltaY;
+        return;
+      }
+
+      const voiceScroller = event.target.closest(".character-voice-list");
+      if (voiceScroller) {
+        event.preventDefault();
+        event.stopPropagation();
+        voiceScroller.scrollTop += event.deltaY || event.deltaX;
+        return;
+      }
+
+      const characterScroller = event.target.closest(".character-build-scroll");
+      if (characterScroller && characterScroller.scrollHeight > characterScroller.clientHeight) {
+        event.preventDefault();
+        event.stopPropagation();
+        characterScroller.scrollTop += event.deltaY || event.deltaX;
+        return;
+      }
+    }
+
     const isInteractiveControl = event.target.closest("input, textarea, select");
     if (isInteractiveControl && !event.ctrlKey && !event.metaKey) return;
     event.preventDefault();
@@ -1894,7 +2197,7 @@ export default function NodeEditor({ active = true } = {}) {
     }
 
     if (source.type === "transfer") {
-      if (!source.data.activated || !source.data.resultUrl) return "Lock Transfer to enable TRANSFER.png output";
+      if (!source.data.activated || !source.data.resultUrl) return `Lock Mood Board to enable ${moodBoardOutputFileName} output`;
       if (
         (target.type === "imageModel" && to.port === "transferIn") ||
         (target.type === "composer" && to.port === "imageIn") ||
@@ -1903,7 +2206,24 @@ export default function NodeEditor({ active = true } = {}) {
         (target.type === "preview" && to.port === "sourceIn")
       )
         return "";
-      return "Transfer connects to the Image Model transfer input or previews";
+      return "Mood Board connects to the Image Model mood board input or previews";
+    }
+
+    if (source.type === "character") {
+      if (!source.data.locked || !source.data.activated || !source.data.resultUrl) return "Lock Character to enable output";
+      if (from.port === "voiceOut") {
+        if (!activeCharacterVoice(source)?.localUrl) return "Select a character voice before connecting";
+        if (target.type === "videoModel" && to.port === "referenceAudioIn") return "";
+        return "Character voice connects to a Video Model audio input";
+      }
+      if (target.type === "imageModel" && to.port === "characterIn") return "";
+      if (target.type === "videoModel" && to.port === "characterIn") return "";
+      if (target.type === "preview" && to.port === "sourceIn") return "";
+      return "Character connects to Character inputs or previews";
+    }
+
+    if (["imageModel", "videoModel"].includes(target.type) && to.port === "characterIn") {
+      return "Character inputs accept locked Character nodes";
     }
 
     if (source.type === "utility") {
@@ -2016,6 +2336,8 @@ export default function NodeEditor({ active = true } = {}) {
         if (source.type === "style") return "";
         return "Style input accepts style outputs";
       }
+      if (["image", "video", "imageModel", "videoModel", "utility", "transfer", "character"].includes(source?.type)) return "";
+      return "Preview accepts image and video sources";
     }
 
     return "";
@@ -2467,11 +2789,11 @@ export default function NodeEditor({ active = true } = {}) {
 
       if (currentNode.type === "imageModel") {
         const isSegmentation = isSam3ImageModel(currentNode.data.model);
-        const imagePromptItems = connectedImagePromptItems(isSegmentation ? incoming.imagePromptIn || [] : [...(incoming.imagePromptIn || []), ...(incoming.transferIn || [])]);
         const aspectRatio = isSegmentation ? currentNode.data.aspectRatio : await resolveImageModelAspectRatio(currentNode, incoming);
+        const imagePromptItems = connectedImagePromptItems(isSegmentation ? incoming.imagePromptIn || [] : [...(incoming.imagePromptIn || []), ...(incoming.transferIn || []), ...(incoming.characterIn || [])]);
         const prompt = isSegmentation
           ? basePrompt
-          : buildEffectiveImagePrompt(basePrompt, [...(incoming.imagePromptIn || []), ...(incoming.cameraIn || []), ...(incoming.styleIn || []), ...(incoming.transferIn || [])], aspectRatio);
+          : buildEffectiveImagePrompt(basePrompt, [...(incoming.imagePromptIn || []), ...(incoming.cameraIn || []), ...(incoming.styleIn || []), ...(incoming.transferIn || []), ...(incoming.characterIn || [])], aspectRatio);
         const runIndexes = Array.from({ length: batchCount }, (_, index) => index);
         const settled = await settleSequential(runIndexes, (index) =>
           runImageModelGeneration({
@@ -2523,7 +2845,7 @@ export default function NodeEditor({ active = true } = {}) {
         return { status: "complete" };
       }
 
-      const prompt = basePrompt;
+      const prompt = buildEffectiveVideoPrompt(basePrompt, incoming);
       const runs = Array.from({ length: batchCount }, (_, index) =>
         runVideoModelGeneration({
           node: currentNode,
@@ -2826,11 +3148,19 @@ export default function NodeEditor({ active = true } = {}) {
               onTransferImageRemove={removeTransferImage}
               onTransferActivate={activateTransferNode}
               onTransferUnlock={unlockTransferNode}
+              onCharacterPortraitUpload={uploadCharacterPortrait}
+              onCharacterWardrobesUpload={uploadCharacterWardrobes}
+              onCharacterVoicesUpload={uploadCharacterVoices}
+              onCharacterWardrobeRemove={removeCharacterWardrobe}
+              onCharacterVoiceRemove={removeCharacterVoice}
+              onCharacterActivate={activateCharacterNode}
+              onCharacterUnlock={unlockCharacterNode}
               onPreviewResizeStart={startPreviewResize}
               onOpenComposer={setComposerEditorNodeId}
               running={node.data.status === "running"}
               transferCompiling={compilingTransferNodeId === node.id}
               selected={selectedNodeSet.has(node.id)}
+              tagHighlight={referenceTagHighlights.get(node.id)}
             />
           ))}
         </div>
@@ -3057,11 +3387,19 @@ function NodeCard({
   onTransferImageRemove,
   onTransferActivate,
   onTransferUnlock,
+  onCharacterPortraitUpload,
+  onCharacterWardrobesUpload,
+  onCharacterVoicesUpload,
+  onCharacterWardrobeRemove,
+  onCharacterVoiceRemove,
+  onCharacterActivate,
+  onCharacterUnlock,
   onPreviewResizeStart,
   onOpenComposer,
   running,
   transferCompiling,
-  selected
+  selected,
+  tagHighlight
 }) {
   const config = getNodeConfig(node.type);
   const Icon = config.icon;
@@ -3087,13 +3425,17 @@ function NodeCard({
     setEditingTitle(false);
   }
 
+  const moodBoardScalable = node.type === "transfer" && node.data.locked && node.data.activated && node.data.resultUrl;
+
   return (
     <article
-      className={`node-card ${node.type === "composer" ? "node-type-composer" : `${node.type} node-type-${node.type}`} ${nodeColor ? "has-node-color" : ""} ${selected ? "selected" : ""}`}
+      className={`node-card ${node.type === "composer" ? "node-type-composer" : `${node.type} node-type-${node.type}`} ${nodeColor ? "has-node-color" : ""} ${selected ? "selected" : ""} ${tagHighlight ? "reference-tag-highlighted" : ""} ${moodBoardScalable ? "mood-board-scalable" : ""}`}
       style={{
         transform: `translate(${node.x}px, ${node.y}px)`,
         "--preview-scale": node.data.previewScale || 1,
-        "--node-color": nodeColor || "transparent"
+        "--node-color": nodeColor || "transparent",
+        "--mood-board-scale": moodBoardScalable ? node.data.moodBoardScale || 1 : 1,
+        "--reference-tag-color": tagHighlight?.color || "#4d8dff"
       }}
       data-node-card-id={node.id}
       onPointerDown={(event) => onDragStart(event, node)}
@@ -3162,6 +3504,13 @@ function NodeCard({
         onTransferImageRemove={onTransferImageRemove}
         onTransferActivate={onTransferActivate}
         onTransferUnlock={onTransferUnlock}
+        onCharacterPortraitUpload={onCharacterPortraitUpload}
+        onCharacterWardrobesUpload={onCharacterWardrobesUpload}
+        onCharacterVoicesUpload={onCharacterVoicesUpload}
+        onCharacterWardrobeRemove={onCharacterWardrobeRemove}
+        onCharacterVoiceRemove={onCharacterVoiceRemove}
+        onCharacterActivate={onCharacterActivate}
+        onCharacterUnlock={onCharacterUnlock}
         onPreviewResizeStart={onPreviewResizeStart}
         onOpenComposer={onOpenComposer}
         transferCompiling={transferCompiling}
@@ -3243,18 +3592,161 @@ function MediaPreview({ node }) {
   );
 }
 
-function StyleCollage({ images, locked, onRemove, onDropImages }) {
+function CharacterVoicePlayer({ voice }) {
+  const audioRef = React.useRef(null);
+  const [playing, setPlaying] = React.useState(false);
+  const [muted, setMuted] = React.useState(false);
+  const [currentTime, setCurrentTime] = React.useState(0);
+  const [duration, setDuration] = React.useState(0);
+
+  React.useEffect(() => {
+    const audio = audioRef.current;
+    audio?.pause();
+    if (audio) audio.currentTime = 0;
+    setPlaying(false);
+    setCurrentTime(0);
+    setDuration(0);
+  }, [voice.localUrl]);
+
+  function togglePlayback() {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (audio.paused) {
+      audio.play().catch(() => setPlaying(false));
+      return;
+    }
+    audio.pause();
+  }
+
+  return (
+    <div className="character-voice-player">
+      <audio
+        ref={audioRef}
+        src={voice.localUrl}
+        muted={muted}
+        preload="metadata"
+        onLoadedMetadata={(event) => setDuration(event.currentTarget.duration)}
+        onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onEnded={() => setPlaying(false)}
+      />
+      <button type="button" onClick={togglePlayback} title={playing ? "Pause dialogue" : "Play dialogue"} aria-label={playing ? "Pause dialogue" : "Play dialogue"}>
+        {playing ? <Pause size={13} /> : <Play size={13} />}
+      </button>
+      <button type="button" onClick={() => setMuted((value) => !value)} title={muted ? "Unmute dialogue" : "Mute dialogue"} aria-label={muted ? "Unmute dialogue" : "Mute dialogue"}>
+        {muted ? <VolumeX size={13} /> : <Volume2 size={13} />}
+      </button>
+      <span>{formatTimelineTime(currentTime)} / {formatTimelineTime(duration)}</span>
+    </div>
+  );
+}
+
+function StillFrameScrubber({ videoUrl, value, onChange }) {
+  const videoRef = React.useRef(null);
+  const [duration, setDuration] = React.useState(0);
+  const [loadState, setLoadState] = React.useState(videoUrl ? "loading" : "idle");
+  const numericValue = Math.max(0, Number(value) || 0);
+  const usableDuration = Number.isFinite(duration) && duration > 0 ? duration : 0;
+  const sliderMax = usableDuration ? Math.max(0.01, usableDuration) : Math.max(1, numericValue);
+  const displayTime = usableDuration ? clamp(numericValue, 0, Math.max(0, usableDuration - 0.04)) : numericValue;
+
+  React.useEffect(() => {
+    setDuration(0);
+    setLoadState(videoUrl ? "loading" : "idle");
+  }, [videoUrl]);
+
+  React.useEffect(() => {
+    const video = videoRef.current;
+    if (!videoUrl || !video || video.readyState < 1) return;
+    const maxTime = usableDuration ? Math.max(0, usableDuration - 0.04) : numericValue;
+    const targetTime = clamp(numericValue, 0, maxTime);
+    if (Math.abs(video.currentTime - targetTime) > 0.035) {
+      video.currentTime = targetTime;
+    }
+  }, [videoUrl, numericValue, usableDuration]);
+
+  function handleLoadedMetadata() {
+    const video = videoRef.current;
+    if (!video) return;
+    const nextDuration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 0;
+    setDuration(nextDuration);
+    setLoadState("ready");
+    if (!nextDuration) return;
+    const nextTime = clamp(numericValue, 0, Math.max(0, nextDuration - 0.04));
+    if (nextTime !== numericValue) onChange(nextTime);
+    if (Math.abs(video.currentTime - nextTime) > 0.035) {
+      video.currentTime = nextTime;
+    }
+  }
+
+  function handleScrub(event) {
+    const nextTime = Number(event.target.value) || 0;
+    onChange(nextTime);
+    const video = videoRef.current;
+    if (video && video.readyState >= 1) {
+      video.currentTime = usableDuration ? clamp(nextTime, 0, Math.max(0, usableDuration - 0.04)) : nextTime;
+    }
+  }
+
+  function stopCanvasGesture(event) {
+    event.stopPropagation();
+  }
+
+  if (!videoUrl) {
+    return (
+      <div className="still-frame-scrubber empty" onPointerDown={stopCanvasGesture} onWheel={stopCanvasGesture}>
+        <Film size={18} />
+        <span>Connect a video</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="still-frame-scrubber" onPointerDown={stopCanvasGesture} onWheel={stopCanvasGesture}>
+      <div className="still-frame-video-shell">
+        <video
+          ref={videoRef}
+          src={videoUrl}
+          muted
+          playsInline
+          preload="metadata"
+          onLoadedMetadata={handleLoadedMetadata}
+          onLoadedData={() => setLoadState("ready")}
+          onError={() => setLoadState("error")}
+        />
+      </div>
+      <div className="still-frame-controls">
+        <input type="range" min="0" max={sliderMax} step="0.01" value={displayTime} onChange={handleScrub} disabled={loadState === "error"} aria-label="Still frame position" />
+        <span>{loadState === "error" ? "Load failed" : `${formatTimelineTime(displayTime)} / ${formatTimelineTime(usableDuration)}`}</span>
+      </div>
+    </div>
+  );
+}
+
+function StyleCollage({ images, locked, outputUrl, outputLabel = moodBoardOutputFileName, onRemove, onDropImages }) {
   function handleDrop(event) {
     event.preventDefault();
     event.stopPropagation();
     onDropImages?.(event.dataTransfer.files);
   }
 
+  if (locked && outputUrl) {
+    return (
+      <div className="style-collage transfer-output-preview locked">
+        <div className="style-collage-cell">
+          <img src={outputUrl} alt={outputLabel} />
+          <span>{outputLabel}</span>
+        </div>
+      </div>
+    );
+  }
+
   if (!images.length) {
     return (
       <div className="style-collage empty" onDragOver={allowFileDrop} onDrop={handleDrop}>
         <Compass size={24} />
-        <span>Drop transfer images here</span>
+        <span>Drop mood board images here</span>
       </div>
     );
   }
@@ -3263,7 +3755,7 @@ function StyleCollage({ images, locked, onRemove, onDropImages }) {
     <div className={`style-collage count-${images.length} ${locked ? "locked" : ""}`} onDragOver={allowFileDrop} onDrop={handleDrop}>
       {images.map((image) => (
         <div className="style-collage-cell" key={image.id}>
-          <img src={image.localUrl} alt={image.fileName || "Transfer reference"} />
+          <img src={image.localUrl} alt={image.fileName || "Mood board reference"} />
           {!locked && (
             <button onClick={() => onRemove(image.id)} title="Remove image">
               <X size={12} />
@@ -4368,6 +4860,13 @@ function NodeBody({
   onTransferImageRemove,
   onTransferActivate,
   onTransferUnlock,
+  onCharacterPortraitUpload,
+  onCharacterWardrobesUpload,
+  onCharacterVoicesUpload,
+  onCharacterWardrobeRemove,
+  onCharacterVoiceRemove,
+  onCharacterActivate,
+  onCharacterUnlock,
   onPreviewResizeStart,
   onOpenComposer,
   incomingByNode,
@@ -4409,6 +4908,7 @@ function NodeBody({
           <label className="text-field-group">
             <span>Original prompt</span>
             <textarea value={node.data.text} onChange={(event) => onUpdate(node.id, { text: event.target.value })} />
+            <textarea aria-label="Text node prompt" value={node.data.text} onChange={(event) => onUpdate(node.id, { text: event.target.value })} />
           </label>
           {hasOutputPanel && (
             <label className="text-field-group">
@@ -4501,6 +5001,241 @@ function NodeBody({
         </button>
         <small className="model-status-note">{imagePlaneCount ? `${imagePlaneCount} image plane source${imagePlaneCount === 1 ? "" : "s"} connected.` : "Block camera, pose, scale, and layout with simple 3D maquettes."}</small>
         {node.data.status === "uploading" && <small className="upload-status">Capturing...</small>}
+        {node.data.error && <small className="upload-error">{node.data.error}</small>}
+      </div>
+    );
+  }
+
+  if (node.type === "character") {
+    const portrait = node.data.characterPortrait;
+    const wardrobes = Array.isArray(node.data.characterWardrobes) ? node.data.characterWardrobes : [];
+    const voices = Array.isArray(node.data.characterVoices) ? node.data.characterVoices : [];
+    const activeWardrobe = activeCharacterWardrobe(node);
+    const activeVoice = activeCharacterVoice(node);
+    const selectedTraits = Array.isArray(node.data.characterTraits) ? node.data.characterTraits : [];
+    const hasCharacterTraits = selectedTraits.length > 0 || Boolean(String(node.data.customCharacterTraits || "").trim());
+    const characterVariants = Array.isArray(node.data.characterSheetVariants) ? node.data.characterSheetVariants : [];
+    const variantCount = characterVariants.length;
+    const targetVariantCount = Math.max(1, wardrobes.length);
+    const batchProgress = node.data.characterBatchProgress;
+    const locked = Boolean(node.data.locked && node.data.activated && node.data.resultUrl);
+    const compiling = node.data.status === "compiling";
+    const activeTab = node.data.characterTab === "sheet" ? "sheet" : "build";
+    const characterPort = config.output.find((port) => port.id === "characterOut");
+    const voicePort = config.output.find((port) => port.id === "voiceOut");
+    const outputConnected = connectedPortKeys.has(`${node.id}:${characterPort.id}`);
+
+    function toggleTrait(trait) {
+      const nextTraits = selectedTraits.includes(trait) ? selectedTraits.filter((item) => item !== trait) : [...selectedTraits, trait];
+      onUpdate(node.id, { characterTraits: nextTraits });
+    }
+
+    function selectWardrobe(wardrobe) {
+      const variant = characterSheetVariantForWardrobeId(node.data, wardrobe.id);
+      if (locked && !variant) return;
+      onUpdate(node.id, {
+        activeWardrobeId: wardrobe.id,
+        ...(locked && variant ? characterVariantDisplayPatch(variant) : {})
+      });
+    }
+
+    function handleCharacterDrop(event, zone) {
+      allowFileDrop(event);
+      if (zone === "portrait") {
+        const file = firstAcceptedFile(event.dataTransfer.files, "image");
+        if (file) onCharacterPortraitUpload(node, file);
+        return;
+      }
+      if (zone === "wardrobe") {
+        onCharacterWardrobesUpload(node, event.dataTransfer.files);
+        return;
+      }
+      onCharacterVoicesUpload(node, event.dataTransfer.files);
+    }
+
+    return (
+      <div className="node-body character-node-body">
+        <div className="character-topbar">
+          <div className="character-tabs" role="tablist" aria-label="Character views">
+            <button type="button" role="tab" aria-selected={activeTab === "build"} className={activeTab === "build" ? "active" : ""} onClick={() => onUpdate(node.id, { characterTab: "build" })}>
+              Character Build
+            </button>
+            <button type="button" role="tab" aria-selected={activeTab === "sheet"} className={activeTab === "sheet" ? "active" : ""} onClick={() => onUpdate(node.id, { characterTab: "sheet" })}>
+              Character Sheet
+            </button>
+          </div>
+          <div className="character-port-bar">
+            {locked || outputConnected ? (
+              <OutputPortRow node={node} port={characterPort} label={`@${characterTag(node)} Character`} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
+            ) : (
+              <span>Lock character to enable output</span>
+            )}
+            {locked && activeVoice && (
+              <OutputPortRow node={node} port={voicePort} label="Selected Voice" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
+            )}
+          </div>
+        </div>
+        {activeTab === "build" ? (
+          <section className="character-build-view">
+            <div className="character-layout">
+              <section className="character-sheet-panel drop-enabled" onDragOver={allowFileDrop} onDrop={(event) => handleCharacterDrop(event, "portrait")}>
+                <span className="character-section-label">Portrait Reference</span>
+                <label className={`character-main-preview ${portrait ? "has-image" : ""}`} title={portrait ? "Replace portrait image" : "Upload portrait image"}>
+                  {portrait?.localUrl ? (
+                    <img src={portrait.localUrl} alt="Character portrait" />
+                  ) : (
+                    <UserRound size={28} />
+                  )}
+                  <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => onCharacterPortraitUpload(node, event.target.files?.[0])} />
+                </label>
+                <label className="character-identity-field">
+                  <span className="character-section-label">Identity</span>
+                  <div className="character-name-row">
+                    <input
+                      value={node.data.characterName || ""}
+                      placeholder="Name"
+                      onChange={(event) => onUpdate(node.id, { characterName: event.target.value })}
+                    />
+                    <strong>@{characterTag(node)}</strong>
+                  </div>
+                </label>
+                <label className="character-physical-details">
+                  <span className="character-section-label">Physical Details <span className="character-optional-label">(Optional)</span></span>
+                  <textarea
+                    value={node.data.characterPhysicalDetails || ""}
+                    placeholder="Defining features, e.g. glass left eye, wooden prosthetic leg"
+                    onChange={(event) => onUpdate(node.id, { characterPhysicalDetails: event.target.value })}
+                  />
+                </label>
+              </section>
+              <div className="character-editor character-build-scroll">
+                <section className="character-section wardrobe drop-enabled" onDragOver={allowFileDrop} onDrop={(event) => handleCharacterDrop(event, "wardrobe")}>
+                  <div className="character-section-head">
+                    <span className="character-section-label">Wardrobe</span>
+                    {wardrobes.length < maxCharacterWardrobes && (
+                      <label className="character-add-button" title="Upload wardrobe images">
+                        <Plus size={13} />
+                        <input type="file" accept="image/png,image/jpeg,image/webp" multiple onChange={(event) => onCharacterWardrobesUpload(node, event.target.files)} />
+                      </label>
+                    )}
+                  </div>
+                  <div className="character-thumb-strip">
+                    {wardrobes.map((wardrobe) => {
+                      const hasSheet = Boolean(characterSheetVariantForWardrobeId(node.data, wardrobe.id));
+                      return (
+                        <button
+                          key={wardrobe.id}
+                          type="button"
+                          className={`${wardrobe.id === activeWardrobe?.id ? "active" : ""} ${locked && !hasSheet ? "unavailable" : ""}`}
+                          disabled={compiling}
+                          onClick={() => selectWardrobe(wardrobe)}
+                          title={locked && hasSheet ? `Use ${wardrobe.fileName || "this wardrobe"} character sheet` : locked ? "No generated sheet for this wardrobe" : wardrobe.fileName}
+                        >
+                          <img src={wardrobe.localUrl} alt={wardrobe.fileName || "Wardrobe"} />
+                          <span className="character-remove" onClick={(event) => { event.stopPropagation(); onCharacterWardrobeRemove(node.id, wardrobe.id); }}>
+                            <X size={10} />
+                          </span>
+                        </button>
+                      );
+                    })}
+                    {!wardrobes.length && <small>Drop outfit sheets here</small>}
+                  </div>
+                </section>
+                <label className="character-section character-reference-notes">
+                  <span className="character-section-label">Notes</span>
+                  <textarea
+                    value={node.data.characterReferenceNotes || ""}
+                    placeholder="Personal reference notes"
+                    onChange={(event) => onUpdate(node.id, { characterReferenceNotes: event.target.value })}
+                  />
+                </label>
+                <details className="character-section character-collapsible characteristics" defaultOpen={hasCharacterTraits}>
+                  <summary>
+                    <span className="character-section-label">Characteristics <span className="character-optional-label">(Optional)</span></span>
+                    <ChevronDown size={13} />
+                  </summary>
+                  <div className="character-collapsible-body">
+                    <div className="character-trait-grid">
+                      {characterTraitOptions.map((trait) => (
+                        <button key={trait} type="button" className={selectedTraits.includes(trait) ? "active" : ""} onClick={() => toggleTrait(trait)}>
+                          {trait}
+                        </button>
+                      ))}
+                    </div>
+                    <input
+                      className="character-custom-traits"
+                      value={node.data.customCharacterTraits || ""}
+                      placeholder="Custom traits, separated by commas"
+                      onChange={(event) => onUpdate(node.id, { customCharacterTraits: event.target.value })}
+                    />
+                  </div>
+                </details>
+                <details className="character-section character-collapsible voice drop-enabled" defaultOpen={Boolean(voices.length)} onDragOver={allowFileDrop} onDrop={(event) => handleCharacterDrop(event, "voice")}>
+                  <summary>
+                    <span className="character-section-label">Voice <span className="character-optional-label">(Optional)</span></span>
+                    <span className="character-summary-meta">{activeVoice ? activeVoice.fileName : "None"}</span>
+                    <ChevronDown size={13} />
+                  </summary>
+                  <div className="character-collapsible-body">
+                    <div className="character-section-head">
+                      <small>Dialogue references</small>
+                      {voices.length < maxCharacterVoices && (
+                        <label className="character-add-button" title="Upload dialogue audio">
+                          <Plus size={13} />
+                          <input type="file" accept="audio/mpeg,audio/wav,audio/mp4,audio/x-m4a" multiple onChange={(event) => onCharacterVoicesUpload(node, event.target.files)} />
+                        </label>
+                      )}
+                    </div>
+                    <div className="character-voice-list">
+                      {voices.map((voice) => (
+                        <button key={voice.id} type="button" className={voice.id === activeVoice?.id ? "active" : ""} onClick={() => onUpdate(node.id, { activeVoiceId: voice.id })}>
+                          <FileAudio size={13} />
+                          <span>{voice.fileName}</span>
+                          <span className="character-remove" onClick={(event) => { event.stopPropagation(); onCharacterVoiceRemove(node.id, voice.id); }}>
+                            <X size={10} />
+                          </span>
+                        </button>
+                      ))}
+                      {!voices.length && <small>Drop dialogue audio here</small>}
+                    </div>
+                    {activeVoice && <CharacterVoicePlayer voice={activeVoice} />}
+                  </div>
+                </details>
+              </div>
+            </div>
+            <div className="character-actions">
+              <span className={node.data.characterVariantNotice ? "upload-error" : ""}>
+                {compiling && batchProgress
+                  ? `Building outfit sheets ${batchProgress.completed} / ${batchProgress.total}`
+                  : node.data.characterVariantNotice
+                    ? node.data.characterVariantNotice
+                  : locked
+                    ? `${variantCount} outfit sheet${variantCount === 1 ? "" : "s"} ready. @${characterTag(node)} uses the selected outfit.`
+                    : `${targetVariantCount} outfit sheet${targetVariantCount === 1 ? "" : "s"} will generate on lock.`}
+              </span>
+              <button
+                className={`style-lock-button ${locked ? "locked" : ""}`}
+                type="button"
+                disabled={compiling || (!locked && (!portrait?.localUrl || !String(node.data.characterName || "").trim()))}
+                onClick={() => (locked ? onCharacterUnlock(node.id) : onCharacterActivate(node))}
+                title={locked ? "Unlock character" : `Generate and lock ${targetVariantCount} outfit sheet${targetVariantCount === 1 ? "" : "s"}`}
+              >
+                {compiling ? "Generating..." : locked ? <Lock size={15} /> : <Unlock size={15} />}
+              </button>
+            </div>
+          </section>
+        ) : (
+          <section className="character-sheet-view">
+            {node.data.resultUrl ? (
+              <img src={node.data.resultUrl} alt={`${node.data.characterName || "Character"} sheet`} />
+            ) : (
+              <div className="character-sheet-empty">
+                <UserRound size={32} />
+                <span>Generate a character sheet from Character Build</span>
+              </div>
+            )}
+          </section>
+        )}
         {node.data.error && <small className="upload-error">{node.data.error}</small>}
       </div>
     );
@@ -4635,14 +5370,16 @@ function NodeBody({
     return (
       <div className="node-body style-node-body">
         {hasTransferOutput || outputConnected ? (
-          <OutputPortRow node={node} port={outputPort} label="TRANSFER.png" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
+          <OutputPortRow node={node} port={outputPort} label={moodBoardOutputFileName} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
         ) : (
-          <div className="style-output-placeholder">Lock transfer to enable output</div>
+          <div className="style-output-placeholder">Lock mood board to enable output</div>
         )}
 
         <StyleCollage
           images={transferImages}
           locked={node.data.locked}
+          outputUrl={hasTransferOutput ? node.data.resultUrl : ""}
+          outputLabel={moodBoardOutputFileName}
           onRemove={(imageId) => onTransferImageRemove(node.id, imageId)}
           onDropImages={(files) => onTransferImagesUpload(node, files)}
         />
@@ -4657,7 +5394,7 @@ function NodeBody({
             className={`style-lock-button ${node.data.locked ? "locked" : ""}`}
             onClick={() => (node.data.locked ? onTransferUnlock(node.id) : onTransferActivate(node))}
             disabled={transferCompiling || (!node.data.locked && !transferImages.length)}
-            title={node.data.locked ? "Unlock transfer" : "Compile TRANSFER.png"}
+            title={node.data.locked ? "Unlock mood board" : `Compile ${moodBoardOutputFileName}`}
           >
             {node.data.locked ? <Lock size={16} /> : <Unlock size={16} />}
           </button>
@@ -4670,6 +5407,7 @@ function NodeBody({
         {node.data.fileName && <small>{node.data.fileName}</small>}
         {node.data.status === "uploading" && <small className="upload-status">Uploading...</small>}
         {node.data.error && <small className="upload-error">{node.data.error}</small>}
+        {hasTransferOutput && <button className="preview-resize-handle mood-board-resize-handle" onPointerDown={(event) => onPreviewResizeStart(event, node, "moodBoardScale")} title="Resize mood board" />}
       </div>
     );
   }
@@ -4758,6 +5496,7 @@ function NodeBody({
     const isColorIdMatte = isUtilityColorIdMatteModel(utilityImageModel);
     const isDepthAnything = isDepthAnythingModel(utilityImageModel);
     const isPatina = isPatinaModel(utilityImageModel);
+    const isStillFrame = isUtilityStillFrameModel(utilityImageModel);
     const isSam3Image = isUtilitySam3ImageModel(utilityImageModel);
     const isBirefnetImage = isUtilityBirefnetImageModel(utilityImageModel);
     const isSam3Video = isUtilitySam3VideoModel(utilityVideoModel);
@@ -4774,6 +5513,7 @@ function NodeBody({
     const isTopazUpscaler = isUtilityTopazUpscalerModel(utilityVideoModel);
     const isVideoUpscaler = isUtilityVideoUpscalerModel(utilityVideoModel);
     const utilityOutputMediaType = isVideoMode ? utilityVideoOutputType(utilityVideoModel) : "image";
+    const stillFrameVideoUrl = isStillFrame ? connectedAssetUrls(incoming.referenceVideoIn).at(-1) || "" : "";
     const utilityOutputPort = {
       ...config.output[0],
       label: utilityOutputMediaType === "video" ? "Video output" : "Image output",
@@ -4804,7 +5544,9 @@ function NodeBody({
         (!isCompositeVideo || Boolean(incoming.maskVideoIn?.length) && (incoming.referenceVideoIn?.length || 0) >= 2) &&
         (!isWanVaceInpaintingVideo || Boolean(incoming.maskVideoIn?.length) && Boolean(promptValue.trim())) &&
         (!isWanVaceMaskToVideo || Boolean(incoming.maskVideoIn?.length) && Boolean(incoming.referenceImageIn?.length) && Boolean(promptValue.trim()))
-      : Boolean(incoming.imageIn?.length) && (!isSam3Image || Boolean(promptValue.trim())) && (!isColorIdMatte || Boolean(normalizeColorIdMatteColor(node.data.colorIdMatteColor)));
+      : isStillFrame
+        ? Boolean(incoming.referenceVideoIn?.length)
+        : Boolean(incoming.imageIn?.length) && (!isSam3Image || Boolean(promptValue.trim())) && (!isColorIdMatte || colorIdMatteRunColors(node.data).length > 0);
     const utilityRunLabel = isVideoMode
       ? isSam3Video
         ? "Run SAM 3 Video"
@@ -4835,11 +5577,13 @@ function NodeBody({
         ? "Run SAM 3 Image"
         : isBirefnetImage
           ? "Run BiRefNet Image"
-          : isPatina
-            ? "Run Patina"
-            : isDepthAnything
-              ? "Run Depth Map"
-              : "Run DWPose";
+          : isStillFrame
+            ? "Grab Still"
+            : isPatina
+              ? "Run Patina"
+              : isDepthAnything
+                ? "Run Depth Map"
+                : "Run DWPose";
     const utilityDescription = utilityModelDescription(isVideoMode ? utilityVideoModel : utilityImageModel);
     const referenceVideoLabel = isCompositeVideo
       ? "Base + Layer"
@@ -4911,7 +5655,7 @@ function NodeBody({
           </div>
         )}
         <button className="run-node-button" onClick={() => onRun(node)} disabled={running || !canRun}>
-          {running ? (isVideoMode ? "Running Video..." : "Running Image...") : utilityRunLabel}
+          {running ? (isVideoMode ? "Running Video..." : isStillFrame ? "Grabbing Still..." : "Running Image...") : utilityRunLabel}
         </button>
         <details className="model-settings-drawer" open={settingsOpen} onToggle={(event) => onUpdate(node.id, { settingsOpen: event.currentTarget.open })}>
           <summary>{isVideoMode ? "Video" : "Image"}</summary>
@@ -5243,6 +5987,7 @@ function NodeBody({
               <NodeRow label="Model">
                 <select value={utilityImageModel} onChange={(event) => onUpdate(node.id, { utilityImageModel: event.target.value, resultUrl: "", resultItems: [], resultType: "image", error: "" })}>
                   <option>{utilityImageModelNames.colorIdMatte}</option>
+                  <option>{utilityImageModelNames.stillFrame}</option>
                   <option>{utilityImageModelNames.dwpose}</option>
                   <option>{utilityImageModelNames.depthAnything}</option>
                   <option>{utilityImageModelNames.patina}</option>
@@ -5255,33 +6000,42 @@ function NodeBody({
                   <textarea className={promptConnected ? "connected-field" : ""} value={promptValue} readOnly={promptConnected} onChange={(event) => onUpdate(node.id, { prompt: event.target.value })} />
                 </NodeRow>
               )}
-              <NodeRow label="Image" inputPort={settingsOpen ? imagePort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-                <button className={incoming.imageIn?.length ? "connected-field" : ""}>{connectedSummary(incoming.imageIn, "Add image")}</button>
-              </NodeRow>
-              {isColorIdMatte ? (
-                <ColorIdMattePicker imageUrl={connectedAssetUrls(incoming.imageIn).at(-1)} node={node} onUpdate={onUpdate} />
-              ) : isPatina ? (
+              {isStillFrame ? (
                 <>
-                  {patinaMapOptions.map((option) => (
-                    <NodeRow key={option.id} label={option.label}>
-                      <button className={`node-toggle ${patinaMapsForData(node.data).includes(option.id) ? "enabled" : ""}`} onClick={() => togglePatinaMap(option.id)}>
-                        <span />
-                      </button>
-                    </NodeRow>
-                  ))}
-                  <NodeRow label="Format">
-                    <select value={node.data.patinaOutputFormat || "png"} onChange={(event) => onUpdate(node.id, { patinaOutputFormat: event.target.value })}>
-                      <option value="png">PNG</option>
-                      <option value="jpeg">JPEG</option>
-                      <option value="webp">WebP</option>
-                    </select>
+                  <NodeRow label="Video" inputPort={settingsOpen ? referenceVideoPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+                    <button className={incoming.referenceVideoIn?.length ? "connected-field" : ""}>{connectedSummary(incoming.referenceVideoIn, "Add video")}</button>
                   </NodeRow>
-                  <NodeRow label="Seed">
-                    <input value={node.data.patinaSeed || ""} onChange={(event) => onUpdate(node.id, { patinaSeed: event.target.value })} placeholder="Random" />
-                  </NodeRow>
+                  <StillFrameScrubber videoUrl={stillFrameVideoUrl} value={node.data.stillFrameTime ?? 0} onChange={(stillFrameTime) => onUpdate(node.id, { stillFrameTime })} />
                 </>
-              ) : isBirefnetImage ? (
+              ) : (
                 <>
+                  <NodeRow label="Image" inputPort={settingsOpen ? imagePort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+                    <button className={incoming.imageIn?.length ? "connected-field" : ""}>{connectedSummary(incoming.imageIn, "Add image")}</button>
+                  </NodeRow>
+                  {isColorIdMatte ? (
+                    <ColorIdMattePicker imageUrl={connectedAssetUrls(incoming.imageIn).at(-1)} node={node} onUpdate={onUpdate} />
+                  ) : isPatina ? (
+                    <>
+                      {patinaMapOptions.map((option) => (
+                        <NodeRow key={option.id} label={option.label}>
+                          <button className={`node-toggle ${patinaMapsForData(node.data).includes(option.id) ? "enabled" : ""}`} onClick={() => togglePatinaMap(option.id)}>
+                            <span />
+                          </button>
+                        </NodeRow>
+                      ))}
+                      <NodeRow label="Format">
+                        <select value={node.data.patinaOutputFormat || "png"} onChange={(event) => onUpdate(node.id, { patinaOutputFormat: event.target.value })}>
+                          <option value="png">PNG</option>
+                          <option value="jpeg">JPEG</option>
+                          <option value="webp">WebP</option>
+                        </select>
+                      </NodeRow>
+                      <NodeRow label="Seed">
+                        <input value={node.data.patinaSeed || ""} onChange={(event) => onUpdate(node.id, { patinaSeed: event.target.value })} placeholder="Random" />
+                      </NodeRow>
+                    </>
+                  ) : isBirefnetImage ? (
+                    <>
                   <NodeRow label="BiRefNet">
                     <select value={node.data.birefnetModel || "General Use (Light)"} onChange={(event) => onUpdate(node.id, { birefnetModel: event.target.value })}>
                       {birefnetModelOptions.map((option) => (
@@ -5334,6 +6088,8 @@ function NodeBody({
                   </select>
                 </NodeRow>
               )}
+            </>
+          )}
             </>
           )}
         </details>
@@ -5454,17 +6210,24 @@ function NodeBody({
     const promptValue = resolvedPromptText(incoming.promptIn) || node.data.prompt;
     const promptConnected = Boolean(resolvedPromptText(incoming.promptIn));
     const isSam3Image = isSam3ImageModel(node.data.model);
+    const imageInstructionSources = [...(incoming.cameraIn || []), ...(incoming.styleIn || []), ...(incoming.transferIn || []), ...(incoming.characterIn || [])];
+    const effectivePromptValue = isSam3Image ? promptValue : buildEffectiveImagePrompt(promptValue, imageInstructionSources, node.data.aspectRatio);
+    const promptHasGeneratedAdditions = effectivePromptValue !== promptValue;
+    const appliedInstructionLabels = activeImageInstructionLabels(imageInstructionSources);
+    const characterTagMatches = isSam3Image ? [] : imageModelCharacterTagMatches(promptValue, incoming.characterIn);
     const imagePromptLabel = connectedSummary(incoming.imagePromptIn, "Add file");
     const cameraPromptLabel = connectedSummary(incoming.cameraIn, "Add camera");
     const stylePromptLabel = connectedSummary(incoming.styleIn, "Add style");
-    const transferPromptLabel = connectedSummary(incoming.transferIn, "Add transfer");
+    const transferPromptLabel = connectedSummary(incoming.transferIn, "Add mood board");
+    const characterPromptLabel = connectedSummary(incoming.characterIn, "Add character");
     const promptPort = config.input.find((port) => port.id === "promptIn");
     const imagePromptPort = config.input.find((port) => port.id === "imagePromptIn");
     const cameraPort = config.input.find((port) => port.id === "cameraIn");
     const stylePort = config.input.find((port) => port.id === "styleIn");
     const transferPort = config.input.find((port) => port.id === "transferIn");
+    const characterPort = config.input.find((port) => port.id === "characterIn");
     const settingsOpen = Boolean(node.data.settingsOpen);
-    const collapsedPorts = isSam3Image ? [promptPort, imagePromptPort] : [promptPort, imagePromptPort, cameraPort, stylePort, transferPort];
+    const collapsedPorts = isSam3Image ? [promptPort, imagePromptPort] : [promptPort, imagePromptPort, cameraPort, stylePort, transferPort, characterPort];
     return (
       <div className="node-body model-node-body image-model-body">
         <ResultPane
@@ -5499,8 +6262,28 @@ function NodeBody({
         <details className="model-settings-drawer" open={settingsOpen} onToggle={(event) => onUpdate(node.id, { settingsOpen: event.currentTarget.open })}>
           <summary>Settings</summary>
           <NodeRow label="Prompt" inputPort={settingsOpen ? promptPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-            <textarea className={promptConnected ? "connected-field" : ""} value={promptValue} readOnly={promptConnected} onChange={(event) => onUpdate(node.id, { prompt: event.target.value })} />
+            <TaggedPromptTextarea
+              className={promptConnected ? "connected-field" : ""}
+              value={promptValue}
+              readOnly={promptConnected}
+              tagMatches={characterTagMatches}
+              onChange={(event) => onUpdate(node.id, { prompt: event.target.value })}
+            />
           </NodeRow>
+          {characterTagMatches.length > 0 && (
+            <div className="reference-tag-chips">
+              {characterTagMatches.map((match) => (
+                <span key={match.nodeId} className="reference-tag-chip" style={{ "--tag-color": match.color }}>
+                  @{match.tag}
+                </span>
+              ))}
+            </div>
+          )}
+          {promptHasGeneratedAdditions && (
+            <div className="effective-prompt-preview">
+              <span>{`${appliedInstructionLabels.length === 1 ? "Active input" : "Active inputs"}: ${appliedInstructionLabels.join(" + ")}`}</span>
+            </div>
+          )}
           <NodeRow label="Model">
             <select value={node.data.model} onChange={(event) => onUpdate(node.id, imageModelSelectionPatch(node.data, event.target.value))}>
               <option>Nano Banana Pro</option>
@@ -5519,8 +6302,11 @@ function NodeBody({
               <NodeRow label="Style" inputPort={settingsOpen ? stylePort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
                 <button className={stylePromptLabel !== "Add style" ? "connected-field" : ""}>{stylePromptLabel}</button>
               </NodeRow>
-              <NodeRow label="Transfer" inputPort={settingsOpen ? transferPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-                <button className={transferPromptLabel !== "Add transfer" ? "connected-field" : ""}>{transferPromptLabel}</button>
+              <NodeRow label="Mood Board" inputPort={settingsOpen ? transferPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+                <button className={transferPromptLabel !== "Add mood board" ? "connected-field" : ""}>{transferPromptLabel}</button>
+              </NodeRow>
+              <NodeRow label="Character" inputPort={settingsOpen ? characterPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+                <button className={characterPromptLabel !== "Add character" ? "connected-field" : ""}>{characterPromptLabel}</button>
               </NodeRow>
               <NodeRow label="Generations">
                 <select value={node.data.batchCount || "1"} onChange={(event) => onUpdate(node.id, { batchCount: event.target.value })}>
@@ -5563,6 +6349,7 @@ function NodeBody({
   const referenceImagePort = config.input.find((port) => port.id === "referenceImageIn");
   const referenceVideoPort = config.input.find((port) => port.id === "referenceVideoIn");
   const referenceAudioPort = config.input.find((port) => port.id === "referenceAudioIn");
+  const characterPort = config.input.find((port) => port.id === "characterIn");
   const isWanFunControl = isWanFunControlModel(node.data.model);
   const isWan27Reference = isWan27ReferenceModel(node.data.model);
   const isAurora = isAuroraModel(node.data.model);
@@ -5577,18 +6364,20 @@ function NodeBody({
   const happyHorseReferenceImageCount = Math.min(incoming.referenceImageIn?.length || 0, 9);
   const wan27ReferenceImageCount = incoming.referenceImageIn?.length || 0;
   const wan27ReferenceVideoCount = incoming.referenceVideoIn?.length || 0;
+  const tagMatches = isWanFunControl || isAurora || isSam3Video ? [] : videoModelReferenceTagMatches(promptValue, incoming);
+  const characterConnected = Boolean(incoming.characterIn?.length);
   const settingsOpen = Boolean(node.data.settingsOpen);
   const collapsedPorts = isWanFunControl
-    ? [promptPort, referenceVideoPort, referenceImagePort]
+    ? [promptPort, referenceVideoPort, referenceImagePort, characterPort]
     : isWan27Reference
-      ? [promptPort, referenceImagePort, referenceVideoPort]
-      : isAurora
-        ? [promptPort, referenceImagePort, referenceAudioPort]
-        : isHappyHorse
-          ? [promptPort, referenceImagePort]
-          : isSam3Video
-            ? [promptPort, referenceVideoPort]
-            : [promptPort, startFramePort, endFramePort, referenceImagePort, referenceVideoPort, referenceAudioPort];
+      ? [promptPort, referenceImagePort, referenceVideoPort, characterPort]
+    : isAurora
+      ? [promptPort, referenceImagePort, referenceAudioPort, characterPort]
+      : isHappyHorse
+        ? [promptPort, referenceImagePort, characterPort]
+    : isSam3Video
+      ? [promptPort, referenceVideoPort]
+      : [promptPort, startFramePort, endFramePort, referenceImagePort, referenceVideoPort, referenceAudioPort, characterPort];
   return (
     <div className="node-body model-node-body video-model-body">
       <ResultPane
@@ -5633,8 +6422,24 @@ function NodeBody({
           </select>
         </NodeRow>
         <NodeRow label="Prompt" inputPort={settingsOpen ? promptPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-          <textarea className={promptConnected ? "connected-field" : ""} value={promptValue} readOnly={promptConnected} onChange={(event) => onUpdate(node.id, { prompt: event.target.value })} />
+          <TaggedPromptTextarea
+            className={promptConnected ? "connected-field" : ""}
+            value={promptValue}
+            readOnly={promptConnected}
+            tagMatches={tagMatches}
+            onChange={(event) => onUpdate(node.id, { prompt: event.target.value })}
+          />
         </NodeRow>
+        {tagMatches.length > 0 && (
+          <div className="reference-tag-chips">
+            {tagMatches.map((match) => (
+              <span key={match.nodeId} className="reference-tag-chip" style={{ "--tag-color": match.color }}>
+                @{match.tag}
+              </span>
+            ))}
+          </div>
+        )}
+        {characterConnected && !isSam3Video && <div className="effective-prompt-preview"><span>Character identity and selected voice instructions applied</span></div>}
         {!isSam3Video && (
           <NodeRow label="Generations">
             <select value={node.data.batchCount || "1"} onChange={(event) => onUpdate(node.id, { batchCount: event.target.value })}>
@@ -5653,6 +6458,9 @@ function NodeBody({
             </NodeRow>
             <NodeRow label="Reference Image" inputPort={settingsOpen ? referenceImagePort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
               <button className={incoming.referenceImageIn?.length ? "connected-field" : ""}>{connectedSummary(incoming.referenceImageIn, "Optional image")}</button>
+            </NodeRow>
+            <NodeRow label="Character" inputPort={settingsOpen ? characterPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+              <button className={incoming.characterIn?.length ? "connected-field" : ""}>{connectedSummary(incoming.characterIn, "Optional character")}</button>
             </NodeRow>
             <NodeRow label="Preprocess">
               <button className={`node-toggle ${node.data.preprocessVideo !== false ? "enabled" : ""}`} onClick={() => onUpdate(node.id, { preprocessVideo: node.data.preprocessVideo === false })}>
@@ -5752,6 +6560,9 @@ function NodeBody({
             <NodeRow label="Audio" inputPort={settingsOpen ? referenceAudioPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
               <button className={incoming.referenceAudioIn?.length ? "connected-field" : ""}>{connectedSummary(incoming.referenceAudioIn, "Add audio")}</button>
             </NodeRow>
+            <NodeRow label="Character" inputPort={settingsOpen ? characterPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+              <button className={incoming.characterIn?.length ? "connected-field" : ""}>{connectedSummary(incoming.characterIn, "Add character")}</button>
+            </NodeRow>
             <NodeRow label="Resolution">
               <select value={node.data.resolution} onChange={(event) => onUpdate(node.id, { resolution: event.target.value })}>
                 <option>720p</option>
@@ -5817,6 +6628,9 @@ function NodeBody({
             </NodeRow>
             <NodeRow label="Reference Audio" inputPort={settingsOpen ? referenceAudioPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
               <button className={incoming.referenceAudioIn?.length ? "connected-field" : ""}>{connectedSummary(incoming.referenceAudioIn, "Add file")}</button>
+            </NodeRow>
+            <NodeRow label="Character" inputPort={settingsOpen ? characterPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+              <button className={incoming.characterIn?.length ? "connected-field" : ""}>{connectedSummary(incoming.characterIn, "Add character")}</button>
             </NodeRow>
             <NodeRow label="Duration">
               <select value={node.data.duration} onChange={(event) => onUpdate(node.id, { duration: event.target.value })}>
@@ -6078,6 +6892,35 @@ function Model3DViewer({ url, label }) {
       {state === "loading" && <span>Loading 3D...</span>}
       {state === "error" && <span>Could not load 3D model</span>}
       {state === "empty" && <span>No 3D model</span>}
+    </div>
+  );
+}
+
+function TaggedPromptTextarea({ value, onChange, readOnly, className = "", tagMatches = [] }) {
+  const highlighterRef = React.useRef(null);
+  const parts = React.useMemo(() => promptHighlightParts(value, tagMatches), [value, tagMatches]);
+
+  function syncScroll(event) {
+    if (!highlighterRef.current) return;
+    highlighterRef.current.scrollTop = event.currentTarget.scrollTop;
+    highlighterRef.current.scrollLeft = event.currentTarget.scrollLeft;
+  }
+
+  return (
+    <div className={`tagged-prompt-editor ${className}`}>
+      <div ref={highlighterRef} className="tagged-prompt-highlighter" aria-hidden="true">
+        {parts.map((part, index) =>
+          part.active ? (
+            <mark key={`${part.text}-${index}`} className="prompt-tag-mark" style={{ "--tag-color": part.color }}>
+              {part.text}
+            </mark>
+          ) : (
+            <span key={`${part.text}-${index}`}>{part.text}</span>
+          )
+        )}
+        {String(value || "").endsWith("\n") ? "\u00a0" : null}
+      </div>
+      <textarea value={value} readOnly={readOnly} onChange={onChange} onScroll={syncScroll} />
     </div>
   );
 }
@@ -6945,6 +7788,14 @@ function getNodeConfig(type) {
       input: [],
       output: [{ id: "imageOut", label: "Image", color: portColors.image }]
     },
+    character: {
+      icon: UserRound,
+      input: [],
+      output: [
+        { id: "characterOut", label: "Character", color: portColors.character },
+        { id: "voiceOut", label: "Voice", color: portColors.audio }
+      ]
+    },
     camera: {
       icon: Camera,
       input: [{ id: "imageIn", label: "Image", color: portColors.image }],
@@ -6972,7 +7823,7 @@ function getNodeConfig(type) {
     transfer: {
       icon: Compass,
       input: [],
-      output: [{ id: "transferOut", label: "TRANSFER.png", color: portColors.transfer }]
+      output: [{ id: "transferOut", label: moodBoardOutputFileName, color: portColors.transfer }]
     },
     utility: {
       icon: Wrench,
@@ -7012,7 +7863,8 @@ function getNodeConfig(type) {
         { id: "imagePromptIn", label: "Image Prompt", color: portColors.image },
         { id: "cameraIn", label: "Camera", color: portColors.camera },
         { id: "styleIn", label: "Style", color: portColors.style },
-        { id: "transferIn", label: "Transfer", color: portColors.transfer }
+        { id: "transferIn", label: "Mood Board", color: portColors.transfer },
+        { id: "characterIn", label: "Character", color: portColors.character }
       ],
       output: [{ id: "imageOut", label: "Image", color: portColors.image }]
     },
@@ -7024,7 +7876,8 @@ function getNodeConfig(type) {
         { id: "endFrameIn", label: "End Frame", color: portColors.image },
         { id: "referenceImageIn", label: "Reference Image", color: portColors.image },
         { id: "referenceVideoIn", label: "Reference Video", color: portColors.video },
-        { id: "referenceAudioIn", label: "Reference Audio", color: portColors.audio }
+        { id: "referenceAudioIn", label: "Reference Audio", color: portColors.audio },
+        { id: "characterIn", label: "Character", color: portColors.character }
       ],
       output: [{ id: "videoOut", label: "Video", color: portColors.video }]
     }
@@ -7062,6 +7915,31 @@ function createDefaultNodeData(type, label, count) {
       composerScene
     };
   }
+  if (type === "character") {
+    return {
+      title,
+      characterName: "",
+      characterPhysicalDetails: "",
+      characterPortrait: null,
+      characterWardrobes: [],
+      activeWardrobeId: "",
+      characterReferenceNotes: "",
+      characterTraits: [],
+      customCharacterTraits: "",
+      characterVoices: [],
+      activeVoiceId: "",
+      characterTab: "build",
+      activated: false,
+      locked: false,
+      compiledWardrobeUrl: "",
+      compiledTraitPrompt: "",
+      compiledVoicePrompt: "",
+      characterSheetVariants: [],
+      characterBatchProgress: null,
+      characterVariantNotice: ""
+    };
+  }
+  if (type === "preview") return { title, previewScale: 1, previewItemIndex: 0 };
   if (type === "camera") {
     return {
       title,
@@ -7074,10 +7952,11 @@ function createDefaultNodeData(type, label, count) {
   }
   if (type === "transfer") {
     return {
-      title,
+      title: title === "Transfer" ? "Mood Board" : title,
       transferImages: [],
       activated: false,
       locked: false,
+      moodBoardScale: 1,
       hiddenPrompt: transferPromptSuffix
     };
   }
@@ -7088,6 +7967,7 @@ function createDefaultNodeData(type, label, count) {
       model: videoModelNames.wanFunControl,
       utilityImageModel: utilityImageModelNames.dwpose,
       utilityVideoModel: utilityVideoModelNames.wanFunControl,
+      stillFrameTime: 0,
       dwposeDrawMode: "body-pose",
       patinaMaps: patinaMapOptions.map((option) => option.id),
       patinaOutputFormat: "png",
@@ -7341,6 +8221,11 @@ function isUtilityWanVaceInpaintingModel(model) {
   return normalized.includes("vace") && normalized.includes("inpaint");
 }
 
+function isUtilityStillFrameModel(model) {
+  const normalized = String(model || "").toLowerCase();
+  return normalized.includes("still") || normalized.includes("frame");
+}
+
 function isUtilitySam3ImageModel(model) {
   const normalized = String(model || "").toLowerCase();
   return normalized.includes("sam") && normalized.includes("image");
@@ -7401,6 +8286,7 @@ function utilityResultType(node) {
 
 function utilityInputPortIds(mode, imageModel = utilityImageModelNames.dwpose, videoModel = utilityVideoModelNames.wanFunControl) {
   if (mode === "image") {
+    if (isUtilityStillFrameModel(imageModel)) return ["referenceVideoIn"];
     return isUtilitySam3ImageModel(imageModel) ? ["promptIn", "imageIn"] : ["imageIn"];
   }
 
@@ -7419,6 +8305,7 @@ function utilityInputPortIds(mode, imageModel = utilityImageModelNames.dwpose, v
 function normalizedUtilityImageModelName(model) {
   const normalized = String(model || "").toLowerCase();
   if (normalized.includes("color") && normalized.includes("matte")) return utilityImageModelNames.colorIdMatte;
+  if (normalized.includes("still") || normalized.includes("frame")) return utilityImageModelNames.stillFrame;
   if (normalized.includes("sam") && normalized.includes("image")) return utilityImageModelNames.sam3Image;
   if (normalized.includes("birefnet")) return utilityImageModelNames.birefnetImage;
   if (normalized.includes("depth") || normalized.includes("anything")) return utilityImageModelNames.depthAnything;
@@ -7481,6 +8368,8 @@ function outputPortIdsForNode(node) {
 
 function estimatedNodeWidth(type) {
   if (type === "imageModel" || type === "videoModel" || type === "utility" || type === "model3d") return 370;
+  if (type === "imageModel" || type === "videoModel" || type === "utility") return 370;
+  if (type === "character") return 760;
   if (type === "camera") return 360;
   if (type === "transfer" || type === "preview") return 335;
   return 310;
@@ -7530,6 +8419,28 @@ function buildConnectedPortKeys(edges) {
   return keys;
 }
 
+function buildReferenceTagHighlights(nodes, incomingByNode) {
+  const highlights = new Map();
+
+  nodes.forEach((node) => {
+    const incoming = incomingByNode[node.id] || {};
+    const prompt = connectedText(incoming.promptIn) || node.data.prompt || "";
+    const matches = node.type === "imageModel" && !isSam3ImageModel(node.data.model)
+      ? imageModelCharacterTagMatches(prompt, incoming.characterIn)
+      : node.type === "videoModel" && !isWanFunControlModel(node.data.model) && !isAuroraModel(node.data.model) && !isSam3VideoModel(node.data.model)
+        ? videoModelReferenceTagMatches(prompt, incoming)
+        : [];
+
+    matches.forEach((match) => {
+      if (!highlights.has(match.nodeId)) {
+        highlights.set(match.nodeId, match);
+      }
+    });
+  });
+
+  return highlights;
+}
+
 function buildActiveEdgeIds(nodes, edges) {
   const activeNodeIds = new Set(nodes.filter((node) => node.data?.status === "running").map((node) => node.id));
   return new Set(edges.filter((edge) => activeNodeIds.has(edge.to.nodeId)).map((edge) => edge.id));
@@ -7541,7 +8452,10 @@ function buildInactiveEdgeIds(nodes, edges) {
     edges
       .filter((edge) => {
         const source = nodeMap.get(edge.from.nodeId);
-        return source?.type === "transfer" && (!source.data?.locked || !source.data?.activated || !source.data?.resultUrl);
+        return (
+          (source?.type === "transfer" || source?.type === "character") &&
+          (!source.data?.locked || !source.data?.activated || !source.data?.resultUrl)
+        );
       })
       .map((edge) => edge.id)
   );
@@ -7637,6 +8551,116 @@ async function runTextNodeProcessing({ node, incoming, projectId, projectName })
   };
 }
 
+function connectedAssetLabels(items = []) {
+  return items
+    .filter(({ source }) => source.data.resultUrl)
+    .map(({ source }) => source.data.title || sourceLabel(source));
+}
+
+function connectedCharacterReferences(items = []) {
+  return items
+    .filter(({ source }) => source.type === "character" && source.data.locked && source.data.activated && source.data.resultUrl)
+    .map(({ source }) => ({
+      url: source.data.resultUrl,
+      label: characterTag(source)
+    }));
+}
+
+function connectedCharacterVoiceUrls(items = []) {
+  return items
+    .filter(({ source }) => source.type === "character" && source.data.locked && source.data.activated)
+    .map(({ source }) => activeCharacterVoice(source)?.localUrl)
+    .filter(Boolean);
+}
+
+function connectedAudioUrls(items = []) {
+  return items
+    .map(({ source, edge }) => (source.type === "character" && edge.from.port === "voiceOut" ? activeCharacterVoice(source)?.localUrl : source.data.resultUrl))
+    .filter(Boolean);
+}
+
+function videoModelReferenceTagMatches(prompt, incoming = {}) {
+  const text = String(prompt || "");
+  const imageCandidates = referenceTagCandidates(incoming.referenceImageIn, 0, "Image");
+  const videoCandidates = referenceTagCandidates(incoming.referenceVideoIn, imageCandidates.length, "Video");
+  const characterCandidates = characterTagCandidates(incoming.characterIn, imageCandidates.length + videoCandidates.length);
+  return [...imageCandidates, ...videoCandidates, ...characterCandidates].filter((match) => promptHasTag(text, match.tag));
+}
+
+function imageModelCharacterTagMatches(prompt, items = []) {
+  const text = String(prompt || "");
+  return characterTagCandidates(items).filter((match) => promptHasTag(text, match.tag));
+}
+
+function referenceTagCandidates(items = [], colorOffset = 0, fallbackPrefix = "Image") {
+  return items
+    .filter(({ source }) => source.data.resultUrl)
+    .map(({ source }, index) => ({
+      nodeId: source.id,
+      tag: cleanPromptTag(source.data.title || sourceLabel(source)) || `${fallbackPrefix}${index + 1}`,
+      color: referenceTagPalette[(colorOffset + index) % referenceTagPalette.length],
+      type: fallbackPrefix.toLowerCase()
+    }));
+}
+
+function characterTagCandidates(items = [], colorOffset = 0) {
+  return items
+    .filter(({ source }) => source.type === "character" && source.data.locked && source.data.activated && source.data.resultUrl)
+    .map(({ source }, index) => ({
+      nodeId: source.id,
+      tag: characterTag(source),
+      color: portColors.character || referenceTagPalette[(colorOffset + index) % referenceTagPalette.length],
+      type: "character"
+    }));
+}
+
+function promptHighlightParts(value, tagMatches = []) {
+  const text = String(value || "");
+  if (!text) return [{ text: "", active: false }];
+
+  const tagMap = new Map(tagMatches.map((match) => [match.tag.toLowerCase(), match]));
+  const parts = [];
+  const tagPattern = /@([A-Za-z0-9_-]+)/g;
+  let lastIndex = 0;
+  let match;
+
+  while ((match = tagPattern.exec(text))) {
+    if (match.index > lastIndex) {
+      parts.push({ text: text.slice(lastIndex, match.index), active: false });
+    }
+
+    const tagMatch = tagMap.get(match[1].toLowerCase());
+    parts.push({
+      text: match[0],
+      active: Boolean(tagMatch),
+      color: tagMatch?.color
+    });
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex < text.length) {
+    parts.push({ text: text.slice(lastIndex), active: false });
+  }
+
+  return parts;
+}
+
+function promptHasTag(prompt, tag) {
+  if (!tag) return false;
+  return new RegExp(`@${escapeRegExp(tag)}(?![A-Za-z0-9_-])`, "i").test(prompt);
+}
+
+function cleanPromptTag(value) {
+  return String(value || "")
+    .replace(/^@+/, "")
+    .replace(/[^A-Za-z0-9_-]/g, "")
+    .slice(0, 28);
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 async function runCameraQwenEdit({ node, incoming, projectId, projectName }) {
   const imageUrl = connectedAssetUrls(incoming.imageIn).at(-1);
   if (!imageUrl) throw new Error("Connect an image to the Camera node.");
@@ -7672,6 +8696,18 @@ async function runCameraQwenEdit({ node, incoming, projectId, projectName }) {
 }
 
 async function runUtilityImageGeneration({ node, prompt, incoming, projectId, projectName }) {
+  const modelName = normalizedUtilityImageModelName(node.data.utilityImageModel);
+  if (isUtilityStillFrameModel(modelName)) {
+    const videoUrl = connectedAssetUrls(incoming.referenceVideoIn).at(-1);
+    if (!videoUrl) throw new Error("Connect a video to the Utility node.");
+    const still = await grabStillFrameFromVideo({
+      videoUrl,
+      requestedTime: node.data.stillFrameTime,
+      nodeTitle: node.data.title
+    });
+    return [still];
+  }
+
   const imageUrl = connectedAssetUrls(incoming.imageIn).at(-1);
   if (!imageUrl) throw new Error("Connect an image to the Utility node.");
   const model = normalizedUtilityImageModelName(node.data.utilityImageModel);
@@ -7748,6 +8784,129 @@ async function runColorIdMatteUtilityImage({ node, imageUrl, projectId, projectN
     text: data.text || "",
     cost: data.cost
   };
+}
+
+async function grabStillFrameFromVideo({ videoUrl, requestedTime, nodeTitle }) {
+  const video = document.createElement("video");
+  video.muted = true;
+  video.playsInline = true;
+  video.preload = "auto";
+  video.src = videoUrl;
+
+  try {
+    video.load();
+    await waitForMediaEvent(video, "loadedmetadata");
+    if (video.readyState < 2) {
+      await waitForMediaEvent(video, "loadeddata");
+    }
+
+    const duration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 0;
+    const requested = Math.max(0, Number(requestedTime) || 0);
+    const targetTime = duration ? Math.min(requested, Math.max(0, duration - 0.04)) : requested;
+    if (targetTime > 0.01) {
+      await seekVideoFrame(video, targetTime);
+    }
+
+    const width = video.videoWidth;
+    const height = video.videoHeight;
+    if (!width || !height) throw new Error("Could not read video dimensions.");
+
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+    context.drawImage(video, 0, 0, width, height);
+    const blob = await canvasToBlob(canvas, "image/png");
+    const fileName = `${safeStillFrameName(nodeTitle)}-${formatFrameTime(targetTime)}.png`;
+    const form = new FormData();
+    form.append("asset", new File([blob], fileName, { type: "image/png" }));
+
+    const { response, data } = await fetchJsonApi("/api/node/upload-asset", {
+      method: "POST",
+      body: form
+    }, "Still frame upload");
+    if (!response.ok) throw new Error(data.error || "Could not save still frame.");
+
+    return {
+      url: data.asset.localUrl,
+      type: "image",
+      label: `Still ${formatFrameTime(targetTime)}`,
+      text: "",
+      seed: null,
+      cost: null
+    };
+  } finally {
+    video.removeAttribute("src");
+    video.load();
+  }
+}
+
+function waitForMediaEvent(element, eventName) {
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      element.removeEventListener(eventName, handleEvent);
+      element.removeEventListener("error", handleError);
+    };
+    const handleEvent = () => {
+      cleanup();
+      resolve();
+    };
+    const handleError = () => {
+      cleanup();
+      reject(new Error("Could not load video."));
+    };
+    element.addEventListener(eventName, handleEvent, { once: true });
+    element.addEventListener("error", handleError, { once: true });
+  });
+}
+
+function seekVideoFrame(video, time) {
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      video.removeEventListener("seeked", handleSeeked);
+      video.removeEventListener("error", handleError);
+    };
+    const handleSeeked = () => {
+      cleanup();
+      resolve();
+    };
+    const handleError = () => {
+      cleanup();
+      reject(new Error("Could not seek video."));
+    };
+    video.addEventListener("seeked", handleSeeked, { once: true });
+    video.addEventListener("error", handleError, { once: true });
+    video.currentTime = time;
+  });
+}
+
+function canvasToBlob(canvas, type) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) resolve(blob);
+      else reject(new Error("Could not render still frame."));
+    }, type);
+  });
+}
+
+function safeStillFrameName(value) {
+  return String(value || "still-frame")
+    .replace(/[^A-Za-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40) || "still-frame";
+}
+
+function formatFrameTime(seconds) {
+  const value = Math.max(0, Number(seconds) || 0);
+  return `${Math.floor(value).toString().padStart(2, "0")}-${Math.round((value % 1) * 10)}`;
+}
+
+function formatTimelineTime(seconds) {
+  const value = Math.max(0, Number(seconds) || 0);
+  const minutes = Math.floor(value / 60);
+  const wholeSeconds = Math.floor(value % 60);
+  const tenths = Math.floor((value % 1) * 10);
+  return `${minutes}:${wholeSeconds.toString().padStart(2, "0")}.${tenths}`;
 }
 
 async function fetchJsonApi(path, options, label) {
@@ -7920,6 +9079,39 @@ async function run3DModelGeneration({ node, incoming, projectId, projectName }) 
   };
 }
 
+async function runCharacterSheetGeneration({ node, prompt, portrait, wardrobe, projectId, projectName }) {
+  const references = [
+    { url: portrait.localUrl, label: "The Character portrait reference" },
+    ...(wardrobe?.localUrl ? [{ url: wardrobe.localUrl, label: "Selected wardrobe sheet" }] : [])
+  ];
+  const { response, data } = await fetchJsonApi("/api/node/generate-image", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      prompt,
+      model: "OpenAI Image 2",
+      aspectRatio: "16:9",
+      resolution: "4K",
+      imagePromptUrls: references.map((item) => item.url),
+      imagePromptLabels: references.map((item) => item.label),
+      projectId,
+      projectName,
+      nodeId: node.id,
+      nodeTitle: `${node.data.title || "Character"} Character Sheet`
+    })
+  }, "Character sheet generation");
+  if (!response.ok) throw new Error(data.error || "Character sheet generation failed.");
+
+  return {
+    url: data.image.localUrl,
+    type: "image",
+    label: `@${characterTag(node)} Character Sheet`,
+    fileName: data.image.fileName,
+    text: data.text || "",
+    cost: data.cost
+  };
+}
+
 function connected3DViewUrls(incoming = {}) {
   return Object.fromEntries(
     model3DViewInputs
@@ -7933,6 +9125,8 @@ function connected3DViewUrls(incoming = {}) {
 }
 
 async function runVideoModelGeneration({ node, prompt, incoming, projectId, projectName, index }) {
+  const characterReferences = connectedCharacterReferences(incoming.characterIn);
+  const characterVoices = connectedCharacterVoiceUrls(incoming.characterIn);
   const { response, data } = await fetchJsonApi("/api/node/generate-video", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -7947,9 +9141,11 @@ async function runVideoModelGeneration({ node, prompt, incoming, projectId, proj
       enableSafetyChecker: node.data.enableSafetyChecker !== false,
       startFrameUrls: connectedAssetUrls(incoming.startFrameIn),
       endFrameUrls: connectedAssetUrls(incoming.endFrameIn),
-      referenceImageUrls: connectedAssetUrls(incoming.referenceImageIn),
+      referenceImageUrls: [...connectedAssetUrls(incoming.referenceImageIn), ...characterReferences.map((item) => item.url)],
+      referenceImageLabels: [...connectedAssetLabels(incoming.referenceImageIn), ...characterReferences.map((item) => item.label)],
       referenceVideoUrls: connectedAssetUrls(incoming.referenceVideoIn),
-      referenceAudioUrls: connectedAssetUrls(incoming.referenceAudioIn),
+      referenceVideoLabels: connectedAssetLabels(incoming.referenceVideoIn),
+      referenceAudioUrls: [...new Set([...connectedAudioUrls(incoming.referenceAudioIn), ...characterVoices])],
       wan27Reference: {
         negativePrompt: node.data.negativePrompt || "",
         multiShots: Boolean(node.data.multiShots)
@@ -8246,6 +9442,11 @@ function previewSelectedIndexForNode(node, previewItems = []) {
   return sourceSelectedIndex >= 0 ? sourceSelectedIndex : 0;
 }
 
+function selectedPreviewSource(sources = [], selectedId) {
+  if (!sources.length) return null;
+  return sources.find((source) => source.id === selectedId) || sources.at(-1);
+}
+
 function previewMediaType(source, edge) {
   if (source.type === "utility") return utilityResultType(source);
   if (source.type === "model3d") return "model3d";
@@ -8256,12 +9457,17 @@ function previewMediaType(source, edge) {
 }
 
 function connectedImagePromptItems(items = []) {
+  const namedCharacterReferences = activeConnectedCharacterSources(items).length > 1;
+
   return items
-    .map(({ source }) => {
+    .flatMap(({ source }) => {
       if (!source.data.resultUrl) return null;
+      if (source.type === "character") {
+        return { url: source.data.resultUrl, label: characterReferenceLabel(source, namedCharacterReferences) };
+      }
       return {
         url: source.data.resultUrl,
-        label: source.type === "composer" ? "Composer frame" : source.type === "transfer" ? "TRANSFER.png" : sourceLabel(source)
+        label: source.type === "composer" ? "Composer frame" : source.type === "transfer" ? moodBoardOutputFileName : sourceLabel(source)
       };
     })
     .filter(Boolean);
@@ -8530,23 +9736,47 @@ function normalizeChoice(value, options = [], fallback) {
   return options.includes(value) ? value : fallback;
 }
 
+function activeImageInstructionLabels(items = []) {
+  return [
+    ...new Set(
+      items
+        .filter(({ source }) => promptPiecesForSource(source).length)
+        .map(({ source }) => ({
+          camera: "Camera",
+          style: "Style",
+          transfer: "Mood Board",
+          character: "Character identity"
+        })[source.type])
+        .filter(Boolean)
+    )
+  ];
+}
+
 function buildEffectiveImagePrompt(prompt, items = [], aspectRatio) {
   const hasTransferReference = items.some(({ source }) => source.type === "transfer" && source.data.resultUrl);
-  const promptInstructions = items
-    .flatMap(({ source }) => promptPiecesForSource(source))
+  const characterSources = activeConnectedCharacterSources(items);
+  const namedCharacterReferences = characterSources.length > 1;
+  const resolvedPrompt = resolveImageCharacterMentions(prompt, characterSources, namedCharacterReferences);
+  const supportingInstructions = items
+    .filter(({ source }) => source.type !== "camera")
+    .flatMap(({ source }) => promptPiecesForSource(source, { namedCharacterReferences }))
+    .filter(Boolean);
+  const cameraInstructions = items
+    .filter(({ source }) => source.type === "camera")
+    .flatMap(({ source }) => promptPiecesForSource(source, { namedCharacterReferences }))
     .filter(Boolean);
 
-  if (!promptInstructions.length) return prompt;
+  if (!supportingInstructions.length && !cameraInstructions.length) return resolvedPrompt;
 
   const ratio = extractAspectRatio(aspectRatio);
   const aspectInstruction = hasTransferReference && ratio
-    ? `Generate the final image in the Image Model node's selected ${ratio} aspect ratio. Do not copy TRANSFER.png's collage layout or aspect ratio into the final image.`
+    ? `Generate the final image in the Image Model node's selected ${ratio} aspect ratio. Do not copy ${moodBoardOutputFileName}'s collage layout or aspect ratio into the final image.`
     : "";
 
-  return [prompt, ...promptInstructions, aspectInstruction].filter(Boolean).join("\n\n");
+  return [resolvedPrompt, ...supportingInstructions, aspectInstruction, ...cameraInstructions].filter(Boolean).join("\n\n");
 }
 
-function promptPiecesForSource(source) {
+function promptPiecesForSource(source, { namedCharacterReferences = false } = {}) {
   if (source.type === "camera") {
     return cameraPromptPieces(source);
   }
@@ -8560,21 +9790,149 @@ function promptPiecesForSource(source) {
     return [composerReferencePrompt];
   }
 
+  if (source.type === "character" && source.data.locked && source.data.activated && source.data.resultUrl) {
+    return characterImagePromptPieces(source, namedCharacterReferences);
+  }
+
   if (source.type !== "transfer" || !source.data.activated || !source.data.resultUrl) return [];
 
   return [source.data.hiddenPrompt || transferPromptSuffix].filter(Boolean);
+}
+
+function buildEffectiveVideoPrompt(prompt, incoming = {}) {
+  const audioUrls = [...new Set([...connectedAudioUrls(incoming.referenceAudioIn), ...connectedCharacterVoiceUrls(incoming.characterIn)])];
+  const characterInstructions = (incoming.characterIn || [])
+    .flatMap(({ source }) => {
+      const voiceUrl = activeCharacterVoice(source)?.localUrl;
+      const audioIndex = voiceUrl ? audioUrls.indexOf(voiceUrl) + 1 : null;
+      return characterVideoPromptPieces(source, audioIndex);
+    })
+    .filter(Boolean);
+  return [prompt, ...characterInstructions].filter(Boolean).join("\n\n");
+}
+
+function characterImagePromptPieces(source, namedCharacterReferences = false) {
+  const sheetLabel = characterReferenceLabel(source, namedCharacterReferences);
+  return [
+    `CHARACTER REFERENCE: Use "${sheetLabel}" as the only identity, selected wardrobe, and body-proportion authority for the character. Render this same recognizable character in the requested scene and keep the selected outfit consistent.`,
+    characterGenerationPhysicalDetailsPrompt(source.data),
+    characterTraitPrompt(source.data)
+  ].filter(Boolean);
+}
+
+function characterVideoPromptPieces(source, audioIndex) {
+  if (!source.data.locked || !source.data.activated || !source.data.resultUrl) return [];
+  return [
+    "The connected character sheet defines the character's visual identity and selected wardrobe. Keep the character consistent throughout the shot.",
+    characterGenerationPhysicalDetailsPrompt(source.data),
+    characterTraitPrompt(source.data),
+    audioIndex && activeCharacterVoice(source)
+      ? `${source.data.compiledVoicePrompt || characterVoicePrompt} Use the dialogue reference labeled @Audio${audioIndex} for this character.`
+      : ""
+  ].filter(Boolean);
+}
+
+function characterTraitPrompt(data = {}) {
+  const presetTraits = Array.isArray(data.characterTraits) ? data.characterTraits : [];
+  const customTraits = String(data.customCharacterTraits || "")
+    .split(",")
+    .map((trait) => trait.trim())
+    .filter(Boolean);
+  const traits = [...new Set([...presetTraits, ...customTraits])];
+  if (!traits.length) return "";
+  return `The character characteristics are authentic, ${traits.join(", ")} and realistically displayed. These traits should be considered when rendering generations.`;
+}
+
+function characterPhysicalDetailsPrompt(data = {}) {
+  const details = String(data.characterPhysicalDetails || "").trim();
+  if (!details) return "";
+  return `Defining physical details requirement: ${details}. These are identity-critical physical features. Depict them clearly, accurately, and consistently across every applicable view in the character sheet. Do not omit, soften, replace, or reinterpret these details.`;
+}
+
+function characterGenerationPhysicalDetailsPrompt(data = {}) {
+  const details = String(data.characterPhysicalDetails || "").trim().replace(/[.!?]+$/, "");
+  if (!details) return "";
+  return `The character has ${details.charAt(0).toLowerCase()}${details.slice(1)}.`;
+}
+
+function activeCharacterWardrobe(node) {
+  const wardrobes = Array.isArray(node?.data?.characterWardrobes) ? node.data.characterWardrobes : [];
+  return wardrobes.find((wardrobe) => wardrobe.id === node.data.activeWardrobeId) || null;
+}
+
+function characterWardrobeVariantId(wardrobe) {
+  return wardrobe?.id || characterDefaultWardrobeId;
+}
+
+function characterSheetVariantForWardrobeId(data = {}, wardrobeId = "") {
+  const targetId = wardrobeId || characterDefaultWardrobeId;
+  const variants = Array.isArray(data.characterSheetVariants) ? data.characterSheetVariants : [];
+  return variants.find((variant) => variant.wardrobeId === targetId) || null;
+}
+
+function characterVariantDisplayPatch(variant) {
+  const generated = variant?.generated || {};
+  return {
+    resultUrl: generated.url || "",
+    resultItems: generated.url ? [generated] : [],
+    selectedResultIndex: 0,
+    fileName: generated.fileName || "",
+    compiledWardrobeUrl: variant?.wardrobeUrl || ""
+  };
+}
+
+function activeCharacterVoice(node) {
+  const voices = Array.isArray(node?.data?.characterVoices) ? node.data.characterVoices : [];
+  return voices.find((voice) => voice.id === node.data.activeVoiceId) || null;
+}
+
+function characterTag(node) {
+  return cleanPromptTag(node?.data?.characterName || node?.data?.title || "Character") || "Character";
+}
+
+function activeConnectedCharacterSources(items = []) {
+  return items
+    .map(({ source }) => source)
+    .filter((source) => source.type === "character" && source.data.locked && source.data.activated && source.data.resultUrl);
+}
+
+function resolveImageCharacterMentions(prompt, characterSources = [], namedCharacterReferences = false) {
+  return characterSources.reduce((value, source) => {
+    const replacement = namedCharacterReferences
+      ? `the character in the reference sheet labeled "${characterReferenceLabel(source, true)}"`
+      : "the character in the connected character sheet";
+    return replacePromptTag(value, characterTag(source), replacement);
+  }, String(prompt || ""));
+}
+
+function replacePromptTag(prompt, tag, replacement) {
+  const pattern = new RegExp(`@${escapeRegExp(tag)}(?![A-Za-z0-9_-])`, "gi");
+  return String(prompt || "").replace(pattern, (match, offset) => (
+    offset === 0
+      ? `${replacement.charAt(0).toUpperCase()}${replacement.slice(1)}`
+      : replacement
+  ));
+}
+
+function characterReferenceLabel(node, namedCharacterReferences = false) {
+  return namedCharacterReferences ? `${characterTag(node)} character identity sheet` : "The Character identity sheet";
 }
 
 function cameraPromptPieces(source) {
   const selectedShot = source.data.shotPreset || "None";
   const selectedLens = source.data.lensPreset || "None";
   const selectedType = source.data.typePreset || "None";
-
-  return [
+  const settings = [
     shotPresetPrompts[selectedShot] || "",
     lensPresetPrompts[selectedLens] || "",
     typePresetPrompts[selectedType] || ""
   ].filter(Boolean);
+
+  if (!settings.length) return [];
+
+  return [
+    `CAMERA COMPOSITION REQUIREMENT: Use the connected Camera node as the authority for final framing and lens perspective. ${settings.join(" ")} Apply these camera choices to the complete final scene, including any connected character. Identity, wardrobe, style, and mood board guidance must preserve this composition rather than replace or weaken it.`
+  ];
 }
 
 function hasCameraPreset(source) {
@@ -8597,6 +9955,8 @@ function sourceLabel(source) {
   if (source.type === "composer") return source.data.title || "Composer";
   if (source.type === "model3d" && source.data.resultUrl) return source.data.title || "3D model";
   if (source.type === "transfer" && source.data.resultUrl) return "TRANSFER.png";
+  if (source.type === "character" && source.data.resultUrl) return `@${characterTag(source)}`;
+  if (source.type === "transfer" && source.data.resultUrl) return moodBoardOutputFileName;
   if (source.type === "style") return (source.data.stylePreset || "None") === "None" ? "Style" : source.data.stylePreset;
   if (source.type === "utility" && source.data.resultUrl) return utilityResultType(source) === "video" ? "Utility video" : "Utility image";
   if (source.data.resultUrl) return source.data.resultUrl.split("/").pop();
@@ -8626,28 +9986,14 @@ function aspectRatioNumber(value) {
 
 async function createTransferCollageBlob(images) {
   const loadedImages = await Promise.all(images.map((image) => loadCanvasImage(image.localUrl)));
-  const columns = loadedImages.length === 1 ? 1 : loadedImages.length <= 4 ? 2 : 3;
-  const rows = Math.ceil(loadedImages.length / columns);
-  const cellSize = 512;
-  const gap = 18;
+  const layout = createMoodBoardLayout(loadedImages);
   const canvas = document.createElement("canvas");
-  canvas.width = columns * cellSize;
-  canvas.height = rows * cellSize;
+  canvas.width = layout.width;
+  canvas.height = layout.height;
 
   const context = canvas.getContext("2d");
-  context.fillStyle = "#0d0d0d";
-  context.fillRect(0, 0, canvas.width, canvas.height);
-
-  loadedImages.forEach((image, index) => {
-    const column = index % columns;
-    const row = Math.floor(index / columns);
-    const x = column * cellSize + gap / 2;
-    const y = row * cellSize + gap / 2;
-    const size = cellSize - gap;
-    drawImageCover(context, image, x, y, size, size);
-    context.strokeStyle = "rgba(255, 255, 255, 0.16)";
-    context.lineWidth = 2;
-    context.strokeRect(x, y, size, size);
+  layout.cells.forEach((cell) => {
+    drawImageCover(context, cell.image, cell.x, cell.y, cell.width, cell.height);
   });
 
   return new Promise((resolve, reject) => {
@@ -8655,17 +10001,166 @@ async function createTransferCollageBlob(images) {
       if (blob) {
         resolve(blob);
       } else {
-        reject(new Error("Could not create TRANSFER.png."));
+        reject(new Error(`Could not create ${moodBoardOutputFileName}.`));
       }
     }, "image/png");
   });
+}
+
+function createMoodBoardLayout(images) {
+  if (!images.length) throw new Error("Upload at least one mood board image.");
+
+  const canvasWidth = 1536;
+  const preferredAspect = 16 / 9;
+  const minAspect = 1.25;
+  const maxAspect = 2.35;
+  const items = images.map((image, index) => ({
+    image,
+    index,
+    ratio: imageAspectRatio(image)
+  }));
+  let bestCandidate = null;
+
+  moodBoardOrders(items).forEach((orderedItems, orderIndex) => {
+    moodBoardRowPartitions(orderedItems.length).forEach((rowLengths) => {
+      const rows = [];
+      let cursor = 0;
+      rowLengths.forEach((length) => {
+        rows.push(orderedItems.slice(cursor, cursor + length));
+        cursor += length;
+      });
+
+      const naturalHeights = rows.map((row) => canvasWidth / row.reduce((total, item) => total + item.ratio, 0));
+      const naturalHeight = naturalHeights.reduce((total, height) => total + height, 0);
+      const naturalAspect = canvasWidth / naturalHeight;
+      const targetAspect = clamp(naturalAspect, minAspect, maxAspect);
+      const targetHeight = canvasWidth / targetAspect;
+      const heightScale = targetHeight / naturalHeight;
+      const rowBalancePenalty = rowBalanceScore(naturalHeights);
+      const tinyCellPenalty = moodBoardTinyCellPenalty(rows, naturalHeights, canvasWidth);
+      const orderPenalty = orderIndex === 0 ? 0 : 0.08;
+      const dominantWideBonus = rows[0]?.length === 1 && rows[0][0]?.ratio > 1.45 ? -0.08 : 0;
+      const score =
+        Math.abs(Math.log(naturalAspect / preferredAspect)) * 0.7 +
+        Math.abs(Math.log(heightScale)) * 1.8 +
+        rowBalancePenalty * 0.45 +
+        tinyCellPenalty +
+        rows.length * 0.025 +
+        orderPenalty +
+        dominantWideBonus;
+
+      if (!bestCandidate || score < bestCandidate.score) {
+        bestCandidate = { rows, naturalHeights, targetHeight, score };
+      }
+    });
+  });
+
+  const canvasHeight = Math.round(bestCandidate.targetHeight);
+  const naturalTotalHeight = bestCandidate.naturalHeights.reduce((total, height) => total + height, 0);
+  const heightScale = canvasHeight / naturalTotalHeight;
+  const cells = [];
+  let y = 0;
+
+  bestCandidate.rows.forEach((row, rowIndex) => {
+    const isLastRow = rowIndex === bestCandidate.rows.length - 1;
+    const rowHeight = isLastRow ? canvasHeight - y : bestCandidate.naturalHeights[rowIndex] * heightScale;
+    const ratioTotal = row.reduce((total, item) => total + item.ratio, 0);
+    let x = 0;
+
+    row.forEach((item, itemIndex) => {
+      const isLastItem = itemIndex === row.length - 1;
+      const width = isLastItem ? canvasWidth - x : canvasWidth * (item.ratio / ratioTotal);
+      cells.push({
+        image: item.image,
+        x,
+        y,
+        width,
+        height: rowHeight
+      });
+      x += width;
+    });
+
+    y += rowHeight;
+  });
+
+  return {
+    width: canvasWidth,
+    height: canvasHeight,
+    cells
+  };
+}
+
+function moodBoardOrders(items) {
+  const candidates = [
+    items,
+    [...items].sort((first, second) => second.ratio - first.ratio),
+    [...items].sort((first, second) => first.ratio - second.ratio)
+  ];
+  const dominantWideIndex = items.reduce((bestIndex, item, index) => (item.ratio > items[bestIndex].ratio ? index : bestIndex), 0);
+  if (items[dominantWideIndex]?.ratio > 1.45) {
+    candidates.push([items[dominantWideIndex], ...items.filter((_, index) => index !== dominantWideIndex)]);
+  }
+
+  const seen = new Set();
+  return candidates.filter((candidate) => {
+    const key = candidate.map((item) => item.index).join(",");
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function moodBoardRowPartitions(count) {
+  const maxRows = Math.min(3, count);
+  const maxPerRow = Math.min(4, count);
+  const partitions = [];
+
+  function build(remaining, current) {
+    if (!remaining) {
+      partitions.push(current);
+      return;
+    }
+    if (current.length >= maxRows) return;
+
+    for (let length = 1; length <= Math.min(maxPerRow, remaining); length += 1) {
+      build(remaining - length, [...current, length]);
+    }
+  }
+
+  build(count, []);
+  return partitions;
+}
+
+function imageAspectRatio(image) {
+  const width = image.naturalWidth || image.width || 1;
+  const height = image.naturalHeight || image.height || 1;
+  return clamp(width / height, 0.25, 4.5);
+}
+
+function rowBalanceScore(heights) {
+  if (heights.length <= 1) return 0;
+  const average = heights.reduce((total, height) => total + height, 0) / heights.length;
+  return heights.reduce((total, height) => total + Math.abs(height - average) / average, 0) / heights.length;
+}
+
+function moodBoardTinyCellPenalty(rows, rowHeights, canvasWidth) {
+  return rows.reduce((penalty, row, rowIndex) => {
+    const ratioTotal = row.reduce((total, item) => total + item.ratio, 0);
+    return row.reduce((rowPenalty, item) => {
+      const width = canvasWidth * (item.ratio / ratioTotal);
+      const height = rowHeights[rowIndex];
+      const narrowPenalty = width < 190 ? (190 - width) / 190 : 0;
+      const shortPenalty = height < 190 ? (190 - height) / 190 : 0;
+      return rowPenalty + narrowPenalty + shortPenalty;
+    }, penalty);
+  }, 0);
 }
 
 function loadCanvasImage(src) {
   return new Promise((resolve, reject) => {
     const image = new Image();
     image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error("Could not load one of the transfer images."));
+    image.onerror = () => reject(new Error("Could not load one of the mood board images."));
     image.src = src;
   });
 }
@@ -9726,6 +11221,40 @@ function normalizeCurrentNode(node) {
     };
   }
 
+  if (nextNode.type === "transfer") {
+    return {
+      ...nextNode,
+      data: {
+        ...data,
+        title: transferTitleFromLegacy(data.title),
+        fileName: data.fileName === "TRANSFER.png" ? moodBoardOutputFileName : data.fileName,
+        moodBoardScale: data.moodBoardScale || 1,
+        hiddenPrompt: transferPromptSuffix
+      }
+    };
+  }
+
+  if (nextNode.type === "character") {
+    const characterSheetVariants = normalizeCharacterSheetVariants(data);
+    const normalizedData = {
+      ...createDefaultNodeData("character", "Character", 1),
+      ...data,
+      characterWardrobes: Array.isArray(data.characterWardrobes) ? data.characterWardrobes : [],
+      characterVoices: Array.isArray(data.characterVoices) ? data.characterVoices : [],
+      characterTraits: Array.isArray(data.characterTraits) ? data.characterTraits : [],
+      characterSheetVariants,
+      characterBatchProgress: null,
+      characterTab: data.characterTab === "sheet" && data.resultUrl ? "sheet" : "build"
+    };
+    const selectedVariant = characterSheetVariantForWardrobeId(normalizedData, normalizedData.activeWardrobeId);
+    return {
+      ...nextNode,
+      data: selectedVariant && normalizedData.locked && normalizedData.activated
+        ? { ...normalizedData, ...characterVariantDisplayPatch(selectedVariant) }
+        : normalizedData
+    };
+  }
+
   return nextNode;
 }
 
@@ -9769,6 +11298,26 @@ function normalizeComposerData(data = {}) {
     composerSavedPoses: normalizeComposerSavedPoses(data.composerSavedPoses),
     composerScene
   };
+}
+
+function normalizeCharacterSheetVariants(data = {}) {
+  const existing = Array.isArray(data.characterSheetVariants)
+    ? data.characterSheetVariants.filter((variant) => variant?.wardrobeId && variant?.generated?.url)
+    : [];
+  if (existing.length || !data.resultUrl) return existing;
+
+  const generated = (Array.isArray(data.resultItems) ? data.resultItems.find((item) => item?.url === data.resultUrl) : null) || {
+    url: data.resultUrl,
+    type: "image",
+    label: `@${cleanPromptTag(data.characterName || data.title || "Character") || "Character"} Character Sheet`,
+    fileName: data.fileName || ""
+  };
+  return [{
+    wardrobeId: data.activeWardrobeId || characterDefaultWardrobeId,
+    wardrobeUrl: data.compiledWardrobeUrl || "",
+    wardrobeFileName: "Existing wardrobe",
+    generated
+  }];
 }
 
 function normalizeUtilityData(data = {}) {
@@ -9820,6 +11369,7 @@ function normalizeUtilityData(data = {}) {
     wanVaceVideoQuality: normalizeChoice(data.wanVaceVideoQuality, ["low", "medium", "high", "maximum"], "high"),
     wanVaceVideoWriteMode: normalizeChoice(data.wanVaceVideoWriteMode, ["fast", "balanced", "small"], "balanced"),
     wanVaceNumInterpolatedFrames: Math.max(0, Math.round(Number(data.wanVaceNumInterpolatedFrames || 0))),
+    stillFrameTime: data.stillFrameTime ?? 0,
     sam3VideoDetectionThreshold: data.sam3VideoDetectionThreshold ?? 0.5,
     extractFrameTime: data.extractFrameTime ?? 0,
     extractFrameFormat: data.extractFrameFormat === "jpeg" ? "jpeg" : "png",
@@ -9877,6 +11427,7 @@ function splitLegacyDirectionNode(node) {
       ...data,
       title: transferTitleFromLegacy(data.title),
       transferImages: data.transferImages || data.styleImages || [],
+      moodBoardScale: data.moodBoardScale || 1,
       hiddenPrompt: transferPromptSuffix
     }
   });
@@ -9989,6 +11540,7 @@ function normalizeEdgeForCurrentGraph(edge, nodeMap) {
       nextEdge.from.port = "imageOut";
       nextEdge.color = portColors.image;
     } else {
+      if (!hasCameraPreset(source)) return null;
       nextEdge.from.port = "cameraOut";
       nextEdge.color = portColors.camera;
     }
@@ -10008,6 +11560,17 @@ function normalizeEdgeForCurrentGraph(edge, nodeMap) {
     nextEdge.from.port = "modelOut";
     nextEdge.color = portColors.model3d;
   }
+  if (source.type === "character") {
+    if (nextEdge.from.port === "voiceOut") {
+      nextEdge.color = portColors.audio;
+    } else {
+      nextEdge.from.port = "characterOut";
+      nextEdge.color = portColors.character;
+    }
+  }
+
+  if (!inputPortIdsForNode(target).includes(nextEdge.to.port)) return null;
+  if (!outputPortIdsForNode(source).includes(nextEdge.from.port)) return null;
 
   return nextEdge;
 }
@@ -10063,8 +11626,8 @@ function clearStaleRunningState(node) {
 }
 
 function transferTitleFromLegacy(title) {
-  if (!title) return "Transfer";
-  return String(title).replace(/^(Style|Direction)\b/, "Transfer");
+  if (!title) return "Mood Board";
+  return String(title).replace(/^(Style|Direction|Transfer)\b/, "Mood Board");
 }
 
 function roundPreviewScale(value) {
