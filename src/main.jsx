@@ -58,6 +58,7 @@ function App() {
   const [imageBatchCount, setImageBatchCount] = React.useState("1");
   const [imageHistory, setImageHistory] = React.useState([]);
   const [workspaceMode, setWorkspaceMode] = React.useState("image");
+  const [nodeStatus, setNodeStatus] = React.useState("");
 
   React.useEffect(() => {
     refreshHistory();
@@ -371,6 +372,11 @@ function App() {
             Stats
           </button>
         </div>
+        {workspaceMode === "nodes" && nodeStatus && (
+          <div className="topbar-status" role="status" title={nodeStatus}>
+            {nodeStatus}
+          </div>
+        )}
       </div>
 
       {workspaceMode === "image" ? (
@@ -586,7 +592,7 @@ function App() {
       ) : null}
 
       <div className={`nodes-tab-keepalive ${workspaceMode === "nodes" ? "active" : ""}`} aria-hidden={workspaceMode !== "nodes"}>
-        <NodeEditor active={workspaceMode === "nodes"} />
+        <NodeEditor active={workspaceMode === "nodes"} onStatusChange={setNodeStatus} />
       </div>
     </main>
   );

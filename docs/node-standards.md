@@ -42,6 +42,12 @@ Use these internal media type names consistently in node config, result items, p
 
 If a new media type is added, update this table, `portColors`, preview logic, stats media mix, connection compatibility, and result rendering together.
 
+## Text Node Roles
+
+- `Text` is the simple prompt node. It should stay lightweight: one plain textarea, one prompt output, no run button, no backend call.
+- `Text Model` is the AI text-processing node. It can accept text, image, video, and style inputs, calls the local text-processing route, and records text model history/cost.
+- Existing saved `text` nodes represent `Text Model`; keep that compatibility unless a migration explicitly changes it.
+
 ## Node Definition Checklist
 
 Every new node type should touch the same core surfaces unless there is a clear reason not to.

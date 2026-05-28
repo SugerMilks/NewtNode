@@ -39,20 +39,21 @@ import {
 import "./nodeEditor.css";
 
 const nodeCatalog = [
-  { type: "text", label: "Text", icon: Type },
+  { type: "plainText", label: "Text", icon: Type },
   { type: "image", label: "Image", icon: FileImage },
+  { type: "video", label: "Video", icon: Video },
+  { type: "preview", label: "Preview", icon: MonitorPlay },
   { type: "character", label: "Character", icon: UserRound },
   { type: "camera", label: "Camera", icon: Camera },
   { type: "composer", label: "Composer", icon: Box },
   { type: "style", label: "Style", icon: Palette },
   { type: "transfer", label: "Mood Board", icon: Compass },
   { type: "utility", label: "Utility", icon: Wrench },
-  { type: "video", label: "Video", icon: Video },
   { type: "audio", label: "Audio", icon: FileAudio },
-  { type: "preview", label: "Preview", icon: MonitorPlay },
   { type: "model3d", label: "3D", icon: Box },
   { type: "imageModel", label: "Image Model", icon: ImagePlus },
-  { type: "videoModel", label: "Video Model", icon: Film }
+  { type: "videoModel", label: "Video Model", icon: Film },
+  { type: "text", label: "Text Model", icon: Type }
 ];
 
 const portColors = {
@@ -345,7 +346,7 @@ function defaultComposerImagePlane(index = 1, imageUrl = "", label = "", aspectR
 const initialNodes = [
   {
     id: "text-1",
-    type: "text",
+    type: "plainText",
     x: 110,
     y: 108,
     data: {
@@ -543,7 +544,7 @@ const utilityModelDescriptions = {
 };
 const sam3SegmentationModelsEnabled = false; // Flip back to true when revisiting SAM 3 segmentation.
 
-export default function NodeEditor({ active = true } = {}) {
+export default function NodeEditor({ active = true, onStatusChange } = {}) {
   const canvasRef = React.useRef(null);
   const projectMenuRef = React.useRef(null);
   const contextMenuRef = React.useRef(null);
@@ -576,6 +577,10 @@ export default function NodeEditor({ active = true } = {}) {
   const [compilingTransferNodeId, setCompilingTransferNodeId] = React.useState(null);
   const [selectedEdgeId, setSelectedEdgeId] = React.useState(null);
   const [composerEditorNodeId, setComposerEditorNodeId] = React.useState(null);
+
+  React.useEffect(() => {
+    onStatusChange?.(saveStatus);
+  }, [onStatusChange, saveStatus]);
 
   const incomingByNode = React.useMemo(() => buildIncomingByNode(nodes, edges), [nodes, edges]);
   const connectedPortKeys = React.useMemo(() => buildConnectedPortKeys(edges), [edges]);
@@ -2177,7 +2182,7 @@ export default function NodeEditor({ active = true } = {}) {
     if (source.type === "model3d") return "model3d";
     if (source.type === "video" || source.type === "videoModel") return "video";
     if (source.type === "audio") return "audio";
-    if (source.type === "text") return "prompt";
+    if (source.type === "plainText" || source.type === "text") return "prompt";
     if (source.type === "image" || source.type === "imageModel") return "image";
     return "";
   }
@@ -2269,7 +2274,7 @@ export default function NodeEditor({ active = true } = {}) {
 
     if (target?.type === "utility") {
       if (to.port === "promptIn") {
-        if (["text", "imageModel", "videoModel"].includes(source.type)) return "";
+        if (["plainText", "text", "imageModel", "videoModel"].includes(source.type)) return "";
         return "Prompt input accepts text outputs";
       }
 
@@ -2287,7 +2292,7 @@ export default function NodeEditor({ active = true } = {}) {
     if (target?.type === "composer") {
       if (to.port === "promptIn") {
         if (source.type === "composer") return from.port === "promptOut" ? "" : "Composer prompt input accepts prompt outputs";
-        if (["text", "imageModel", "videoModel", "utility"].includes(source.type)) return "";
+        if (["plainText", "text", "imageModel", "videoModel", "utility"].includes(source.type)) return "";
         return "Composer prompt input accepts prompt outputs";
       }
 
@@ -2339,8 +2344,8 @@ export default function NodeEditor({ active = true } = {}) {
 
     if (target?.type === "text") {
       if (to.port === "textIn") {
-        if (["text", "imageModel", "videoModel"].includes(source.type)) return "";
-        return "Text input accepts text outputs";
+        if (["plainText", "text", "imageModel", "videoModel"].includes(source.type)) return "";
+        return "Text Model input accepts text outputs";
       }
 
       if (to.port === "imageIn") {
@@ -3097,7 +3102,6 @@ export default function NodeEditor({ active = true } = {}) {
               </div>
             )}
           </div>
-          {saveStatus && <small>{saveStatus}</small>}
         </div>
         {nodeCatalog.map((item) => {
           const Icon = item.icon;
@@ -4910,6 +4914,20 @@ function NodeBody({
   const outputPort = config.output[0];
   const resolvedPromptText = (items = []) => connectedText(items, incomingByNode);
 
+  if (node.type === "plainText") {
+    return (
+      <div className="node-body text-node-body plain-text-node-body">
+        <OutputPortRow node={node} port={outputPort} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
+        <div className="text-single-panel">
+          <label className="text-field-group">
+            <span>Prompt</span>
+            <textarea aria-label="Text prompt" value={node.data.text || ""} onChange={(event) => onUpdate(node.id, { text: event.target.value })} />
+          </label>
+        </div>
+      </div>
+    );
+  }
+
   if (node.type === "text") {
     const hasOutputPanel = Boolean(node.data.resultText) || node.data.status === "running" || node.data.status === "complete";
     const textPort = config.input.find((port) => port.id === "textIn");
@@ -4925,7 +4943,7 @@ function NodeBody({
     return (
       <div className="node-body text-node-body">
         <OutputPortRow node={node} port={outputPort} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
-        <div className="text-input-port-stack" aria-label="Text node inputs">
+        <div className="text-input-port-stack" aria-label="Text Model node inputs">
           {[textPort, imagePort, videoPort, stylePort].filter(Boolean).map((port) => (
             <PortHandle
               key={port.id}
@@ -4941,8 +4959,7 @@ function NodeBody({
         <div className={hasOutputPanel ? "text-split-panel" : "text-single-panel"}>
           <label className="text-field-group">
             <span>Original prompt</span>
-            <textarea value={node.data.text} onChange={(event) => onUpdate(node.id, { text: event.target.value })} />
-            <textarea aria-label="Text node prompt" value={node.data.text} onChange={(event) => onUpdate(node.id, { text: event.target.value })} />
+            <textarea aria-label="Text Model prompt" value={node.data.text || ""} onChange={(event) => onUpdate(node.id, { text: event.target.value })} />
           </label>
           {hasOutputPanel && (
             <label className="text-field-group">
@@ -4956,7 +4973,7 @@ function NodeBody({
           )}
         </div>
         <button className="run-node-button" onClick={() => onRun(node)} disabled={running || !hasRunInput}>
-          {running ? "Running..." : "Run Text"}
+          {running ? "Running..." : "Run Text Model"}
         </button>
         {node.data.lastRunModel && <small className="upload-status">Processed with {node.data.lastRunModel}</small>}
         {node.data.error && <small className="upload-error">{node.data.error}</small>}
@@ -7807,6 +7824,11 @@ function NodeRow({ label, children, inputPort, node, onConnectStart, onDisconnec
 
 function getNodeConfig(type) {
   const configs = {
+    plainText: {
+      icon: Type,
+      input: [],
+      output: [{ id: "promptOut", label: "Prompt", color: portColors.prompt }]
+    },
     text: {
       icon: Type,
       input: [
@@ -7923,6 +7945,7 @@ function getNodeConfig(type) {
 function createDefaultNodeData(type, label, count) {
   const title = `${label}${count > 1 ? ` ${count}` : ""}`;
 
+  if (type === "plainText") return { title, text: "" };
   if (type === "text") return { title, text: "" };
   if (type === "image" || type === "video" || type === "audio") return { title };
   if (type === "preview") return { title, previewScale: 1 };
@@ -8498,6 +8521,7 @@ function buildInactiveEdgeIds(nodes, edges) {
 function connectedText(items = [], incomingByNode = null, visited = new Set()) {
   return items
     .map(({ source }) => {
+      if (source.type === "plainText") return source.data.text;
       if (source.type === "text") return source.data.resultText || source.data.text;
       if (source.type === "imageModel" || source.type === "videoModel" || source.type === "utility") return source.data.resultText;
       if (source.type === "composer") {
@@ -8535,7 +8559,7 @@ function connectedTextInputItems(items = []) {
   return items
     .map(({ source }) => ({
       label: sourceLabel(source),
-      text: source.type === "text" ? source.data.resultText || source.data.text : source.data.resultText || source.data.prompt || source.data.title
+      text: ["plainText", "text"].includes(source.type) ? source.data.resultText || source.data.text : source.data.resultText || source.data.prompt || source.data.title
     }))
     .filter((item) => item.text);
 }
@@ -11005,7 +11029,7 @@ function nodeRunPriority(node) {
 }
 
 function runStageLabel(type) {
-  if (type === "text") return "text";
+  if (type === "text") return "text model";
   if (type === "camera") return "camera";
   if (type === "imageModel") return "image";
   if (type === "model3d") return "3D";
@@ -11244,6 +11268,29 @@ function normalizeCurrentNode(node) {
     };
   }
 
+  if (nextNode.type === "text") {
+    return {
+      ...nextNode,
+      data: {
+        ...data,
+        title: textModelTitleFromLegacy(data.title),
+        text: data.text || "",
+        resultText: data.resultText || ""
+      }
+    };
+  }
+
+  if (nextNode.type === "plainText") {
+    return {
+      ...nextNode,
+      data: {
+        ...data,
+        title: data.title || "Text",
+        text: data.text || ""
+      }
+    };
+  }
+
   if (nextNode.type === "composer") {
     return {
       ...nextNode,
@@ -11300,6 +11347,13 @@ function normalizeCurrentNode(node) {
   }
 
   return nextNode;
+}
+
+function textModelTitleFromLegacy(title) {
+  const value = String(title || "").trim();
+  if (!value) return "Text Model";
+  const match = value.match(/^Text( \d+)?$/);
+  return match ? `Text Model${match[1] || ""}` : value;
 }
 
 function normalizeModel3DData(data = {}) {
