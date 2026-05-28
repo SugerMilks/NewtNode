@@ -158,7 +158,7 @@ Saved workflows are long-lived project files. Changes must avoid breaking them.
 - Clear stale `running` state on load.
 - Keep `resultItems`, `resultUrl`, and selected result indexes compatible with older workflows.
 - Store reusable assets under `public/models` or `public/models/poses` only when they should be versioned with the repo.
-- Store unpackaged generated outputs under `/outputs/<workflow-name>/`, unpackaged uploads under `/uploads/<workflow-name>/`, and registry copies of saved workflows under `/saved_workflows`.
+- Store unpackaged generated outputs under `/outputs/<workflow-name>/`, unpackaged uploads under `/uploads/<workflow-name>/`, unpackaged helper dependencies under `/outputs/<workflow-name>/dependencies/`, and registry copies of saved workflows under `/saved_workflows`.
 
 ## Workflow Package Standards
 

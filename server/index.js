@@ -3558,7 +3558,7 @@ async function createManagedAssetTarget(requestLike, kind, extension = "", asset
     };
   }
 
-  const workflowDir = safePathSegment(body.projectName || body.workflowName || "Untitled-node-project");
+  const workflowDir = localWorkflowAssetDirName(body);
   const root = assetGroup === workflowPackageInputDirName ? uploadsDir : outputsDir;
   const relativeRoot = assetGroup === workflowPackageInputDirName ? workflowDir : path.join(workflowDir, assetGroup === workflowPackageOutputDirName ? "" : assetGroup);
   const targetDir = path.join(root, relativeRoot);
@@ -3571,6 +3571,10 @@ async function createManagedAssetTarget(requestLike, kind, extension = "", asset
     filePath: path.join(root, relativePath),
     publicPath: `/${assetGroup === workflowPackageInputDirName ? "uploads" : "outputs"}/${relativePath.split(path.sep).map(encodeURIComponent).join("/")}`
   };
+}
+
+function localWorkflowAssetDirName(body = {}) {
+  return safePathSegment(body.workflowName || body.projectName || body.workflowFileName || body.projectId || "Untitled-node-project");
 }
 
 async function moveUploadedFile(sourcePath, targetPath) {
@@ -6284,7 +6288,7 @@ function roundCurrency(value) {
 
 function projectFromBody(body) {
   const id = String(body.projectId || "").trim();
-  const name = String(body.projectName || "").trim();
+  const name = String(body.projectName || body.workflowName || "").trim();
   return {
     id: id || "node-workspace",
     name: name || "Node workspace"

@@ -601,9 +601,11 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
   const composerEditorNode = nodes.find((node) => node.id === composerEditorNodeId && node.type === "composer");
 
   function workflowRequestContext(overrides = {}) {
+    const workflowName = savedProjectName || selectedProjectName || projectName || "Untitled node project";
     return {
       projectId: projectId || "",
       projectName: projectName || "Untitled node project",
+      workflowName,
       workflowPackageId: projectPackagePath ? projectId || "" : "",
       workflowPackagePath: projectPackagePath || "",
       ...overrides
@@ -9097,6 +9099,7 @@ function workflowContextPayload(workflowContext = {}, projectId = "", projectNam
   return {
     projectId: workflowContext.projectId || projectId || "",
     projectName: workflowContext.projectName || projectName || "Untitled node project",
+    workflowName: workflowContext.workflowName || workflowContext.projectName || projectName || "Untitled node project",
     workflowPackageId: workflowContext.workflowPackageId || "",
     workflowPackagePath: workflowContext.workflowPackagePath || ""
   };
