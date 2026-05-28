@@ -2678,6 +2678,40 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
     }
   }
 
+  async function openWorkflowFromSystemPicker() {
+    try {
+      const defaultPath =
+        projectPackagePath ||
+        window.localStorage.getItem("newtnode-last-open-workflow") ||
+        window.localStorage.getItem("newtnode-last-package-parent") ||
+        "";
+      setSaveStatus("Opening workflow...");
+      const { response, data } = await fetchJsonApi("/api/system/open-workflow-file", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: "Open NewtNode workflow package",
+          defaultPath
+        })
+      }, "Open workflow");
+
+      if (!response.ok) {
+        if (data.canceled) {
+          setSaveStatus("Open canceled");
+          return;
+        }
+        throw new Error(data.error || "Could not open workflow.");
+      }
+
+      applyWorkflow(data, "Opened");
+      const openedPackagePath = data.packagePath || data.package?.rootPath || "";
+      window.localStorage.setItem("newtnode-last-open-workflow", openedPackagePath || data.fileName || "");
+      await loadProjects();
+    } catch (error) {
+      setSaveStatus(error.message || "Could not open workflow.");
+    }
+  }
+
   async function loadProject(id) {
     if (!id) return;
 
@@ -3067,7 +3101,7 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
             <Save size={16} />
             <span>Save As</span>
           </button>
-          <button onClick={() => workflowFileInputRef.current?.click()} title="Open workflow JSON">
+          <button onClick={openWorkflowFromSystemPicker} title="Open workflow package JSON">
             <FolderOpen size={16} />
             <span>Open</span>
           </button>

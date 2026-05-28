@@ -6,7 +6,7 @@ import multer from "multer";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { appendFile, copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { File } from "node:buffer";
 import { randomUUID } from "node:crypto";
 import { execFile as execFileCallback } from "node:child_process";
@@ -25,6 +25,8 @@ const workflowAssetsPrefix = "/workflow-assets";
 const workflowPackageInputDirName = "inputs";
 const workflowPackageOutputDirName = "outputs";
 const workflowPackageDependencyDirName = "dependencies";
+const workflowPackageMetadataDirName = ".newtnode";
+const workflowPackageManifestFileName = "manifest.json";
 const composerPosesDir = path.join(rootDir, "public", "models", "poses");
 const dataDir = path.join(__dirname, "data");
 const historyPath = path.join(dataDir, "history.json");
@@ -230,6 +232,20 @@ app.post("/api/system/select-folder", async (req, res) => {
   } catch (error) {
     const status = error.code === "DIALOG_CANCELED" ? 499 : 500;
     res.status(status).json({ error: error.message || "Folder selection failed.", canceled: error.code === "DIALOG_CANCELED" });
+  }
+});
+
+app.post("/api/system/open-workflow-file", async (req, res) => {
+  try {
+    const selectedPath = await selectWorkflowFileWithDialog({
+      title: String(req.body.title || "Open NewtNode workflow"),
+      defaultPath: String(req.body.defaultPath || "")
+    });
+    const workflow = await readWorkflowFromFilePath(selectedPath);
+    res.json(workflow);
+  } catch (error) {
+    const status = error.code === "DIALOG_CANCELED" ? 499 : 500;
+    res.status(status).json({ error: error.message || "Workflow selection failed.", canceled: error.code === "DIALOG_CANCELED" });
   }
 });
 
@@ -3505,12 +3521,24 @@ function workflowPackageContextFromBody(body = {}) {
 }
 
 async function ensureWorkflowPackageDirs(packagePath) {
+  const metadataDir = path.join(packagePath, workflowPackageMetadataDirName);
   await Promise.all([
     mkdir(packagePath, { recursive: true }),
     mkdir(path.join(packagePath, workflowPackageInputDirName), { recursive: true }),
     mkdir(path.join(packagePath, workflowPackageOutputDirName), { recursive: true }),
-    mkdir(path.join(packagePath, workflowPackageDependencyDirName), { recursive: true })
+    mkdir(path.join(packagePath, workflowPackageDependencyDirName), { recursive: true }),
+    mkdir(metadataDir, { recursive: true })
   ]);
+  await hideWorkflowPackageMetadataDir(metadataDir);
+}
+
+async function hideWorkflowPackageMetadataDir(metadataDir) {
+  if (process.platform !== "win32") return;
+  try {
+    await execFile("attrib.exe", ["+h", metadataDir], { windowsHide: true, timeout: 5000 });
+  } catch {
+    // Hiding package metadata is cosmetic; package loading should not depend on it.
+  }
 }
 
 async function createManagedAssetTarget(requestLike, kind, extension = "", assetGroup = workflowPackageOutputDirName) {
@@ -3559,10 +3587,12 @@ async function hydrateWorkflowPackage(workflow) {
   const packageWorkflowPath = path.join(packagePath, workflowFileName);
   try {
     const packagedWorkflow = JSON.parse(await readFile(packageWorkflowPath, "utf8"));
+    const workflowId = workflow.id || packagedWorkflow.id;
     return {
       ...workflow,
       ...packagedWorkflow,
-      id: workflow.id || packagedWorkflow.id,
+      id: workflowId,
+      updatedAt: workflow.updatedAt || packagedWorkflow.updatedAt,
       packagePath,
       fileName: workflow.fileName || packagedWorkflow.fileName || workflowFileName,
       package: {
@@ -3570,7 +3600,8 @@ async function hydrateWorkflowPackage(workflow) {
         ...(workflow.package || {}),
         rootPath: packagePath,
         workflowFileName
-      }
+      },
+      graph: rewriteWorkflowPackageAssetReferences(packagedWorkflow.graph || workflow.graph, workflowId, packagePath)
     };
   } catch {
     return { ...workflow, packagePath };
@@ -3587,13 +3618,17 @@ function normalizeWorkflowPackageRegistration(value) {
   const name = String(value?.name || "Untitled node project").trim() || "Untitled node project";
   const packagePath = normalizeWorkflowPackagePath(value?.packagePath || value?.package?.rootPath);
   if (!packagePath) throw new Error("Workflow package is missing its package path.");
+  if (!existsSync(packagePath)) throw new Error(`Workflow package path is not accessible: ${packagePath}`);
   const fileName = safeWorkflowFileName(value?.fileName || value?.package?.workflowFileName) || workflowFileNameForName(name);
+  const now = new Date().toISOString();
 
   return {
     ...value,
     id,
     name,
     fileName,
+    createdAt: value?.createdAt || now,
+    updatedAt: now,
     packagePath,
     package: {
       ...(value.package || {}),
@@ -3642,8 +3677,17 @@ async function writeWorkflowPackage(workflow, packagePath) {
   };
 
   await writeFile(path.join(packagePath, workflowFileName), JSON.stringify(packagedWorkflow, null, 2));
-  await writeFile(path.join(packagePath, "manifest.json"), JSON.stringify(manifest, null, 2));
+  await writeFile(workflowPackageManifestPath(packagePath), JSON.stringify(manifest, null, 2));
+  await rm(legacyWorkflowPackageManifestPath(packagePath), { force: true }).catch(() => {});
   return packagedWorkflow;
+}
+
+function workflowPackageManifestPath(packagePath) {
+  return path.join(packagePath, workflowPackageMetadataDirName, workflowPackageManifestFileName);
+}
+
+function legacyWorkflowPackageManifestPath(packagePath) {
+  return path.join(packagePath, workflowPackageManifestFileName);
 }
 
 async function copyWorkflowAssetsToPackage(graph, workflowId, packagePath) {
@@ -3728,6 +3772,54 @@ function rewriteWorkflowAssetUrls(value, urlMap) {
   return value;
 }
 
+function rewriteWorkflowPackageAssetReferences(value, workflowId, packagePath) {
+  if (typeof value === "string") {
+    return workflowPackageAssetReferenceForOpenedPath(value, workflowId, packagePath);
+  }
+
+  if (Array.isArray(value)) return value.map((item) => rewriteWorkflowPackageAssetReferences(item, workflowId, packagePath));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, rewriteWorkflowPackageAssetReferences(item, workflowId, packagePath)]));
+  }
+
+  return value;
+}
+
+function workflowPackageAssetReferenceForOpenedPath(value, workflowId, packagePath) {
+  const publicPath = tryLocalPublicPath(value);
+  if (!publicPath || !workflowId || !packagePath) return value;
+
+  if (publicPath.startsWith(`${workflowAssetsPrefix}/`)) {
+    const relativePath = workflowPackageRelativePath(publicPath);
+    if (relativePath && existsSync(path.join(packagePath, relativePath))) {
+      return workflowPackagePublicPath(workflowId, relativePath);
+    }
+    return value;
+  }
+
+  const candidatePaths = workflowPackageAssetCandidatesForLocalPath(publicPath);
+  const matchingPath = candidatePaths.find((relativePath) => existsSync(path.join(packagePath, relativePath)));
+  return matchingPath ? workflowPackagePublicPath(workflowId, matchingPath) : value;
+}
+
+function workflowPackageAssetCandidatesForLocalPath(publicPath) {
+  const decodedPath = decodeURIComponent(String(publicPath || ""));
+  const isUpload = decodedPath.startsWith("/uploads/");
+  const prefix = isUpload ? "/uploads/" : "/outputs/";
+  if (!decodedPath.startsWith(prefix)) return [];
+
+  const relativePath = safeRelativeAssetPath(decodedPath.slice(prefix.length));
+  if (!relativePath) return [];
+
+  const fileName = path.basename(relativePath);
+  const group = isUpload ? workflowPackageInputDirName : workflowPackageOutputDirName;
+  return [
+    path.join(group, relativePath),
+    path.join(group, fileName),
+    ...(isUpload ? [] : [path.join(workflowPackageDependencyDirName, relativePath), path.join(workflowPackageDependencyDirName, fileName)])
+  ];
+}
+
 function tryLocalPublicPath(value) {
   try {
     return localPublicPathFromUrl(value);
@@ -3777,6 +3869,68 @@ async function selectFolderWithDialog({ title = "Choose folder", defaultPath = "
   }
 
   return selectFolderWithLinuxDialog({ title, defaultPath });
+}
+
+async function selectWorkflowFileWithDialog({ title = "Open NewtNode workflow", defaultPath = "" } = {}) {
+  if (process.platform === "win32") {
+    return selectWorkflowFileWithWindowsDialog({ title, defaultPath });
+  }
+
+  if (process.platform === "darwin") {
+    return selectWorkflowFileWithMacDialog({ title, defaultPath });
+  }
+
+  return selectWorkflowFileWithLinuxDialog({ title, defaultPath });
+}
+
+async function readWorkflowFromFilePath(filePath) {
+  const workflowFilePath = normalizeWorkflowPackagePath(filePath);
+  if (!workflowFilePath || !existsSync(workflowFilePath)) {
+    throw new Error("Workflow file is not accessible.");
+  }
+
+  const workflow = JSON.parse(await readFile(workflowFilePath, "utf8"));
+  if (!workflow?.graph || !Array.isArray(workflow.graph.nodes) || !Array.isArray(workflow.graph.edges)) {
+    throw new Error("That JSON file is not a NewtNode workflow.");
+  }
+
+  const workflowFileName = path.basename(workflowFilePath);
+  const packagePath = path.dirname(workflowFilePath);
+  const openedWorkflow = {
+    ...workflow,
+    id: workflow.id || null,
+    name: workflow.name || path.basename(workflowFileName, ".json") || "Untitled node project",
+    fileName: workflowFileName
+  };
+
+  if (!workflowShouldRegisterOpenedPackage(openedWorkflow, packagePath)) {
+    return openedWorkflow;
+  }
+
+  const registeredWorkflowId = openedWorkflow.id || randomUUID();
+  return writeWorkflowFile(
+    normalizeWorkflowPackageRegistration({
+      ...openedWorkflow,
+      id: registeredWorkflowId,
+      packagePath,
+      package: {
+        ...(openedWorkflow.package || {}),
+        rootPath: packagePath,
+        workflowFileName
+      },
+      graph: rewriteWorkflowPackageAssetReferences(openedWorkflow.graph, registeredWorkflowId, packagePath)
+    })
+  );
+}
+
+function workflowShouldRegisterOpenedPackage(workflow, packagePath) {
+  if (!packagePath) return false;
+  if (workflow.packagePath || workflow.package?.rootPath || workflow.package?.workflowFileName) return true;
+  if ([...collectWorkflowAssetUrls(workflow.graph)].some((url) => String(url || "").startsWith(`${workflowAssetsPrefix}/`))) return true;
+  if (existsSync(workflowPackageManifestPath(packagePath)) || existsSync(legacyWorkflowPackageManifestPath(packagePath))) return true;
+  return [workflowPackageInputDirName, workflowPackageOutputDirName, workflowPackageDependencyDirName].some((directoryName) =>
+    existsSync(path.join(packagePath, directoryName))
+  );
 }
 
 async function selectFolderWithWindowsDialog({ title, defaultPath }) {
@@ -3949,6 +4103,39 @@ try {
   return runFolderDialogCommand("powershell.exe", ["-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-Command", script]);
 }
 
+async function selectWorkflowFileWithWindowsDialog({ title, defaultPath }) {
+  const selectedPath = normalizeWorkflowPackagePath(defaultPath);
+  const script = `
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Windows.Forms
+$dialog = New-Object System.Windows.Forms.OpenFileDialog
+$dialog.Title = ${powershellStringLiteral(title)}
+$dialog.Filter = 'NewtNode workflow JSON (*.json)|*.json|JSON files (*.json)|*.json|All files (*.*)|*.*'
+$dialog.CheckFileExists = $true
+$dialog.Multiselect = $false
+$selectedPath = ${powershellStringLiteral(selectedPath)}
+
+if ($selectedPath) {
+  if (Test-Path -LiteralPath $selectedPath -PathType Leaf) {
+    $dialog.InitialDirectory = [System.IO.Path]::GetDirectoryName($selectedPath)
+    $dialog.FileName = [System.IO.Path]::GetFileName($selectedPath)
+  } elseif (Test-Path -LiteralPath $selectedPath -PathType Container) {
+    $dialog.InitialDirectory = $selectedPath
+  }
+}
+
+$result = $dialog.ShowDialog()
+if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
+  [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
+  Write-Output $dialog.FileName
+  exit 0
+}
+exit 2
+`;
+
+  return runFileDialogCommand("powershell.exe", ["-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-Command", script]);
+}
+
 function powershellStringLiteral(value) {
   return `'${String(value || "").replace(/'/g, "''")}'`;
 }
@@ -3973,9 +4160,50 @@ async function selectFolderWithLinuxDialog({ title, defaultPath }) {
   }
 }
 
+async function selectWorkflowFileWithMacDialog({ title, defaultPath }) {
+  const selectedFile = existingFilePath(defaultPath);
+  const selectedDirectory = selectedFile ? path.dirname(selectedFile) : existingDirectoryPath(defaultPath);
+  const script = selectedDirectory
+    ? `POSIX path of (choose file with prompt ${JSON.stringify(title)} of type {"json"} default location POSIX file ${JSON.stringify(selectedDirectory)})`
+    : `POSIX path of (choose file with prompt ${JSON.stringify(title)} of type {"json"})`;
+  return runFileDialogCommand("osascript", ["-e", script]);
+}
+
+async function selectWorkflowFileWithLinuxDialog({ title, defaultPath }) {
+  const selectedFile = existingFilePath(defaultPath);
+  const selectedDirectory = selectedFile ? path.dirname(selectedFile) : existingDirectoryPath(defaultPath);
+  try {
+    const args = ["--file-selection", `--title=${title}`, "--file-filter=NewtNode workflows | *.json", "--file-filter=All files | *"];
+    if (selectedFile) {
+      args.push(`--filename=${selectedFile}`);
+    } else if (selectedDirectory) {
+      args.push(`--filename=${selectedDirectory}${path.sep}`);
+    }
+    return await runFileDialogCommand("zenity", args);
+  } catch (error) {
+    if (error.code === "DIALOG_CANCELED") throw error;
+    return runFileDialogCommand("kdialog", ["--getopenfilename", selectedDirectory || rootDir, "*.json|JSON files"]);
+  }
+}
+
+function existingFilePath(value) {
+  const selectedPath = normalizeWorkflowPackagePath(value);
+  if (!selectedPath || !existsSync(selectedPath)) return "";
+  try {
+    return statSync(selectedPath).isFile() ? selectedPath : "";
+  } catch {
+    return "";
+  }
+}
+
 function existingDirectoryPath(value) {
   const selectedPath = normalizeWorkflowPackagePath(value);
-  return selectedPath && existsSync(selectedPath) ? selectedPath : "";
+  if (!selectedPath || !existsSync(selectedPath)) return "";
+  try {
+    return statSync(selectedPath).isDirectory() ? selectedPath : "";
+  } catch {
+    return "";
+  }
 }
 
 async function runFolderDialogCommand(command, args) {
@@ -3991,6 +4219,26 @@ async function runFolderDialogCommand(command, args) {
   } catch (error) {
     if (error.code === "DIALOG_CANCELED" || error.code === 2) {
       const canceled = new Error("Folder selection canceled.");
+      canceled.code = "DIALOG_CANCELED";
+      throw canceled;
+    }
+    throw error;
+  }
+}
+
+async function runFileDialogCommand(command, args) {
+  try {
+    const { stdout } = await execFile(command, args, { windowsHide: false, timeout: 120000 });
+    const selectedPath = String(stdout || "").trim();
+    if (!selectedPath) {
+      const error = new Error("File selection canceled.");
+      error.code = "DIALOG_CANCELED";
+      throw error;
+    }
+    return selectedPath;
+  } catch (error) {
+    if (error.code === "DIALOG_CANCELED" || error.code === 2) {
+      const canceled = new Error("File selection canceled.");
       canceled.code = "DIALOG_CANCELED";
       throw canceled;
     }

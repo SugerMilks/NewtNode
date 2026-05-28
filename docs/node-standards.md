@@ -173,13 +173,14 @@ Portable packages are the default Save As shape for workflows that need to move 
     inputs/
     outputs/
     dependencies/
-    manifest.json
+    .newtnode/
+      manifest.json
   ```
 
 - `inputs/` contains uploaded source media used by graph nodes.
 - `outputs/` contains generated media and explicit node outputs.
 - `dependencies/` contains derived helper assets needed to rerun or inspect the graph, such as padded frames, composed mood boards, masks, and other intermediate support files that are not primary user uploads or final outputs.
-- `manifest.json` records package metadata and copied asset entries. It should help diagnose missing assets without becoming required runtime state.
+- `.newtnode/manifest.json` records package metadata and copied asset entries. It should help diagnose missing assets without becoming required runtime state. Keep the package root visually focused on the workflow JSON and asset folders.
 - A packaged workflow should still appear in the saved workflow dropdown through the local `/saved_workflows` registry copy.
 - Save updates the attached package in place. Save As copies the graph and its current local assets into the chosen package folder.
 - Once a package is attached, upload and generation requests must include the workflow package context so new files are written into that package.
