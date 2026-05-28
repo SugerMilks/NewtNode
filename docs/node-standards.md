@@ -2,6 +2,8 @@
 
 This is a living standard for Newt_Node. It describes the current conventions for nodes, UI, media flow, backend routes, cost tracking, and verification. Amend it when the app deliberately changes direction. Do not bypass it casually.
 
+Before starting any new feature, read this document first. If the feature changes a core workflow, update this document in the same change so the next feature starts from the current truth.
+
 ## Goals
 
 - Keep every node predictable to build, use, save, load, preview, run, and debug.
@@ -9,6 +11,18 @@ This is a living standard for Newt_Node. It describes the current conventions fo
 - Make media types explicit so connector lines, ports, previews, stats, and backend routes stay in agreement.
 - Track generation cost honestly whenever the app can estimate or record it.
 - Prefer small, compatible changes over one-off node behavior.
+- Keep saved workflows portable enough that another user can open and run a packaged graph from a shared drive when the needed assets are included.
+
+## New Feature Checklist
+
+Use this quick pass before implementing a feature, and again before committing it.
+
+- Read the relevant standards in this document first.
+- Identify which surfaces the feature touches: node catalog, node data, ports, run order, backend routes, asset persistence, stats, saved workflows, and UI states.
+- Prefer existing helpers and patterns before adding a new storage, request, preview, or result shape.
+- Preserve old saved workflows with normalization or migration when fields, ports, node types, or asset URLs change.
+- Keep generated files and copied dependencies inside the current workflow package when a package is attached.
+- Update this document when the feature intentionally changes one of these standards.
 
 ## Current Media Types
 
@@ -106,8 +120,9 @@ Local node routes should live in `server/index.js` under `/api/node/...`.
 
 - Validate required inputs early and return JSON errors.
 - Use local asset helpers such as `readLocalAsset`, `localAssetToFalUrl`, or `uploadLocalOutputToFal` rather than passing local paths to remote APIs.
-- Download generated files into `/outputs`.
-- Return local URLs such as `/outputs/file.glb` to the client.
+- Use managed asset helpers for uploaded, generated, and derived files so the current workflow package is honored.
+- Download generated files into the attached package `outputs/` folder, or into `/outputs/<workflow-name>/` when no package is attached.
+- Return local URLs such as `/workflow-assets/<workflow-id>/outputs/file.glb` for packaged assets or `/outputs/<workflow-name>/file.glb` for unpackaged assets.
 - Add a health route flag for new API routes.
 - Use `subscribeFal` for Fal calls so queue and failure logging stays consistent.
 - Normalize Fal file responses with `normalizeFalFile` and fallback search helpers where useful.
@@ -137,7 +152,35 @@ Saved workflows are long-lived project files. Changes must avoid breaking them.
 - Clear stale `running` state on load.
 - Keep `resultItems`, `resultUrl`, and selected result indexes compatible with older workflows.
 - Store reusable assets under `public/models` or `public/models/poses` only when they should be versioned with the repo.
-- Store generated outputs under `/outputs`, uploads under `/uploads`, and project saves under `/saved_workflows`.
+- Store unpackaged generated outputs under `/outputs/<workflow-name>/`, unpackaged uploads under `/uploads/<workflow-name>/`, and registry copies of saved workflows under `/saved_workflows`.
+
+## Workflow Package Standards
+
+Portable packages are the default Save As shape for workflows that need to move between machines or live on a shared drive.
+
+- Save As opens the native folder picker and lets the user choose the parent folder.
+- Save As creates or updates a package folder named from the workflow, with this shape:
+
+  ```text
+  WorkflowName/
+    WorkflowName.json
+    inputs/
+    outputs/
+    dependencies/
+    manifest.json
+  ```
+
+- `inputs/` contains uploaded source media used by graph nodes.
+- `outputs/` contains generated media and explicit node outputs.
+- `dependencies/` contains derived helper assets needed to rerun or inspect the graph, such as padded frames, composed mood boards, masks, and other intermediate support files that are not primary user uploads or final outputs.
+- `manifest.json` records package metadata and copied asset entries. It should help diagnose missing assets without becoming required runtime state.
+- A packaged workflow should still appear in the saved workflow dropdown through the local `/saved_workflows` registry copy.
+- Save updates the attached package in place. Save As copies the graph and its current local assets into the chosen package folder.
+- Once a package is attached, upload and generation requests must include the workflow package context so new files are written into that package.
+- Packaged assets must be served through `/workflow-assets/<workflow-id>/...`.
+- Vite development proxy config must include `/workflow-assets` anywhere it includes `/uploads` and `/outputs`.
+- Opening a packaged workflow must register its package path with the local server before packaged assets are expected to preview or run.
+- Do not use browser-only object URLs or absolute machine-local paths as saved graph dependencies.
 
 ## UI Design Standards
 

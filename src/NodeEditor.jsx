@@ -566,6 +566,7 @@ export default function NodeEditor({ active = true } = {}) {
   const [projectName, setProjectName] = React.useState(savedDraft.projectName);
   const [projectId, setProjectId] = React.useState(savedDraft.projectId);
   const [savedProjectName, setSavedProjectName] = React.useState(savedDraft.savedProjectName);
+  const [projectPackagePath, setProjectPackagePath] = React.useState(savedDraft.projectPackagePath);
   const [projects, setProjects] = React.useState([]);
   const [projectMenuOpen, setProjectMenuOpen] = React.useState(false);
   const [localWorkflowFileName, setLocalWorkflowFileName] = React.useState("");
@@ -593,6 +594,23 @@ export default function NodeEditor({ active = true } = {}) {
   const selectedRunAllCount = selectedRunnableNodes.length + selectedPlayablePreviewNodes.length;
   const selectedProjectName = projects.find((project) => project.id === projectId)?.name;
   const composerEditorNode = nodes.find((node) => node.id === composerEditorNodeId && node.type === "composer");
+
+  function workflowRequestContext(overrides = {}) {
+    return {
+      projectId: projectId || "",
+      projectName: projectName || "Untitled node project",
+      workflowPackageId: projectPackagePath ? projectId || "" : "",
+      workflowPackagePath: projectPackagePath || "",
+      ...overrides
+    };
+  }
+
+  function appendWorkflowContextToForm(form, overrides = {}) {
+    const context = workflowRequestContext(overrides);
+    Object.entries(context).forEach(([key, value]) => {
+      form.append(key, value || "");
+    });
+  }
 
   React.useEffect(() => {
     nodesRef.current = nodes;
@@ -641,13 +659,14 @@ export default function NodeEditor({ active = true } = {}) {
           viewport,
           projectId,
           projectName,
-          savedProjectName
+          savedProjectName,
+          projectPackagePath
         })
       );
     } catch {
       // Local persistence should never interrupt the node editor.
     }
-  }, [nodes, edges, groups, viewport, projectId, projectName, savedProjectName]);
+  }, [nodes, edges, groups, viewport, projectId, projectName, savedProjectName, projectPackagePath]);
 
   React.useEffect(() => {
     if (!active) return undefined;
@@ -727,7 +746,7 @@ export default function NodeEditor({ active = true } = {}) {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [active, selectedNodeIds, selectedEdgeId, nodes, edges, groups, viewport, projectId, projectName, savedProjectName, selectedProjectName]);
+  }, [active, selectedNodeIds, selectedEdgeId, nodes, edges, groups, viewport, projectId, projectName, savedProjectName, selectedProjectName, projectPackagePath]);
 
   React.useEffect(() => {
     if (!active) return undefined;
@@ -1120,8 +1139,9 @@ export default function NodeEditor({ active = true } = {}) {
     });
 
     const form = new FormData();
-    form.append("asset", file);
+    appendWorkflowContextToForm(form);
     form.append("nodeType", node.type);
+    form.append("asset", file);
 
     try {
       const response = await fetch("/api/node/upload-asset", {
@@ -1217,9 +1237,8 @@ export default function NodeEditor({ active = true } = {}) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          ...workflowRequestContext(),
           imageDataUrl,
-          projectId,
-          projectName,
           nodeId: node.id,
           nodeTitle: node.data.title,
           aspectRatio: node.data.composerAspectRatio || "16:9",
@@ -1279,8 +1298,9 @@ export default function NodeEditor({ active = true } = {}) {
       const uploadedImages = [];
       for (const file of files) {
         const form = new FormData();
-        form.append("asset", file);
+        appendWorkflowContextToForm(form);
         form.append("nodeType", "transfer");
+        form.append("asset", file);
 
         const response = await fetch("/api/node/upload-asset", {
           method: "POST",
@@ -1466,8 +1486,7 @@ export default function NodeEditor({ active = true } = {}) {
               prompt,
               portrait,
               wardrobe,
-              projectId,
-              projectName
+              workflowContext: workflowRequestContext()
             });
             return {
               wardrobeId: characterWardrobeVariantId(wardrobe),
@@ -1538,8 +1557,9 @@ export default function NodeEditor({ active = true } = {}) {
 
   async function uploadNodeAsset(file, nodeType) {
     const form = new FormData();
-    form.append("asset", file);
+    appendWorkflowContextToForm(form);
     form.append("nodeType", nodeType);
+    form.append("asset", file);
     const response = await fetch("/api/node/upload-asset", { method: "POST", body: form });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Upload failed.");
@@ -1594,8 +1614,9 @@ export default function NodeEditor({ active = true } = {}) {
       const collageBlob = await createTransferCollageBlob(transferImages);
       const transferFile = new File([collageBlob], moodBoardOutputFileName, { type: "image/png" });
       const form = new FormData();
-      form.append("asset", transferFile);
+      appendWorkflowContextToForm(form);
       form.append("nodeId", node.id);
+      form.append("asset", transferFile);
 
       const response = await fetch("/api/node/upload-transfer-collage", {
         method: "POST",
@@ -2475,6 +2496,7 @@ export default function NodeEditor({ active = true } = {}) {
       updatedAt: now,
       app: "NewtNode",
       version: 1,
+      packagePath: projectPackagePath || "",
       graph: {
         nodes,
         edges,
@@ -2507,59 +2529,54 @@ export default function NodeEditor({ active = true } = {}) {
 
   async function saveProjectAsLocalFile() {
     const cleanProjectName = String(projectName || "").trim() || "Untitled node project";
-    const suggestedName = workflowFileNameForProject(cleanProjectName);
-    const id = projectId || createNodeId("workflow");
 
     try {
-      setSaveStatus("Choosing save location...");
-
-      if (!window.showSaveFilePicker) {
-        const workflow = currentWorkflowDocument({ id, name: cleanProjectName, fileName: suggestedName });
-        downloadWorkflowJson(workflow, suggestedName);
-        setProjectId(id);
-        setProjectName(workflow.name);
-        setSavedProjectName(workflow.name);
-        setLocalWorkflowFileName("");
-        setSaveStatus("Downloaded workflow JSON. This browser cannot keep a local save target.");
-        return;
+      const suggestedParent = window.localStorage.getItem("newtnode-last-package-parent") || "";
+      setSaveStatus("Choosing package folder...");
+      const { response, data } = await fetchJsonApi("/api/system/select-folder", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: "Choose parent folder for this NewtNode workflow package",
+          defaultPath: suggestedParent
+        })
+      }, "Folder picker");
+      if (!response.ok) {
+        if (data.canceled) {
+          setSaveStatus("Save As canceled");
+          return;
+        }
+        throw new Error(data.error || "Could not choose a package folder.");
       }
 
-      const handle = await window.showSaveFilePicker({
-        suggestedName,
-        types: [
-          {
-            description: "NewtNode workflow JSON",
-            accept: {
-              "application/json": [".json"]
-            }
-          }
-        ]
-      });
-
-      await saveProjectToLocalHandle(handle);
-      localWorkflowHandleRef.current = handle;
-    } catch (error) {
-      if (error?.name === "AbortError") {
+      const packageParentPath = data.path || "";
+      if (!packageParentPath) {
         setSaveStatus("Save As canceled");
         return;
       }
-      setSaveStatus(error.message || "Could not save workflow JSON.");
+
+      window.localStorage.setItem("newtnode-last-package-parent", packageParentPath);
+      await saveProjectToSavedWorkflows({ packageParentPath, saveAsPackage: true, name: cleanProjectName });
+    } catch (error) {
+      setSaveStatus(error.message || "Could not save workflow package.");
     }
   }
 
-  async function saveProjectToSavedWorkflows() {
+  async function saveProjectToSavedWorkflows(options = {}) {
     try {
-      const cleanProjectName = String(projectName || "").trim() || "Untitled node project";
+      const cleanProjectName = String(options.name || projectName || "").trim() || "Untitled node project";
       const lastSavedName = String(savedProjectName || selectedProjectName || "").trim();
-      const shouldCreateNewProject = Boolean(projectId && lastSavedName && cleanProjectName !== lastSavedName);
+      const shouldCreateNewProject = Boolean(!projectPackagePath && projectId && lastSavedName && cleanProjectName !== lastSavedName);
 
-      setSaveStatus("Saving...");
+      setSaveStatus(options.saveAsPackage ? "Saving workflow package..." : "Saving...");
       const response = await fetch("/api/saved-workflows", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           id: shouldCreateNewProject ? null : projectId,
           name: cleanProjectName,
+          packageParentPath: options.packageParentPath || "",
+          packagePath: options.packageParentPath ? "" : options.packagePath || projectPackagePath || "",
           nodes,
           edges,
           groups,
@@ -2571,8 +2588,16 @@ export default function NodeEditor({ active = true } = {}) {
       setProjectId(project.id);
       setProjectName(project.name);
       setSavedProjectName(project.name);
-      setSaveStatus(project.fileName ? `Saved ${project.fileName}` : shouldCreateNewProject ? "Saved as new workflow" : "Saved");
+      setProjectPackagePath(project.packagePath || project.package?.rootPath || "");
+      setSaveStatus(project.packagePath ? `Saved package ${project.package?.workflowFileName || project.fileName}` : project.fileName ? `Saved ${project.fileName}` : shouldCreateNewProject ? "Saved as new workflow" : "Saved");
       await loadProjects();
+      if (project.graph) {
+        const graph = normalizeEditorGraph(project.graph.nodes || [], project.graph.edges || [], project.graph.groups || []);
+        setNodes(graph.nodes);
+        setEdges(graph.edges);
+        setGroups(graph.groups);
+        setViewport(project.graph.viewport || viewport);
+      }
     } catch (error) {
       setSaveStatus(error.message);
     }
@@ -2599,6 +2624,7 @@ export default function NodeEditor({ active = true } = {}) {
     setProjectId(project.id || null);
     setProjectName(project.name || "Untitled node project");
     setSavedProjectName(project.name || null);
+    setProjectPackagePath(project.packagePath || project.package?.rootPath || "");
     setNodes(graph.nodes);
     setEdges(graph.edges);
     setGroups(graph.groups);
@@ -2618,15 +2644,26 @@ export default function NodeEditor({ active = true } = {}) {
         throw new Error("That JSON file is not a NewtNode workflow.");
       }
 
-      applyWorkflow(
-        {
-          ...project,
-          id: project.id || null,
-          name: project.name || file.name.replace(/\.json$/i, "") || "Untitled node project",
-          fileName: file.name
-        },
-        "Opened"
-      );
+      let openedProject = {
+        ...project,
+        id: project.id || null,
+        name: project.name || file.name.replace(/\.json$/i, "") || "Untitled node project",
+        fileName: project.fileName || file.name
+      };
+
+      if (openedProject.packagePath || openedProject.package?.rootPath) {
+        const response = await fetch("/api/saved-workflows/register-package", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ workflow: openedProject })
+        });
+        const registered = await response.json();
+        if (!response.ok) throw new Error(registered.error || "Could not register workflow package.");
+        openedProject = registered;
+      }
+
+      applyWorkflow(openedProject, "Opened");
+      await loadProjects();
     } catch (error) {
       setSaveStatus(error.message || "Could not open workflow.");
     } finally {
@@ -2665,6 +2702,7 @@ export default function NodeEditor({ active = true } = {}) {
         setProjectId(null);
         setProjectName("Untitled node project");
         setSavedProjectName(null);
+        setProjectPackagePath("");
       }
       setProjectMenuOpen(false);
       setSaveStatus("Workflow deleted");
@@ -2695,6 +2733,7 @@ export default function NodeEditor({ active = true } = {}) {
     const previousVideoResults = existingResultItemsForNode(currentNode, "video");
     const previous3DResults = existingResultItemsForNode(currentNode, "model3d");
     const previousUtilityResults = existingResultItemsForNode(currentNode, currentNode.type === "utility" ? utilityOutputType(currentNode) : "image");
+    const requestContext = workflowRequestContext();
 
     try {
       const runningPatch =
@@ -2704,7 +2743,7 @@ export default function NodeEditor({ active = true } = {}) {
       updateNode(currentNode.id, runningPatch);
 
       if (currentNode.type === "camera") {
-        const generated = await runCameraQwenEdit({ node: currentNode, incoming, projectId, projectName });
+        const generated = await runCameraQwenEdit({ node: currentNode, incoming, workflowContext: requestContext });
         const resultItems = appendResultItems(previousImageResults, [generated], "image");
         const firstNewIndex = Math.max(0, resultItems.length - 1);
         updateNode(currentNode.id, {
@@ -2720,7 +2759,7 @@ export default function NodeEditor({ active = true } = {}) {
       }
 
       if (currentNode.type === "text") {
-        const processed = await runTextNodeProcessing({ node: currentNode, incoming, projectId, projectName });
+        const processed = await runTextNodeProcessing({ node: currentNode, incoming, workflowContext: requestContext });
         updateNode(currentNode.id, {
           status: "complete",
           error: "",
@@ -2736,8 +2775,7 @@ export default function NodeEditor({ active = true } = {}) {
             node: currentNode,
             prompt: basePrompt,
             incoming,
-            projectId,
-            projectName
+            workflowContext: requestContext
           });
           if (!generatedItems.length) throw new Error("Utility image returned no image.");
           const generated = generatedItems[0];
@@ -2761,8 +2799,7 @@ export default function NodeEditor({ active = true } = {}) {
             node: currentNode,
             prompt: basePrompt,
             incoming,
-            projectId,
-            projectName,
+            workflowContext: requestContext,
             index
           })
         );
@@ -2801,8 +2838,7 @@ export default function NodeEditor({ active = true } = {}) {
             prompt,
             aspectRatio,
             imagePromptItems,
-            projectId,
-            projectName,
+            workflowContext: requestContext,
             index
           }),
           imageRunStaggerMs
@@ -2828,8 +2864,7 @@ export default function NodeEditor({ active = true } = {}) {
         const generated = await run3DModelGeneration({
           node: currentNode,
           incoming,
-          projectId,
-          projectName
+          workflowContext: requestContext
         });
         const resultItems = appendResultItems(previous3DResults, [generated], "model3d");
         const firstNewIndex = Math.max(0, resultItems.length - 1);
@@ -2851,8 +2886,7 @@ export default function NodeEditor({ active = true } = {}) {
           node: currentNode,
           prompt,
           incoming,
-          projectId,
-          projectName,
+          workflowContext: requestContext,
           index
         })
       );
@@ -3024,7 +3058,7 @@ export default function NodeEditor({ active = true } = {}) {
             <Save size={16} />
             <span>Save</span>
           </button>
-          <button onClick={saveProjectAsLocalFile} title={localWorkflowFileName ? `Save As local workflow. Current target: ${localWorkflowFileName}` : "Save workflow JSON to a local file"}>
+          <button onClick={saveProjectAsLocalFile} title={projectPackagePath ? `Save As portable package. Current package: ${projectPackagePath}` : "Save as portable workflow package"}>
             <Save size={16} />
             <span>Save As</span>
           </button>
@@ -8528,7 +8562,7 @@ function connectedMediaInputItems(items = [], mediaType) {
     .filter(Boolean);
 }
 
-async function runTextNodeProcessing({ node, incoming, projectId, projectName }) {
+async function runTextNodeProcessing({ node, incoming, projectId, projectName, workflowContext }) {
   const { response, data } = await fetchJsonApi("/api/node/process-text", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -8537,8 +8571,7 @@ async function runTextNodeProcessing({ node, incoming, projectId, projectName })
       textInputs: [...connectedTextInputItems(incoming.textIn), ...connectedStyleInputItems(incoming.styleIn)],
       imageInputs: connectedMediaInputItems(incoming.imageIn, "image"),
       videoInputs: connectedMediaInputItems(incoming.videoIn, "video"),
-      projectId,
-      projectName,
+      ...workflowContextPayload(workflowContext, projectId, projectName),
       nodeId: node.id,
       nodeTitle: node.data.title
     })
@@ -8661,7 +8694,7 @@ function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-async function runCameraQwenEdit({ node, incoming, projectId, projectName }) {
+async function runCameraQwenEdit({ node, incoming, projectId, projectName, workflowContext }) {
   const imageUrl = connectedAssetUrls(incoming.imageIn).at(-1);
   if (!imageUrl) throw new Error("Connect an image to the Camera node.");
 
@@ -8677,8 +8710,7 @@ async function runCameraQwenEdit({ node, incoming, projectId, projectName }) {
       loraScale: finiteNumber(node.data.loraScale, qwenCameraDefaults.loraScale),
       guidanceScale: finiteNumber(node.data.guidanceScale, qwenCameraDefaults.guidanceScale),
       numInferenceSteps: finiteNumber(node.data.numInferenceSteps, qwenCameraDefaults.numInferenceSteps),
-      projectId,
-      projectName,
+      ...workflowContextPayload(workflowContext, projectId, projectName),
       nodeId: node.id,
       nodeTitle: node.data.title
     })
@@ -8695,7 +8727,7 @@ async function runCameraQwenEdit({ node, incoming, projectId, projectName }) {
   };
 }
 
-async function runUtilityImageGeneration({ node, prompt, incoming, projectId, projectName }) {
+async function runUtilityImageGeneration({ node, prompt, incoming, projectId, projectName, workflowContext }) {
   const modelName = normalizedUtilityImageModelName(node.data.utilityImageModel);
   if (isUtilityStillFrameModel(modelName)) {
     const videoUrl = connectedAssetUrls(incoming.referenceVideoIn).at(-1);
@@ -8703,7 +8735,8 @@ async function runUtilityImageGeneration({ node, prompt, incoming, projectId, pr
     const still = await grabStillFrameFromVideo({
       videoUrl,
       requestedTime: node.data.stillFrameTime,
-      nodeTitle: node.data.title
+      nodeTitle: node.data.title,
+      workflowContext
     });
     return [still];
   }
@@ -8713,7 +8746,7 @@ async function runUtilityImageGeneration({ node, prompt, incoming, projectId, pr
   const model = normalizedUtilityImageModelName(node.data.utilityImageModel);
 
   if (isUtilityColorIdMatteModel(model)) {
-    return [await runColorIdMatteUtilityImage({ node, imageUrl, projectId, projectName })];
+    return [await runColorIdMatteUtilityImage({ node, imageUrl, projectId, projectName, workflowContext })];
   }
 
   const { response, data } = await fetchJsonApi("/api/node/utility-image", {
@@ -8727,8 +8760,7 @@ async function runUtilityImageGeneration({ node, prompt, incoming, projectId, pr
       patinaMaps: patinaMapsForData(node.data),
       patinaOutputFormat: node.data.patinaOutputFormat || "png",
       patinaSeed: node.data.patinaSeed || "",
-      projectId,
-      projectName,
+      ...workflowContextPayload(workflowContext, projectId, projectName),
       nodeId: node.id,
       nodeTitle: node.data.title
     })
@@ -8747,7 +8779,7 @@ async function runUtilityImageGeneration({ node, prompt, incoming, projectId, pr
   }));
 }
 
-async function runColorIdMatteUtilityImage({ node, imageUrl, projectId, projectName }) {
+async function runColorIdMatteUtilityImage({ node, imageUrl, projectId, projectName, workflowContext }) {
   const color = normalizeColorIdMatteColor(node.data.colorIdMatteColor);
   if (!color) throw new Error("Pick a color in the Utility node.");
 
@@ -8766,8 +8798,7 @@ async function runColorIdMatteUtilityImage({ node, imageUrl, projectId, projectN
   form.append("matchedPixels", String(mask.matchedPixels));
   form.append("width", String(mask.width));
   form.append("height", String(mask.height));
-  form.append("projectId", projectId || "");
-  form.append("projectName", projectName || "");
+  appendWorkflowContextFormFields(form, workflowContext, projectId, projectName);
   form.append("nodeId", node.id);
   form.append("nodeTitle", node.data.title || "");
 
@@ -8786,7 +8817,7 @@ async function runColorIdMatteUtilityImage({ node, imageUrl, projectId, projectN
   };
 }
 
-async function grabStillFrameFromVideo({ videoUrl, requestedTime, nodeTitle }) {
+async function grabStillFrameFromVideo({ videoUrl, requestedTime, nodeTitle, workflowContext }) {
   const video = document.createElement("video");
   video.muted = true;
   video.playsInline = true;
@@ -8819,6 +8850,7 @@ async function grabStillFrameFromVideo({ videoUrl, requestedTime, nodeTitle }) {
     const blob = await canvasToBlob(canvas, "image/png");
     const fileName = `${safeStillFrameName(nodeTitle)}-${formatFrameTime(targetTime)}.png`;
     const form = new FormData();
+    appendWorkflowContextFormFields(form, workflowContext);
     form.append("asset", new File([blob], fileName, { type: "image/png" }));
 
     const { response, data } = await fetchJsonApi("/api/node/upload-asset", {
@@ -9003,7 +9035,22 @@ function canRetryLocalApi(path) {
   return isLocalhost && window.location.port !== "3333";
 }
 
-async function runImageModelGeneration({ node, prompt, aspectRatio, imagePromptItems, projectId, projectName, index }) {
+function workflowContextPayload(workflowContext = {}, projectId = "", projectName = "") {
+  return {
+    projectId: workflowContext.projectId || projectId || "",
+    projectName: workflowContext.projectName || projectName || "Untitled node project",
+    workflowPackageId: workflowContext.workflowPackageId || "",
+    workflowPackagePath: workflowContext.workflowPackagePath || ""
+  };
+}
+
+function appendWorkflowContextFormFields(form, workflowContext = {}, projectId = "", projectName = "") {
+  Object.entries(workflowContextPayload(workflowContext, projectId, projectName)).forEach(([key, value]) => {
+    form.append(key, value || "");
+  });
+}
+
+async function runImageModelGeneration({ node, prompt, aspectRatio, imagePromptItems, projectId, projectName, workflowContext, index }) {
   const { response, data } = await fetchJsonApi("/api/node/generate-image", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -9015,8 +9062,7 @@ async function runImageModelGeneration({ node, prompt, aspectRatio, imagePromptI
       resolution: node.data.resolution,
       imagePromptUrls: imagePromptItems.map((item) => item.url),
       imagePromptLabels: imagePromptItems.map((item) => item.label),
-      projectId,
-      projectName,
+      ...workflowContextPayload(workflowContext, projectId, projectName),
       nodeId: node.id,
       nodeTitle: node.data.title
     })
@@ -9047,7 +9093,7 @@ function normalizedWan27ReferenceAspectRatio(value) {
   return wan27ReferenceAspectRatioOptions.includes(normalized) ? normalized : "16:9";
 }
 
-async function run3DModelGeneration({ node, incoming, projectId, projectName }) {
+async function run3DModelGeneration({ node, incoming, projectId, projectName, workflowContext }) {
   const imageViewUrls = connected3DViewUrls(incoming);
   if (!imageViewUrls.front) throw new Error("Connect a front image to the 3D node.");
 
@@ -9060,8 +9106,7 @@ async function run3DModelGeneration({ node, incoming, projectId, projectName }) 
       generateType: normalizeModel3DGenerateType(node.data.generateType),
       enablePbr: Boolean(node.data.enablePbr),
       faceCount: model3DFaceCount(node.data.faceCount),
-      projectId,
-      projectName,
+      ...workflowContextPayload(workflowContext, projectId, projectName),
       nodeId: node.id,
       nodeTitle: node.data.title
     })
@@ -9079,7 +9124,7 @@ async function run3DModelGeneration({ node, incoming, projectId, projectName }) 
   };
 }
 
-async function runCharacterSheetGeneration({ node, prompt, portrait, wardrobe, projectId, projectName }) {
+async function runCharacterSheetGeneration({ node, prompt, portrait, wardrobe, projectId, projectName, workflowContext }) {
   const references = [
     { url: portrait.localUrl, label: "The Character portrait reference" },
     ...(wardrobe?.localUrl ? [{ url: wardrobe.localUrl, label: "Selected wardrobe sheet" }] : [])
@@ -9094,8 +9139,7 @@ async function runCharacterSheetGeneration({ node, prompt, portrait, wardrobe, p
       resolution: "4K",
       imagePromptUrls: references.map((item) => item.url),
       imagePromptLabels: references.map((item) => item.label),
-      projectId,
-      projectName,
+      ...workflowContextPayload(workflowContext, projectId, projectName),
       nodeId: node.id,
       nodeTitle: `${node.data.title || "Character"} Character Sheet`
     })
@@ -9124,7 +9168,7 @@ function connected3DViewUrls(incoming = {}) {
   );
 }
 
-async function runVideoModelGeneration({ node, prompt, incoming, projectId, projectName, index }) {
+async function runVideoModelGeneration({ node, prompt, incoming, projectId, projectName, workflowContext, index }) {
   const characterReferences = connectedCharacterReferences(incoming.characterIn);
   const characterVoices = connectedCharacterVoiceUrls(incoming.characterIn);
   const { response, data } = await fetchJsonApi("/api/node/generate-video", {
@@ -9162,8 +9206,7 @@ async function runVideoModelGeneration({ node, prompt, incoming, projectId, proj
         shift: node.data.shift || 5,
         seed: node.data.seed || ""
       },
-      projectId,
-      projectName,
+      ...workflowContextPayload(workflowContext, projectId, projectName),
       nodeId: node.id,
       nodeTitle: node.data.title
     })
@@ -9179,7 +9222,7 @@ async function runVideoModelGeneration({ node, prompt, incoming, projectId, proj
   };
 }
 
-async function runUtilityVideoGeneration({ node, prompt, incoming, projectId, projectName, index }) {
+async function runUtilityVideoGeneration({ node, prompt, incoming, projectId, projectName, workflowContext, index }) {
   const model = normalizedUtilityVideoModelName(node.data.utilityVideoModel || utilityVideoModelNames.wanFunControl);
   const { response, data } = await fetchJsonApi("/api/node/utility-video", {
     method: "POST",
@@ -9321,8 +9364,7 @@ async function runUtilityVideoGeneration({ node, prompt, incoming, projectId, pr
         videoQuality: node.data.birefnetVideoQuality || "high",
         videoWriteMode: node.data.birefnetVideoWriteMode || "balanced"
       },
-      projectId,
-      projectName,
+      ...workflowContextPayload(workflowContext, projectId, projectName),
       nodeId: node.id,
       nodeTitle: node.data.title
     })
@@ -10623,7 +10665,7 @@ function createComposerImagePlane(plane, renderer, scene, camera, options = {}) 
 function composerTextureUrl(url) {
   if (!url || /^(blob:|data:|https?:)/i.test(url)) return url;
   if (typeof window === "undefined") return url;
-  if (/^\/(?:uploads|outputs)\//i.test(url)) {
+  if (/^\/(?:uploads|outputs|workflow-assets)\//i.test(url)) {
     const mediaOrigin = ["127.0.0.1", "localhost"].includes(window.location.hostname)
       ? `${window.location.protocol}//${window.location.hostname}:3333`
       : window.location.origin;
@@ -11093,7 +11135,8 @@ function loadNodeEditorDraft() {
     viewport: { x: 0, y: 0, scale: 1 },
     projectId: null,
     projectName: "Untitled node project",
-    savedProjectName: null
+    savedProjectName: null,
+    projectPackagePath: ""
   };
 
   try {
@@ -11107,7 +11150,8 @@ function loadNodeEditorDraft() {
       viewport: parsed.viewport || fallback.viewport,
       projectId: parsed.projectId || null,
       projectName: parsed.projectName || fallback.projectName,
-      savedProjectName: parsed.savedProjectName || null
+      savedProjectName: parsed.savedProjectName || null,
+      projectPackagePath: parsed.projectPackagePath || ""
     };
   } catch {
     return fallback;

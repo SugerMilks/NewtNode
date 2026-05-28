@@ -5,7 +5,7 @@ import express from "express";
 import multer from "multer";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { appendFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { appendFile, copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { File } from "node:buffer";
 import { randomUUID } from "node:crypto";
@@ -21,6 +21,10 @@ const rootDir = path.resolve(__dirname, "..");
 const uploadsDir = path.join(rootDir, "uploads");
 const outputsDir = path.join(rootDir, "outputs");
 const savedWorkflowsDir = path.join(rootDir, "saved_workflows");
+const workflowAssetsPrefix = "/workflow-assets";
+const workflowPackageInputDirName = "inputs";
+const workflowPackageOutputDirName = "outputs";
+const workflowPackageDependencyDirName = "dependencies";
 const composerPosesDir = path.join(rootDir, "public", "models", "poses");
 const dataDir = path.join(__dirname, "data");
 const historyPath = path.join(dataDir, "history.json");
@@ -198,6 +202,36 @@ app.use(cors());
 app.use(express.json({ limit: "16mb" }));
 app.use("/uploads", express.static(uploadsDir));
 app.use("/outputs", express.static(outputsDir));
+app.get(/^\/workflow-assets\/([^/]+)\/(.+)$/, async (req, res) => {
+  try {
+    const workflowId = decodeURIComponent(req.params[0] || "");
+    const relativePath = safeRelativeAssetPath(decodeURIComponent(req.params[1] || ""));
+    if (!workflowId || !relativePath) return res.status(400).send("Invalid workflow asset path.");
+
+    const workflow = await findRegisteredWorkflowPackage(workflowId);
+    if (!workflow?.packagePath) return res.status(404).send("Workflow package not found.");
+
+    const filePath = path.join(workflow.packagePath, relativePath);
+    res.sendFile(filePath, (error) => {
+      if (error && !res.headersSent) res.status(error.statusCode || 404).send("Workflow asset not found.");
+    });
+  } catch (error) {
+    if (!res.headersSent) res.status(400).send(error.message || "Invalid workflow asset path.");
+  }
+});
+
+app.post("/api/system/select-folder", async (req, res) => {
+  try {
+    const selectedPath = await selectFolderWithDialog({
+      title: String(req.body.title || "Choose folder"),
+      defaultPath: String(req.body.defaultPath || "")
+    });
+    res.json({ path: selectedPath });
+  } catch (error) {
+    const status = error.code === "DIALOG_CANCELED" ? 499 : 500;
+    res.status(status).json({ error: error.message || "Folder selection failed.", canceled: error.code === "DIALOG_CANCELED" });
+  }
+});
 
 app.get("/api/health", (_req, res) => {
   res.json({
@@ -381,30 +415,49 @@ app.get("/api/saved-workflows/:fileName", async (req, res) => {
 });
 
 app.post("/api/saved-workflows", async (req, res) => {
-  const workflows = await readSavedWorkflows();
-  const now = new Date().toISOString();
-  const id = String(req.body.id || randomUUID()).trim();
-  const name = String(req.body.name || "Untitled node project").trim() || "Untitled node project";
-  const existing = workflows.find((item) => item.id === id);
-  const fileName = existing?.fileName || uniqueWorkflowFileName(name, workflows);
-  const workflow = {
-    id,
-    name,
-    fileName,
-    createdAt: existing?.createdAt || now,
-    updatedAt: now,
-    app: "NewtNode",
-    version: 1,
-    graph: {
-      nodes: Array.isArray(req.body.nodes) ? req.body.nodes : [],
-      edges: Array.isArray(req.body.edges) ? req.body.edges : [],
-      groups: Array.isArray(req.body.groups) ? req.body.groups : [],
-      viewport: req.body.viewport || { x: 0, y: 0, scale: 1 }
-    }
-  };
+  try {
+    const workflows = await readSavedWorkflows();
+    const now = new Date().toISOString();
+    const id = String(req.body.id || randomUUID()).trim();
+    const name = String(req.body.name || "Untitled node project").trim() || "Untitled node project";
+    const existing = workflows.find((item) => item.id === id);
+    const packagePath = workflowPackagePathFromSaveRequest(req.body, existing, name);
+    const fileName = existing?.fileName || uniqueWorkflowFileName(name, workflows);
+    const workflow = {
+      id,
+      name,
+      fileName,
+      createdAt: existing?.createdAt || now,
+      updatedAt: now,
+      app: "NewtNode",
+      version: 1,
+      packagePath: packagePath || "",
+      graph: {
+        nodes: Array.isArray(req.body.nodes) ? req.body.nodes : [],
+        edges: Array.isArray(req.body.edges) ? req.body.edges : [],
+        groups: Array.isArray(req.body.groups) ? req.body.groups : [],
+        viewport: req.body.viewport || { x: 0, y: 0, scale: 1 }
+      }
+    };
 
-  await writeWorkflowFile(workflow);
-  res.json(workflow);
+    const savedWorkflow = packagePath ? await writeWorkflowPackage(workflow, packagePath) : workflow;
+    await writeWorkflowFile(savedWorkflow);
+    res.json(savedWorkflow);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: error.message || "Could not save workflow." });
+  }
+});
+
+app.post("/api/saved-workflows/register-package", async (req, res) => {
+  try {
+    const workflow = normalizeWorkflowPackageRegistration(req.body.workflow || req.body);
+    const registered = await writeWorkflowFile(workflow);
+    res.json(registered);
+  } catch (error) {
+    console.error(error);
+    res.status(400).json({ error: error.message || "Could not register workflow package." });
+  }
 });
 
 app.delete("/api/saved-workflows/:fileName", async (req, res) => {
@@ -517,19 +570,27 @@ app.post("/api/node/upload-asset", upload.single("asset"), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: "No asset uploaded." });
   }
-  const extensionMimeType = mimeForExtension(path.extname(req.file.originalname).toLowerCase());
-  const mimeType = req.file.mimetype && req.file.mimetype !== "application/octet-stream" ? req.file.mimetype : extensionMimeType;
+  try {
+    const extensionMimeType = mimeForExtension(path.extname(req.file.originalname).toLowerCase());
+    const mimeType = req.file.mimetype && req.file.mimetype !== "application/octet-stream" ? req.file.mimetype : extensionMimeType;
+    const target = await createManagedAssetTarget(req, req.file.filename, "", workflowPackageInputDirName);
+    await moveUploadedFile(req.file.path, target.filePath);
 
-  res.json({
-    asset: {
-      localUrl: `/uploads/${req.file.filename}`,
-      fileName: req.file.originalname,
-      storedFileName: req.file.filename,
-      mimeType,
-      size: req.file.size,
-      mediaType: mediaTypeForMime(mimeType)
-    }
-  });
+    res.json({
+      asset: {
+        localUrl: target.publicPath,
+        fileName: req.file.originalname,
+        storedFileName: target.relativePath,
+        mimeType,
+        size: req.file.size,
+        mediaType: mediaTypeForMime(mimeType)
+      }
+    });
+  } catch (error) {
+    if (req.file?.path) await rm(req.file.path, { force: true }).catch(() => {});
+    console.error(error);
+    res.status(500).json({ error: error.message || "Upload failed." });
+  }
 });
 
 app.post("/api/node/composer-frame", async (req, res) => {
@@ -545,9 +606,9 @@ app.post("/api/node/composer-frame", async (req, res) => {
       return res.status(400).json({ error: "Composer frame was empty." });
     }
 
-    const fileName = uniqueOutputFileName("composer-frame", ".png");
-    await writeFile(path.join(outputsDir, fileName), bytes);
-    const localUrl = `/outputs/${fileName}`;
+    const output = await createManagedAssetTarget(req, "composer-frame", ".png", workflowPackageOutputDirName);
+    await writeFile(output.filePath, bytes);
+    const localUrl = output.publicPath;
     const title = String(req.body.nodeTitle || "Composer").trim() || "Composer";
     const cost = {
       amountUsd: 0,
@@ -580,7 +641,7 @@ app.post("/api/node/composer-frame", async (req, res) => {
       },
       cost,
       localImage: localUrl,
-      outputFileName: fileName,
+      outputFileName: output.fileName,
       outputBytes: bytes.length,
       text: "Composer frame capture."
     });
@@ -588,7 +649,7 @@ app.post("/api/node/composer-frame", async (req, res) => {
     res.json({
       image: {
         localUrl,
-        fileName,
+        fileName: output.fileName,
         mimeType: "image/png"
       },
       cost
@@ -613,9 +674,8 @@ app.post("/api/node/color-id-matte", upload.single("asset"), async (req, res) =>
       return res.status(400).json({ error: "No Color ID matte uploaded." });
     }
 
-    const fileName = uniqueOutputFileName("color-id-matte", ".png");
-    const outputPath = path.join(outputsDir, fileName);
-    await rename(req.file.path, outputPath);
+    const output = await createManagedAssetTarget(req, "color-id-matte", ".png", workflowPackageOutputDirName);
+    await moveUploadedFile(req.file.path, output.filePath);
 
     const selectedColor = String(req.body.selectedColor || "").slice(0, 16);
     const tolerance = clampInteger(req.body.tolerance, 0, 96, 0);
@@ -660,8 +720,8 @@ app.post("/api/node/color-id-matte", upload.single("asset"), async (req, res) =>
         matchedPixels
       },
       cost,
-      localImage: `/outputs/${fileName}`,
-      outputFileName: fileName,
+      localImage: output.publicPath,
+      outputFileName: output.fileName,
       outputBytes: req.file.size,
       text
     });
@@ -672,8 +732,8 @@ app.post("/api/node/color-id-matte", upload.single("asset"), async (req, res) =>
       cost,
       image: {
         label: "Color ID Matte",
-        localUrl: `/outputs/${fileName}`,
-        fileName,
+        localUrl: output.publicPath,
+        fileName: output.fileName,
         mimeType: "image/png"
       }
     });
@@ -754,25 +814,25 @@ async function handleTransferCollageUpload(req, res) {
     return res.status(400).json({ error: "No mood board collage uploaded." });
   }
 
-  const nodeId = safePathSegment(req.body.nodeId || "mood-board");
-  const transferDir = path.join(uploadsDir, "transfers", nodeId);
-  const storedFileName = path.join("transfers", nodeId, moodBoardOutputFileName);
-  const targetPath = path.join(transferDir, moodBoardOutputFileName);
+  try {
+    const nodeId = safePathSegment(req.body.nodeId || "mood-board");
+    const target = await createManagedAssetTarget(req, `${nodeId}-${moodBoardOutputFileName}`, "", workflowPackageDependencyDirName);
+    await moveUploadedFile(req.file.path, target.filePath);
 
-  await mkdir(transferDir, { recursive: true });
-  await rm(targetPath, { force: true });
-  await rename(req.file.path, targetPath);
-
-  res.json({
-    asset: {
-      localUrl: `/uploads/${storedFileName.split(path.sep).join("/")}`,
-      fileName: moodBoardOutputFileName,
-      storedFileName: storedFileName.split(path.sep).join("/"),
-      mimeType: "image/png",
-      size: req.file.size,
-      mediaType: "image"
-    }
-  });
+    res.json({
+      asset: {
+        localUrl: target.publicPath,
+        fileName: moodBoardOutputFileName,
+        storedFileName: target.relativePath,
+        mimeType: "image/png",
+        size: req.file.size,
+        mediaType: "image"
+      }
+    });
+  } catch (error) {
+    if (req.file?.path) await rm(req.file.path, { force: true }).catch(() => {});
+    throw error;
+  }
 }
 
 app.post("/api/node/generate-image", async (req, res) => {
@@ -818,7 +878,7 @@ app.post("/api/node/generate-image", async (req, res) => {
         aspectRatio,
         resolution: req.body.resolution
       });
-      const output = await downloadImage(openAiImage.remoteImage.url, "openai-image-2", openAiImage.remoteImage.content_type || openAiImage.remoteImage.mimeType);
+      const output = await downloadImage(req, openAiImage.remoteImage.url, "openai-image-2", openAiImage.remoteImage.content_type || openAiImage.remoteImage.mimeType);
 
       const cost = estimateOpenAiImage2Cost({
         resolution: req.body.resolution,
@@ -901,9 +961,9 @@ app.post("/api/node/generate-image", async (req, res) => {
 
     const mimeType = inlineData.mimeType || inlineData.mime_type || "image/png";
     const extension = extensionForMime(mimeType);
-    const fileName = uniqueOutputFileName("nano-banana-pro", extension);
+    const output = await createManagedAssetTarget(req, "nano-banana-pro", extension, workflowPackageOutputDirName);
     const imageBytes = Buffer.from(inlineData.data, "base64");
-    await writeFile(path.join(outputsDir, fileName), imageBytes);
+    await writeFile(output.filePath, imageBytes);
 
     const cost = estimateImageCost({ resolution: req.body.resolution });
     await appendHistory({
@@ -929,8 +989,8 @@ app.post("/api/node/generate-image", async (req, res) => {
         imagePromptLabels: cleanReferenceLabels
       },
       cost,
-      localImage: `/outputs/${fileName}`,
-      outputFileName: fileName,
+      localImage: output.publicPath,
+      outputFileName: output.fileName,
       outputBytes: imageBytes.length,
       text
     });
@@ -939,8 +999,8 @@ app.post("/api/node/generate-image", async (req, res) => {
       text,
       cost,
       image: {
-        localUrl: `/outputs/${fileName}`,
-        fileName,
+        localUrl: output.publicPath,
+        fileName: output.fileName,
         mimeType
       }
     });
@@ -990,7 +1050,7 @@ async function runSam3ImageSegmentation(req, res, { prompt, imagePromptUrls, ima
     return res.status(502).json({ error: "Fal returned no segmentation image URL.", raw: result?.data });
   }
 
-  const output = await downloadImage(remoteImage.url, "sam-3-image-segmentation", remoteImage.content_type || remoteImage.mimeType);
+  const output = await downloadImage(req, remoteImage.url, "sam-3-image-segmentation", remoteImage.content_type || remoteImage.mimeType);
   const returnedMaskCount = Array.isArray(result?.data?.masks) ? result.data.masks.length : 0;
   const maskCount = returnedMaskCount || 1;
   const text = `Segmented ${maskCount} ${maskCount === 1 ? "mask" : "masks"}.`;
@@ -1131,7 +1191,7 @@ async function runDwposeUtilityImage(req, res, { imageUrl, selectedModel }) {
     return res.status(502).json({ error: "Fal returned no DWPose image URL.", raw: result?.data });
   }
 
-  const output = await downloadImage(remoteImage.url, "dwpose", remoteImage.content_type || remoteImage.mimeType);
+  const output = await downloadImage(req, remoteImage.url, "dwpose", remoteImage.content_type || remoteImage.mimeType);
   const cost = estimateFalImageUtilityCost({
     endpoint,
     mediaType: "image",
@@ -1206,7 +1266,7 @@ async function runDepthAnythingUtilityImage(req, res, { imageUrl, selectedModel 
     return res.status(502).json({ error: "Fal returned no Depth Anything image URL.", raw: result?.data });
   }
 
-  const output = await downloadImage(remoteImage.url, "depth-anything", remoteImage.content_type || remoteImage.mimeType);
+  const output = await downloadImage(req, remoteImage.url, "depth-anything", remoteImage.content_type || remoteImage.mimeType);
   const cost = estimateFalImageUtilityCost({
     endpoint,
     mediaType: "image",
@@ -1289,7 +1349,7 @@ async function runPatinaUtilityImage(req, res, { imageUrl, selectedModel }) {
   const outputs = [];
   for (const [index, remoteImage] of remoteImages.entries()) {
     const mapType = normalizePatinaMapId(remoteImage.map_type || maps[index]) || `map-${index + 1}`;
-    const output = await downloadImage(remoteImage.url, `patina-${mapType}`, remoteImage.content_type || remoteImage.mimeType);
+    const output = await downloadImage(req, remoteImage.url, `patina-${mapType}`, remoteImage.content_type || remoteImage.mimeType);
     outputs.push({
       remoteImage,
       output,
@@ -1377,7 +1437,7 @@ async function runBirefnetUtilityImage(req, res, { imageUrl, selectedModel }) {
     return res.status(502).json({ error: "Fal returned no BiRefNet image URL.", raw: result?.data });
   }
 
-  const output = await downloadImage(remoteImage.url, "birefnet-image", remoteImage.content_type || remoteImage.mimeType);
+  const output = await downloadImage(req, remoteImage.url, "birefnet-image", remoteImage.content_type || remoteImage.mimeType);
   const images = [
     {
       remoteImage,
@@ -1387,7 +1447,7 @@ async function runBirefnetUtilityImage(req, res, { imageUrl, selectedModel }) {
   ];
 
   if (input.output_mask && remoteMask?.url && remoteMask.url !== remoteImage.url) {
-    const maskOutput = await downloadImage(remoteMask.url, "birefnet-mask", remoteMask.content_type || remoteMask.mimeType);
+    const maskOutput = await downloadImage(req, remoteMask.url, "birefnet-mask", remoteMask.content_type || remoteMask.mimeType);
     images.push({
       remoteImage: remoteMask,
       output: maskOutput,
@@ -1610,7 +1670,7 @@ app.post("/api/node/qwen-camera-edit", async (req, res) => {
       return res.status(502).json({ error: "Fal returned no Qwen camera image URL.", raw: result?.data });
     }
 
-    const output = await downloadImage(remoteImage.url, "qwen-camera-edit", remoteImage.content_type || remoteImage.mimeType);
+    const output = await downloadImage(req, remoteImage.url, "qwen-camera-edit", remoteImage.content_type || remoteImage.mimeType);
     const prompt = result?.data?.prompt || qwenCameraPromptLabel(input);
     const cost = estimateQwenCameraEditCost({ endpoint, image: remoteImage });
 
@@ -1834,7 +1894,7 @@ app.post("/api/node/generate-video", async (req, res) => {
       return res.status(502).json({ error: "Fal returned no video URL.", raw: result?.data });
     }
 
-    const output = await downloadVideo(remoteVideo.url, routeKind);
+    const output = await downloadVideo(req, remoteVideo.url, routeKind);
     const cost = estimateSeedanceCost({
       speed,
       duration,
@@ -1944,12 +2004,12 @@ app.post("/api/node/generate-3d", async (req, res) => {
       return res.status(502).json({ error: "Hunyuan 3D returned no GLB model.", raw: data });
     }
 
-    const output = await downloadModelFile(remoteModel.url, "hunyuan-3d-pro", remoteModel.content_type || remoteModel.mimeType || remoteModel.mime_type);
+    const output = await downloadModelFile(req, remoteModel.url, "hunyuan-3d-pro", remoteModel.content_type || remoteModel.mimeType || remoteModel.mime_type);
     const remoteThumbnail = normalizeFalFile(data.thumbnail) || normalizeFalFile(data.thumbnail_url) || firstFalImageResult(data);
     let thumbnailOutput = null;
     if (remoteThumbnail?.url) {
       try {
-        thumbnailOutput = await downloadImage(remoteThumbnail.url, "hunyuan-3d-thumbnail", remoteThumbnail.content_type || remoteThumbnail.mimeType || remoteThumbnail.mime_type);
+        thumbnailOutput = await downloadImage(req, remoteThumbnail.url, "hunyuan-3d-thumbnail", remoteThumbnail.content_type || remoteThumbnail.mimeType || remoteThumbnail.mime_type);
       } catch (error) {
         console.warn("Could not download 3D thumbnail:", error.message);
       }
@@ -2046,7 +2106,7 @@ async function runSam3VideoSegmentation(req, res, { prompt, referenceVideoUrls }
     return res.status(502).json({ error: "Fal returned no segmentation video URL.", raw: result?.data });
   }
 
-  const output = await downloadVideo(remoteVideo.url, "sam-3-video-mask");
+  const output = await downloadVideo(req, remoteVideo.url, "sam-3-video-mask");
   const cost = estimateSam3VideoCost({ endpoint, frames: videoFrameCount(remoteVideo, result?.data) });
 
   await appendHistory({
@@ -2116,7 +2176,7 @@ async function runAuroraVideo(req, res, { prompt, referenceImageUrls, referenceA
     return res.status(502).json({ error: "Fal returned no video URL.", raw: result?.data });
   }
 
-  const output = await downloadVideo(remoteVideo.url, "creatify-aurora");
+  const output = await downloadVideo(req, remoteVideo.url, "creatify-aurora");
   const cost = estimateAuroraCost({ endpoint, resolution, duration: remoteVideo.duration });
   await appendHistory({
     id: result.requestId || randomUUID(),
@@ -2182,7 +2242,7 @@ async function runHappyHorseReferenceVideo(req, res, { prompt, referenceImageUrl
     return res.status(502).json({ error: "Fal returned no Happy Horse video URL.", raw: result?.data });
   }
 
-  const output = await downloadVideo(remoteVideo.url, "happy-horse-reference-to-video");
+  const output = await downloadVideo(req, remoteVideo.url, "happy-horse-reference-to-video");
   const cost = estimateHappyHorseCost({ endpoint, resolution, duration });
   await appendHistory({
     id: result.requestId || randomUUID(),
@@ -2262,7 +2322,7 @@ async function runWanFunControlVideo(req, res, { prompt, referenceImageUrls, ref
     return res.status(502).json({ error: "Fal returned no video URL.", raw: result?.data });
   }
 
-  const output = await downloadVideo(remoteVideo.url, "wan-fun-control");
+  const output = await downloadVideo(req, remoteVideo.url, "wan-fun-control");
   const cost = estimateWanFunControlCost({
     endpoint,
     matchInputNumFrames,
@@ -2347,7 +2407,7 @@ async function runWan27ReferenceVideo(req, res, { prompt, referenceImageUrls, re
     return res.status(502).json({ error: "Fal returned no Wan 2.7 video URL.", raw: result?.data });
   }
 
-  const output = await downloadVideo(remoteVideo.url, "wan-2-7-reference-to-video");
+  const output = await downloadVideo(req, remoteVideo.url, "wan-2-7-reference-to-video");
   const outputVideo = enrichVideoMetadata(remoteVideo, await probeVideoFile(output.filePath));
   const cost = estimateWan27ReferenceVideoCost({
     endpoint,
@@ -2443,7 +2503,7 @@ async function runVoidVideoInpaintingUtility(req, res, { prompt, referenceVideoU
     return res.status(502).json({ error: "Fal returned no VOID video URL.", raw: result?.data });
   }
 
-  const output = await downloadVideo(remoteVideo.url, "void-video-inpainting");
+  const output = await downloadVideo(req, remoteVideo.url, "void-video-inpainting");
   const cost = estimateVoidVideoInpaintingCost({
     endpoint,
     enablePass2Refinement: input.enable_pass2_refinement,
@@ -2525,6 +2585,7 @@ async function runWanVaceMaskToVideoUtility(req, res, { prompt, referenceImageUr
     maskVideoUrl
   });
   const preparedMedia = await prepareWanVaceMaskToVideoMedia({
+    body: req.body,
     videoUrl,
     maskVideoUrl,
     referenceImageUrls: referenceImageUrls.slice(0, 4),
@@ -2557,7 +2618,7 @@ async function runWanVaceMaskToVideoUtility(req, res, { prompt, referenceImageUr
     return res.status(502).json({ error: "Fal returned no Wan VACE Mask-to-Video URL.", raw: result?.data });
   }
 
-  const output = await downloadVideo(remoteVideo.url, "wan-vace-mask-to-video");
+  const output = await downloadVideo(req, remoteVideo.url, "wan-vace-mask-to-video");
   const outputVideo = enrichVideoMetadata(remoteVideo, await probeVideoFile(output.filePath));
   const cost = estimateWanVaceInpaintingCost({
     endpoint,
@@ -2673,7 +2734,7 @@ async function runWanVaceInpaintingUtility(req, res, { prompt, referenceImageUrl
     return res.status(502).json({ error: "Fal returned no Wan VACE video URL.", raw: result?.data });
   }
 
-  const output = await downloadVideo(remoteVideo.url, "wan-vace-inpainting");
+  const output = await downloadVideo(req, remoteVideo.url, "wan-vace-inpainting");
   const outputVideo = enrichVideoMetadata(remoteVideo, await probeVideoFile(output.filePath));
   const cost = estimateWanVaceInpaintingCost({
     endpoint,
@@ -2771,7 +2832,7 @@ async function runBirefnetUtilityVideo(req, res, { referenceVideoUrls, selectedV
     return res.status(502).json({ error: "Fal returned no BiRefNet video URL.", raw: result?.data });
   }
 
-  const output = await downloadVideo(remoteVideo.url, "birefnet-video");
+  const output = await downloadVideo(req, remoteVideo.url, "birefnet-video");
   const videos = [
     {
       remoteVideo,
@@ -2781,7 +2842,7 @@ async function runBirefnetUtilityVideo(req, res, { referenceVideoUrls, selectedV
   ];
 
   if (input.output_mask && remoteMaskVideo?.url && remoteMaskVideo.url !== remoteVideo.url) {
-    const maskOutput = await downloadVideo(remoteMaskVideo.url, "birefnet-mask-video");
+    const maskOutput = await downloadVideo(req, remoteMaskVideo.url, "birefnet-mask-video");
     videos.push({
       remoteVideo: remoteMaskVideo,
       output: maskOutput,
@@ -2874,7 +2935,7 @@ async function runRifeVideoInterpolation(req, res, { referenceVideoUrls, selecte
     return res.status(502).json({ error: "Fal returned no RIFE video URL.", raw: result?.data });
   }
 
-  const output = await downloadVideo(remoteVideo.url, "rife-video-interpolation");
+  const output = await downloadVideo(req, remoteVideo.url, "rife-video-interpolation");
   const cost = estimateFalVideoUtilityCost({
     endpoint,
     pricingBasis: "RIFE video interpolation fal.ai request; local price estimate not configured"
@@ -2948,7 +3009,7 @@ async function runBytedanceVideoUpscaler(req, res, { referenceVideoUrls, selecte
     return res.status(502).json({ error: "Fal returned no Bytedance upscaled video URL.", raw: result?.data });
   }
 
-  const output = await downloadVideo(remoteVideo.url, "bytedance-video-upscaler");
+  const output = await downloadVideo(req, remoteVideo.url, "bytedance-video-upscaler");
   const outputVideo = enrichVideoMetadata(remoteVideo, await probeVideoFile(output.filePath));
   const cost = estimateBytedanceVideoUpscalerCost({
     endpoint,
@@ -3031,7 +3092,7 @@ async function runTopazVideoUpscaler(req, res, { referenceVideoUrls, selectedVid
     return res.status(502).json({ error: "Fal returned no Topaz upscaled video URL.", raw: result?.data });
   }
 
-  const output = await downloadVideo(remoteVideo.url, "topaz-video-upscale");
+  const output = await downloadVideo(req, remoteVideo.url, "topaz-video-upscale");
   const outputVideo = enrichVideoMetadata(remoteVideo, await probeVideoFile(output.filePath));
   const billingTier = normalizeChoice(options.billingResolutionTier, topazUpscalerBillingTierOptions, "auto");
   const cost = estimateTopazVideoUpscalerCost({
@@ -3179,7 +3240,7 @@ app.post(
         return res.status(502).json({ error: "Fal returned no video URL.", raw: result?.data });
       }
 
-      const output = await downloadVideo(remoteVideo.url, route.kind);
+      const output = await downloadVideo(req, remoteVideo.url, route.kind);
       const cost = estimateSeedanceCost({
         speed,
         duration,
@@ -3376,10 +3437,14 @@ function safeWorkflowFileName(value) {
   return fileName.replace(/[^A-Za-z0-9_.-]/g, "-").slice(0, 120);
 }
 
+function workflowFileNameForName(name) {
+  return `${safePathSegment(name || "workflow")}.json`;
+}
+
 function uniqueWorkflowFileName(name, workflows) {
   const usedNames = new Set(workflows.map((workflow) => workflow.fileName.toLowerCase()));
   const baseName = safePathSegment(name || "workflow") || "workflow";
-  let fileName = `${baseName}.json`;
+  let fileName = workflowFileNameForName(baseName);
   let suffix = 2;
 
   while (usedNames.has(fileName.toLowerCase())) {
@@ -3388,6 +3453,549 @@ function uniqueWorkflowFileName(name, workflows) {
   }
 
   return fileName;
+}
+
+function safeRelativeAssetPath(value) {
+  const normalized = path.normalize(String(value || "").replace(/^[/\\]+/, ""));
+  if (!normalized || path.isAbsolute(normalized) || normalized.startsWith("..")) return "";
+  return normalized;
+}
+
+function safePackageFileName(value, fallback = "asset") {
+  const extension = path.extname(String(value || ""));
+  const base = path
+    .basename(String(value || fallback), extension)
+    .replace(/[^A-Za-z0-9_.-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 70) || fallback;
+  const safeExtension = extension.replace(/[^A-Za-z0-9.]+/g, "").slice(0, 16);
+  return `${base}${safeExtension || ""}`;
+}
+
+function workflowPackagePublicPath(workflowId, relativePath) {
+  return `${workflowAssetsPrefix}/${encodeURIComponent(workflowId)}/${relativePath.split(path.sep).map(encodeURIComponent).join("/")}`;
+}
+
+function workflowPackagePathFromSaveRequest(body, existing, name) {
+  const explicitPackagePath = normalizeWorkflowPackagePath(body.packagePath || body.workflowPackagePath);
+  if (explicitPackagePath) return explicitPackagePath;
+
+  const existingPackagePath = normalizeWorkflowPackagePath(existing?.packagePath || existing?.package?.rootPath);
+  if (existingPackagePath && !body.packageParentPath) return existingPackagePath;
+
+  const parentPath = normalizeWorkflowPackagePath(body.packageParentPath);
+  if (!parentPath) return "";
+  return path.join(parentPath, safePathSegment(name || "workflow"));
+}
+
+function normalizeWorkflowPackagePath(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  return path.resolve(raw);
+}
+
+function workflowPackageContextFromBody(body = {}) {
+  const packagePath = normalizeWorkflowPackagePath(body.workflowPackagePath || body.packagePath);
+  if (!packagePath) return null;
+
+  return {
+    id: String(body.workflowPackageId || body.projectId || body.id || randomUUID()).trim(),
+    packagePath
+  };
+}
+
+async function ensureWorkflowPackageDirs(packagePath) {
+  await Promise.all([
+    mkdir(packagePath, { recursive: true }),
+    mkdir(path.join(packagePath, workflowPackageInputDirName), { recursive: true }),
+    mkdir(path.join(packagePath, workflowPackageOutputDirName), { recursive: true }),
+    mkdir(path.join(packagePath, workflowPackageDependencyDirName), { recursive: true })
+  ]);
+}
+
+async function createManagedAssetTarget(requestLike, kind, extension = "", assetGroup = workflowPackageOutputDirName) {
+  const body = requestLike?.body || {};
+  const packageContext = workflowPackageContextFromBody(body);
+  const inputExtension = extension || path.extname(String(kind || ""));
+  const fileName = inputExtension ? uniqueOutputFileName(kind, inputExtension) : safePackageFileName(kind || "asset");
+
+  if (packageContext?.packagePath) {
+    await ensureWorkflowPackageDirs(packageContext.packagePath);
+    const relativePath = path.join(assetGroup, fileName);
+    return {
+      fileName,
+      relativePath: relativePath.split(path.sep).join("/"),
+      filePath: path.join(packageContext.packagePath, relativePath),
+      publicPath: workflowPackagePublicPath(packageContext.id, relativePath)
+    };
+  }
+
+  const workflowDir = safePathSegment(body.projectName || body.workflowName || "Untitled-node-project");
+  const root = assetGroup === workflowPackageInputDirName ? uploadsDir : outputsDir;
+  const relativeRoot = assetGroup === workflowPackageInputDirName ? workflowDir : path.join(workflowDir, assetGroup === workflowPackageOutputDirName ? "" : assetGroup);
+  const targetDir = path.join(root, relativeRoot);
+  await mkdir(targetDir, { recursive: true });
+
+  const relativePath = path.join(relativeRoot, fileName);
+  return {
+    fileName,
+    relativePath: relativePath.split(path.sep).join("/"),
+    filePath: path.join(root, relativePath),
+    publicPath: `/${assetGroup === workflowPackageInputDirName ? "uploads" : "outputs"}/${relativePath.split(path.sep).map(encodeURIComponent).join("/")}`
+  };
+}
+
+async function moveUploadedFile(sourcePath, targetPath) {
+  await mkdir(path.dirname(targetPath), { recursive: true });
+  await rm(targetPath, { force: true }).catch(() => {});
+  await rename(sourcePath, targetPath);
+}
+
+async function hydrateWorkflowPackage(workflow) {
+  const packagePath = normalizeWorkflowPackagePath(workflow.packagePath || workflow.package?.rootPath);
+  if (!packagePath) return workflow;
+
+  const workflowFileName = safeWorkflowFileName(workflow.package?.workflowFileName || workflow.fileName) || workflowFileNameForName(workflow.name || "workflow");
+  const packageWorkflowPath = path.join(packagePath, workflowFileName);
+  try {
+    const packagedWorkflow = JSON.parse(await readFile(packageWorkflowPath, "utf8"));
+    return {
+      ...workflow,
+      ...packagedWorkflow,
+      id: workflow.id || packagedWorkflow.id,
+      packagePath,
+      fileName: workflow.fileName || packagedWorkflow.fileName || workflowFileName,
+      package: {
+        ...(packagedWorkflow.package || {}),
+        ...(workflow.package || {}),
+        rootPath: packagePath,
+        workflowFileName
+      }
+    };
+  } catch {
+    return { ...workflow, packagePath };
+  }
+}
+
+async function findRegisteredWorkflowPackage(workflowId) {
+  const workflows = await readSavedWorkflows();
+  return workflows.find((workflow) => String(workflow.id || "") === String(workflowId || "") && workflow.packagePath);
+}
+
+function normalizeWorkflowPackageRegistration(value) {
+  const id = String(value?.id || randomUUID()).trim();
+  const name = String(value?.name || "Untitled node project").trim() || "Untitled node project";
+  const packagePath = normalizeWorkflowPackagePath(value?.packagePath || value?.package?.rootPath);
+  if (!packagePath) throw new Error("Workflow package is missing its package path.");
+  const fileName = safeWorkflowFileName(value?.fileName || value?.package?.workflowFileName) || workflowFileNameForName(name);
+
+  return {
+    ...value,
+    id,
+    name,
+    fileName,
+    packagePath,
+    package: {
+      ...(value.package || {}),
+      rootPath: packagePath,
+      workflowFileName: fileName,
+      assetBaseUrl: `${workflowAssetsPrefix}/${encodeURIComponent(id)}`
+    },
+    graph: {
+      nodes: Array.isArray(value?.graph?.nodes) ? value.graph.nodes : [],
+      edges: Array.isArray(value?.graph?.edges) ? value.graph.edges : [],
+      groups: Array.isArray(value?.graph?.groups) ? value.graph.groups : [],
+      viewport: value?.graph?.viewport || { x: 0, y: 0, scale: 1 }
+    }
+  };
+}
+
+async function writeWorkflowPackage(workflow, packagePath) {
+  await ensureWorkflowPackageDirs(packagePath);
+  const workflowFileName = workflowFileNameForName(workflow.name || "workflow");
+  const assets = await copyWorkflowAssetsToPackage(workflow.graph, workflow.id, packagePath);
+  const graph = rewriteWorkflowAssetUrls(workflow.graph, assets.urlMap);
+  const updatedAt = new Date().toISOString();
+  const packagedWorkflow = {
+    ...workflow,
+    fileName: workflow.fileName || workflowFileName,
+    updatedAt,
+    packagePath,
+    package: {
+      id: workflow.id,
+      name: workflow.name,
+      rootPath: packagePath,
+      workflowFileName,
+      assetBaseUrl: `${workflowAssetsPrefix}/${encodeURIComponent(workflow.id)}`,
+      savedAt: updatedAt
+    },
+    graph
+  };
+  const manifest = {
+    app: "NewtNode",
+    version: 1,
+    workflowId: workflow.id,
+    workflowName: workflow.name,
+    workflowFileName,
+    updatedAt,
+    assets: assets.manifest
+  };
+
+  await writeFile(path.join(packagePath, workflowFileName), JSON.stringify(packagedWorkflow, null, 2));
+  await writeFile(path.join(packagePath, "manifest.json"), JSON.stringify(manifest, null, 2));
+  return packagedWorkflow;
+}
+
+async function copyWorkflowAssetsToPackage(graph, workflowId, packagePath) {
+  const urls = collectWorkflowAssetUrls(graph);
+  const urlMap = new Map();
+  const manifest = [];
+  const usedTargets = new Set();
+
+  for (const publicPath of urls) {
+    try {
+      const source = await resolveLocalAssetPath(publicPath);
+      const assetGroup = workflowPackageAssetGroup(publicPath);
+      const existingPackagePath = workflowPackageRelativePath(publicPath, workflowId);
+      if (existingPackagePath && path.resolve(source.filePath) === path.resolve(packagePath, existingPackagePath)) {
+        urlMap.set(publicPath, publicPath);
+        manifest.push({
+          source: publicPath,
+          url: publicPath,
+          relativePath: existingPackagePath.split(path.sep).join("/"),
+          group: assetGroup,
+          fileName: path.basename(existingPackagePath)
+        });
+        continue;
+      }
+
+      const targetName = uniquePackageAssetName(source.fileName, usedTargets);
+      const relativePath = path.join(assetGroup, targetName);
+      const targetPath = path.join(packagePath, relativePath);
+      await mkdir(path.dirname(targetPath), { recursive: true });
+      if (path.resolve(source.filePath) !== path.resolve(targetPath)) await copyFile(source.filePath, targetPath);
+      const packagedUrl = workflowPackagePublicPath(workflowId, relativePath);
+      urlMap.set(publicPath, packagedUrl);
+      manifest.push({
+        source: publicPath,
+        url: packagedUrl,
+        relativePath: relativePath.split(path.sep).join("/"),
+        group: assetGroup,
+        fileName: targetName
+      });
+    } catch (error) {
+      manifest.push({
+        source: publicPath,
+        missing: true,
+        error: error.message || "Asset could not be copied."
+      });
+    }
+  }
+
+  return { urlMap, manifest };
+}
+
+function collectWorkflowAssetUrls(value, urls = new Set()) {
+  if (typeof value === "string") {
+    const publicPath = tryLocalPublicPath(value);
+    if (publicPath) urls.add(publicPath);
+    return urls;
+  }
+
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectWorkflowAssetUrls(item, urls));
+    return urls;
+  }
+
+  if (value && typeof value === "object") {
+    Object.values(value).forEach((item) => collectWorkflowAssetUrls(item, urls));
+  }
+
+  return urls;
+}
+
+function rewriteWorkflowAssetUrls(value, urlMap) {
+  if (typeof value === "string") {
+    const publicPath = tryLocalPublicPath(value);
+    return publicPath && urlMap.has(publicPath) ? urlMap.get(publicPath) : value;
+  }
+
+  if (Array.isArray(value)) return value.map((item) => rewriteWorkflowAssetUrls(item, urlMap));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, rewriteWorkflowAssetUrls(item, urlMap)]));
+  }
+
+  return value;
+}
+
+function tryLocalPublicPath(value) {
+  try {
+    return localPublicPathFromUrl(value);
+  } catch {
+    return "";
+  }
+}
+
+function workflowPackageAssetGroup(publicPath) {
+  if (String(publicPath || "").startsWith("/uploads/")) return workflowPackageInputDirName;
+  const packagePath = workflowPackageRelativePath(publicPath);
+  const firstSegment = packagePath ? packagePath.split(/[\\/]/)[0] : "";
+  if ([workflowPackageInputDirName, workflowPackageOutputDirName, workflowPackageDependencyDirName].includes(firstSegment)) return firstSegment;
+  return workflowPackageOutputDirName;
+}
+
+function workflowPackageRelativePath(publicPath, workflowId = "") {
+  const match = String(publicPath || "").match(/^\/workflow-assets\/([^/]+)\/(.+)$/);
+  if (!match) return "";
+  if (workflowId && decodeURIComponent(match[1]) !== String(workflowId)) return "";
+  return safeRelativeAssetPath(decodeURIComponent(match[2] || ""));
+}
+
+function uniquePackageAssetName(fileName, usedTargets) {
+  const safeName = safePackageFileName(fileName || "asset");
+  const extension = path.extname(safeName);
+  const base = path.basename(safeName, extension);
+  let nextName = safeName;
+  let index = 2;
+
+  while (usedTargets.has(nextName.toLowerCase())) {
+    nextName = `${base}-${index}${extension}`;
+    index += 1;
+  }
+
+  usedTargets.add(nextName.toLowerCase());
+  return nextName;
+}
+
+async function selectFolderWithDialog({ title = "Choose folder", defaultPath = "" } = {}) {
+  if (process.platform === "win32") {
+    return selectFolderWithWindowsDialog({ title, defaultPath });
+  }
+
+  if (process.platform === "darwin") {
+    return selectFolderWithMacDialog({ title, defaultPath });
+  }
+
+  return selectFolderWithLinuxDialog({ title, defaultPath });
+}
+
+async function selectFolderWithWindowsDialog({ title, defaultPath }) {
+  const selectedPath = normalizeWorkflowPackagePath(defaultPath);
+  const script = `
+$ErrorActionPreference = 'Stop'
+$typeDefinition = @"
+using System;
+using System.Runtime.InteropServices;
+
+[ComImport]
+[Guid("DC1C5A9C-E88A-4DDE-A5A1-60F82A20AEF7")]
+internal class FileOpenDialogRCW
+{
+}
+
+[ComImport]
+[Guid("d57c7288-d4ad-4768-be02-9d969532d960")]
+[InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+internal interface IFileOpenDialog
+{
+  [PreserveSig]
+  int Show(IntPtr parent);
+  void SetFileTypes(uint cFileTypes, IntPtr rgFilterSpec);
+  void SetFileTypeIndex(uint iFileType);
+  void GetFileTypeIndex(out uint piFileType);
+  void Advise(IntPtr pfde, out uint pdwCookie);
+  void Unadvise(uint dwCookie);
+  void SetOptions(uint fos);
+  void GetOptions(out uint pfos);
+  void SetDefaultFolder(IShellItem psi);
+  void SetFolder(IShellItem psi);
+  void GetFolder(out IShellItem ppsi);
+  void GetCurrentSelection(out IShellItem ppsi);
+  void SetFileName([MarshalAs(UnmanagedType.LPWStr)] string pszName);
+  void GetFileName([MarshalAs(UnmanagedType.LPWStr)] out string pszName);
+  void SetTitle([MarshalAs(UnmanagedType.LPWStr)] string pszTitle);
+  void SetOkButtonLabel([MarshalAs(UnmanagedType.LPWStr)] string pszText);
+  void SetFileNameLabel([MarshalAs(UnmanagedType.LPWStr)] string pszLabel);
+  void GetResult(out IShellItem ppsi);
+  void AddPlace(IShellItem psi, int fdap);
+  void SetDefaultExtension([MarshalAs(UnmanagedType.LPWStr)] string pszDefaultExtension);
+  void Close(int hr);
+  void SetClientGuid(ref Guid guid);
+  void ClearClientData();
+  void SetFilter(IntPtr pFilter);
+  void GetResults(out IntPtr ppenum);
+  void GetSelectedItems(out IntPtr ppsai);
+}
+
+[ComImport]
+[Guid("43826d1e-e718-42ee-bc55-a1e261c37bfe")]
+[InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+internal interface IShellItem
+{
+  void BindToHandler(IntPtr pbc, ref Guid bhid, ref Guid riid, out IntPtr ppv);
+  void GetParent(out IShellItem ppsi);
+  void GetDisplayName(uint sigdnName, out IntPtr ppszName);
+  void GetAttributes(uint sfgaoMask, out uint psfgaoAttribs);
+  void Compare(IShellItem psi, uint hint, out int piOrder);
+}
+
+public static class NativeFolderPicker
+{
+  private const uint FOS_PICKFOLDERS = 0x00000020;
+  private const uint FOS_FORCEFILESYSTEM = 0x00000040;
+  private const uint FOS_PATHMUSTEXIST = 0x00000800;
+  private const uint SIGDN_FILESYSPATH = 0x80058000;
+  private const int ERROR_CANCELLED = unchecked((int)0x800704C7);
+
+  [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)]
+  private static extern int SHCreateItemFromParsingName(
+    [MarshalAs(UnmanagedType.LPWStr)] string pszPath,
+    IntPtr pbc,
+    ref Guid riid,
+    [MarshalAs(UnmanagedType.Interface)] out IShellItem ppv);
+
+  [DllImport("ole32.dll")]
+  private static extern void CoTaskMemFree(IntPtr pv);
+
+  public static string PickFolder(string title, string defaultPath)
+  {
+    object dialogObject = new FileOpenDialogRCW();
+    IFileOpenDialog dialog = (IFileOpenDialog)dialogObject;
+    IShellItem defaultFolder = null;
+    IShellItem result = null;
+
+    try
+    {
+      uint options;
+      dialog.GetOptions(out options);
+      dialog.SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST);
+      if (!String.IsNullOrWhiteSpace(title))
+      {
+        dialog.SetTitle(title);
+      }
+      dialog.SetOkButtonLabel("Select Folder");
+
+      if (!String.IsNullOrWhiteSpace(defaultPath) && System.IO.Directory.Exists(defaultPath))
+      {
+        Guid shellItemGuid = new Guid("43826D1E-E718-42EE-BC55-A1E261C37BFE");
+        if (SHCreateItemFromParsingName(defaultPath, IntPtr.Zero, ref shellItemGuid, out defaultFolder) == 0)
+        {
+          dialog.SetFolder(defaultFolder);
+        }
+      }
+
+      int hr = dialog.Show(IntPtr.Zero);
+      if (hr == ERROR_CANCELLED)
+      {
+        return null;
+      }
+      if (hr != 0)
+      {
+        Marshal.ThrowExceptionForHR(hr);
+      }
+
+      dialog.GetResult(out result);
+      IntPtr pathPointer;
+      result.GetDisplayName(SIGDN_FILESYSPATH, out pathPointer);
+      try
+      {
+        return Marshal.PtrToStringUni(pathPointer);
+      }
+      finally
+      {
+        CoTaskMemFree(pathPointer);
+      }
+    }
+    finally
+    {
+      if (result != null) Marshal.ReleaseComObject(result);
+      if (defaultFolder != null) Marshal.ReleaseComObject(defaultFolder);
+      Marshal.ReleaseComObject(dialogObject);
+    }
+  }
+}
+"@
+
+$selectedPath = ${powershellStringLiteral(selectedPath)}
+$title = ${powershellStringLiteral(title)}
+
+try {
+  Add-Type -TypeDefinition $typeDefinition
+  $path = [NativeFolderPicker]::PickFolder($title, $selectedPath)
+  if ($path) {
+    [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
+    Write-Output $path
+    exit 0
+  }
+  exit 2
+} catch {
+  Add-Type -AssemblyName System.Windows.Forms
+  $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+  $dialog.Description = $title
+  $dialog.ShowNewFolderButton = $true
+  if ($selectedPath -and (Test-Path -LiteralPath $selectedPath)) {
+    $dialog.SelectedPath = $selectedPath
+  }
+  $result = $dialog.ShowDialog()
+  if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
+    [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
+    Write-Output $dialog.SelectedPath
+    exit 0
+  }
+  exit 2
+}
+`;
+
+  return runFolderDialogCommand("powershell.exe", ["-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-Command", script]);
+}
+
+function powershellStringLiteral(value) {
+  return `'${String(value || "").replace(/'/g, "''")}'`;
+}
+
+async function selectFolderWithMacDialog({ title, defaultPath }) {
+  const selectedPath = existingDirectoryPath(defaultPath);
+  const script = selectedPath
+    ? `POSIX path of (choose folder with prompt ${JSON.stringify(title)} default location POSIX file ${JSON.stringify(selectedPath)})`
+    : `POSIX path of (choose folder with prompt ${JSON.stringify(title)})`;
+  return runFolderDialogCommand("osascript", ["-e", script]);
+}
+
+async function selectFolderWithLinuxDialog({ title, defaultPath }) {
+  const selectedPath = existingDirectoryPath(defaultPath);
+  try {
+    const args = ["--file-selection", "--directory", `--title=${title}`];
+    if (selectedPath) args.push(`--filename=${selectedPath}${path.sep}`);
+    return await runFolderDialogCommand("zenity", args);
+  } catch (error) {
+    if (error.code === "DIALOG_CANCELED") throw error;
+    return runFolderDialogCommand("kdialog", ["--getexistingdirectory", selectedPath || rootDir]);
+  }
+}
+
+function existingDirectoryPath(value) {
+  const selectedPath = normalizeWorkflowPackagePath(value);
+  return selectedPath && existsSync(selectedPath) ? selectedPath : "";
+}
+
+async function runFolderDialogCommand(command, args) {
+  try {
+    const { stdout } = await execFile(command, args, { windowsHide: false, timeout: 120000 });
+    const selectedPath = String(stdout || "").trim();
+    if (!selectedPath) {
+      const error = new Error("Folder selection canceled.");
+      error.code = "DIALOG_CANCELED";
+      throw error;
+    }
+    return selectedPath;
+  } catch (error) {
+    if (error.code === "DIALOG_CANCELED" || error.code === 2) {
+      const canceled = new Error("Folder selection canceled.");
+      canceled.code = "DIALOG_CANCELED";
+      throw canceled;
+    }
+    throw error;
+  }
 }
 
 function safeComposerPoseFileName(value) {
@@ -3493,12 +4101,14 @@ async function readSavedWorkflowFiles() {
     if (!entry.isFile() || !entry.name.toLowerCase().endsWith(".json")) continue;
 
     try {
-      const workflow = JSON.parse(await readFile(path.join(savedWorkflowsDir, entry.name), "utf8"));
+      const registryWorkflow = JSON.parse(await readFile(path.join(savedWorkflowsDir, entry.name), "utf8"));
+      const workflow = await hydrateWorkflowPackage(registryWorkflow);
       workflows.push({
         ...workflow,
         id: workflow.id || entry.name,
         name: workflow.name || path.basename(entry.name, ".json"),
-        fileName: entry.name,
+        fileName: registryWorkflow.fileName || entry.name,
+        registryFileName: entry.name,
         graph: {
           nodes: Array.isArray(workflow.graph?.nodes) ? workflow.graph.nodes : [],
           edges: Array.isArray(workflow.graph?.edges) ? workflow.graph.edges : [],
@@ -3516,7 +4126,12 @@ async function readSavedWorkflowFiles() {
 
 async function writeWorkflowFile(workflow) {
   await mkdir(savedWorkflowsDir, { recursive: true });
-  await writeFile(path.join(savedWorkflowsDir, workflow.fileName), JSON.stringify(workflow, null, 2));
+  const registryWorkflow = {
+    ...workflow,
+    fileName: safeWorkflowFileName(workflow.fileName) || workflowFileNameForName(workflow.name || "workflow")
+  };
+  await writeFile(path.join(savedWorkflowsDir, registryWorkflow.fileName), JSON.stringify(registryWorkflow, null, 2));
+  return registryWorkflow;
 }
 
 function uniqueReferenceName(value, usedNames) {
@@ -3542,22 +4157,21 @@ async function uploadToFal(file) {
   return fal.storage.upload(falFile);
 }
 
-async function downloadVideo(url, kind) {
+async function downloadVideo(req, url, kind) {
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`Could not download generated video: ${response.status} ${response.statusText}`);
   }
 
   const extension = path.extname(new URL(url).pathname) || ".mp4";
-  const fileName = uniqueOutputFileName(kind, extension);
-  const outputPath = path.join(outputsDir, fileName);
+  const output = await createManagedAssetTarget(req, kind, extension, workflowPackageOutputDirName);
   const bytes = Buffer.from(await response.arrayBuffer());
-  await writeFile(outputPath, bytes);
+  await writeFile(output.filePath, bytes);
 
   return {
-    fileName,
-    publicPath: `/outputs/${fileName}`,
-    filePath: outputPath,
+    fileName: output.fileName,
+    publicPath: output.publicPath,
+    filePath: output.filePath,
     bytes: bytes.length
   };
 }
@@ -3600,7 +4214,7 @@ async function localVideoDurations(urls = []) {
   const durations = [];
   for (const url of urls) {
     try {
-      const source = resolveLocalAssetPathFromUrl(url);
+      const source = await resolveLocalAssetPathFromUrl(url);
       const metadata = await probeVideoFile(source.filePath);
       durations.push(positiveNumber(metadata.duration) || 0);
     } catch {
@@ -3618,7 +4232,7 @@ async function resolveWanVaceMaskToVideoAspectRatio({ value, videoUrl, maskVideo
   for (const sourceUrl of [videoUrl, maskVideoUrl]) {
     if (!sourceUrl) continue;
     try {
-      const source = resolveLocalAssetPathFromUrl(sourceUrl);
+      const source = await resolveLocalAssetPathFromUrl(sourceUrl);
       const metadata = await probeVideoFile(source.filePath);
       const width = positiveNumber(metadata.width);
       const height = positiveNumber(metadata.height);
@@ -3639,9 +4253,10 @@ function wanVaceAspectRatioFromDimensions(width, height) {
   return w > h ? "16:9" : "9:16";
 }
 
-async function prepareWanVaceMaskToVideoMedia({ videoUrl, maskVideoUrl, referenceImageUrls = [], aspectRatio }) {
+async function prepareWanVaceMaskToVideoMedia({ body, videoUrl, maskVideoUrl, referenceImageUrls = [], aspectRatio }) {
   const paddedMedia = [];
   const preparedMask = await prepareLocalMediaForWanVaceAspect({
+    body,
     publicPath: maskVideoUrl,
     aspectRatio,
     kind: "wan-vace-mask-video",
@@ -3649,6 +4264,7 @@ async function prepareWanVaceMaskToVideoMedia({ videoUrl, maskVideoUrl, referenc
   });
   const preparedSource = videoUrl
     ? await prepareLocalMediaForWanVaceAspect({
+        body,
         publicPath: videoUrl,
         aspectRatio,
         kind: "wan-vace-source-video",
@@ -3660,6 +4276,7 @@ async function prepareWanVaceMaskToVideoMedia({ videoUrl, maskVideoUrl, referenc
   for (const referenceImageUrl of referenceImageUrls) {
     preparedReferences.push(
       await prepareLocalMediaForWanVaceAspect({
+        body,
         publicPath: referenceImageUrl,
         aspectRatio,
         kind: "wan-vace-reference-image",
@@ -3680,8 +4297,8 @@ async function prepareWanVaceMaskToVideoMedia({ videoUrl, maskVideoUrl, referenc
   };
 }
 
-async function prepareLocalMediaForWanVaceAspect({ publicPath, aspectRatio, kind, mediaType }) {
-  const asset = resolveLocalAssetPathFromUrl(publicPath);
+async function prepareLocalMediaForWanVaceAspect({ body, publicPath, aspectRatio, kind, mediaType }) {
+  const asset = await resolveLocalAssetPathFromUrl(publicPath);
   const metadata = mediaType === "video" ? await probeVideoFile(asset.filePath) : await probeLocalImageFile(asset.filePath, asset.fileName);
   const width = positiveNumber(metadata.width);
   const height = positiveNumber(metadata.height);
@@ -3704,32 +4321,31 @@ async function prepareLocalMediaForWanVaceAspect({ publicPath, aspectRatio, kind
   }
 
   const extension = mediaType === "video" ? ".mp4" : ".png";
-  const fileName = uniqueOutputFileName(`${kind}-padded-${aspectRatio.replace(":", "x")}`, extension);
-  const outputPath = path.join(outputsDir, fileName);
+  const output = await createManagedAssetTarget({ body }, `${kind}-padded-${aspectRatio.replace(":", "x")}`, extension, workflowPackageDependencyDirName);
 
   if (mediaType === "video") {
     await padVideoWithFfmpeg({
       sourcePath: asset.filePath,
-      outputPath,
+      outputPath: output.filePath,
       targetWidth: target.width,
       targetHeight: target.height
     });
   } else {
     await padImageWithFfmpeg({
       sourcePath: asset.filePath,
-      outputPath,
+      outputPath: output.filePath,
       targetWidth: target.width,
       targetHeight: target.height
     });
   }
 
   return {
-    publicPath: `/outputs/${fileName}`,
+    publicPath: output.publicPath,
     wasPadded: true,
     summary: {
       kind,
       sourceUrl: localPublicPathFromUrl(publicPath),
-      paddedUrl: `/outputs/${fileName}`,
+      paddedUrl: output.publicPath,
       originalWidth: width,
       originalHeight: height,
       paddedWidth: target.width,
@@ -3786,15 +4402,15 @@ function ensureEven(value) {
 async function createExtractFrameResult({ body, sourceVideoUrl }) {
   let outputPath = "";
   try {
-    const sourceVideo = resolveLocalAssetPathFromUrl(sourceVideoUrl);
+    const sourceVideo = await resolveLocalAssetPathFromUrl(sourceVideoUrl);
     const metadata = await probeVideoFile(sourceVideo.filePath);
     const options = body.extractFrame && typeof body.extractFrame === "object" ? body.extractFrame : body;
     const format = normalizeExtractFrameFormat(options.format);
     const mimeType = format === "jpeg" ? "image/jpeg" : "image/png";
     const extension = format === "jpeg" ? ".jpg" : ".png";
     const frameTime = extractFrameTime(options.frameTime, metadata.duration);
-    const fileName = uniqueOutputFileName("video-frame", extension);
-    outputPath = path.join(outputsDir, fileName);
+    const output = await createManagedAssetTarget({ body }, "video-frame", extension, workflowPackageOutputDirName);
+    outputPath = output.filePath;
 
     await extractVideoFrameWithFfmpeg({
       sourcePath: sourceVideo.filePath,
@@ -3804,7 +4420,7 @@ async function createExtractFrameResult({ body, sourceVideoUrl }) {
     });
 
     const outputStats = await stat(outputPath);
-    const localUrl = `/outputs/${fileName}`;
+    const localUrl = output.publicPath;
     const text = `Video frame at ${formatFrameTimeLabel(frameTime)}.`;
     const cost = {
       amountUsd: 0,
@@ -3843,7 +4459,7 @@ async function createExtractFrameResult({ body, sourceVideoUrl }) {
       },
       cost,
       localImage: localUrl,
-      outputFileName: fileName,
+      outputFileName: output.fileName,
       outputBytes: outputStats.size,
       text
     });
@@ -3855,7 +4471,7 @@ async function createExtractFrameResult({ body, sourceVideoUrl }) {
       image: {
         label: "Video Frame",
         localUrl,
-        fileName,
+        fileName: output.fileName,
         mimeType
       }
     };
@@ -3868,7 +4484,7 @@ async function createExtractFrameResult({ body, sourceVideoUrl }) {
 async function createColorIdMatteVideoResult({ body, sourceVideoUrl }) {
   const outputPaths = [];
   try {
-    const sourceVideo = resolveLocalAssetPathFromUrl(sourceVideoUrl);
+    const sourceVideo = await resolveLocalAssetPathFromUrl(sourceVideoUrl);
     const metadata = await probeVideoFile(sourceVideo.filePath);
     const options = body.colorIdMatte && typeof body.colorIdMatte === "object" ? body.colorIdMatte : body;
     const mattes = normalizedColorIdVideoMattes(options);
@@ -3901,8 +4517,8 @@ async function createColorIdMatteVideoResult({ body, sourceVideoUrl }) {
 
     for (const matte of mattes) {
       const extension = videoOutputExtension(outputFormat);
-      const fileName = uniqueOutputFileName(safeOutputKind(`color-id-video-matte-${matte.name}`), extension);
-      const outputPath = path.join(outputsDir, fileName);
+      const output = await createManagedAssetTarget({ body }, safeOutputKind(`color-id-video-matte-${matte.name}`), extension, workflowPackageOutputDirName);
+      const outputPath = output.filePath;
       outputPaths.push(outputPath);
 
       await createColorIdMatteVideoWithFfmpeg({
@@ -3922,8 +4538,8 @@ async function createColorIdMatteVideoResult({ body, sourceVideoUrl }) {
       const outputMetadata = await probeVideoFile(outputPath);
       videos.push({
         label: matte.name,
-        localUrl: `/outputs/${fileName}`,
-        fileName,
+        localUrl: output.publicPath,
+        fileName: output.fileName,
         mimeType: videoOutputMimeType(outputFormat),
         bytes: outputStats.size,
         metadata: outputMetadata,
@@ -3986,14 +4602,14 @@ async function createColorIdMatteVideoResult({ body, sourceVideoUrl }) {
 async function createCompositeVideoResult({ body, baseVideoUrl, layerVideoUrl, maskVideoUrl }) {
   let outputPath = "";
   try {
-    const baseVideo = resolveLocalAssetPathFromUrl(baseVideoUrl);
-    const layerVideo = resolveLocalAssetPathFromUrl(layerVideoUrl);
-    const maskVideo = resolveLocalAssetPathFromUrl(maskVideoUrl);
+    const baseVideo = await resolveLocalAssetPathFromUrl(baseVideoUrl);
+    const layerVideo = await resolveLocalAssetPathFromUrl(layerVideoUrl);
+    const maskVideo = await resolveLocalAssetPathFromUrl(maskVideoUrl);
     const baseMetadata = await probeVideoFile(baseVideo.filePath);
     const options = body.compositeVideo && typeof body.compositeVideo === "object" ? body.compositeVideo : {};
     const outputFormat = normalizeVideoOutputFormat(options.outputFormat);
-    const fileName = uniqueOutputFileName("composite-video", videoOutputExtension(outputFormat));
-    outputPath = path.join(outputsDir, fileName);
+    const output = await createManagedAssetTarget({ body }, "composite-video", videoOutputExtension(outputFormat), workflowPackageOutputDirName);
+    outputPath = output.filePath;
     const invertMask = Boolean(options.invertMask);
     const maskBlur = clampNumber(options.maskBlur, 0, 24, 0);
     const maskExpand = clampInteger(options.maskExpand, -12, 12, 0);
@@ -4012,7 +4628,7 @@ async function createCompositeVideoResult({ body, baseVideoUrl, layerVideoUrl, m
 
     const outputStats = await stat(outputPath);
     const outputMetadata = await probeVideoFile(outputPath);
-    const localUrl = `/outputs/${fileName}`;
+    const localUrl = output.publicPath;
     const text = "Composite video.";
     const cost = {
       amountUsd: 0,
@@ -4054,7 +4670,7 @@ async function createCompositeVideoResult({ body, baseVideoUrl, layerVideoUrl, m
       },
       cost,
       localVideo: localUrl,
-      outputFileName: fileName,
+      outputFileName: output.fileName,
       outputBytes: outputStats.size,
       text
     });
@@ -4067,7 +4683,7 @@ async function createCompositeVideoResult({ body, baseVideoUrl, layerVideoUrl, m
         {
           label: "Composite Video",
           localUrl,
-          fileName,
+          fileName: output.fileName,
           mimeType: videoOutputMimeType(outputFormat)
         },
         outputMetadata
@@ -4367,7 +4983,7 @@ function enrichVideoMetadata(video, metadata = {}) {
   return next;
 }
 
-async function downloadImage(url, kind, mimeTypeHint = "") {
+async function downloadImage(req, url, kind, mimeTypeHint = "") {
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`Could not download generated image: ${response.status} ${response.statusText}`);
@@ -4375,20 +4991,19 @@ async function downloadImage(url, kind, mimeTypeHint = "") {
 
   const mimeType = normalizeMimeType(mimeTypeHint || response.headers.get("content-type") || "image/png");
   const extension = imageExtensionForUrl(url, mimeType);
-  const fileName = uniqueOutputFileName(kind, extension);
-  const outputPath = path.join(outputsDir, fileName);
+  const output = await createManagedAssetTarget(req, kind, extension, workflowPackageOutputDirName);
   const bytes = Buffer.from(await response.arrayBuffer());
-  await writeFile(outputPath, bytes);
+  await writeFile(output.filePath, bytes);
 
   return {
-    fileName,
-    publicPath: `/outputs/${fileName}`,
+    fileName: output.fileName,
+    publicPath: output.publicPath,
     bytes: bytes.length,
     mimeType
   };
 }
 
-async function downloadModelFile(url, kind, mimeTypeHint = "") {
+async function downloadModelFile(req, url, kind, mimeTypeHint = "") {
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`Could not download generated 3D model: ${response.status} ${response.statusText}`);
@@ -4396,14 +5011,13 @@ async function downloadModelFile(url, kind, mimeTypeHint = "") {
 
   const mimeType = normalizeMimeType(mimeTypeHint || response.headers.get("content-type") || "model/gltf-binary", "model/gltf-binary");
   const extension = modelExtensionForUrl(url, mimeType);
-  const fileName = uniqueOutputFileName(kind, extension);
-  const outputPath = path.join(outputsDir, fileName);
+  const output = await createManagedAssetTarget(req, kind, extension, workflowPackageOutputDirName);
   const bytes = Buffer.from(await response.arrayBuffer());
-  await writeFile(outputPath, bytes);
+  await writeFile(output.filePath, bytes);
 
   return {
-    fileName,
-    publicPath: `/outputs/${fileName}`,
+    fileName: output.fileName,
+    publicPath: output.publicPath,
     bytes: bytes.length,
     mimeType
   };
@@ -4671,7 +5285,7 @@ function summarizeFalValue(value, key = "", depth = 0) {
     if (normalizedKey.includes("key") || normalizedKey.includes("token") || normalizedKey.includes("authorization")) {
       return "[redacted]";
     }
-    if (normalizedKey.includes("url") || /^https?:\/\//i.test(value) || value.startsWith("/outputs/") || value.startsWith("/uploads/")) {
+    if (normalizedKey.includes("url") || /^https?:\/\//i.test(value) || isLocalAssetUrl(value)) {
       return summarizeFalUrl(value);
     }
     if (normalizedKey.includes("prompt") || normalizedKey.includes("text") || value.length > 160) {
@@ -4706,10 +5320,10 @@ function summarizeFalValue(value, key = "", depth = 0) {
 }
 
 function summarizeFalUrl(value) {
-  if (value.startsWith("/outputs/") || value.startsWith("/uploads/")) {
+  if (isLocalAssetUrl(value)) {
     return {
       type: "local-url",
-      path: value.replace(/^\/(outputs|uploads)\//, "/$1/.../")
+      path: value.replace(/^\/(outputs|uploads|workflow-assets)\//, "/$1/.../")
     };
   }
 
@@ -6447,11 +7061,11 @@ function firstLocalOutput(value) {
 }
 
 function isLocalOutputUrl(value) {
-  return typeof value === "string" && value.startsWith("/outputs/");
+  return typeof value === "string" && (value.startsWith("/outputs/") || value.startsWith(`${workflowAssetsPrefix}/`));
 }
 
 function isLocalAssetUrl(value) {
-  return typeof value === "string" && (value.startsWith("/outputs/") || value.startsWith("/uploads/"));
+  return typeof value === "string" && (value.startsWith("/outputs/") || value.startsWith("/uploads/") || value.startsWith(`${workflowAssetsPrefix}/`));
 }
 
 async function uploadLocalOutputToFal(publicPath) {
@@ -6464,7 +7078,7 @@ async function uploadLocalOutputToFal(publicPath) {
 }
 
 async function readLocalAsset(publicPath) {
-  const { fileName, filePath } = resolveLocalAssetPath(publicPath);
+  const { fileName, filePath } = await resolveLocalAssetPath(publicPath);
   const buffer = await readFile(filePath);
 
   return {
@@ -6474,7 +7088,7 @@ async function readLocalAsset(publicPath) {
   };
 }
 
-function resolveLocalAssetPathFromUrl(value) {
+async function resolveLocalAssetPathFromUrl(value) {
   return resolveLocalAssetPath(localPublicPathFromUrl(value));
 }
 
@@ -6490,10 +7104,22 @@ function localPublicPathFromUrl(value) {
     // Fall through to the clear validation error below.
   }
 
-  throw new Error("Extract Frame can only read local Newt Node videos from uploads or outputs.");
+  throw new Error("This action can only read local NewtNode assets from uploads, outputs, or workflow packages.");
 }
 
-function resolveLocalAssetPath(publicPath) {
+async function resolveLocalAssetPath(publicPath) {
+  const packageMatch = String(publicPath || "").match(/^\/workflow-assets\/([^/]+)\/(.+)$/);
+  if (packageMatch) {
+    const workflowId = decodeURIComponent(packageMatch[1] || "");
+    const relativePath = safeRelativeAssetPath(decodeURIComponent(packageMatch[2] || ""));
+    const workflow = await findRegisteredWorkflowPackage(workflowId);
+    if (!workflow?.packagePath || !relativePath) throw new Error("Workflow package asset is not registered.");
+    return {
+      fileName: path.basename(relativePath),
+      filePath: path.join(workflow.packagePath, relativePath)
+    };
+  }
+
   const isUpload = publicPath.startsWith("/uploads/");
   const prefix = isUpload ? "/uploads/" : "/outputs/";
   const root = isUpload ? uploadsDir : outputsDir;

@@ -50,6 +50,10 @@ Generated videos are downloaded into `outputs/`. Uploaded source images are reta
 
 Fal's Seedance 2.0 schema currently supports `480p`, `720p`, `1080p`, durations from `4` to `15` seconds or `auto`, aspect ratios including `16:9`, `9:16`, `1:1`, and synchronized audio generation.
 
+## Development Standards
+
+Before adding a new feature, read `docs/node-standards.md`. It is the shared checklist for node behavior, UI conventions, workflow packages, asset storage, backend routes, stats, and verification.
+
 ## Named References
 
 Reference images can be renamed in the thumbnail strip. Use those handles in your prompt with `@`, such as `@product` or `@talent`. The app translates your names to Fal's required `@Image1`, `@Image2`, etc. tokens before sending the request.

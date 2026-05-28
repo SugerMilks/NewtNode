@@ -9,7 +9,8 @@ export default defineConfig({
     proxy: {
       "/api": "http://127.0.0.1:3333",
       "/uploads": "http://127.0.0.1:3333",
-      "/outputs": "http://127.0.0.1:3333"
+      "/outputs": "http://127.0.0.1:3333",
+      "/workflow-assets": "http://127.0.0.1:3333"
     }
   }
 });
