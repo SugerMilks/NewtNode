@@ -21,10 +21,13 @@ import {
   Minus,
   PanelLeftClose,
   PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
   Palette,
   Pause,
   Play,
   Plus,
+  RefreshCw,
   Save,
   Trash2,
   Type,
@@ -70,6 +73,8 @@ const portColors = {
 };
 
 const maxTransferImages = 6;
+const outputDragMime = "application/x-newtnode-output";
+const maxProjectOutputItems = 25;
 const moodBoardOutputFileName = "MOOD_BOARD.png";
 const maxCharacterWardrobes = 8;
 const maxCharacterVoices = 8;
@@ -573,6 +578,8 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
   const [localWorkflowFileName, setLocalWorkflowFileName] = React.useState("");
   const [contextMenu, setContextMenu] = React.useState(null);
   const [toolbarCollapsed, setToolbarCollapsed] = React.useState(true);
+  const [outputsCollapsed, setOutputsCollapsed] = React.useState(true);
+  const [outputHistory, setOutputHistory] = React.useState([]);
   const [saveStatus, setSaveStatus] = React.useState("");
   const [compilingTransferNodeId, setCompilingTransferNodeId] = React.useState(null);
   const [selectedEdgeId, setSelectedEdgeId] = React.useState(null);
@@ -599,6 +606,10 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
   const selectedRunAllCount = selectedRunnableNodes.length + selectedPlayablePreviewNodes.length;
   const selectedProjectName = projects.find((project) => project.id === projectId)?.name;
   const composerEditorNode = nodes.find((node) => node.id === composerEditorNodeId && node.type === "composer");
+  const projectOutputs = React.useMemo(
+    () => buildProjectOutputItems({ nodes, history: outputHistory, projectId, projectName }),
+    [nodes, outputHistory, projectId, projectName]
+  );
 
   function workflowRequestContext(overrides = {}) {
     const workflowName = savedProjectName || selectedProjectName || projectName || "Untitled node project";
@@ -653,6 +664,7 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
 
   React.useEffect(() => {
     loadProjects();
+    loadOutputHistory();
   }, []);
 
   React.useEffect(() => {
@@ -1214,18 +1226,18 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
       const incomingSources = incomingByPreview[node.id]?.sourceIn || [];
       if (!incomingSources.some(({ edge }) => edge.from.nodeId === sourceNodeId)) return node;
 
-      const previewItems = connectedPreviewSources(incomingSources);
-      let latestIndex = -1;
-      previewItems.forEach((item, index) => {
-        if (item.sourceNodeId === sourceNodeId) latestIndex = index;
-      });
-      if (latestIndex < 0) return node;
+      const previewSources = connectedPreviewSources(incomingSources);
+      const sourceGroup = previewSources.find((source) => source.sourceNodeId === sourceNodeId);
+      if (!sourceGroup) return node;
+      const selectedItemIndex = sourceGroup.items.findIndex((item) => item.sourceSelectedResult);
+      const previewItemIndex = selectedItemIndex >= 0 ? selectedItemIndex : Math.max(0, sourceGroup.items.length - 1);
 
       return {
         ...node,
         data: {
           ...node.data,
-          previewSelectedIndex: latestIndex
+          previewSourceId: sourceGroup.id,
+          previewItemIndex
         }
       };
     });
@@ -1274,6 +1286,7 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
         error: ""
       });
       setSaveStatus("Composer frame captured");
+      loadOutputHistory();
     } catch (error) {
       updateNode(node.id, {
         status: "error",
@@ -1410,6 +1423,124 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
     } catch (error) {
       updateNode(node.id, { status: "error", error: error.message });
     }
+  }
+
+  function importOutputAssetToMediaNode(node, item) {
+    if (!isOutputItemCompatibleWithNode(item, node.type)) {
+      const itemType = capitalizeMediaType(item?.type || "media");
+      const targetType = node.type === "model3d" ? "3D" : capitalizeMediaType(node.type);
+      updateNode(node.id, { error: `${itemType} outputs cannot be dropped on ${targetType} nodes.` });
+      setSaveStatus(`${itemType} output needs a matching node`);
+      return;
+    }
+
+    const fileName = item.fileName || fileNameFromLocalUrl(item.url);
+    const mimeType = item.mimeType || mimeForOutputItem(item);
+    const resultItem = {
+      url: item.url,
+      type: item.type,
+      label: item.label || fileName || `${capitalizeMediaType(item.type)} output`,
+      fileName,
+      mimeType,
+      createdAt: item.createdAt || ""
+    };
+    const resultItems = appendResultItems(existingResultItemsForNode(node, item.type), [resultItem], item.type);
+
+    pushUndoSnapshot();
+    updateNode(node.id, {
+      fileName,
+      storedFileName: "",
+      mimeType,
+      mediaType: item.type,
+      resultUrl: item.url,
+      resultItems,
+      selectedResultIndex: Math.max(0, resultItems.length - 1),
+      resultType: item.type,
+      status: "ready",
+      error: ""
+    });
+    setSaveStatus(`Added ${fileName || "output"} to ${node.data.title || configTitleFallback(node.type)}`);
+  }
+
+  function importOutputAssetToTransferNode(node, item) {
+    if (item?.type !== "image") {
+      updateNode(node.id, { error: "Mood Board accepts image outputs." });
+      setSaveStatus("Mood Board accepts image outputs");
+      return;
+    }
+
+    const existingImages = Array.isArray(node.data.transferImages) ? node.data.transferImages : [];
+    if (node.data.locked) {
+      updateNode(node.id, { error: "Unlock Mood Board before adding output images." });
+      return;
+    }
+    if (existingImages.length >= maxTransferImages) {
+      updateNode(node.id, { error: `Mood Board accepts up to ${maxTransferImages} images.` });
+      return;
+    }
+
+    pushUndoSnapshot();
+    updateNode(node.id, {
+      transferImages: [
+        ...existingImages,
+        {
+          ...assetFromOutputItem(item),
+          id: `transfer-output-${Date.now()}`
+        }
+      ].slice(0, maxTransferImages),
+      status: "ready",
+      activated: false,
+      locked: false,
+      resultUrl: "",
+      fileName: "",
+      error: ""
+    });
+    setSaveStatus("Added output image to Mood Board");
+  }
+
+  function importOutputAssetToCharacterPortrait(node, item) {
+    if (item?.type !== "image") {
+      updateNode(node.id, { error: "Portrait Reference accepts image outputs." });
+      setSaveStatus("Portrait Reference accepts image outputs");
+      return;
+    }
+
+    pushUndoSnapshot();
+    updateNode(node.id, {
+      characterPortrait: assetFromOutputItem(item),
+      status: "ready",
+      error: ""
+    });
+    setSaveStatus("Added output image as character portrait");
+  }
+
+  function importOutputAssetToCharacterWardrobes(node, item) {
+    if (item?.type !== "image") {
+      updateNode(node.id, { error: "Wardrobe accepts image outputs." });
+      setSaveStatus("Wardrobe accepts image outputs");
+      return;
+    }
+
+    const existing = Array.isArray(node.data.characterWardrobes) ? node.data.characterWardrobes : [];
+    if (existing.length >= maxCharacterWardrobes) {
+      updateNode(node.id, { error: `Character accepts up to ${maxCharacterWardrobes} wardrobe references.` });
+      return;
+    }
+
+    const wardrobe = {
+      ...assetFromOutputItem(item),
+      id: `character-wardrobe-output-${Date.now()}`
+    };
+    const nextWardrobes = [...existing, wardrobe].slice(0, maxCharacterWardrobes);
+
+    pushUndoSnapshot();
+    updateNode(node.id, {
+      characterWardrobes: nextWardrobes,
+      activeWardrobeId: node.data.activeWardrobeId || wardrobe.id,
+      status: "ready",
+      error: ""
+    });
+    setSaveStatus("Added output image as wardrobe reference");
   }
 
   function removeCharacterWardrobe(nodeId, wardrobeId) {
@@ -2194,6 +2325,8 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
     const target = graphNodes.find((node) => node.id === to.nodeId);
 
     if (!source || !target) return "Choose a valid connection";
+    if (!outputPortIdsForNode(source).includes(from.port)) return "Choose a valid output";
+    if (!inputPortIdsForNode(target).includes(to.port)) return "Choose a valid input";
 
     if (source.type === "camera") {
       if (from.port === "imageOut") {
@@ -2488,6 +2621,17 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
       }
     } catch (error) {
       setSaveStatus(error.message);
+    }
+  }
+
+  async function loadOutputHistory() {
+    try {
+      const response = await fetch("/api/history");
+      if (!response.ok) throw new Error("Could not load generated outputs.");
+      const history = await response.json();
+      setOutputHistory(Array.isArray(history) ? history : []);
+    } catch {
+      // The output rail is helpful, but it should never block the graph editor.
     }
   }
 
@@ -2796,6 +2940,7 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
           seed: generated.seed,
           error: ""
         });
+        loadOutputHistory();
         return { status: "complete" };
       }
 
@@ -2831,6 +2976,7 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
             resultType: "image",
             error: ""
           });
+          loadOutputHistory();
           return { status: "complete" };
         }
 
@@ -2862,6 +3008,7 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
           resultType: utilityResultType,
           error: failures.length ? nodeBatchStatusMessage(utilityResultType, batchCount, successes.length, failures) : ""
         });
+        loadOutputHistory();
         return { status: "complete" };
       }
 
@@ -2898,6 +3045,7 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
           resultText: successes.map((item) => item.text).filter(Boolean).join("\n\n"),
           error: failures.length ? nodeBatchStatusMessage("image", batchCount, successes.length, failures) : ""
         });
+        loadOutputHistory();
         return { status: "complete" };
       }
 
@@ -2918,6 +3066,7 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
           resultType: "model3d",
           error: ""
         });
+        loadOutputHistory();
         return { status: "complete" };
       }
 
@@ -2946,6 +3095,7 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
         resultText: "",
         error: failures.length ? nodeBatchStatusMessage("video", batchCount, successes.length, failures) : ""
       });
+      loadOutputHistory();
       return { status: "complete" };
     } catch (error) {
       updateNode(currentNode.id, { status: "error", error: error.message });
@@ -3070,7 +3220,7 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
   }
 
   return (
-    <section className={`node-workspace ${toolbarCollapsed ? "toolbar-collapsed" : ""}`}>
+    <section className={`node-workspace ${toolbarCollapsed ? "toolbar-collapsed" : ""} ${outputsCollapsed ? "outputs-collapsed" : "outputs-open"}`}>
       {composerEditorNode && (
         <ComposerEditorModal
           node={composerEditorNode}
@@ -3083,6 +3233,11 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
       {toolbarCollapsed && (
         <button className="sidebar-restore" onClick={() => setToolbarCollapsed(false)} title="Show node palette">
           <PanelLeftOpen size={17} />
+        </button>
+      )}
+      {outputsCollapsed && (
+        <button className="outputs-restore" onClick={() => setOutputsCollapsed(false)} title="Show project outputs">
+          <PanelRightOpen size={17} />
         </button>
       )}
 
@@ -3218,12 +3373,16 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
               incomingByNode={incomingByNode}
               onRun={runNode}
               onUpload={uploadMediaAsset}
+              onOutputImport={importOutputAssetToMediaNode}
               onTransferImagesUpload={uploadTransferImages}
+              onTransferOutputImport={importOutputAssetToTransferNode}
               onTransferImageRemove={removeTransferImage}
               onTransferActivate={activateTransferNode}
               onTransferUnlock={unlockTransferNode}
               onCharacterPortraitUpload={uploadCharacterPortrait}
+              onCharacterPortraitImport={importOutputAssetToCharacterPortrait}
               onCharacterWardrobesUpload={uploadCharacterWardrobes}
+              onCharacterWardrobeImport={importOutputAssetToCharacterWardrobes}
               onCharacterVoicesUpload={uploadCharacterVoices}
               onCharacterWardrobeRemove={removeCharacterWardrobe}
               onCharacterVoiceRemove={removeCharacterVoice}
@@ -3273,6 +3432,13 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
           </button>
         </div>
       </div>
+      {!outputsCollapsed && (
+        <ProjectOutputDrawer
+          items={projectOutputs}
+          onClose={() => setOutputsCollapsed(true)}
+          onRefresh={loadOutputHistory}
+        />
+      )}
     </section>
   );
 }
@@ -3329,6 +3495,61 @@ function SelectionActionBar({ bounds, viewport, selectedCount, runnableCount, on
         <span>Group</span>
       </button>
     </div>
+  );
+}
+
+function ProjectOutputDrawer({ items, onClose, onRefresh }) {
+  function startDrag(event, item) {
+    event.dataTransfer.effectAllowed = "copy";
+    event.dataTransfer.setData(outputDragMime, JSON.stringify(item));
+    event.dataTransfer.setData("text/plain", item.url);
+    event.dataTransfer.setData("text/uri-list", item.url);
+  }
+
+  return (
+    <aside className="project-output-drawer">
+      <div className="output-drawer-header">
+        <div className="output-drawer-actions">
+          <button onClick={onRefresh} title="Refresh outputs" aria-label="Refresh outputs">
+            <RefreshCw size={14} />
+          </button>
+          <button onClick={onClose} title="Hide project outputs" aria-label="Hide project outputs">
+            <PanelRightClose size={16} />
+          </button>
+        </div>
+      </div>
+      <div className="project-output-list">
+        {items.length ? (
+          items.map((item) => {
+            const KindIcon = item.type === "video" ? Film : item.type === "audio" ? FileAudio : item.type === "model3d" ? Box : FileImage;
+            return (
+              <div
+                key={item.id}
+                className={`project-output-thumb ${item.type}`}
+                draggable
+                onDragStart={(event) => startDrag(event, item)}
+                title={`${item.label || item.fileName || "Output"}\nDrag to a compatible node`}
+              >
+                {item.type === "image" && <img src={item.url} alt={item.label || item.fileName || "Generated output"} onError={useNewtNodeImageFallback} />}
+                {item.type === "video" && <video src={item.url} muted playsInline preload="metadata" onError={useNewtNodeVideoFallback} />}
+                {(item.type === "model3d" || item.type === "audio") && (
+                  <div className="project-output-placeholder">
+                    <KindIcon size={22} />
+                  </div>
+                )}
+                <span className="project-output-kind">
+                  <KindIcon size={12} />
+                </span>
+              </div>
+            );
+          })
+        ) : (
+          <div className="project-output-empty">
+            <ImagePlus size={22} />
+          </div>
+        )}
+      </div>
+    </aside>
   );
 }
 
@@ -3457,12 +3678,16 @@ function NodeCard({
   incomingByNode,
   onRun,
   onUpload,
+  onOutputImport,
   onTransferImagesUpload,
+  onTransferOutputImport,
   onTransferImageRemove,
   onTransferActivate,
   onTransferUnlock,
   onCharacterPortraitUpload,
+  onCharacterPortraitImport,
   onCharacterWardrobesUpload,
+  onCharacterWardrobeImport,
   onCharacterVoicesUpload,
   onCharacterWardrobeRemove,
   onCharacterVoiceRemove,
@@ -3574,12 +3799,16 @@ function NodeCard({
         onDisconnectInput={onDisconnectInput}
         connectedPortKeys={connectedPortKeys}
         onUpload={onUpload}
+        onOutputImport={onOutputImport}
         onTransferImagesUpload={onTransferImagesUpload}
+        onTransferOutputImport={onTransferOutputImport}
         onTransferImageRemove={onTransferImageRemove}
         onTransferActivate={onTransferActivate}
         onTransferUnlock={onTransferUnlock}
         onCharacterPortraitUpload={onCharacterPortraitUpload}
+        onCharacterPortraitImport={onCharacterPortraitImport}
         onCharacterWardrobesUpload={onCharacterWardrobesUpload}
+        onCharacterWardrobeImport={onCharacterWardrobeImport}
         onCharacterVoicesUpload={onCharacterVoicesUpload}
         onCharacterWardrobeRemove={onCharacterWardrobeRemove}
         onCharacterVoiceRemove={onCharacterVoiceRemove}
@@ -3645,7 +3874,7 @@ function MediaPreview({ node }) {
   if (node.type === "image") {
     return (
       <div className="media-preview">
-        <img src={node.data.resultUrl} alt={node.data.fileName || "Uploaded image"} />
+        <img src={node.data.resultUrl} alt={node.data.fileName || "Uploaded image"} onError={useNewtNodeImageFallback} />
       </div>
     );
   }
@@ -3653,7 +3882,7 @@ function MediaPreview({ node }) {
   if (node.type === "video") {
     return (
       <div className="media-preview">
-        <video src={node.data.resultUrl} controls muted loop />
+        <video src={node.data.resultUrl} controls muted loop onError={useNewtNodeVideoFallback} />
       </div>
     );
   }
@@ -3664,6 +3893,22 @@ function MediaPreview({ node }) {
       <audio src={node.data.resultUrl} controls />
     </div>
   );
+}
+
+function useNewtNodeImageFallback(event) {
+  const image = event.currentTarget;
+  if (image.src.endsWith("/newtnode-logo.png")) return;
+  image.classList.add("newtnode-logo-fallback");
+  image.src = "/newtnode-logo.png";
+}
+
+function useNewtNodeVideoFallback(event) {
+  const video = event.currentTarget;
+  if (!video.getAttribute("src") && video.poster.endsWith("/newtnode-logo.png")) return;
+  video.classList.add("newtnode-logo-fallback", "newtnode-video-fallback");
+  video.poster = "/newtnode-logo.png";
+  video.removeAttribute("src");
+  video.load();
 }
 
 function CharacterVoicePlayer({ voice }) {
@@ -3798,10 +4043,15 @@ function StillFrameScrubber({ videoUrl, value, onChange }) {
   );
 }
 
-function StyleCollage({ images, locked, outputUrl, outputLabel = moodBoardOutputFileName, onRemove, onDropImages }) {
+function StyleCollage({ images, locked, outputUrl, outputLabel = moodBoardOutputFileName, onRemove, onDropImages, onDropOutput }) {
   function handleDrop(event) {
     event.preventDefault();
     event.stopPropagation();
+    const outputItem = outputItemFromDataTransfer(event.dataTransfer);
+    if (outputItem) {
+      onDropOutput?.(outputItem);
+      return;
+    }
     onDropImages?.(event.dataTransfer.files);
   }
 
@@ -3809,7 +4059,7 @@ function StyleCollage({ images, locked, outputUrl, outputLabel = moodBoardOutput
     return (
       <div className="style-collage transfer-output-preview locked">
         <div className="style-collage-cell">
-          <img src={outputUrl} alt={outputLabel} />
+          <img src={outputUrl} alt={outputLabel} onError={useNewtNodeImageFallback} />
           <span>{outputLabel}</span>
         </div>
       </div>
@@ -3829,7 +4079,7 @@ function StyleCollage({ images, locked, outputUrl, outputLabel = moodBoardOutput
     <div className={`style-collage count-${images.length} ${locked ? "locked" : ""}`} onDragOver={allowFileDrop} onDrop={handleDrop}>
       {images.map((image) => (
         <div className="style-collage-cell" key={image.id}>
-          <img src={image.localUrl} alt={image.fileName || "Mood board reference"} />
+          <img src={image.localUrl} alt={image.fileName || "Mood board reference"} onError={useNewtNodeImageFallback} />
           {!locked && (
             <button onClick={() => onRemove(image.id)} title="Remove image">
               <X size={12} />
@@ -4930,12 +5180,16 @@ function NodeBody({
   onDisconnectInput,
   connectedPortKeys,
   onUpload,
+  onOutputImport,
   onTransferImagesUpload,
+  onTransferOutputImport,
   onTransferImageRemove,
   onTransferActivate,
   onTransferUnlock,
   onCharacterPortraitUpload,
+  onCharacterPortraitImport,
   onCharacterWardrobesUpload,
+  onCharacterWardrobeImport,
   onCharacterVoicesUpload,
   onCharacterWardrobeRemove,
   onCharacterVoiceRemove,
@@ -5025,6 +5279,11 @@ function NodeBody({
         onDrop={(event) => {
           event.preventDefault();
           event.stopPropagation();
+          const outputItem = outputItemFromDataTransfer(event.dataTransfer);
+          if (outputItem) {
+            onOutputImport?.(node, outputItem);
+            return;
+          }
           const file = firstAcceptedFile(event.dataTransfer.files, node.type);
           if (file) onUpload(node, file);
         }}
@@ -5128,6 +5387,15 @@ function NodeBody({
 
     function handleCharacterDrop(event, zone) {
       allowFileDrop(event);
+      const outputItem = outputItemFromDataTransfer(event.dataTransfer);
+      if (outputItem && zone === "portrait") {
+        onCharacterPortraitImport?.(node, outputItem);
+        return;
+      }
+      if (outputItem && zone === "wardrobe") {
+        onCharacterWardrobeImport?.(node, outputItem);
+        return;
+      }
       if (zone === "portrait") {
         const file = firstAcceptedFile(event.dataTransfer.files, "image");
         if (file) onCharacterPortraitUpload(node, file);
@@ -5469,6 +5737,7 @@ function NodeBody({
           outputLabel={moodBoardOutputFileName}
           onRemove={(imageId) => onTransferImageRemove(node.id, imageId)}
           onDropImages={(files) => onTransferImagesUpload(node, files)}
+          onDropOutput={(item) => onTransferOutputImport?.(node, item)}
         />
 
         <div className="style-actions">
@@ -5531,35 +5800,67 @@ function NodeBody({
   }
 
   if (node.type === "preview") {
-    const previewItems = connectedPreviewSources(incoming.sourceIn);
-    const previewIndex = previewSelectedIndexForNode(node, previewItems);
-    const previewSource = previewItems[previewIndex] || null;
-    const canStepPreview = previewItems.length > 1;
+    const previewSources = connectedPreviewSources(incoming.sourceIn);
+    const { source: previewSource, item: previewItem, itemIndex: previewIndex } = previewSelectionForNode(node, previewSources);
+    const previewItems = previewSource?.items || [];
     const sourcePort = config.input.find((port) => port.id === "sourceIn");
     function stepPreview(direction) {
       if (!previewItems.length) return;
       const nextIndex = (previewIndex + direction + previewItems.length) % previewItems.length;
-      onUpdate(node.id, { previewSelectedIndex: nextIndex });
+      onUpdate(node.id, { previewSourceId: previewSource.id, previewItemIndex: nextIndex });
     }
 
     return (
       <div className="node-body preview-node-body">
         <NodeRow label="Source" inputPort={sourcePort} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-          <button className={previewSource ? "connected-field" : ""}>{previewSource ? previewSource.label : "Connect media"}</button>
+          {previewSources.length > 1 ? (
+            <select
+              className="connected-field"
+              value={previewSource?.id || ""}
+              onChange={(event) => onUpdate(node.id, { previewSourceId: event.target.value, previewItemIndex: 0 })}
+            >
+              {previewSources.map((source) => (
+                <option key={source.id} value={source.id}>
+                  {source.label}
+                  {source.items.length > 1 ? ` (${source.items.length})` : ""}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <button className={previewSource ? "connected-field" : ""}>{previewSource ? previewSource.label : "Connect media"}</button>
+          )}
         </NodeRow>
-        <div className={`preview-stage ${previewSource ? "has-preview" : ""}`}>
-          {previewSource?.type === "image" && <img src={previewSource.url} alt={previewSource.label} />}
-          {previewSource?.type === "video" && <video src={previewSource.url} controls loop data-preview-video-node-id={node.id} />}
-          {previewSource?.type === "model3d" && <Model3DViewer url={previewSource.url} label={previewSource.label} />}
-          {!previewSource && <span>Preview will appear here</span>}
+        <div className={`preview-stage ${previewItem ? "has-preview" : ""}`}>
+          {previewItem?.type === "image" && <img key={previewItem.url} src={previewItem.url} alt={previewItem.label || previewSource.label} onError={useNewtNodeImageFallback} />}
+          {previewItem?.type === "video" && <video key={previewItem.url} src={previewItem.url} controls loop data-preview-video-node-id={node.id} onError={useNewtNodeVideoFallback} />}
+          {previewItem?.type === "model3d" && <Model3DViewer key={previewItem.url} url={previewItem.url} label={previewItem.label || previewSource.label} />}
+          {!previewItem && <span>Preview will appear here</span>}
         </div>
-        {canStepPreview && (
-          <div className="preview-frame-nav">
-            <button onClick={() => stepPreview(-1)} title="Previous preview" aria-label="Previous preview">
+        {previewItems.length > 1 && (
+          <div className="preview-result-browser" onPointerDown={(event) => event.stopPropagation()}>
+            <button type="button" onClick={() => stepPreview(-1)} title="Previous preview" aria-label="Previous preview">
               <ChevronLeft size={15} />
             </button>
-            <span>{previewIndex + 1} / {previewItems.length}</span>
-            <button onClick={() => stepPreview(1)} title="Next preview" aria-label="Next preview">
+            <div className="preview-thumb-strip">
+              {previewItems.map((item, index) => (
+                <button
+                  key={`${previewSource.id}-${item.url}-${index}`}
+                  type="button"
+                  className={index === previewIndex ? "active" : ""}
+                  onClick={() => onUpdate(node.id, { previewSourceId: previewSource.id, previewItemIndex: index })}
+                  title={item.label || `${previewSource.label} ${index + 1}`}
+                >
+                  {item.type === "image" && <img src={item.url} alt={item.label || `Preview ${index + 1}`} onError={useNewtNodeImageFallback} />}
+                  {item.type === "video" && <video src={item.url} muted playsInline preload="metadata" onError={useNewtNodeVideoFallback} />}
+                  {item.type === "model3d" && (
+                    <span className="preview-thumb-model">
+                      <Box size={18} />
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+            <button type="button" onClick={() => stepPreview(1)} title="Next preview" aria-label="Next preview">
               <ChevronRight size={15} />
             </button>
           </div>
@@ -6197,7 +6498,21 @@ function NodeBody({
     const faceCount = model3DFaceCount(node.data.faceCount);
 
     return (
-      <div className="node-body model-node-body model3d-body">
+      <div
+        className="node-body model-node-body model3d-body"
+        onDragOver={allowFileDrop}
+        onDrop={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const outputItem = outputItemFromDataTransfer(event.dataTransfer);
+          if (outputItem) {
+            onOutputImport?.(node, outputItem);
+            return;
+          }
+          const file = firstAcceptedFile(event.dataTransfer.files, "model3d");
+          if (file) onUpload(node, file);
+        }}
+      >
         <ResultPane
           label="Results will appear here"
           resultUrl={node.data.resultUrl}
@@ -6781,8 +7096,8 @@ function ResultPane({ label, resultUrl, resultItems = [], selectedIndex = 0, typ
       {activeItem && (
         <div className="result-carousel" onPointerDown={(event) => event.stopPropagation()}>
           <div className="result-item" key={activeItem.url}>
-            {activeItem.type === "image" && <img src={activeItem.url} alt={activeItem.label || `Generated image ${activeIndex + 1}`} />}
-            {activeItem.type === "video" && <video src={activeItem.url} controls loop />}
+            {activeItem.type === "image" && <img src={activeItem.url} alt={activeItem.label || `Generated image ${activeIndex + 1}`} onError={useNewtNodeImageFallback} />}
+            {activeItem.type === "video" && <video src={activeItem.url} controls loop onError={useNewtNodeVideoFallback} />}
             {activeItem.type === "model3d" && <Model3DViewer url={activeItem.url} label={activeItem.label || `3D model ${activeIndex + 1}`} />}
           </div>
           <button type="button" className="result-download-button" onClick={downloadActiveItem} title={`Download ${activeItem.type === "model3d" ? "3D model" : "result"}`} aria-label="Download result">
@@ -7984,7 +8299,7 @@ function createDefaultNodeData(type, label, count) {
   if (type === "plainText") return { title, text: "" };
   if (type === "text") return { title, text: "" };
   if (type === "image" || type === "video" || type === "audio") return { title };
-  if (type === "preview") return { title, previewScale: 1 };
+  if (type === "preview") return { title, previewScale: 1, previewItemIndex: 0 };
   if (type === "model3d") {
     return {
       title,
@@ -8032,7 +8347,6 @@ function createDefaultNodeData(type, label, count) {
       characterVariantNotice: ""
     };
   }
-  if (type === "preview") return { title, previewScale: 1, previewItemIndex: 0 };
   if (type === "camera") {
     return {
       title,
@@ -8470,6 +8784,181 @@ function estimatedNodeWidth(type) {
 
 function configTitleFallback(type) {
   return nodeCatalog.find((item) => item.type === type)?.label || "Node";
+}
+
+function buildProjectOutputItems({ nodes = [], history = [], projectId, projectName }) {
+  const outputMap = new Map();
+
+  nodes.forEach((node) => {
+    const type = nodeResultMediaType(node);
+    if (!type) return;
+    normalizedResultItems(node.data.resultItems, node.data.resultUrl, type)
+      .filter((item) => isLocalOutputUrl(item.url))
+      .forEach((item, index) => {
+        addProjectOutput(outputMap, {
+          id: `node:${node.id}:${index}:${item.url}`,
+          url: item.url,
+          type: item.type || type,
+          label: item.label || `${node.data.title || configTitleFallback(node.type)} ${index + 1}`,
+          fileName: item.fileName || fileNameFromLocalUrl(item.url),
+          mimeType: item.mimeType || mimeForOutputItem(item),
+          createdAt: item.createdAt || ""
+        });
+      });
+  });
+
+  history
+    .filter((item) => historyProjectMatches(item, projectId, projectName))
+    .forEach((item, historyIndex) => {
+      historyOutputUrls(item).forEach((url, urlIndex) => {
+        const type = outputMediaTypeForUrl(url, item.mediaType);
+        if (!type) return;
+        addProjectOutput(outputMap, {
+          id: `history:${item.id || historyIndex}:${urlIndex}`,
+          url,
+          type,
+          label: item.node?.title || item.modelName || `${capitalizeMediaType(type)} output`,
+          fileName: urlIndex === 0 ? item.outputFileName || fileNameFromLocalUrl(url) : fileNameFromLocalUrl(url),
+          mimeType: mimeForOutputItem({ url, type }),
+          createdAt: item.createdAt || ""
+        });
+      });
+    });
+
+  return [...outputMap.values()]
+    .sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")))
+    .slice(0, maxProjectOutputItems);
+}
+
+function addProjectOutput(outputMap, item) {
+  if (!item?.url || !isLocalOutputUrl(item.url)) return;
+  if (outputMap.has(item.url)) {
+    const existing = outputMap.get(item.url);
+    outputMap.set(item.url, {
+      ...item,
+      ...existing,
+      createdAt: existing.createdAt || item.createdAt,
+      fileName: existing.fileName || item.fileName,
+      mimeType: existing.mimeType || item.mimeType
+    });
+    return;
+  }
+  outputMap.set(item.url, item);
+}
+
+function isLocalOutputUrl(value) {
+  if (typeof value !== "string") return false;
+  return value.startsWith("/outputs/") || /^\/workflow-assets\/[^/]+\/outputs\//.test(value);
+}
+
+function historyProjectMatches(item, projectId, projectName) {
+  const project = item?.project || {};
+  const cleanProjectId = String(projectId || "").trim();
+  const cleanProjectName = String(projectName || "").trim();
+  const genericNames = new Set(["", "Untitled", "Untitled node project", "Node workspace"]);
+
+  if (cleanProjectId) return project.id === cleanProjectId;
+  if (!genericNames.has(cleanProjectName)) return project.name === cleanProjectName && project.id !== "node-workspace";
+  return false;
+}
+
+function historyOutputUrls(item) {
+  const urls = [];
+  if (Array.isArray(item.localModels)) urls.push(...item.localModels);
+  if (item.localModel) urls.push(item.localModel);
+  if (Array.isArray(item.localVideos)) urls.push(...item.localVideos);
+  if (item.localVideo) urls.push(item.localVideo);
+  if (Array.isArray(item.localAudios)) urls.push(...item.localAudios);
+  if (item.localAudio) urls.push(item.localAudio);
+  if (!item.localModel) {
+    if (Array.isArray(item.localImages)) urls.push(...item.localImages);
+    if (item.localImage) urls.push(item.localImage);
+  }
+  return [...new Set(urls.filter(isLocalOutputUrl))];
+}
+
+function nodeResultMediaType(node) {
+  if (!node?.data?.resultUrl && !Array.isArray(node?.data?.resultItems)) return "";
+  if (node.type === "utility") return utilityResultType(node);
+  if (node.type === "image" || node.type === "video" || node.type === "audio" || node.type === "model3d") return node.type;
+  if (node.type === "videoModel") return "video";
+  if (node.type === "imageModel" || node.type === "camera" || node.type === "composer" || node.type === "character") return "image";
+  return "";
+}
+
+function outputMediaTypeForUrl(url, fallbackType) {
+  const extension = fileNameFromLocalUrl(url).toLowerCase();
+  if (/\.(glb|gltf)$/.test(extension)) return "model3d";
+  if (/\.(mp4|mov|webm)$/.test(extension)) return "video";
+  if (/\.(mp3|wav|m4a|aac|ogg)$/.test(extension)) return "audio";
+  if (/\.(png|jpe?g|webp|gif)$/.test(extension)) return "image";
+  return ["image", "video", "audio", "model3d"].includes(fallbackType) ? fallbackType : "";
+}
+
+function outputItemFromDataTransfer(dataTransfer) {
+  const raw = dataTransfer?.getData(outputDragMime);
+  if (!raw) return null;
+  try {
+    const item = JSON.parse(raw);
+    if (!item?.url || !item?.type || !isLocalOutputUrl(item.url)) return null;
+    return item;
+  } catch {
+    return null;
+  }
+}
+
+function isOutputItemCompatibleWithNode(item, nodeType) {
+  if (!item?.type) return false;
+  if (nodeType === "model3d") return item.type === "model3d";
+  return item.type === nodeType;
+}
+
+function assetFromOutputItem(item) {
+  return {
+    fileName: item.fileName || fileNameFromLocalUrl(item.url),
+    storedFileName: "",
+    mimeType: item.mimeType || mimeForOutputItem(item),
+    mediaType: item.type,
+    localUrl: item.url
+  };
+}
+
+function mimeForOutputItem(item) {
+  const fileName = fileNameFromLocalUrl(item?.url || item?.fileName || "");
+  const lower = fileName.toLowerCase();
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+  if (lower.endsWith(".webp")) return "image/webp";
+  if (lower.endsWith(".gif")) return "image/gif";
+  if (lower.endsWith(".mp4")) return "video/mp4";
+  if (lower.endsWith(".mov")) return "video/quicktime";
+  if (lower.endsWith(".webm")) return "video/webm";
+  if (lower.endsWith(".glb")) return "model/gltf-binary";
+  if (lower.endsWith(".gltf")) return "model/gltf+json";
+  if (lower.endsWith(".wav")) return "audio/wav";
+  if (lower.endsWith(".m4a")) return "audio/mp4";
+  if (lower.endsWith(".aac")) return "audio/aac";
+  if (lower.endsWith(".ogg")) return "audio/ogg";
+  if (lower.endsWith(".mp3")) return "audio/mpeg";
+  if (item?.type === "video") return "video/mp4";
+  if (item?.type === "audio") return "audio/mpeg";
+  if (item?.type === "model3d") return "model/gltf-binary";
+  return "image/png";
+}
+
+function fileNameFromLocalUrl(url) {
+  const clean = String(url || "").split("?")[0].split("#")[0];
+  const fileName = clean.split("/").pop() || "output";
+  try {
+    return decodeURIComponent(fileName);
+  } catch {
+    return fileName;
+  }
+}
+
+function capitalizeMediaType(type) {
+  if (type === "model3d") return "3D";
+  const value = String(type || "Media");
+  return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
 function mediaAccept(type) {
@@ -9509,39 +9998,71 @@ function nodeBatchStatusMessage(mediaType, total, completed, failures) {
 
 function connectedPreviewSources(items = []) {
   return items
-    .filter(({ source }) => source.data.resultUrl)
-    .flatMap(({ source, edge }) => {
+    .map(({ source, edge }) => {
       const sourceType = previewMediaType(source, edge);
+      const resultItems = normalizedResultItems(source.data.resultItems, source.data.resultUrl, sourceType);
+      if (!resultItems.length) return null;
       const sourceName = source.type === "camera" && edge.from.port === "imageOut" ? "Camera image" : sourceLabel(source);
       const selectedResultIndex = Math.trunc(Number(source.data.selectedResultIndex));
-      return normalizedResultItems(source.data.resultItems, source.data.resultUrl, sourceType).map((item, index, allItems) => ({
-        ...item,
+      return {
+        id: `${source.id}:${edge.from.port}`,
         sourceNodeId: source.id,
-        sourceResultIndex: index,
-        sourceSelectedResult: index === selectedResultIndex || item.url === source.data.resultUrl,
-        type: item.type || sourceType,
-        label: allItems.length > 1 ? `${sourceName} ${index + 1}` : sourceName
-      }));
-    });
+        sourcePort: edge.from.port,
+        label: sourceName,
+        type: sourceType,
+        items: resultItems.map((item, index, allItems) => ({
+          ...item,
+          sourceNodeId: source.id,
+          sourceResultIndex: index,
+          sourceSelectedResult: index === selectedResultIndex || item.url === source.data.resultUrl,
+          type: item.type || sourceType,
+          label: allItems.length > 1 ? `${sourceName} ${index + 1}` : sourceName
+        }))
+      };
+    })
+    .filter(Boolean);
 }
 
 function previewVideoSourceForNode(node, incomingByNode) {
   if (node?.type !== "preview") return null;
-  const previewItems = connectedPreviewSources(incomingByNode?.[node.id]?.sourceIn || []);
-  const previewIndex = previewSelectedIndexForNode(node, previewItems);
-  const previewSource = previewItems[previewIndex] || null;
-  return previewSource?.type === "video" ? previewSource : null;
+  const previewSources = connectedPreviewSources(incomingByNode?.[node.id]?.sourceIn || []);
+  const { item } = previewSelectionForNode(node, previewSources);
+  return item?.type === "video" ? item : null;
 }
 
-function previewSelectedIndexForNode(node, previewItems = []) {
-  const maxIndex = Math.max(0, previewItems.length - 1);
+function previewSelectionForNode(node, previewSources = []) {
+  if (!previewSources.length) return { source: null, item: null, itemIndex: 0 };
   const data = node?.data || {};
-  if (data.previewSelectedIndex !== undefined && data.previewSelectedIndex !== null && data.previewSelectedIndex !== "") {
+  if (!data.previewSourceId && data.previewSelectedIndex !== undefined && data.previewSelectedIndex !== null && data.previewSelectedIndex !== "") {
+    const flatItems = previewSources.flatMap((source) => source.items.map((item, itemIndex) => ({ source, item, itemIndex })));
+    const maxIndex = Math.max(0, flatItems.length - 1);
     const selectedIndex = Math.trunc(Number(data.previewSelectedIndex));
+    const selected = flatItems[Math.min(Math.max(Number.isFinite(selectedIndex) ? selectedIndex : 0, 0), maxIndex)];
+    if (selected) return selected;
+  }
+
+  const source =
+    selectedPreviewSource(previewSources, data.previewSourceId) ||
+    previewSources.find((previewSource) => previewSource.items.some((item) => item.sourceSelectedResult)) ||
+    previewSources.at(-1);
+  const itemIndex = previewSelectedItemIndexForSource(node, source);
+  return {
+    source,
+    item: source?.items?.[itemIndex] || null,
+    itemIndex
+  };
+}
+
+function previewSelectedItemIndexForSource(node, source) {
+  const items = source?.items || [];
+  const maxIndex = Math.max(0, items.length - 1);
+  const data = node?.data || {};
+  if (data.previewItemIndex !== undefined && data.previewItemIndex !== null && data.previewItemIndex !== "") {
+    const selectedIndex = Math.trunc(Number(data.previewItemIndex));
     return Math.min(Math.max(Number.isFinite(selectedIndex) ? selectedIndex : 0, 0), maxIndex);
   }
 
-  const sourceSelectedIndex = previewItems.findIndex((item) => item.sourceSelectedResult);
+  const sourceSelectedIndex = items.findIndex((item) => item.sourceSelectedResult);
   return sourceSelectedIndex >= 0 ? sourceSelectedIndex : 0;
 }
 

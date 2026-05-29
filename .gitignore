@@ -11,6 +11,7 @@ server/data/node-projects.json
 server/data/*.log
 .vs_ai_logs/
 .newtnode_logs/
+NewtNode.app/Contents/_CodeSignature/
 !uploads/.gitkeep
 !outputs/.gitkeep
 !saved_workflows/.gitkeep

@@ -108,6 +108,8 @@ Nodes should feel like they belong to the same editor.
 - Generated outputs should have a node-level download affordance when possible.
 - 3D outputs should be displayed with the shared Three.js GLTF viewer.
 - If a node returns multiple outputs, store them in `resultItems` with explicit `type`, `url`, `label`, and optional `cost`.
+- The project output rail should show recent local outputs from the current graph and matching history only. Include `/outputs/<workflow-name>/...` and packaged `/workflow-assets/<workflow-id>/outputs/...` URLs; do not add absolute machine-local paths or browser object URLs.
+- Dragging from the output rail into a compatible node should reuse the existing local output URL instead of re-uploading or copying the asset. Keep the imported asset shape aligned with normal uploaded assets so saved workflows remain portable.
 
 ## Run And Dependency Standards
 
