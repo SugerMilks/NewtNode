@@ -1297,28 +1297,6 @@ video.newtnode-video-fallback {
   width: 100%;
 }
 
-.composer-input-port-stack {
-  position: absolute;
-  top: 72px;
-  left: -9px;
-  z-index: 5;
-  display: grid;
-  gap: 10px;
-}
-
-.composer-node-prompt {
-  display: grid;
-  gap: 6px;
-  color: rgba(244, 240, 232, 0.58);
-  font-size: 12px;
-  font-weight: 760;
-}
-
-.composer-node-prompt textarea {
-  min-height: 72px;
-  resize: vertical;
-}
-
 .composer-node-preview {
   display: grid;
   overflow: hidden;
@@ -1351,6 +1329,35 @@ video.newtnode-video-fallback {
 .composer-node-body small {
   color: rgba(244, 240, 232, 0.56);
   font-size: 12px;
+}
+
+.composer-input-list {
+  display: grid;
+  gap: 8px;
+}
+
+.composer-input-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 18px;
+  margin-left: -31px;
+  color: rgba(244, 240, 232, 0.6);
+  font-size: 12px;
+  font-weight: 760;
+  line-height: 1;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.composer-input-row .inline-port {
+  pointer-events: auto;
+}
+
+.composer-input-row span {
+  max-width: 230px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .composer-node-body .upload-status {

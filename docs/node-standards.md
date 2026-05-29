@@ -122,6 +122,19 @@ Nodes should feel like they belong to the same editor.
 - Nodes should set `status`, `error`, `resultUrl`, `resultItems`, `selectedResultIndex`, and `resultType` consistently.
 - Batch failures should report partial success without discarding successful outputs.
 
+## Composer Node Standard
+
+- Composer is an image-guide node. It exposes one `Image Plane` input and one `Frame` output.
+- Composer should not expose prompt input or prompt output ports. Written prompts should connect directly to the downstream model that generates the final media.
+- Each Composer maquette exposes a dynamic Character input below the Open Composer action, with the maquette name shown beside the port. The port id must stay tied to the maquette id so renaming the maquette does not break the binding.
+- Composer maquette Character inputs accept locked Character nodes only. Treat each input as a single binding; replacing the connection should replace the prior Character for that maquette rather than stack ambiguous identities.
+- When a Composer frame is connected to an Image Model image input, the image prompt builder automatically wraps the effective written prompt with the locked spatial blueprint instruction. This instruction treats the Composer frame as composition, pose, camera, crop, scale, occlusion, and negative-space authority only.
+- If maquettes have Character bindings, Composer must forward those Character sheet references to the Image Model and add explicit maquette-to-character mapping text so each maquette keeps its own assigned identity. Include a short placement/color descriptor for each mapped maquette because the rendered guide frame does not visibly contain maquette names.
+- Composer-bound Character references are identity-only. The Composer guide remains the authority for pose, gesture, stance, limb endpoints, crop, scale, placement, and camera.
+- When an Image Model is running from a Composer frame, the Composer's bound Character input lines should animate as active generation dependencies.
+- The Composer frame should be labeled as the input guide image when sent to backend image-generation routes.
+- Saved workflows with older Composer prompt edges, or Character bindings for deleted maquettes, should drop those edges during graph normalization instead of keeping stale prompt plumbing.
+
 ## Backend API Standards
 
 Local node routes should live in `server/index.js` under `/api/node/...`.

@@ -76,6 +76,7 @@ const maxTransferImages = 6;
 const outputDragMime = "application/x-newtnode-output";
 const maxProjectOutputItems = 25;
 const moodBoardOutputFileName = "MOOD_BOARD.png";
+const composerCharacterPortPrefix = "characterIn:";
 const maxCharacterWardrobes = 8;
 const maxCharacterVoices = 8;
 const characterDefaultWardrobeId = "__default-wardrobe__";
@@ -96,8 +97,214 @@ const happyHorseDurationOptions = Array.from({ length: 13 }, (_value, index) => 
 const voidVideoFrameOptions = [69, 77, 85, 93, 101, 109, 117, 125, 133, 141, 149, 157, 165, 173, 181, 189, 197];
 const composerMannequinModelPath = "/models/male_mannequin.glb";
 const composerMannequinModelScale = 1.45;
-const composerReferencePrompt =
-  "Use the connected Composer frame as a strict composition and blocking control image. Preserve its camera angle, framing, horizon/floor plane, subject silhouette, pose direction, major object positions, scale relationships, and negative space. Translate the simple maquette and proxy objects into the requested final subject matter, but do not copy viewport guide lines, grid lines, flat blue material, or simple primitive geometry as final image details.";
+const composerReferencePrompt = (writtenPrompt = "") => {
+  const cleanWrittenPrompt = String(writtenPrompt || "").trim();
+  return `Use the input guide image as a locked spatial blueprint. Use the written prompt as the sole source for the final subject matter, character design, wardrobe, environment, lighting, color, material, texture, style, mood, and rendering quality.
+
+The input guide image controls composition and spatial structure only. The written prompt controls the final visual interpretation only.
+
+STRICT POSE TRACE REQUIREMENT
+
+Treat the input guide image as a rotoscope underlay, pose skeleton, and spatial control map. The final rendered subjects must be retargeted directly onto the visible guide subjects, not loosely inspired by them.
+
+For every primary subject, match the visible 2D screen position of the head, neck, shoulder line, torso centerline, hips, elbows, wrists, hands, knees, ankles, feet, and major silhouette corners as closely as possible. If the final image were overlaid on the guide image, the pose, limb endpoints, body angle, subject size, and subject placement should visibly line up.
+
+Do not naturalize, straighten, relax, rebalance, beautify, simplify, or make the pose more comfortable. If the guide pose is awkward, asymmetric, off-balance, puppet-like, mannequin-like, partially cropped, or physically unusual, preserve that exact spatial arrangement. The final subject's anatomy may be rendered naturally, but it must occupy the same pose footprint and keep the same gesture and limb endpoints.
+
+GUIDE IMAGE ROLE
+
+Analyze the input guide image and preserve its visible layout exactly.
+
+The input guide image controls:
+composition, camera angle, camera height, lens perspective, framing, crop, subject count, subject placement, subject scale, foreground/background depth relationships, pose, gesture, stance, body orientation, head placement, torso orientation, shoulder line, limb placement, hand and foot endpoints, silhouette, body blocking, occlusion, contact points, negative space, and overall staging.
+
+The input guide image does not control:
+subject identity, character design, facial design, wardrobe, accessories, color, material, texture, lighting, background design, environment details, mood, rendering style, or level of finish.
+
+CHARACTER REFERENCE ROLE
+
+If character reference images are provided, they control character identity, face, body type, selected wardrobe, and character-specific surface detail only. They do not control pose, stance, gesture, head angle, limb placement, hand position, foot position, camera, crop, scale, lighting, background, or composition.
+
+Never copy a pose, relaxed standing posture, portrait stance, camera angle, crop, or expression from a character reference sheet. Retarget each character onto the corresponding guide-image subject while keeping the guide image's pose and spatial structure as the highest priority.
+
+WRITTEN PROMPT ROLE
+
+Use the written prompt only for:
+final subject identity, character details, facial design, expression, wardrobe, props that are explicitly requested, environment, background style, lighting, color palette, materials, texture, atmosphere, mood, art direction, medium, and rendering quality.
+
+Apply the written prompt inside the locked spatial structure of the input guide image.
+
+PRIMARY TRANSFORMATION
+
+Replace the guide image's placeholder forms completely with the subjects and scene described in the written prompt.
+
+The final image should look as though the written prompt was painted directly over the input guide image, while preserving the guide image's composition, pose, scale, camera, crop, silhouette, depth, and staging.
+
+All major subjects in the guide image must keep their original:
+position in frame, relative size, distance from camera, body orientation, pose class, gesture, stance, crop, silhouette, occlusion relationship, and relationship to other subjects.
+
+SUBJECT MAPPING
+
+Map the main visible figures, objects, or compositional masses from the input guide image to the subjects or elements described in the written prompt.
+
+Preserve the guide image's:
+number of primary subjects
+left-to-right ordering
+foreground-to-background ordering
+relative scale between subjects
+viewing angle of each subject
+pose and gesture of each subject
+crop of each subject
+occlusion between subjects
+spacing between subjects
+negative space around subjects
+
+Do not add, remove, merge, split, shrink, enlarge, or reposition primary subjects unless the written prompt explicitly requires it. If the written prompt requires added detail, keep it subordinate to the guide image's existing composition.
+
+POSE AND BODY LOCK
+
+Preserve each figure's pose from the input guide image.
+
+Keep:
+standing figures standing
+seated figures seated
+kneeling figures kneeling
+crouching figures crouching
+reclining figures reclining
+walking figures walking
+running figures running
+leaning figures leaning in the same direction
+turned figures turned the same way
+front-facing figures front-facing
+back-facing figures back-facing
+side-facing figures side-facing
+over-the-shoulder figures over-the-shoulder
+
+Also keep each visible arm, hand, leg, foot, shoulder, hip, head, and torso in the same screen-space position and the same relative distance from every other visible body part. Do not treat the pose as a general action label; treat it as an exact body layout to trace.
+
+Do not reinterpret the action or emotional body language by changing the body pose. Express emotion through face, lighting, color, texture, and style, not through a new pose.
+
+Preserve:
+head angle and placement
+neck direction
+torso orientation
+shoulder placement
+arm angles
+hand endpoints
+leg angles
+foot placement
+weight distribution
+contact points
+body tension
+silhouette outline
+
+Do not move hands, feet, head, torso, or limbs away from their guide-image positions. Do not turn a standing figure into a seated figure, a cropped figure into a full figure, a background figure into a foreground figure, or a foreground figure into a background figure.
+
+CAMERA AND FRAMING LOCK
+
+Preserve the guide image's camera and frame.
+
+Keep:
+same aspect ratio
+same camera angle
+same camera height
+same lens perspective
+same distance relationship to subjects
+same crop
+same framing
+same horizon or implied horizon
+same foreground, midground, and background structure
+same empty-space pattern
+
+Do not mirror, rotate, zoom, recrop, reframe, change the camera height, change the lens perspective, or change the apparent distance between camera and subjects.
+
+CROP AND OCCLUSION LOCK
+
+If a subject is cropped by the frame in the guide image, keep that subject cropped in the same way.
+
+If a subject is partially hidden, blocked, or overlapped by another subject or object in the guide image, preserve that same occlusion relationship.
+
+If the guide image contains a large foreground shape, close-up body part, over-the-shoulder framing element, cropped object, or blocking mass, preserve its role as a large foreground compositional element.
+
+Do not turn cropped or occluded elements into fully visible elements. Do not reveal hidden body parts or complete forms that are cropped out of the guide image.
+
+NEGATIVE SPACE LOCK
+
+Preserve the guide image's negative space and visual breathing room.
+
+The written prompt may define the environment, but environmental details must fit behind and around the locked composition. Do not fill open areas with large new props, scenery, architecture, furniture, crowds, text, symbols, or decorative elements that change the guide image's spatial balance.
+
+Add background and atmosphere only where they do not disturb subject placement, silhouette, staging, occlusion, or negative space.
+
+STYLE REPLACEMENT
+
+Do not copy the guide image's placeholder appearance.
+
+Do not preserve:
+guide image color
+guide image material
+guide image texture
+guide image lighting
+guide image background
+mannequin-like appearance
+primitive shapes
+unfinished surfaces
+simple gray or colored placeholder look
+construction artifacts
+rigging marks
+model seams
+guide-object identity
+
+The guide image is not the final subject and not the final style. It is only the composition and pose blueprint.
+
+CONFLICT RULE
+
+If the written prompt conflicts with the input guide image's pose, staging, camera, crop, subject placement, or silhouette, follow the input guide image.
+
+If the written prompt implies a different pose, different camera angle, different framing, different subject scale, different subject position, or different action, ignore that spatial implication and keep the guide image layout.
+
+If a requested costume, accessory, prop, or environment detail would require changing the locked pose, silhouette, crop, or staging, adapt that detail so it fits within the guide image's existing visual footprint.
+
+FORBIDDEN CHANGES
+
+Do not mirror the composition.
+Do not rotate the composition.
+Do not zoom in or out.
+Do not recrop.
+Do not reframe.
+Do not change camera height.
+Do not change lens perspective.
+Do not change subject count.
+Do not change subject placement.
+Do not change foreground/background order.
+Do not change relative subject scale.
+Do not change pose class.
+Do not change stance.
+Do not change gesture.
+Do not replace an unusual pose with a more natural pose.
+Do not make a character stand straighter, lower their arms, raise their arms, uncross legs, plant both feet, or relax their posture unless the guide image already shows that.
+Do not move head, hands, feet, torso, or limb endpoints.
+Do not alter silhouette or body blocking.
+Do not reveal cropped-out body parts.
+Do not remove occlusion.
+Do not fill negative space with new large elements.
+Do not copy placeholder materials, colors, lighting, or primitive construction from the guide image.
+
+PRIORITY ORDER
+
+1. Preserve the input guide image's composition, camera, crop, subject placement, relative scale, depth, silhouette, occlusion, pose, and negative space.
+2. Preserve each subject's pose class, orientation, gesture, stance, body blocking, and frame crop.
+3. Preserve exact screen-space limb endpoints and body-part relationships from the guide image, including hands, feet, elbows, knees, shoulders, hips, head, and torso.
+4. Apply the written prompt's subject identity, character design, wardrobe, materials, environment, lighting, style, mood, and rendering quality.
+5. Add detail only where it does not change the locked composition or pose footprint.
+6. When any instruction conflicts, the guide image's spatial structure wins.
+
+WRITTEN PROMPT
+
+${cleanWrittenPrompt || "No additional written prompt was provided."}
+
+Generate the final image as a fully rendered interpretation of the written prompt, locked to the composition, pose, camera, framing, silhouette, scale, occlusion, and negative space of the input guide image.`;
+};
 const transferPromptSuffix =
   "Only use the uploaded image labeled MOOD_BOARD.png as a reference for overall style, color grading and image qualities. The generated image should NOT take any elements, subjects, or compositional framing of the content from MOOD_BOARD.png directly; only use MOOD_BOARD.png as a visual guide to transfer the style to the generation.";
 let composerMannequinAsset = null;
@@ -2203,9 +2410,12 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
 
         pushUndoSnapshot();
         setEdges((current) => {
-          let nextEdges = current.filter(
-            (edge) => !(edge.from.nodeId === draftEdge.from.nodeId && edge.from.port === draftEdge.from.port && edge.to.nodeId === to.nodeId && edge.to.port === to.port)
-          );
+          const targetNode = nodesRef.current.find((node) => node.id === to.nodeId);
+          const replacesSingleComposerCharacterInput = isComposerCharacterInputPort(to.port, targetNode);
+          let nextEdges = current.filter((edge) => {
+            if (replacesSingleComposerCharacterInput && edge.to.nodeId === to.nodeId && edge.to.port === to.port) return false;
+            return !(edge.from.nodeId === draftEdge.from.nodeId && edge.from.port === draftEdge.from.port && edge.to.nodeId === to.nodeId && edge.to.port === to.port);
+          });
 
           return [
             ...nextEdges,
@@ -2262,8 +2472,7 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
         text: ["textIn"],
         imageModel: ["promptIn"],
         videoModel: ["promptIn"],
-        utility: ["promptIn"],
-        composer: ["promptIn"]
+        utility: ["promptIn"]
       },
       image: {
         preview: ["sourceIn"],
@@ -2298,6 +2507,12 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
         utility: ["imageIn", "referenceImageIn"],
         preview: ["sourceIn"]
       },
+      character: {
+        imageModel: ["characterIn"],
+        videoModel: ["characterIn"],
+        composer: composerCharacterInputPortIdsForNode(target),
+        preview: ["sourceIn"]
+      },
       model3d: {
         preview: ["sourceIn"]
       }
@@ -2308,10 +2523,11 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
 
   function autoConnectionOutputKind(source, from) {
     if (source.type === "camera") return from.port === "cameraOut" ? "camera" : "image";
-    if (source.type === "composer") return from.port === "promptOut" ? "prompt" : "image";
+    if (source.type === "composer") return "image";
     if (source.type === "utility") return utilityOutputType(source);
     if (source.type === "style") return "style";
     if (source.type === "transfer") return "transfer";
+    if (source.type === "character") return from.port === "voiceOut" ? "audio" : "character";
     if (source.type === "model3d") return "model3d";
     if (source.type === "video" || source.type === "videoModel") return "video";
     if (source.type === "audio") return "audio";
@@ -2379,6 +2595,7 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
       }
       if (target.type === "imageModel" && to.port === "characterIn") return "";
       if (target.type === "videoModel" && to.port === "characterIn") return "";
+      if (target.type === "composer" && isComposerCharacterInputPort(to.port, target)) return "";
       if (target.type === "preview" && to.port === "sourceIn") return "";
       return "Character connects to Character inputs or previews";
     }
@@ -2425,10 +2642,9 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
     }
 
     if (target?.type === "composer") {
-      if (to.port === "promptIn") {
-        if (source.type === "composer") return from.port === "promptOut" ? "" : "Composer prompt input accepts prompt outputs";
-        if (["plainText", "text", "imageModel", "videoModel", "utility"].includes(source.type)) return "";
-        return "Composer prompt input accepts prompt outputs";
+      if (isComposerCharacterInputPort(to.port, target)) {
+        if (source.type === "character" && from.port === "characterOut") return "";
+        return "Composer character inputs accept locked Character nodes";
       }
 
       if (to.port === "imageIn") {
@@ -2439,18 +2655,6 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
     }
 
     if (source?.type === "composer") {
-      if (from.port === "promptOut") {
-        if (
-          (target.type === "imageModel" && to.port === "promptIn") ||
-          (target.type === "videoModel" && to.port === "promptIn") ||
-          (target.type === "utility" && to.port === "promptIn") ||
-          (target.type === "text" && to.port === "textIn") ||
-          (target.type === "composer" && to.port === "promptIn")
-        )
-          return "";
-        return "Composer prompt output connects to prompt inputs";
-      }
-
       if (from.port === "imageOut") {
         if (target.type === "preview" && to.port === "sourceIn") return "";
         if (target.type === "text" && to.port === "imageIn") return "";
@@ -2905,7 +3109,7 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
 
     const currentIncomingByNode = buildIncomingByNode(nodesRef.current, edgesRef.current);
     const incoming = currentIncomingByNode[currentNode.id] || {};
-    const basePrompt = connectedText(incoming.promptIn, currentIncomingByNode) || currentNode.data.prompt;
+    const basePrompt = connectedText(incoming.promptIn) || currentNode.data.prompt;
     const isSingleRunSegmentation =
       (currentNode.type === "imageModel" && isSam3ImageModel(currentNode.data.model)) ||
       (currentNode.type === "videoModel" && isSam3VideoModel(currentNode.data.model)) ||
@@ -3017,10 +3221,10 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
       if (currentNode.type === "imageModel") {
         const isSegmentation = isSam3ImageModel(currentNode.data.model);
         const aspectRatio = isSegmentation ? currentNode.data.aspectRatio : await resolveImageModelAspectRatio(currentNode, incoming);
-        const imagePromptItems = connectedImagePromptItems(isSegmentation ? incoming.imagePromptIn || [] : [...(incoming.imagePromptIn || []), ...(incoming.transferIn || []), ...(incoming.characterIn || [])]);
+        const imagePromptItems = connectedImagePromptItems(isSegmentation ? incoming.imagePromptIn || [] : [...(incoming.imagePromptIn || []), ...(incoming.transferIn || []), ...(incoming.characterIn || [])], currentIncomingByNode);
         const prompt = isSegmentation
           ? basePrompt
-          : buildEffectiveImagePrompt(basePrompt, [...(incoming.imagePromptIn || []), ...(incoming.cameraIn || []), ...(incoming.styleIn || []), ...(incoming.transferIn || []), ...(incoming.characterIn || [])], aspectRatio);
+          : buildEffectiveImagePrompt(basePrompt, [...(incoming.imagePromptIn || []), ...(incoming.cameraIn || []), ...(incoming.styleIn || []), ...(incoming.transferIn || []), ...(incoming.characterIn || [])], aspectRatio, currentIncomingByNode);
         const runIndexes = Array.from({ length: batchCount }, (_, index) => index);
         const settled = await settleSequential(runIndexes, (index) =>
           runImageModelGeneration({
@@ -5204,7 +5408,7 @@ function NodeBody({
 }) {
   const config = getNodeConfig(node.type);
   const outputPort = config.output[0];
-  const resolvedPromptText = (items = []) => connectedText(items, incomingByNode);
+  const resolvedPromptText = (items = []) => connectedText(items);
 
   if (node.type === "plainText") {
     return (
@@ -5305,35 +5509,14 @@ function NodeBody({
   }
 
   if (node.type === "composer") {
-    const promptOutputPort = config.output.find((port) => port.id === "promptOut");
     const imageOutputPort = config.output.find((port) => port.id === "imageOut");
-    const promptInputPort = config.input.find((port) => port.id === "promptIn");
     const imageInputPort = config.input.find((port) => port.id === "imageIn");
-    const promptValue = resolvedPromptText(incoming.promptIn) || node.data.prompt || "";
-    const promptConnected = Boolean(resolvedPromptText(incoming.promptIn));
-    const imagePlaneCount = connectedAssetItems(incoming.imageIn).length;
+    const characterInputPorts = composerCharacterInputPortsForNode(node);
+    const composerInputPorts = [imageInputPort, ...characterInputPorts].filter(Boolean);
 
     return (
       <div className="node-body composer-node-body">
-        <div className="composer-input-port-stack" aria-label="Composer inputs">
-          {[promptInputPort, imageInputPort].filter(Boolean).map((port) => (
-            <PortHandle
-              key={port.id}
-              node={node}
-              port={port}
-              side="input"
-              onConnectStart={onConnectStart}
-              onDisconnectInput={onDisconnectInput}
-              connectedPortKeys={connectedPortKeys}
-            />
-          ))}
-        </div>
-        {promptOutputPort && <OutputPortRow node={node} port={promptOutputPort} label="Prompt output" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />}
         {imageOutputPort && <OutputPortRow node={node} port={imageOutputPort} label="Frame output" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />}
-        <label className="composer-node-prompt">
-          <span>Prompt</span>
-          <textarea className={promptConnected ? "connected-field" : ""} value={promptValue} readOnly={promptConnected} onChange={(event) => onUpdate(node.id, { prompt: event.target.value })} />
-        </label>
         <div className={`composer-node-preview ${node.data.resultUrl ? "" : "empty"}`}>
           {node.data.resultUrl ? (
             <img src={node.data.resultUrl} alt="Composer frame" />
@@ -5347,7 +5530,21 @@ function NodeBody({
         <button className="run-node-button" onClick={() => onOpenComposer?.(node.id)}>
           Open Composer
         </button>
-        <small className="model-status-note">{imagePlaneCount ? `${imagePlaneCount} image plane source${imagePlaneCount === 1 ? "" : "s"} connected.` : "Block camera, pose, scale, and layout with simple 3D maquettes."}</small>
+        <div className="composer-input-list" aria-label="Composer inputs">
+          {composerInputPorts.map((port) => (
+            <div key={port.id} className="composer-input-row">
+              <PortHandle
+                node={node}
+                port={port}
+                side="input"
+                onConnectStart={onConnectStart}
+                onDisconnectInput={onDisconnectInput}
+                connectedPortKeys={connectedPortKeys}
+              />
+              <span title={port.label}>{port.label}</span>
+            </div>
+          ))}
+        </div>
         {node.data.status === "uploading" && <small className="upload-status">Capturing...</small>}
         {node.data.error && <small className="upload-error">{node.data.error}</small>}
       </div>
@@ -6614,11 +6811,11 @@ function NodeBody({
     const promptValue = resolvedPromptText(incoming.promptIn) || node.data.prompt;
     const promptConnected = Boolean(resolvedPromptText(incoming.promptIn));
     const isSam3Image = isSam3ImageModel(node.data.model);
-    const imageInstructionSources = [...(incoming.cameraIn || []), ...(incoming.styleIn || []), ...(incoming.transferIn || []), ...(incoming.characterIn || [])];
-    const effectivePromptValue = isSam3Image ? promptValue : buildEffectiveImagePrompt(promptValue, imageInstructionSources, node.data.aspectRatio);
+    const imageInstructionSources = [...(incoming.imagePromptIn || []), ...(incoming.cameraIn || []), ...(incoming.styleIn || []), ...(incoming.transferIn || []), ...(incoming.characterIn || [])];
+    const effectivePromptValue = isSam3Image ? promptValue : buildEffectiveImagePrompt(promptValue, imageInstructionSources, node.data.aspectRatio, incomingByNode);
     const promptHasGeneratedAdditions = effectivePromptValue !== promptValue;
-    const appliedInstructionLabels = activeImageInstructionLabels(imageInstructionSources);
-    const characterTagMatches = isSam3Image ? [] : imageModelCharacterTagMatches(promptValue, incoming.characterIn);
+    const appliedInstructionLabels = activeImageInstructionLabels(imageInstructionSources, incomingByNode);
+    const characterTagMatches = isSam3Image ? [] : imageModelCharacterTagMatches(promptValue, imageInstructionSources, incomingByNode);
     const imagePromptLabel = connectedSummary(incoming.imagePromptIn, "Add file");
     const cameraPromptLabel = connectedSummary(incoming.cameraIn, "Add camera");
     const stylePromptLabel = connectedSummary(incoming.styleIn, "Add style");
@@ -8215,14 +8412,8 @@ function getNodeConfig(type) {
     },
     composer: {
       icon: Box,
-      input: [
-        { id: "promptIn", label: "Prompt", color: portColors.prompt },
-        { id: "imageIn", label: "Image Plane", color: portColors.image }
-      ],
-      output: [
-        { id: "promptOut", label: "Prompt", color: portColors.prompt },
-        { id: "imageOut", label: "Frame", color: portColors.image }
-      ]
+      input: [{ id: "imageIn", label: "Image Plane", color: portColors.image }],
+      output: [{ id: "imageOut", label: "Frame", color: portColors.image }]
     },
     style: {
       icon: Palette,
@@ -8317,7 +8508,6 @@ function createDefaultNodeData(type, label, count) {
     const composerScene = defaultComposerScene();
     return {
       title,
-      prompt: "",
       composerAspectRatio: "16:9",
       composerShowGuides: true,
       composerSelectedId: composerScene.maquettes[0]?.id || "",
@@ -8760,7 +8950,8 @@ function visiblePortIdsForNode(node) {
 }
 
 function inputPortIdsForNode(node) {
-  return (getNodeConfig(node?.type)?.input || []).map((port) => port.id);
+  const basePorts = (getNodeConfig(node?.type)?.input || []).map((port) => port.id);
+  return node?.type === "composer" ? [...basePorts, ...composerCharacterInputPortIdsForNode(node)] : basePorts;
 }
 
 function activeInputPortIdsForNode(node) {
@@ -8773,6 +8964,40 @@ function activeInputPortIdsForNode(node) {
 
 function outputPortIdsForNode(node) {
   return (getNodeConfig(node?.type)?.output || []).map((port) => port.id);
+}
+
+function composerCharacterInputPortIdsForNode(node) {
+  return composerCharacterInputPortsForNode(node).map((port) => port.id);
+}
+
+function composerCharacterInputPortsForNode(node) {
+  if (node?.type !== "composer") return [];
+  return normalizedComposerScene(node.data?.composerScene).maquettes.map((maquette, index) => ({
+    id: composerCharacterPortId(maquette.id),
+    label: composerMaquetteLabel(maquette, index),
+    color: portColors.character,
+    maquetteId: maquette.id
+  }));
+}
+
+function composerCharacterPortId(maquetteId) {
+  return `${composerCharacterPortPrefix}${maquetteId}`;
+}
+
+function composerMaquetteIdFromCharacterPort(portId) {
+  const value = String(portId || "");
+  return value.startsWith(composerCharacterPortPrefix) ? value.slice(composerCharacterPortPrefix.length) : "";
+}
+
+function isComposerCharacterInputPort(portId, node = null) {
+  const maquetteId = composerMaquetteIdFromCharacterPort(portId);
+  if (!maquetteId) return false;
+  if (!node || node.type !== "composer") return true;
+  return normalizedComposerScene(node.data?.composerScene).maquettes.some((maquette) => maquette.id === maquetteId);
+}
+
+function composerMaquetteLabel(maquette = {}, index = 0) {
+  return String(maquette.name || `Maquette ${index + 1}`).trim() || `Maquette ${index + 1}`;
 }
 
 function estimatedNodeWidth(type) {
@@ -9026,8 +9251,33 @@ function buildReferenceTagHighlights(nodes, incomingByNode) {
 }
 
 function buildActiveEdgeIds(nodes, edges) {
+  const nodeMap = new Map(nodes.map((node) => [node.id, node]));
   const activeNodeIds = new Set(nodes.filter((node) => node.data?.status === "running").map((node) => node.id));
-  return new Set(edges.filter((edge) => activeNodeIds.has(edge.to.nodeId)).map((edge) => edge.id));
+  const activeEdgeIds = new Set();
+  const activeImageModelComposerIds = new Set();
+
+  edges.forEach((edge) => {
+    if (!activeNodeIds.has(edge.to.nodeId)) return;
+
+    activeEdgeIds.add(edge.id);
+
+    const source = nodeMap.get(edge.from.nodeId);
+    const target = nodeMap.get(edge.to.nodeId);
+    if (source?.type === "composer" && target?.type === "imageModel" && edge.from.port === "imageOut") {
+      activeImageModelComposerIds.add(source.id);
+    }
+  });
+
+  if (activeImageModelComposerIds.size) {
+    edges.forEach((edge) => {
+      const target = nodeMap.get(edge.to.nodeId);
+      if (target?.type === "composer" && activeImageModelComposerIds.has(target.id) && isComposerCharacterInputPort(edge.to.port, target)) {
+        activeEdgeIds.add(edge.id);
+      }
+    });
+  }
+
+  return activeEdgeIds;
 }
 
 function buildInactiveEdgeIds(nodes, edges) {
@@ -9045,19 +9295,12 @@ function buildInactiveEdgeIds(nodes, edges) {
   );
 }
 
-function connectedText(items = [], incomingByNode = null, visited = new Set()) {
+function connectedText(items = []) {
   return items
     .map(({ source }) => {
       if (source.type === "plainText") return source.data.text;
       if (source.type === "text") return source.data.resultText || source.data.text;
       if (source.type === "imageModel" || source.type === "videoModel" || source.type === "utility") return source.data.resultText;
-      if (source.type === "composer") {
-        if (visited.has(source.id)) return source.data.prompt || "";
-        const nextVisited = new Set(visited);
-        nextVisited.add(source.id);
-        const incomingPrompt = incomingByNode ? connectedText(incomingByNode[source.id]?.promptIn || [], incomingByNode, nextVisited) : "";
-        return incomingPrompt || source.data.prompt || "";
-      }
       return source.data.title;
     })
     .filter(Boolean)
@@ -9171,9 +9414,16 @@ function videoModelReferenceTagMatches(prompt, incoming = {}) {
   return [...imageCandidates, ...videoCandidates, ...characterCandidates].filter((match) => promptHasTag(text, match.tag));
 }
 
-function imageModelCharacterTagMatches(prompt, items = []) {
+function imageModelCharacterTagMatches(prompt, items = [], incomingByNode = null) {
   const text = String(prompt || "");
-  return characterTagCandidates(items).filter((match) => promptHasTag(text, match.tag));
+  return activeConnectedCharacterSources(items, incomingByNode)
+    .map((source, index) => ({
+      nodeId: source.id,
+      tag: characterTag(source),
+      color: portColors.character || referenceTagPalette[index % referenceTagPalette.length],
+      type: "character"
+    }))
+    .filter((match) => promptHasTag(text, match.tag));
 }
 
 function referenceTagCandidates(items = [], colorOffset = 0, fallbackPrefix = "Image") {
@@ -10082,21 +10332,112 @@ function previewMediaType(source, edge) {
   return "image";
 }
 
-function connectedImagePromptItems(items = []) {
-  const namedCharacterReferences = activeConnectedCharacterSources(items).length > 1;
+function connectedImagePromptItems(items = [], incomingByNode = null) {
+  const namedCharacterReferences = activeConnectedCharacterSources(items, incomingByNode).length > 1;
+  const uniqueItems = new Map();
 
-  return items
+  items
     .flatMap(({ source }) => {
       if (!source.data.resultUrl) return null;
       if (source.type === "character") {
         return { url: source.data.resultUrl, label: characterReferenceLabel(source, namedCharacterReferences) };
       }
+      if (source.type === "composer") {
+        return [
+          { url: source.data.resultUrl, label: "Input guide image" },
+          ...composerCharacterBindingsForSource(source, incomingByNode).map((binding) => ({
+            url: binding.source.data.resultUrl,
+            label: composerCharacterReferenceLabel(binding, namedCharacterReferences)
+          }))
+        ];
+      }
       return {
         url: source.data.resultUrl,
-        label: source.type === "composer" ? "Composer frame" : source.type === "transfer" ? moodBoardOutputFileName : sourceLabel(source)
+        label: source.type === "transfer" ? moodBoardOutputFileName : sourceLabel(source)
+      };
+    })
+    .filter(Boolean)
+    .forEach((item) => {
+      uniqueItems.set(`${item.url}|${item.label}`, item);
+    });
+
+  return [...uniqueItems.values()];
+}
+
+function composerCharacterBindingsForItems(items = [], incomingByNode = null) {
+  const bindings = new Map();
+  items.forEach(({ source }) => {
+    composerCharacterBindingsForSource(source, incomingByNode).forEach((binding) => {
+      bindings.set(`${source.id}:${binding.maquette.id}:${binding.source.id}`, binding);
+    });
+  });
+  return [...bindings.values()];
+}
+
+function composerCharacterBindingsForSource(source, incomingByNode = null) {
+  if (!isActiveComposerSource(source) || !incomingByNode) return [];
+  const incoming = incomingByNode[source.id] || {};
+  const maquettes = normalizedComposerScene(source.data?.composerScene).maquettes;
+
+  return maquettes
+    .map((maquette, index) => {
+      const portId = composerCharacterPortId(maquette.id);
+      const connection = (incoming[portId] || [])
+        .filter(({ source: characterSource, edge }) =>
+          edge.from.port !== "voiceOut" &&
+          characterSource.type === "character" &&
+          characterSource.data.locked &&
+          characterSource.data.activated &&
+          characterSource.data.resultUrl
+        )
+        .at(-1);
+      if (!connection) return null;
+      return {
+        composer: source,
+        maquette,
+        maquetteIndex: index,
+        maquetteLabel: composerMaquetteLabel(maquette, index),
+        source: connection.source
       };
     })
     .filter(Boolean);
+}
+
+function composerCharacterReferenceLabel(binding, namedCharacterReferences = false) {
+  const characterName = characterTag(binding.source);
+  const characterLabel = namedCharacterReferences ? `${characterName} character identity sheet` : "Character identity sheet";
+  return cleanImageReferenceLabel(`Maquette ${binding.maquetteLabel} uses ${characterLabel}`);
+}
+
+function composerCharacterMappingPromptPieces(items = [], incomingByNode = null, namedCharacterReferences = false) {
+  return composerCharacterBindingsForItems(items, incomingByNode)
+    .flatMap((binding) => [
+      `COMPOSER CHARACTER MAPPING: In the input guide image, the maquette named "${binding.maquetteLabel}" must be rendered as the character reference labeled "${composerCharacterReferenceLabel(binding, namedCharacterReferences)}". Identify the correct maquette by this Composer placement descriptor: ${composerMaquetteSpatialDescriptor(binding.maquette, binding.maquetteIndex)} Use the descriptor and placeholder color only to identify the correct guide figure, not as final appearance. Preserve that maquette's exact pose, placement, body orientation, scale, crop, silhouette, occlusion, and foreground/background relationship. Replace only the placeholder maquette identity with that character's identity, wardrobe, body proportions, face, and styling. The character reference for this maquette is identity-only; do not copy its pose, stance, portrait posture, camera angle, crop, expression, lighting, or background. Retarget the character onto the maquette's exact visible body layout, including head angle, shoulder line, torso direction, arm angles, hand positions, leg angles, foot positions, body balance, and silhouette footprint.`,
+      characterGenerationPhysicalDetailsPrompt(binding.source.data),
+      characterTraitPrompt(binding.source.data)
+    ])
+    .filter(Boolean);
+}
+
+function composerMaquetteSpatialDescriptor(maquette = {}, index = 0) {
+  const x = finiteNumber(maquette.x, 0);
+  const y = finiteNumber(maquette.y, 0);
+  const z = finiteNumber(maquette.z, 0);
+  const scale = finiteNumber(maquette.scale, 1);
+  const rotationY = finiteNumber(maquette.rotY, 0);
+  const horizontal = x <= -0.75 ? "left side" : x >= 0.75 ? "right side" : Math.abs(x) <= 0.25 ? "center" : x < 0 ? "slightly left of center" : "slightly right of center";
+  const depth = z <= -0.75 ? "front/foreground area" : z >= 0.75 ? "back/background area" : Math.abs(z) <= 0.25 ? "middle depth" : z < 0 ? "front-middle depth" : "back-middle depth";
+  const height = y <= -0.35 ? "low in the scene" : y >= 0.35 ? "high in the scene" : "near ground level";
+  const color = maquette.color ? ` visible placeholder color ${maquette.color},` : "";
+  return `maquette ${index + 1},${color} ${horizontal}, ${depth}, ${height}, scene position x ${x.toFixed(2)}, y ${y.toFixed(2)}, z ${z.toFixed(2)}, scale ${scale.toFixed(2)}, y rotation ${rotationY.toFixed(0)} degrees.`;
+}
+
+function cleanImageReferenceLabel(value) {
+  return String(value || "")
+    .replace(/[^A-Za-z0-9_. -]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 80);
 }
 
 async function resolveImageModelAspectRatio(node, incoming = {}) {
@@ -10362,13 +10703,14 @@ function normalizeChoice(value, options = [], fallback) {
   return options.includes(value) ? value : fallback;
 }
 
-function activeImageInstructionLabels(items = []) {
+function activeImageInstructionLabels(items = [], incomingByNode = null) {
   return [
     ...new Set(
       items
-        .filter(({ source }) => promptPiecesForSource(source).length)
+        .filter(({ source }) => isActiveComposerSource(source) || promptPiecesForSource(source).length)
         .map(({ source }) => ({
           camera: "Camera",
+          composer: composerCharacterBindingsForSource(source, incomingByNode).length ? "Composer guide + character map" : "Composer guide",
           style: "Style",
           transfer: "Mood Board",
           character: "Character identity"
@@ -10378,28 +10720,36 @@ function activeImageInstructionLabels(items = []) {
   ];
 }
 
-function buildEffectiveImagePrompt(prompt, items = [], aspectRatio) {
+function buildEffectiveImagePrompt(prompt, items = [], aspectRatio, incomingByNode = null) {
   const hasTransferReference = items.some(({ source }) => source.type === "transfer" && source.data.resultUrl);
-  const characterSources = activeConnectedCharacterSources(items);
+  const hasComposerGuide = items.some(({ source }) => isActiveComposerSource(source));
+  const characterSources = activeConnectedCharacterSources(items, incomingByNode);
   const namedCharacterReferences = characterSources.length > 1;
   const resolvedPrompt = resolveImageCharacterMentions(prompt, characterSources, namedCharacterReferences);
   const supportingInstructions = items
-    .filter(({ source }) => source.type !== "camera")
+    .filter(({ source }) => source.type !== "camera" && !isActiveComposerSource(source))
     .flatMap(({ source }) => promptPiecesForSource(source, { namedCharacterReferences }))
     .filter(Boolean);
+  const composerCharacterInstructions = composerCharacterMappingPromptPieces(items, incomingByNode, namedCharacterReferences);
   const cameraInstructions = items
     .filter(({ source }) => source.type === "camera")
     .flatMap(({ source }) => promptPiecesForSource(source, { namedCharacterReferences }))
     .filter(Boolean);
 
-  if (!supportingInstructions.length && !cameraInstructions.length) return resolvedPrompt;
+  if (!hasComposerGuide && !supportingInstructions.length && !cameraInstructions.length) return resolvedPrompt;
 
   const ratio = extractAspectRatio(aspectRatio);
   const aspectInstruction = hasTransferReference && ratio
     ? `Generate the final image in the Image Model node's selected ${ratio} aspect ratio. Do not copy ${moodBoardOutputFileName}'s collage layout or aspect ratio into the final image.`
     : "";
+  const writtenPrompt = [resolvedPrompt, ...supportingInstructions, ...composerCharacterInstructions].filter(Boolean).join("\n\n");
+  const finalPrompt = hasComposerGuide ? composerReferencePrompt(writtenPrompt) : writtenPrompt;
 
-  return [resolvedPrompt, ...supportingInstructions, aspectInstruction, ...cameraInstructions].filter(Boolean).join("\n\n");
+  return [finalPrompt, aspectInstruction, ...cameraInstructions].filter(Boolean).join("\n\n");
+}
+
+function isActiveComposerSource(source) {
+  return source?.type === "composer" && Boolean(source.data?.resultUrl);
 }
 
 function promptPiecesForSource(source, { namedCharacterReferences = false } = {}) {
@@ -10412,8 +10762,8 @@ function promptPiecesForSource(source, { namedCharacterReferences = false } = {}
     return [stylePresetPrompts[selectedPreset] || ""].filter(Boolean);
   }
 
-  if (source.type === "composer" && source.data.resultUrl) {
-    return [composerReferencePrompt];
+  if (source.type === "composer") {
+    return [];
   }
 
   if (source.type === "character" && source.data.locked && source.data.activated && source.data.resultUrl) {
@@ -10516,10 +10866,18 @@ function characterTag(node) {
   return cleanPromptTag(node?.data?.characterName || node?.data?.title || "Character") || "Character";
 }
 
-function activeConnectedCharacterSources(items = []) {
-  return items
-    .map(({ source }) => source)
-    .filter((source) => source.type === "character" && source.data.locked && source.data.activated && source.data.resultUrl);
+function activeConnectedCharacterSources(items = [], incomingByNode = null) {
+  const sources = [
+    ...items
+      .map(({ source }) => source)
+      .filter((source) => source.type === "character" && source.data.locked && source.data.activated && source.data.resultUrl),
+    ...composerCharacterBindingsForItems(items, incomingByNode).map((binding) => binding.source)
+  ];
+  const uniqueSources = new Map();
+  sources.forEach((source) => {
+    uniqueSources.set(source.id, source);
+  });
+  return [...uniqueSources.values()];
 }
 
 function resolveImageCharacterMentions(prompt, characterSources = [], namedCharacterReferences = false) {
@@ -11967,12 +12325,12 @@ function normalizeImageModelData(data = {}) {
 }
 
 function normalizeComposerData(data = {}) {
+  const { prompt: _legacyPrompt, ...composerData } = data;
   const composerScene = normalizedComposerScene(data.composerScene);
   const selectedStillExists = data.composerSelectedId === "camera" || [...composerScene.maquettes, ...composerScene.props, ...composerScene.imagePlanes].some((item) => item.id === data.composerSelectedId);
   return {
-    ...data,
+    ...composerData,
     title: data.title || "Composer",
-    prompt: data.prompt || "",
     composerAspectRatio: normalizeComposerAspectRatio(data.composerAspectRatio),
     composerShowGuides: data.composerShowGuides !== false,
     composerSelectedId: selectedStillExists ? data.composerSelectedId : composerScene.maquettes[0]?.id || composerScene.props[0]?.id || composerScene.imagePlanes[0]?.id || "camera",
@@ -12238,6 +12596,12 @@ function normalizeEdgeForCurrentGraph(edge, nodeMap) {
     nextEdge.color = utilityOutputType(source) === "video" ? portColors.video : portColors.image;
   }
 
+  if (source.type === "composer") {
+    if (nextEdge.from.port === "promptOut" || nextEdge.to.port === "promptIn") return null;
+    nextEdge.from.port = "imageOut";
+    nextEdge.color = portColors.image;
+  }
+
   if (source.type === "model3d") {
     nextEdge.from.port = "modelOut";
     nextEdge.color = portColors.model3d;
@@ -12249,6 +12613,12 @@ function normalizeEdgeForCurrentGraph(edge, nodeMap) {
       nextEdge.from.port = "characterOut";
       nextEdge.color = portColors.character;
     }
+  }
+
+  if (target?.type === "composer" && isComposerCharacterInputPort(nextEdge.to.port, target)) {
+    if (source.type !== "character" || nextEdge.from.port === "voiceOut") return null;
+    nextEdge.from.port = "characterOut";
+    nextEdge.color = portColors.character;
   }
 
   if (!inputPortIdsForNode(target).includes(nextEdge.to.port)) return null;
