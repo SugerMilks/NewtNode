@@ -2675,7 +2675,7 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
     setProjectName(workflow.name);
     setSavedProjectName(workflow.name);
     setLocalWorkflowFileName(handle.name || workflow.fileName);
-    setSaveStatus(`Saved ${handle.name || workflow.fileName}`);
+    setSaveStatus(`Saved ${workflowDisplayPath(workflow, handle.name || workflow.fileName)}`);
   }
 
   async function saveProjectAsLocalFile() {
@@ -2740,7 +2740,8 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
       setProjectName(project.name);
       setSavedProjectName(project.name);
       setProjectPackagePath(project.packagePath || project.package?.rootPath || "");
-      setSaveStatus(project.packagePath ? `Saved package ${project.package?.workflowFileName || project.fileName}` : project.fileName ? `Saved ${project.fileName}` : shouldCreateNewProject ? "Saved as new workflow" : "Saved");
+      const savedPath = workflowDisplayPath(project);
+      setSaveStatus(savedPath ? `Saved ${savedPath}` : shouldCreateNewProject ? "Saved as new workflow" : "Saved");
       await loadProjects();
       if (project.graph) {
         const graph = normalizeEditorGraph(project.graph.nodes || [], project.graph.edges || [], project.graph.groups || []);
@@ -2783,7 +2784,8 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
     setSelectedNodeIds([]);
     setSelectedEdgeId(null);
     setProjectMenuOpen(false);
-    setSaveStatus(project.fileName ? `${sourceLabel} ${project.fileName}` : sourceLabel);
+    const displayPath = workflowDisplayPath(project);
+    setSaveStatus(displayPath ? `${sourceLabel} ${displayPath}` : sourceLabel);
   }
 
   async function openWorkflowFile(file) {
@@ -2851,7 +2853,7 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
 
       applyWorkflow(data, "Opened");
       const openedPackagePath = data.packagePath || data.package?.rootPath || "";
-      window.localStorage.setItem("newtnode-last-open-workflow", openedPackagePath || data.fileName || "");
+      window.localStorage.setItem("newtnode-last-open-workflow", openedPackagePath || data.filePath || data.fileName || "");
       await loadProjects();
     } catch (error) {
       setSaveStatus(error.message || "Could not open workflow.");
@@ -11650,6 +11652,30 @@ function workflowFileNameForProject(name) {
     .replace(/\s+/g, "-")
     .toLowerCase();
   return `${cleanName || "newtnode-workflow"}.json`;
+}
+
+function workflowDisplayPath(project = {}, fallback = "") {
+  const workflow = project || {};
+  const packageRoot = firstNonEmptyString(workflow.packagePath, workflow.package?.rootPath);
+  const packageFile = firstNonEmptyString(workflow.package?.workflowFileName, workflow.fileName);
+  if (packageRoot) return joinDisplayPath(packageRoot, packageFile);
+
+  return firstNonEmptyString(workflow.filePath, workflow.workflowFilePath, workflow.fullPath, workflow.path, workflow.fileName, fallback);
+}
+
+function firstNonEmptyString(...values) {
+  return values.map((value) => String(value || "").trim()).find(Boolean) || "";
+}
+
+function joinDisplayPath(root, child) {
+  const cleanRoot = String(root || "").trim().replace(/[\\/]+$/, "");
+  const cleanChild = String(child || "").trim().replace(/^[\\/]+/, "");
+  if (!cleanRoot) return cleanChild;
+  if (!cleanChild) return cleanRoot;
+  if (cleanRoot.endsWith(`\\${cleanChild}`) || cleanRoot.endsWith(`/${cleanChild}`)) return cleanRoot;
+
+  const separator = cleanRoot.includes("\\") && !cleanRoot.includes("/") ? "\\" : "/";
+  return `${cleanRoot}${separator}${cleanChild}`;
 }
 
 async function ensureWritableWorkflowHandle(handle) {

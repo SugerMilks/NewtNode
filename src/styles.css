@@ -67,7 +67,7 @@ button {
 
 .topbar-status {
   min-width: 0;
-  max-width: min(460px, 36vw);
+  max-width: min(840px, 52vw);
   margin-left: auto;
   overflow: hidden;
   color: rgba(244, 240, 232, 0.48);

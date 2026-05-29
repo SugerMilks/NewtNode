@@ -3904,7 +3904,8 @@ async function readWorkflowFromFilePath(filePath) {
     ...workflow,
     id: workflow.id || null,
     name: workflow.name || path.basename(workflowFileName, ".json") || "Untitled node project",
-    fileName: workflowFileName
+    fileName: workflowFileName,
+    filePath: workflowFilePath
   };
 
   if (!workflowShouldRegisterOpenedPackage(openedWorkflow, packagePath)) {
