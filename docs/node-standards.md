@@ -110,6 +110,8 @@ Nodes should feel like they belong to the same editor.
 - If a node returns multiple outputs, store them in `resultItems` with explicit `type`, `url`, `label`, and optional `cost`.
 - The project output rail should show recent local outputs from the current graph and matching history only. Include `/outputs/<workflow-name>/...` and packaged `/workflow-assets/<workflow-id>/outputs/...` URLs; do not add absolute machine-local paths or browser object URLs.
 - Dragging from the output rail into a compatible node should reuse the existing local output URL instead of re-uploading or copying the asset. Keep the imported asset shape aligned with normal uploaded assets so saved workflows remain portable.
+- Dragging from the output rail onto the canvas should create a matching media node in place. Dragging external files onto the canvas should import supported media into the current workflow package/app storage and create matching Image, Video, Audio, 3D, or Text nodes; text files store file contents in the Text node.
+- Double-clicking an output rail thumbnail should open a lightweight full-size preview modal instead of expanding the rail.
 
 ## Run And Dependency Standards
 
@@ -167,6 +169,9 @@ Every paid remote model should record cost metadata.
 
 Saved workflows are long-lived project files. Changes must avoid breaking them.
 
+- Save, Save As, Open, and Import live under the left toolbar File menu. Open replaces the current graph; Import merges the selected workflow into the current graph.
+- When a workflow replacement would discard unsaved graph or project-name changes, prompt with Save, Don't Save, and Cancel. Save writes never-saved workflows to the local app saved-workflows folder.
+- Ctrl+S and Cmd+S save the current workflow. If it has never been saved, use the default local saved-workflows registry rather than requiring Save As.
 - Add normalization for new node fields.
 - Preserve unknown data fields when normalizing unless they are unsafe runtime state.
 - Migrate renamed node types or ports.
@@ -202,7 +207,14 @@ Portable packages are the default Save As shape for workflows that need to move 
 - Packaged assets must be served through `/workflow-assets/<workflow-id>/...`.
 - Vite development proxy config must include `/workflow-assets` anywhere it includes `/uploads` and `/outputs`.
 - Opening a packaged workflow must register its package path with the local server before packaged assets are expected to preview or run.
+- Importing a workflow must remap node, edge, and group IDs and place the imported graph in a clear canvas area rather than directly on top of the current graph.
 - Do not use browser-only object URLs or absolute machine-local paths as saved graph dependencies.
+
+## Provider Key Routing
+
+- Fal is the default provider route for remote models.
+- Google image models should use a direct Google API key only when `GOOGLE_API_KEY` exists. When it is absent, route the same Google-branded image model through Fal instead.
+- Do not automatically fall back from direct Google to Fal after a Google request fails; if the user supplied a Google key, Google model failures should surface as Google failures.
 
 ## UI Design Standards
 

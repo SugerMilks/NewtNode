@@ -758,15 +758,18 @@ const sam3SegmentationModelsEnabled = false; // Flip back to true when revisitin
 
 export default function NodeEditor({ active = true, onStatusChange } = {}) {
   const canvasRef = React.useRef(null);
+  const fileMenuRef = React.useRef(null);
   const projectMenuRef = React.useRef(null);
   const contextMenuRef = React.useRef(null);
   const workflowFileInputRef = React.useRef(null);
   const localWorkflowHandleRef = React.useRef(null);
   const undoStackRef = React.useRef([]);
   const clipboardRef = React.useRef(null);
+  const unsavedPromptResolverRef = React.useRef(null);
   const savedDraft = React.useMemo(loadNodeEditorDraft, []);
   const nodesRef = React.useRef(savedDraft.nodes);
   const edgesRef = React.useRef(savedDraft.edges);
+  const [cleanWorkflowFingerprint, setCleanWorkflowFingerprint] = React.useState(() => workflowStateFingerprint(savedDraft));
   const [nodes, setNodes] = React.useState(savedDraft.nodes);
   const [edges, setEdges] = React.useState(savedDraft.edges);
   const [groups, setGroups] = React.useState(savedDraft.groups);
@@ -781,6 +784,7 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
   const [savedProjectName, setSavedProjectName] = React.useState(savedDraft.savedProjectName);
   const [projectPackagePath, setProjectPackagePath] = React.useState(savedDraft.projectPackagePath);
   const [projects, setProjects] = React.useState([]);
+  const [fileMenuOpen, setFileMenuOpen] = React.useState(false);
   const [projectMenuOpen, setProjectMenuOpen] = React.useState(false);
   const [localWorkflowFileName, setLocalWorkflowFileName] = React.useState("");
   const [contextMenu, setContextMenu] = React.useState(null);
@@ -788,6 +792,8 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
   const [outputsCollapsed, setOutputsCollapsed] = React.useState(true);
   const [outputHistory, setOutputHistory] = React.useState([]);
   const [saveStatus, setSaveStatus] = React.useState("");
+  const [previewLightboxItem, setPreviewLightboxItem] = React.useState(null);
+  const [unsavedPrompt, setUnsavedPrompt] = React.useState(null);
   const [compilingTransferNodeId, setCompilingTransferNodeId] = React.useState(null);
   const [selectedEdgeId, setSelectedEdgeId] = React.useState(null);
   const [composerEditorNodeId, setComposerEditorNodeId] = React.useState(null);
@@ -817,6 +823,11 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
     () => buildProjectOutputItems({ nodes, history: outputHistory, projectId, projectName }),
     [nodes, outputHistory, projectId, projectName]
   );
+  const currentWorkflowFingerprint = React.useMemo(
+    () => workflowStateFingerprint({ nodes, edges, groups, viewport, projectName, projectPackagePath }),
+    [nodes, edges, groups, viewport, projectName, projectPackagePath]
+  );
+  const hasUnsavedChanges = currentWorkflowFingerprint !== cleanWorkflowFingerprint;
 
   function workflowRequestContext(overrides = {}) {
     const workflowName = savedProjectName || selectedProjectName || projectName || "Untitled node project";
@@ -977,6 +988,9 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
   React.useEffect(() => {
     if (!active) return undefined;
     function handlePointerDown(event) {
+      if (!fileMenuRef.current?.contains(event.target)) {
+        setFileMenuOpen(false);
+      }
       if (!projectMenuRef.current?.contains(event.target)) {
         setProjectMenuOpen(false);
       }
@@ -1177,6 +1191,175 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
     const clientX = clamp(event.clientX, rect.left + 16, rect.right - 16);
     const clientY = clamp(event.clientY, rect.top + 16, rect.bottom - 16);
     return screenToScene(clientX, clientY);
+  }
+
+  function createMediaNodeFromOutputItem(item, position) {
+    const type = nodeTypeForOutputItem(item);
+    if (!type) {
+      setSaveStatus("That output type cannot create a node yet");
+      return;
+    }
+
+    const count = nodesRef.current.filter((node) => node.type === type).length + 1;
+    const spec = nodeCatalog.find((catalogItem) => catalogItem.type === type);
+    const nodePosition = position || defaultNodePosition(count);
+    const nodeId = createNodeId(type);
+    const fileName = item.fileName || fileNameFromLocalUrl(item.url);
+    const mediaType = type === "model3d" ? "model3d" : item.type;
+    const resultItem = {
+      url: item.url,
+      type: mediaType,
+      label: item.label || fileName || `${capitalizeMediaType(mediaType)} output`,
+      fileName,
+      mimeType: item.mimeType || mimeForOutputItem(item),
+      createdAt: item.createdAt || ""
+    };
+    const nextNode = {
+      id: nodeId,
+      type,
+      x: nodePosition.x,
+      y: nodePosition.y,
+      data: {
+        ...createDefaultNodeData(type, spec?.label || "Node", count),
+        fileName,
+        storedFileName: "",
+        mimeType: resultItem.mimeType,
+        mediaType,
+        resultType: mediaType,
+        resultUrl: item.url,
+        resultItems: [resultItem],
+        selectedResultIndex: 0,
+        status: "ready",
+        error: ""
+      }
+    };
+
+    pushUndoSnapshot();
+    setSelectedEdgeId(null);
+    setNodes((current) => [...current, nextNode]);
+    setSelectedNodeIds([nodeId]);
+    setSaveStatus(`Created ${spec?.label || "node"} from ${fileName || "output"}`);
+  }
+
+  async function createMediaNodesFromFiles(fileList, position) {
+    const files = Array.from(fileList || [])
+      .map((file) => ({ file, type: nodeTypeForDroppedFile(file) }))
+      .filter((item) => item.type);
+
+    if (!files.length) {
+      setSaveStatus("Drop an image, video, audio, 3D model, or text file");
+      return;
+    }
+
+    const stamp = Date.now();
+    const typeCounts = new Map();
+    nodeCatalog.forEach((item) => {
+      typeCounts.set(item.type, nodesRef.current.filter((node) => node.type === item.type).length);
+    });
+
+    const droppedNodes = files.map(({ file, type }, index) => {
+      const nextCount = (typeCounts.get(type) || 0) + 1;
+      typeCounts.set(type, nextCount);
+      const spec = nodeCatalog.find((item) => item.type === type);
+      const nodeId = createNodeId(type, `drop-${stamp}-${index}`);
+      const nodePosition = {
+        x: Math.round((position?.x ?? defaultNodePosition(nextCount).x) + index * 38),
+        y: Math.round((position?.y ?? defaultNodePosition(nextCount).y) + index * 38)
+      };
+      const defaultData = createDefaultNodeData(type, spec?.label || "Node", nextCount);
+      return {
+        id: nodeId,
+        type,
+        x: nodePosition.x,
+        y: nodePosition.y,
+        file,
+        data: {
+          ...defaultData,
+          title: fileBaseName(file.name) || defaultData.title,
+          fileName: file.name,
+          ...(type === "plainText" ? { text: "" } : { status: "uploading", error: "", resultUrl: "" })
+        }
+      };
+    });
+
+    pushUndoSnapshot();
+    setSelectedEdgeId(null);
+    setNodes((current) => [
+      ...current,
+      ...droppedNodes.map(({ file: _file, ...node }) => node)
+    ]);
+    setSelectedNodeIds(droppedNodes.map((node) => node.id));
+    setSaveStatus(`Importing ${droppedNodes.length} file${droppedNodes.length === 1 ? "" : "s"}...`);
+
+    await Promise.all(
+      droppedNodes.map(async (node) => {
+        if (node.type === "plainText") {
+          try {
+            const text = await node.file.text();
+            updateNode(node.id, { text, status: "ready", error: "" });
+          } catch (error) {
+            updateNode(node.id, { text: error.message || "Could not read text file.", status: "error", error: error.message || "Could not read text file." });
+          }
+          return;
+        }
+
+        await uploadDroppedFileToNode(node.id, node.type, node.file);
+      })
+    );
+  }
+
+  async function uploadDroppedFileToNode(nodeId, type, file) {
+    try {
+      const asset = await uploadNodeAsset(file, type);
+      const mediaType = type === "model3d" ? "model3d" : asset.mediaType;
+      const resultItem = {
+        url: asset.localUrl,
+        type: mediaType,
+        label: asset.fileName || file.name || `${capitalizeMediaType(mediaType)} upload`,
+        fileName: asset.fileName || file.name,
+        mimeType: asset.mimeType
+      };
+
+      updateNode(nodeId, {
+        fileName: asset.fileName,
+        storedFileName: asset.storedFileName,
+        mimeType: asset.mimeType,
+        mediaType,
+        resultType: mediaType,
+        resultUrl: asset.localUrl,
+        resultItems: [resultItem],
+        selectedResultIndex: 0,
+        status: "ready",
+        error: ""
+      });
+    } catch (error) {
+      updateNode(nodeId, {
+        status: "error",
+        error: error.message || "Upload failed."
+      });
+    }
+  }
+
+  function handleCanvasDragOver(event) {
+    if (outputItemFromDataTransfer(event.dataTransfer) || hasSupportedDroppedFile(event.dataTransfer?.items || event.dataTransfer?.files)) {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "copy";
+    }
+  }
+
+  function handleCanvasDrop(event) {
+    const outputItem = outputItemFromDataTransfer(event.dataTransfer);
+    const files = event.dataTransfer?.files;
+    if (!outputItem && !hasSupportedDroppedFile(files)) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    const position = pointerNodePosition(event);
+    if (outputItem) {
+      createMediaNodeFromOutputItem(outputItem, position);
+      return;
+    }
+    createMediaNodesFromFiles(files, position);
   }
 
   function removeNode(nodeId) {
@@ -2861,6 +3044,43 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
     };
   }
 
+  function markWorkflowClean(overrides = {}) {
+    setCleanWorkflowFingerprint(
+      workflowStateFingerprint({
+        nodes,
+        edges,
+        groups,
+        viewport,
+        projectName,
+        projectPackagePath,
+        ...overrides
+      })
+    );
+  }
+
+  function requestUnsavedWorkflowDecision(actionLabel) {
+    if (!hasUnsavedChanges) return Promise.resolve("discard");
+    return new Promise((resolve) => {
+      unsavedPromptResolverRef.current = resolve;
+      setUnsavedPrompt({ actionLabel });
+    });
+  }
+
+  function resolveUnsavedWorkflowPrompt(decision) {
+    const resolver = unsavedPromptResolverRef.current;
+    unsavedPromptResolverRef.current = null;
+    setUnsavedPrompt(null);
+    resolver?.(decision);
+  }
+
+  async function guardUnsavedWorkflowChange(actionLabel) {
+    if (!hasUnsavedChanges) return true;
+    const decision = await requestUnsavedWorkflowDecision(actionLabel);
+    if (decision === "cancel") return false;
+    if (decision === "save") return saveProject();
+    return true;
+  }
+
   async function saveProjectToLocalHandle(handle) {
     const cleanProjectName = String(projectName || "").trim() || "Untitled node project";
     const id = projectId || createNodeId("workflow");
@@ -2879,7 +3099,9 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
     setProjectName(workflow.name);
     setSavedProjectName(workflow.name);
     setLocalWorkflowFileName(handle.name || workflow.fileName);
+    markWorkflowClean({ projectName: workflow.name });
     setSaveStatus(`Saved ${workflowDisplayPath(workflow, handle.name || workflow.fileName)}`);
+    return true;
   }
 
   async function saveProjectAsLocalFile() {
@@ -2899,7 +3121,7 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
       if (!response.ok) {
         if (data.canceled) {
           setSaveStatus("Save As canceled");
-          return;
+          return false;
         }
         throw new Error(data.error || "Could not choose a package folder.");
       }
@@ -2907,13 +3129,14 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
       const packageParentPath = data.path || "";
       if (!packageParentPath) {
         setSaveStatus("Save As canceled");
-        return;
+        return false;
       }
 
       window.localStorage.setItem("newtnode-last-package-parent", packageParentPath);
-      await saveProjectToSavedWorkflows({ packageParentPath, saveAsPackage: true, name: cleanProjectName });
+      return saveProjectToSavedWorkflows({ packageParentPath, saveAsPackage: true, name: cleanProjectName });
     } catch (error) {
       setSaveStatus(error.message || "Could not save workflow package.");
+      return false;
     }
   }
 
@@ -2943,19 +3166,38 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
       setProjectId(project.id);
       setProjectName(project.name);
       setSavedProjectName(project.name);
-      setProjectPackagePath(project.packagePath || project.package?.rootPath || "");
+      const nextPackagePath = project.packagePath || project.package?.rootPath || "";
+      setProjectPackagePath(nextPackagePath);
       const savedPath = workflowDisplayPath(project);
       setSaveStatus(savedPath ? `Saved ${savedPath}` : shouldCreateNewProject ? "Saved as new workflow" : "Saved");
       await loadProjects();
+      let cleanNodes = nodes;
+      let cleanEdges = edges;
+      let cleanGroups = groups;
+      let cleanViewport = viewport;
       if (project.graph) {
         const graph = normalizeEditorGraph(project.graph.nodes || [], project.graph.edges || [], project.graph.groups || []);
+        cleanNodes = graph.nodes;
+        cleanEdges = graph.edges;
+        cleanGroups = graph.groups;
+        cleanViewport = project.graph.viewport || viewport;
         setNodes(graph.nodes);
         setEdges(graph.edges);
         setGroups(graph.groups);
-        setViewport(project.graph.viewport || viewport);
+        setViewport(cleanViewport);
       }
+      markWorkflowClean({
+        nodes: cleanNodes,
+        edges: cleanEdges,
+        groups: cleanGroups,
+        viewport: cleanViewport,
+        projectName: project.name,
+        projectPackagePath: nextPackagePath
+      });
+      return true;
     } catch (error) {
       setSaveStatus(error.message);
+      return false;
     }
   }
 
@@ -2966,28 +3208,40 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
         await saveProjectToLocalHandle(localWorkflowHandleRef.current);
       } catch (error) {
         setSaveStatus(error.message || "Could not save workflow JSON.");
+        return false;
       }
-      return;
+      return true;
     }
 
-    await saveProjectToSavedWorkflows();
+    return saveProjectToSavedWorkflows();
   }
 
   function applyWorkflow(project, sourceLabel = "Loaded") {
     const graph = normalizeEditorGraph(project.graph?.nodes || [], project.graph?.edges || [], project.graph?.groups || []);
+    const nextProjectName = project.name || "Untitled node project";
+    const nextPackagePath = project.packagePath || project.package?.rootPath || "";
+    const nextViewport = project.graph?.viewport || { x: 0, y: 0, scale: 1 };
     localWorkflowHandleRef.current = null;
     setLocalWorkflowFileName("");
     setProjectId(project.id || null);
-    setProjectName(project.name || "Untitled node project");
+    setProjectName(nextProjectName);
     setSavedProjectName(project.name || null);
-    setProjectPackagePath(project.packagePath || project.package?.rootPath || "");
+    setProjectPackagePath(nextPackagePath);
     setNodes(graph.nodes);
     setEdges(graph.edges);
     setGroups(graph.groups);
-    setViewport(project.graph?.viewport || { x: 0, y: 0, scale: 1 });
+    setViewport(nextViewport);
     setSelectedNodeIds([]);
     setSelectedEdgeId(null);
     setProjectMenuOpen(false);
+    markWorkflowClean({
+      nodes: graph.nodes,
+      edges: graph.edges,
+      groups: graph.groups,
+      viewport: nextViewport,
+      projectName: nextProjectName,
+      projectPackagePath: nextPackagePath
+    });
     const displayPath = workflowDisplayPath(project);
     setSaveStatus(displayPath ? `${sourceLabel} ${displayPath}` : sourceLabel);
   }
@@ -2996,6 +3250,7 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
     if (!file) return;
 
     try {
+      if (!(await guardUnsavedWorkflowChange("open another workflow"))) return;
       const project = JSON.parse(await file.text());
       if (!project?.graph || !Array.isArray(project.graph.nodes) || !Array.isArray(project.graph.edges)) {
         throw new Error("That JSON file is not a NewtNode workflow.");
@@ -3032,6 +3287,7 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
 
   async function openWorkflowFromSystemPicker() {
     try {
+      if (!(await guardUnsavedWorkflowChange("open another workflow"))) return;
       const defaultPath =
         projectPackagePath ||
         window.localStorage.getItem("newtnode-last-open-workflow") ||
@@ -3064,10 +3320,138 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
     }
   }
 
+  async function importWorkflowFromSystemPicker() {
+    try {
+      const defaultPath =
+        projectPackagePath ||
+        window.localStorage.getItem("newtnode-last-open-workflow") ||
+        window.localStorage.getItem("newtnode-last-package-parent") ||
+        "";
+      setSaveStatus("Importing workflow...");
+      const { response, data } = await fetchJsonApi("/api/system/open-workflow-file", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: "Import NewtNode workflow",
+          defaultPath
+        })
+      }, "Import workflow");
+
+      if (!response.ok) {
+        if (data.canceled) {
+          setSaveStatus("Import canceled");
+          return;
+        }
+        throw new Error(data.error || "Could not import workflow.");
+      }
+
+      importWorkflow(data);
+      const openedPackagePath = data.packagePath || data.package?.rootPath || "";
+      window.localStorage.setItem("newtnode-last-open-workflow", openedPackagePath || data.filePath || data.fileName || "");
+      await loadProjects();
+    } catch (error) {
+      setSaveStatus(error.message || "Could not import workflow.");
+    }
+  }
+
+  function importWorkflow(project) {
+    const graph = normalizeEditorGraph(project.graph?.nodes || [], project.graph?.edges || [], project.graph?.groups || []);
+    if (!graph.nodes.length) {
+      setSaveStatus("That workflow has no nodes to import");
+      return;
+    }
+
+    const stamp = Date.now();
+    const idMap = new Map();
+    const offset = clearImportOffset(graph.nodes);
+    const importedNodes = graph.nodes.map((node, index) => {
+      const nextId = createNodeId(node.type, `import-${stamp}-${index}`);
+      idMap.set(node.id, nextId);
+      return {
+        ...cloneNode(node),
+        id: nextId,
+        x: Math.round(node.x + offset.x),
+        y: Math.round(node.y + offset.y)
+      };
+    });
+    const importedEdges = graph.edges
+      .filter((edge) => idMap.has(edge.from.nodeId) && idMap.has(edge.to.nodeId))
+      .map((edge, index) => ({
+        ...cloneEdge(edge),
+        id: `edge-import-${stamp}-${index}`,
+        from: {
+          ...edge.from,
+          nodeId: idMap.get(edge.from.nodeId)
+        },
+        to: {
+          ...edge.to,
+          nodeId: idMap.get(edge.to.nodeId)
+        }
+      }));
+    const importedGroups = graph.groups.map((group, index) => ({
+      ...group,
+      id: `group-import-${stamp}-${index}`,
+      x: Math.round(group.x + offset.x),
+      y: Math.round(group.y + offset.y),
+      nodeIds: (group.nodeIds || []).map((nodeId) => idMap.get(nodeId)).filter(Boolean)
+    }));
+
+    pushUndoSnapshot();
+    setNodes((current) => [...current, ...importedNodes]);
+    setEdges((current) => dedupeEdges([...current, ...importedEdges]));
+    setGroups((current) => [...current, ...importedGroups]);
+    setSelectedNodeIds(importedNodes.map((node) => node.id));
+    setSelectedEdgeId(null);
+    setProjectMenuOpen(false);
+    setFileMenuOpen(false);
+    setSaveStatus(`Imported ${project.name || "workflow"} into a clear canvas area`);
+  }
+
+  function clearImportOffset(importedNodes) {
+    const importBounds = graphBoundsForNodes(importedNodes);
+    const importWidth = Math.max(estimatedNodeWidth("image"), importBounds.right - importBounds.left);
+    const importHeight = Math.max(estimatedNodeHeight("image"), importBounds.bottom - importBounds.top);
+    const canvas = canvasRef.current;
+    const canvasRect = canvas?.getBoundingClientRect();
+    const sceneCenter = canvasRect
+      ? screenToScene(canvasRect.left + canvasRect.width / 2, canvasRect.top + canvasRect.height / 2)
+      : defaultNodePosition(nodesRef.current.length + 1);
+    const currentRects = nodesRef.current.map((node) => estimatedNodeRect(node, 72));
+    const targetPositions = [
+      { x: sceneCenter.x - importWidth / 2, y: sceneCenter.y - importHeight / 2 },
+      { x: sceneCenter.x + 420, y: sceneCenter.y - importHeight / 2 },
+      { x: sceneCenter.x - importWidth / 2, y: sceneCenter.y + 360 },
+      { x: sceneCenter.x - importWidth - 420, y: sceneCenter.y - importHeight / 2 },
+      { x: sceneCenter.x - importWidth / 2, y: sceneCenter.y - importHeight - 360 }
+    ];
+
+    for (const target of targetPositions) {
+      const candidate = {
+        left: target.x,
+        top: target.y,
+        right: target.x + importWidth,
+        bottom: target.y + importHeight
+      };
+      if (!currentRects.some((rect) => rectsOverlap(rect, candidate))) {
+        return {
+          x: target.x - importBounds.left,
+          y: target.y - importBounds.top
+        };
+      }
+    }
+
+    const currentBounds = graphBoundsForNodes(nodesRef.current);
+    return {
+      x: currentBounds.right + 160 - importBounds.left,
+      y: Math.max(currentBounds.top, sceneCenter.y - importHeight / 2) - importBounds.top
+    };
+  }
+
   async function loadProject(id) {
     if (!id) return;
 
     try {
+      if (!(await guardUnsavedWorkflowChange("load another workflow"))) return;
       const selectedProject = projects.find((project) => project.id === id || project.fileName === id);
       const fileName = selectedProject?.fileName || id;
       const response = await fetch(`/api/saved-workflows/${encodeURIComponent(fileName)}`);
@@ -3436,6 +3820,18 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
           onCapture={(imageDataUrl) => captureComposerFrame(composerEditorNode, imageDataUrl)}
         />
       )}
+      {unsavedPrompt && (
+        <UnsavedWorkflowPrompt
+          actionLabel={unsavedPrompt.actionLabel}
+          onDecision={resolveUnsavedWorkflowPrompt}
+        />
+      )}
+      {previewLightboxItem && (
+        <OutputPreviewLightbox
+          item={previewLightboxItem}
+          onClose={() => setPreviewLightboxItem(null)}
+        />
+      )}
       {toolbarCollapsed && (
         <button className="sidebar-restore" onClick={() => setToolbarCollapsed(false)} title="Show node palette">
           <PanelLeftOpen size={17} />
@@ -3456,18 +3852,33 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
         </div>
         <div className="project-tools">
           <input value={projectName} onChange={(event) => setProjectName(event.target.value)} placeholder="Project name" />
-          <button onClick={saveProject} title="Save project">
-            <Save size={16} />
-            <span>Save</span>
-          </button>
-          <button onClick={saveProjectAsLocalFile} title={projectPackagePath ? `Save As portable package. Current package: ${projectPackagePath}` : "Save as portable workflow package"}>
-            <Save size={16} />
-            <span>Save As</span>
-          </button>
-          <button onClick={openWorkflowFromSystemPicker} title="Open workflow package JSON">
-            <FolderOpen size={16} />
-            <span>Open</span>
-          </button>
+          <div className="file-menu" ref={fileMenuRef}>
+            <button className="file-menu-trigger" onClick={() => setFileMenuOpen((open) => !open)} title="File">
+              <FolderOpen size={16} />
+              <span>File</span>
+              <ChevronDown size={13} />
+            </button>
+            {fileMenuOpen && (
+              <div className="file-menu-list">
+                <button onClick={() => { setFileMenuOpen(false); saveProject(); }} title="Save project">
+                  <Save size={15} />
+                  <span>Save</span>
+                </button>
+                <button onClick={() => { setFileMenuOpen(false); saveProjectAsLocalFile(); }} title={projectPackagePath ? `Save As portable package. Current package: ${projectPackagePath}` : "Save as portable workflow package"}>
+                  <Save size={15} />
+                  <span>Save As</span>
+                </button>
+                <button onClick={() => { setFileMenuOpen(false); openWorkflowFromSystemPicker(); }} title="Open workflow package JSON">
+                  <FolderOpen size={15} />
+                  <span>Open</span>
+                </button>
+                <button onClick={() => { setFileMenuOpen(false); importWorkflowFromSystemPicker(); }} title="Import workflow into this canvas">
+                  <Download size={15} />
+                  <span>Import</span>
+                </button>
+              </div>
+            )}
+          </div>
           <input
             ref={workflowFileInputRef}
             className="workflow-file-input"
@@ -3525,6 +3936,8 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
         onPointerUp={finishConnection}
         onPointerCancel={stopNodeDrag}
         onContextMenu={openCanvasContextMenu}
+        onDragOver={handleCanvasDragOver}
+        onDrop={handleCanvasDrop}
       >
         <div
           className="node-scene"
@@ -3643,6 +4056,7 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
           items={projectOutputs}
           onClose={() => setOutputsCollapsed(true)}
           onRefresh={loadOutputHistory}
+          onPreviewOpen={setPreviewLightboxItem}
         />
       )}
     </section>
@@ -3704,7 +4118,7 @@ function SelectionActionBar({ bounds, viewport, selectedCount, runnableCount, on
   );
 }
 
-function ProjectOutputDrawer({ items, onClose, onRefresh }) {
+function ProjectOutputDrawer({ items, onClose, onRefresh, onPreviewOpen }) {
   function startDrag(event, item) {
     event.dataTransfer.effectAllowed = "copy";
     event.dataTransfer.setData(outputDragMime, JSON.stringify(item));
@@ -3734,7 +4148,8 @@ function ProjectOutputDrawer({ items, onClose, onRefresh }) {
                 className={`project-output-thumb ${item.type}`}
                 draggable
                 onDragStart={(event) => startDrag(event, item)}
-                title={`${item.label || item.fileName || "Output"}\nDrag to a compatible node`}
+                onDoubleClick={() => onPreviewOpen?.(item)}
+                title={`${item.label || item.fileName || "Output"}\nDrag to canvas or double-click to preview`}
               >
                 {item.type === "image" && <img src={item.url} alt={item.label || item.fileName || "Generated output"} onError={useNewtNodeImageFallback} />}
                 {item.type === "video" && <video src={item.url} muted playsInline preload="metadata" onError={useNewtNodeVideoFallback} />}
@@ -3756,6 +4171,76 @@ function ProjectOutputDrawer({ items, onClose, onRefresh }) {
         )}
       </div>
     </aside>
+  );
+}
+
+function UnsavedWorkflowPrompt({ actionLabel, onDecision }) {
+  React.useEffect(() => {
+    function handleKeyDown(event) {
+      if (event.key === "Escape") onDecision("cancel");
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onDecision]);
+
+  return (
+    <div className="workflow-prompt-backdrop" role="presentation" onPointerDown={(event) => {
+      if (event.target === event.currentTarget) onDecision("cancel");
+    }}>
+      <section className="workflow-prompt" role="dialog" aria-modal="true" aria-labelledby="workflow-prompt-title" onPointerDown={(event) => event.stopPropagation()}>
+        <h2 id="workflow-prompt-title">Unsaved workflow</h2>
+        <p>Save changes before you {actionLabel || "change workflows"}?</p>
+        <div className="workflow-prompt-actions">
+          <button type="button" className="primary" onClick={() => onDecision("save")}>Save</button>
+          <button type="button" onClick={() => onDecision("discard")}>Don't Save</button>
+          <button type="button" onClick={() => onDecision("cancel")}>Cancel</button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function OutputPreviewLightbox({ item, onClose }) {
+  React.useEffect(() => {
+    function handleKeyDown(event) {
+      if (event.key === "Escape") onClose();
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  const KindIcon = item.type === "video" ? Film : item.type === "audio" ? FileAudio : item.type === "model3d" ? Box : FileImage;
+  const label = item.label || item.fileName || `${capitalizeMediaType(item.type)} preview`;
+
+  return (
+    <div className="output-lightbox-backdrop" role="presentation" onPointerDown={(event) => {
+      if (event.target === event.currentTarget) onClose();
+    }}>
+      <section className={`output-lightbox ${item.type}`} role="dialog" aria-modal="true" aria-label={label} onPointerDown={(event) => event.stopPropagation()}>
+        <header>
+          <span>
+            <KindIcon size={15} />
+            {label}
+          </span>
+          <button type="button" onClick={onClose} title="Close preview" aria-label="Close preview">
+            <X size={15} />
+          </button>
+        </header>
+        <div className="output-lightbox-stage">
+          {item.type === "image" && <img src={item.url} alt={label} onError={useNewtNodeImageFallback} />}
+          {item.type === "video" && <video src={item.url} controls loop playsInline onError={useNewtNodeVideoFallback} />}
+          {item.type === "model3d" && <Model3DViewer url={item.url} label={label} />}
+          {item.type === "audio" && (
+            <div className="output-lightbox-audio">
+              <FileAudio size={34} />
+              <audio src={item.url} controls />
+            </div>
+          )}
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -9009,6 +9494,39 @@ function estimatedNodeWidth(type) {
   return 310;
 }
 
+function estimatedNodeHeight(type) {
+  if (type === "character") return 520;
+  if (type === "composer") return 410;
+  if (type === "imageModel" || type === "videoModel" || type === "utility" || type === "model3d") return 430;
+  if (type === "transfer" || type === "preview") return 360;
+  if (type === "camera") return 380;
+  return 270;
+}
+
+function estimatedNodeRect(node, padding = 0) {
+  return {
+    left: Number(node?.x || 0) - padding,
+    top: Number(node?.y || 0) - padding,
+    right: Number(node?.x || 0) + estimatedNodeWidth(node?.type) + padding,
+    bottom: Number(node?.y || 0) + estimatedNodeHeight(node?.type) + padding
+  };
+}
+
+function graphBoundsForNodes(nodes = []) {
+  const rects = nodes.map((node) => estimatedNodeRect(node));
+  if (!rects.length) return { left: 0, top: 0, right: 0, bottom: 0 };
+  return {
+    left: Math.min(...rects.map((rect) => rect.left)),
+    top: Math.min(...rects.map((rect) => rect.top)),
+    right: Math.max(...rects.map((rect) => rect.right)),
+    bottom: Math.max(...rects.map((rect) => rect.bottom))
+  };
+}
+
+function rectsOverlap(first, second) {
+  return first.left < second.right && first.right > second.left && first.top < second.bottom && first.bottom > second.top;
+}
+
 function configTitleFallback(type) {
   return nodeCatalog.find((item) => item.type === type)?.label || "Node";
 }
@@ -9140,6 +9658,14 @@ function isOutputItemCompatibleWithNode(item, nodeType) {
   return item.type === nodeType;
 }
 
+function nodeTypeForOutputItem(item) {
+  if (item?.type === "image") return "image";
+  if (item?.type === "video") return "video";
+  if (item?.type === "audio") return "audio";
+  if (item?.type === "model3d") return "model3d";
+  return "";
+}
+
 function assetFromOutputItem(item) {
   return {
     fileName: item.fileName || fileNameFromLocalUrl(item.url),
@@ -9204,7 +9730,48 @@ function firstAcceptedFile(fileList, type) {
   if (type === "image") return files.find((file) => file.type.startsWith("image/"));
   if (type === "video") return files.find((file) => file.type.startsWith("video/"));
   if (type === "audio") return files.find((file) => file.type.startsWith("audio/"));
+  if (type === "model3d") return files.find(isModel3DFile);
   return files[0];
+}
+
+function hasSupportedDroppedFile(value) {
+  return Array.from(value || []).some((item) => {
+    if (item.kind && item.kind !== "file") return false;
+    if (item.kind === "file") return true;
+    if (item.getAsFile) return Boolean(nodeTypeForDroppedFile(item.getAsFile()) || nodeTypeForDroppedFile({ type: item.type || "", name: "" }));
+    return Boolean(nodeTypeForDroppedFile(item));
+  });
+}
+
+function nodeTypeForDroppedFile(file) {
+  if (!file) return "";
+  const mimeType = String(file.type || "").toLowerCase();
+  if (mimeType.startsWith("image/")) return "image";
+  if (mimeType.startsWith("video/")) return "video";
+  if (mimeType.startsWith("audio/")) return "audio";
+  if (isModel3DFile(file)) return "model3d";
+  if (isTextFile(file)) return "plainText";
+  return "";
+}
+
+function isModel3DFile(file) {
+  const name = String(file?.name || "").toLowerCase();
+  const mimeType = String(file?.type || "").toLowerCase();
+  return mimeType.startsWith("model/") || /\.(glb|gltf)$/i.test(name);
+}
+
+function isTextFile(file) {
+  const name = String(file?.name || "").toLowerCase();
+  const mimeType = String(file?.type || "").toLowerCase();
+  if (mimeType.startsWith("text/")) return true;
+  if (["application/json", "application/xml", "application/yaml", "application/x-yaml"].includes(mimeType)) return true;
+  return /\.(txt|md|markdown|json|csv|tsv|xml|yaml|yml|srt|vtt|html|css|js|jsx|ts|tsx|py|sh|bat|ps1|log)$/i.test(name);
+}
+
+function fileBaseName(fileName) {
+  return String(fileName || "")
+    .replace(/\.[^.]+$/, "")
+    .trim();
 }
 
 function buildIncomingByNode(nodes, edges) {
@@ -11989,6 +12556,17 @@ function cloneGraphState(state) {
     selectedNodeIds: [...state.selectedNodeIds],
     selectedEdgeId: state.selectedEdgeId || null
   };
+}
+
+function workflowStateFingerprint(state = {}) {
+  return JSON.stringify({
+    nodes: (state.nodes || []).map(cloneNode),
+    edges: (state.edges || []).map(cloneEdge),
+    groups: (state.groups || []).map(cloneGroup),
+    viewport: state.viewport || { x: 0, y: 0, scale: 1 },
+    projectName: String(state.projectName || "Untitled node project").trim() || "Untitled node project",
+    projectPackagePath: state.projectPackagePath || ""
+  });
 }
 
 function cloneNode(node) {

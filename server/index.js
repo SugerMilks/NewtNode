@@ -52,6 +52,7 @@ const hunyuan3DProBaseCost = Number(process.env.HUNYUAN_3D_PRO_BASE_COST || 0.37
 const hunyuan3DProAddOnCost = Number(process.env.HUNYUAN_3D_PRO_ADD_ON_COST || 0.15);
 const nanoImageAspectRatios = ["21:9", "16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3", "4:5", "5:4"];
 const openAiImageAspectRatios = nanoImageAspectRatios;
+const falNanoBananaProEndpoint = process.env.FAL_NANO_BANANA_PRO_ENDPOINT || "fal-ai/nano-banana-pro";
 const falTextRequestCost = Number(process.env.FAL_TEXT_REQUEST_COST || 0.001);
 const falVisionTextUnitCost = Number(process.env.FAL_VISION_TEXT_UNIT_COST || 0.01);
 const falVideoTextUnitCost = Number(process.env.FAL_VIDEO_TEXT_UNIT_COST || 0.01);
@@ -276,6 +277,9 @@ app.get("/api/health", (_req, res) => {
       ffprobeBundled: Boolean(ffprobeStatic?.path)
     },
     falKeyConfigured: Boolean(process.env.FAL_KEY),
+    googleApiKeyConfigured: Boolean(process.env.GOOGLE_API_KEY),
+    googleImageModelsUseGoogleDirect: Boolean(process.env.GOOGLE_API_KEY),
+    falNanoBananaProEndpoint,
     openAiKeyConfigured: Boolean(process.env.OPENAI_API_KEY || openAiTextApiKey),
     openAiTextKeyConfigured: Boolean(openAiTextApiKey),
     openAiImage2ViaFalConfigured: Boolean(process.env.FAL_KEY),
@@ -936,6 +940,61 @@ app.post("/api/node/generate-image", async (req, res) => {
         cost,
         image: {
           ...openAiImage.remoteImage,
+          localUrl: output.publicPath,
+          fileName: output.fileName,
+          mimeType: output.mimeType
+        }
+      });
+    }
+
+    if (selectedModel.provider === "fal-nano-banana-pro") {
+      if (!process.env.FAL_KEY) {
+        return res.status(400).json({ error: "Missing FAL_KEY in .env." });
+      }
+
+      const falImage = await generateFalNanoBananaPro({
+        prompt,
+        imagePromptUrls,
+        imagePromptLabels,
+        aspectRatio,
+        resolution: req.body.resolution
+      });
+      const output = await downloadImage(req, falImage.remoteImage.url, "nano-banana-pro", falImage.remoteImage.content_type || falImage.remoteImage.mimeType);
+      const cost = estimateImageCost({ resolution: req.body.resolution });
+
+      await appendHistory({
+        id: randomUUID(),
+        createdAt: new Date().toISOString(),
+        mediaType: "image",
+        provider: "fal.ai",
+        modelName: selectedModel.displayName,
+        endpoint: falImage.endpoint,
+        mode: imagePromptUrls.length ? "Image edit with references" : "Image generation",
+        prompt,
+        submittedPrompt: falImage.submittedPrompt,
+        project: projectFromBody(req.body),
+        node: nodeFromBody(req.body),
+        settings: {
+          model: req.body.model || selectedModel.displayName,
+          aspectRatio,
+          requestedAspectRatio: requestedAspectRatio || aspectRatio,
+          resolution: falImage.resolution,
+          imagePromptCount: imagePromptUrls.length,
+          imagePromptLabels: cleanReferenceLabels
+        },
+        cost,
+        remoteImage: falImage.remoteImage,
+        localImage: output.publicPath,
+        outputFileName: output.fileName,
+        outputBytes: output.bytes,
+        text: falImage.description || ""
+      });
+
+      return res.json({
+        text: falImage.description || "",
+        cost,
+        image: {
+          ...falImage.remoteImage,
           localUrl: output.publicPath,
           fileName: output.fileName,
           mimeType: output.mimeType
@@ -6588,10 +6647,11 @@ function resolveImageModel(model) {
     };
   }
 
+  const useGoogleDirect = Boolean(process.env.GOOGLE_API_KEY);
   return {
-    provider: "google",
+    provider: useGoogleDirect ? "google" : "fal-nano-banana-pro",
     displayName: "Nano Banana Pro",
-    id: "gemini-3-pro-image-preview"
+    id: useGoogleDirect ? "gemini-3-pro-image-preview" : falNanoBananaProEndpoint
   };
 }
 
@@ -7043,6 +7103,50 @@ function extractGeminiImageData(data) {
     inlineData,
     finishReason: candidate.finishReason || candidate.finish_reason || "",
     raw: data
+  };
+}
+
+async function generateFalNanoBananaPro({ prompt, imagePromptUrls, imagePromptLabels, aspectRatio, resolution }) {
+  const imageInputs = [];
+
+  for (const [index, imagePromptUrl] of imagePromptUrls.entries()) {
+    const asset = await readLocalAsset(imagePromptUrl);
+    if (!asset.mimeType.startsWith("image/")) continue;
+    imageInputs.push({
+      ...asset,
+      label: cleanImagePromptLabel(imagePromptLabels[index])
+    });
+  }
+
+  const baseEndpoint = falNanoBananaProEndpoint.replace(/\/edit$/i, "");
+  const endpoint = imageInputs.length ? `${baseEndpoint}/edit` : baseEndpoint;
+  const normalizedResolution = normalizeGeminiImageSize(resolution);
+  const input = {
+    prompt: promptWithReferenceLabels(prompt, imageInputs),
+    num_images: 1,
+    aspect_ratio: normalizeImageAspectRatioForProvider(aspectRatio, "fal-nano-banana-pro"),
+    output_format: "png",
+    resolution: normalizedResolution,
+    sync_mode: false
+  };
+
+  if (imageInputs.length) {
+    input.image_urls = await Promise.all(imageInputs.slice(0, 14).map(uploadImageInputToFal));
+  }
+
+  const result = await subscribeFal(endpoint, { input, logs: true });
+  const remoteImage = firstFalImageResult(result?.data);
+
+  if (!remoteImage?.url) {
+    throw new Error("Fal returned no Nano Banana Pro image URL.");
+  }
+
+  return {
+    endpoint,
+    remoteImage,
+    resolution: normalizedResolution,
+    submittedPrompt: input.prompt,
+    description: result?.data?.description || result?.data?.text || ""
   };
 }
 
