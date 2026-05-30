@@ -64,17 +64,19 @@ import {
 import { appendResultItems, existingResultItemsForNode, normalizedResultItems } from "./mediaResults.js";
 import { nodeTypeDefinitions, nodeTypeForOutputItem, nodeTypeLabel } from "./nodeRegistry.js";
 import {
+  appendedNodeResultState,
+  batchRunError,
   buildSelectedRunnableDependencies,
-  firstNewResultIndex,
   formatNodeBatchCount,
   fulfilledRunValues,
+  ensureRunSuccesses,
   isRunnableNode,
   nodeBatchCount,
-  nodeBatchStatusMessage,
   nodeRunIndexes,
   nodeRunPriority,
   nodeTitle,
   rejectedRunResults,
+  resultTextFromItems,
   runStageLabel,
   settleSequential,
   wait
@@ -3119,8 +3121,7 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
 
       if (currentNode.type === "camera") {
         const generated = await runCameraQwenEdit({ node: currentNode, incoming, workflowContext: requestContext });
-        const resultItems = appendResultItems(previousImageResults, [generated], "image");
-        const firstNewIndex = firstNewResultIndex(resultItems, [generated]);
+        const { resultItems, firstNewIndex } = appendedNodeResultState(previousImageResults, [generated], "image");
         updateNode(currentNode.id, {
           status: "complete",
           resultUrl: generated.url,
@@ -3155,14 +3156,13 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
           });
           if (!generatedItems.length) throw new Error("Utility image returned no image.");
           const generated = generatedItems[0];
-          const resultItems = appendResultItems(previousUtilityResults, generatedItems, "image");
-          const firstNewIndex = firstNewResultIndex(resultItems, generatedItems);
+          const { resultItems, firstNewIndex } = appendedNodeResultState(previousUtilityResults, generatedItems, "image");
           updateNode(currentNode.id, {
             status: "complete",
             resultUrl: generated.url,
             resultItems,
             selectedResultIndex: firstNewIndex,
-            resultText: generatedItems.map((item) => item.text).filter(Boolean).join("\n\n"),
+            resultText: resultTextFromItems(generatedItems),
             resultType: "image",
             error: ""
           });
@@ -3183,18 +3183,17 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
         const settled = await Promise.allSettled(runs);
         const successes = fulfilledRunValues(settled, { flatten: true });
         const failures = rejectedRunResults(settled);
-        if (!successes.length) throw new Error(failures[0]?.reason?.message || "Utility video failed.");
-        const resultItems = appendResultItems(previousUtilityResults, successes, utilityResultType);
-        const firstNewIndex = firstNewResultIndex(resultItems, successes);
+        ensureRunSuccesses(successes, failures, "Utility video failed.");
+        const { resultItems, firstNewIndex } = appendedNodeResultState(previousUtilityResults, successes, utilityResultType);
 
         updateNode(currentNode.id, {
           status: "complete",
           resultUrl: successes[0].url,
           resultItems,
           selectedResultIndex: firstNewIndex,
-          resultText: successes.map((item) => item.text).filter(Boolean).join("\n\n"),
+          resultText: resultTextFromItems(successes),
           resultType: utilityResultType,
-          error: failures.length ? nodeBatchStatusMessage(utilityResultType, batchCount, successes.length, failures) : ""
+          error: batchRunError(utilityResultType, batchCount, successes, failures)
         });
         loadOutputHistory();
         return { status: "complete" };
@@ -3221,17 +3220,16 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
         );
         const successes = fulfilledRunValues(settled);
         const failures = rejectedRunResults(settled);
-        if (!successes.length) throw new Error(failures[0]?.reason?.message || "Image generation failed.");
-        const resultItems = appendResultItems(previousImageResults, successes, "image");
-        const firstNewIndex = firstNewResultIndex(resultItems, successes);
+        ensureRunSuccesses(successes, failures, "Image generation failed.");
+        const { resultItems, firstNewIndex } = appendedNodeResultState(previousImageResults, successes, "image");
 
         updateNode(currentNode.id, {
           status: "complete",
           resultUrl: successes[0].url,
           resultItems,
           selectedResultIndex: firstNewIndex,
-          resultText: successes.map((item) => item.text).filter(Boolean).join("\n\n"),
-          error: failures.length ? nodeBatchStatusMessage("image", batchCount, successes.length, failures) : ""
+          resultText: resultTextFromItems(successes),
+          error: batchRunError("image", batchCount, successes, failures)
         });
         loadOutputHistory();
         return { status: "complete" };
@@ -3243,8 +3241,7 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
           incoming,
           workflowContext: requestContext
         });
-        const resultItems = appendResultItems(previous3DResults, [generated], "model3d");
-        const firstNewIndex = firstNewResultIndex(resultItems, [generated]);
+        const { resultItems, firstNewIndex } = appendedNodeResultState(previous3DResults, [generated], "model3d");
         updateNode(currentNode.id, {
           status: "complete",
           resultUrl: generated.url,
@@ -3271,9 +3268,8 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
       const settled = await Promise.allSettled(runs);
       const successes = fulfilledRunValues(settled);
       const failures = rejectedRunResults(settled);
-      if (!successes.length) throw new Error(failures[0]?.reason?.message || "Video generation failed.");
-      const resultItems = appendResultItems(previousVideoResults, successes, "video");
-      const firstNewIndex = firstNewResultIndex(resultItems, successes);
+      ensureRunSuccesses(successes, failures, "Video generation failed.");
+      const { resultItems, firstNewIndex } = appendedNodeResultState(previousVideoResults, successes, "video");
 
       updateNode(currentNode.id, {
         status: "complete",
@@ -3281,7 +3277,7 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
         resultItems,
         selectedResultIndex: firstNewIndex,
         resultText: "",
-        error: failures.length ? nodeBatchStatusMessage("video", batchCount, successes.length, failures) : ""
+        error: batchRunError("video", batchCount, successes, failures)
       });
       loadOutputHistory();
       return { status: "complete" };

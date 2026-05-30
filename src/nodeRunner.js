@@ -1,3 +1,5 @@
+import { appendResultItems } from "./mediaResults.js";
+
 export function nodeBatchCount(node) {
   const count = Number(node.data.batchCount || 1);
   return Math.min(4, Math.max(1, Number.isFinite(count) ? count : 1));
@@ -29,6 +31,28 @@ export function rejectedRunResults(settledResults) {
 
 export function firstNewResultIndex(resultItems, newItems) {
   return Math.max(0, resultItems.length - newItems.length);
+}
+
+export function appendedNodeResultState(existingItems, newItems, mediaType) {
+  const normalizedNewItems = Array.isArray(newItems) ? newItems : [newItems];
+  const resultItems = appendResultItems(existingItems, normalizedNewItems, mediaType);
+  return {
+    resultItems,
+    firstNewIndex: firstNewResultIndex(resultItems, normalizedNewItems)
+  };
+}
+
+export function resultTextFromItems(items = []) {
+  return items.map((item) => item.text).filter(Boolean).join("\n\n");
+}
+
+export function batchRunError(mediaType, total, successes, failures) {
+  return failures.length ? nodeBatchStatusMessage(mediaType, total, successes.length, failures) : "";
+}
+
+export function ensureRunSuccesses(successes, failures, fallbackMessage) {
+  if (!successes.length) throw new Error(failures[0]?.reason?.message || fallbackMessage);
+  return successes;
 }
 
 export function isRunnableNode(node) {
