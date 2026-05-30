@@ -1,5 +1,5 @@
 import React from "react";
-import { ChevronLeft, ChevronRight, Download, FileAudio, FileImage, Plus, Video } from "lucide-react";
+import { Box, ChevronLeft, ChevronRight, Download, FileAudio, FileImage, Film, ImagePlus, PanelRightClose, Plus, RefreshCw, Video, X } from "lucide-react";
 import { normalizedResultItems, resultDownloadFileName } from "../mediaResults.js";
 import { GLTFLoader, THREE, useThreeRuntimeReady } from "../threeRuntime.js";
 
@@ -42,6 +42,105 @@ export function UploadIcon({ type }) {
   if (type === "video") return <Video size={22} />;
   if (type === "audio") return <FileAudio size={22} />;
   return <Plus size={22} />;
+}
+
+export function ProjectOutputDrawer({ items, onClose, onRefresh, onPreviewOpen, outputDragMime = "application/x-newtnode-output" }) {
+  function startDrag(event, item) {
+    event.dataTransfer.effectAllowed = "copy";
+    event.dataTransfer.setData(outputDragMime, JSON.stringify(item));
+    event.dataTransfer.setData("text/plain", item.url);
+    event.dataTransfer.setData("text/uri-list", item.url);
+  }
+
+  return (
+    <aside className="project-output-drawer">
+      <div className="output-drawer-header">
+        <div className="output-drawer-actions">
+          <button onClick={onRefresh} title="Refresh outputs" aria-label="Refresh outputs">
+            <RefreshCw size={14} />
+          </button>
+          <button onClick={onClose} title="Hide project outputs" aria-label="Hide project outputs">
+            <PanelRightClose size={16} />
+          </button>
+        </div>
+      </div>
+      <div className="project-output-list">
+        {items.length ? (
+          items.map((item) => {
+            const KindIcon = item.type === "video" ? Film : item.type === "audio" ? FileAudio : item.type === "model3d" ? Box : FileImage;
+            return (
+              <div
+                key={item.id}
+                className={`project-output-thumb ${item.type}`}
+                draggable
+                onDragStart={(event) => startDrag(event, item)}
+                onDoubleClick={() => onPreviewOpen?.(item)}
+                title={`${item.label || item.fileName || "Output"}\nDrag to canvas or double-click to preview`}
+              >
+                {item.type === "image" && <img src={item.url} alt={item.label || item.fileName || "Generated output"} draggable={false} onError={useNewtNodeImageFallback} />}
+                {item.type === "video" && <video src={item.url} muted playsInline preload="metadata" draggable={false} onError={useNewtNodeVideoFallback} />}
+                {(item.type === "model3d" || item.type === "audio") && (
+                  <div className="project-output-placeholder">
+                    <KindIcon size={22} />
+                  </div>
+                )}
+                <span className="project-output-kind">
+                  <KindIcon size={12} />
+                </span>
+              </div>
+            );
+          })
+        ) : (
+          <div className="project-output-empty">
+            <ImagePlus size={22} />
+          </div>
+        )}
+      </div>
+    </aside>
+  );
+}
+
+export function OutputPreviewLightbox({ item, onClose }) {
+  React.useEffect(() => {
+    function handleKeyDown(event) {
+      if (event.key === "Escape") onClose();
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  const KindIcon = item.type === "video" ? Film : item.type === "audio" ? FileAudio : item.type === "model3d" ? Box : FileImage;
+  const label = item.label || item.fileName || `${capitalizeMediaType(item.type)} preview`;
+
+  return (
+    <div className="output-lightbox-backdrop" role="presentation" onPointerDown={(event) => {
+      if (event.target === event.currentTarget) onClose();
+    }}>
+      <section className={`output-lightbox ${item.type}`} role="dialog" aria-modal="true" aria-label={label} onPointerDown={(event) => event.stopPropagation()}>
+        <header>
+          <span>
+            <KindIcon size={15} />
+            {label}
+          </span>
+          <button type="button" onClick={onClose} title="Close preview" aria-label="Close preview">
+            <X size={15} />
+          </button>
+        </header>
+        <div className="output-lightbox-stage">
+          {item.type === "image" && <img src={item.url} alt={label} onError={useNewtNodeImageFallback} />}
+          {item.type === "video" && <video src={item.url} controls loop playsInline onError={useNewtNodeVideoFallback} />}
+          {item.type === "model3d" && <Model3DViewer url={item.url} label={label} />}
+          {item.type === "audio" && (
+            <div className="output-lightbox-audio">
+              <FileAudio size={34} />
+              <audio src={item.url} controls />
+            </div>
+          )}
+        </div>
+      </section>
+    </div>
+  );
 }
 
 export function ResultPane({ label, resultUrl, resultItems = [], selectedIndex = 0, type, status, error, onSelectResult }) {
@@ -293,4 +392,10 @@ function disposeThreeObject(root) {
       material.dispose?.();
     });
   });
+}
+
+function capitalizeMediaType(type) {
+  if (type === "model3d") return "3D";
+  const value = String(type || "media");
+  return value.charAt(0).toUpperCase() + value.slice(1);
 }
