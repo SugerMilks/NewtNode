@@ -45,6 +45,57 @@ export function resetCopiedNodeRuntime(data = {}) {
   };
 }
 
+export function remapImportedGraph(graph = {}, offset = {}, stamp = Date.now()) {
+  const idMap = new Map();
+  const safeOffset = {
+    x: Number(offset.x) || 0,
+    y: Number(offset.y) || 0
+  };
+  const nodes = graph.nodes || [];
+  const edges = graph.edges || [];
+  const groups = graph.groups || [];
+
+  const remappedNodes = nodes.map((node, index) => {
+    const nextId = createNodeId(node.type, `import-${stamp}-${index}`);
+    idMap.set(node.id, nextId);
+    return {
+      ...cloneNode(node),
+      id: nextId,
+      x: Math.round(node.x + safeOffset.x),
+      y: Math.round(node.y + safeOffset.y)
+    };
+  });
+
+  const remappedEdges = edges
+    .filter((edge) => idMap.has(edge.from.nodeId) && idMap.has(edge.to.nodeId))
+    .map((edge, index) => ({
+      ...cloneEdge(edge),
+      id: `edge-import-${stamp}-${index}`,
+      from: {
+        ...edge.from,
+        nodeId: idMap.get(edge.from.nodeId)
+      },
+      to: {
+        ...edge.to,
+        nodeId: idMap.get(edge.to.nodeId)
+      }
+    }));
+
+  const remappedGroups = groups.map((group, index) => ({
+    ...cloneGroup(group),
+    id: `group-import-${stamp}-${index}`,
+    x: Math.round(group.x + safeOffset.x),
+    y: Math.round(group.y + safeOffset.y),
+    nodeIds: (group.nodeIds || []).map((nodeId) => idMap.get(nodeId)).filter(Boolean)
+  }));
+
+  return {
+    nodes: remappedNodes,
+    edges: remappedEdges,
+    groups: remappedGroups
+  };
+}
+
 export function cloneEdge(edge) {
   return {
     ...edge,

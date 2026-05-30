@@ -67,7 +67,7 @@ import { buildProjectOutputItems } from "./projectOutputs.js";
 import { GLTFLoader, THREE, cloneSkeleton, degreesToRadians, lerp, radiansToDegrees, useThreeRuntimeReady } from "./threeRuntime.js";
 import { appendWorkflowContextFormFields, workflowContextPayload } from "./workflowContext.js";
 import { buildWorkflowDocument, ensureWritableWorkflowHandle, workflowDisplayPath, workflowFileNameForProject, writeWorkflowFileHandle } from "./workflowFiles.js";
-import { cloneEdge, cloneGraphState, cloneNode, createNodeId, resetCopiedNodeRuntime, workflowStateFingerprint } from "./workflowState.js";
+import { cloneEdge, cloneGraphState, cloneNode, createNodeId, remapImportedGraph, resetCopiedNodeRuntime, workflowStateFingerprint } from "./workflowState.js";
 import "./nodeEditor.css";
 
 const nodeIcons = {
@@ -3404,40 +3404,8 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
       return;
     }
 
-    const stamp = Date.now();
-    const idMap = new Map();
     const offset = clearImportOffset(graph.nodes);
-    const importedNodes = graph.nodes.map((node, index) => {
-      const nextId = createNodeId(node.type, `import-${stamp}-${index}`);
-      idMap.set(node.id, nextId);
-      return {
-        ...cloneNode(node),
-        id: nextId,
-        x: Math.round(node.x + offset.x),
-        y: Math.round(node.y + offset.y)
-      };
-    });
-    const importedEdges = graph.edges
-      .filter((edge) => idMap.has(edge.from.nodeId) && idMap.has(edge.to.nodeId))
-      .map((edge, index) => ({
-        ...cloneEdge(edge),
-        id: `edge-import-${stamp}-${index}`,
-        from: {
-          ...edge.from,
-          nodeId: idMap.get(edge.from.nodeId)
-        },
-        to: {
-          ...edge.to,
-          nodeId: idMap.get(edge.to.nodeId)
-        }
-      }));
-    const importedGroups = graph.groups.map((group, index) => ({
-      ...group,
-      id: `group-import-${stamp}-${index}`,
-      x: Math.round(group.x + offset.x),
-      y: Math.round(group.y + offset.y),
-      nodeIds: (group.nodeIds || []).map((nodeId) => idMap.get(nodeId)).filter(Boolean)
-    }));
+    const { nodes: importedNodes, edges: importedEdges, groups: importedGroups } = remapImportedGraph(graph, offset);
 
     pushUndoSnapshot();
     setNodes((current) => [...current, ...importedNodes]);
