@@ -65,6 +65,7 @@ import { appendResultItems, existingResultItemsForNode, normalizedResultItems } 
 import { nodeTypeDefinitions, nodeTypeForOutputItem, nodeTypeLabel } from "./nodeRegistry.js";
 import { buildProjectOutputItems } from "./projectOutputs.js";
 import { GLTFLoader, THREE, cloneSkeleton, degreesToRadians, lerp, radiansToDegrees, useThreeRuntimeReady } from "./threeRuntime.js";
+import { loadNodeEditorDraft, useNodeEditorDraftPersistence } from "./useNodeEditorDraft.js";
 import { useWorkflowPersistence } from "./useWorkflowPersistence.js";
 import { appendWorkflowContextFormFields, workflowContextPayload } from "./workflowContext.js";
 import { cloneEdge, cloneGraphState, cloneNode, createNodeId, resetCopiedNodeRuntime } from "./workflowState.js";
@@ -645,7 +646,6 @@ const initialEdges = [
 const contextMenuSize = { width: 190, height: 420, inset: 8 };
 const viewportScaleFloor = 0.0001;
 const maxZoom = 1.9;
-const nodeDraftStorageKey = "seedance-node-editor-draft-v1";
 const previewBaseWidth = 330;
 const previewScaleFloor = 0.05;
 const namedColorPalette = [
@@ -796,9 +796,7 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
   const undoStackRef = React.useRef([]);
   const clipboardRef = React.useRef(null);
   const metadataLoadedRef = React.useRef(false);
-  const draftWriteTimerRef = React.useRef(null);
-  const pendingDraftSnapshotRef = React.useRef(null);
-  const savedDraft = React.useMemo(loadNodeEditorDraft, []);
+  const savedDraft = React.useMemo(() => loadNodeEditorDraft({ initialNodes, initialEdges, normalizeEditorGraph }), []);
   const nodesRef = React.useRef(savedDraft.nodes);
   const edgesRef = React.useRef(savedDraft.edges);
   const [nodes, setNodes] = React.useState(savedDraft.nodes);
@@ -890,27 +888,15 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
     importOffsetForNodes: clearImportOffset,
     onStatusChange
   });
+  const draftSnapshot = React.useMemo(
+    () => currentDraftSnapshot(),
+    [nodes, edges, groups, viewport, projectId, projectName, savedProjectName, projectPackagePath, workflowFilePath]
+  );
+  useNodeEditorDraftPersistence(draftSnapshot);
   const projectOutputs = React.useMemo(
     () => buildProjectOutputItems({ nodes, history: outputHistory, projectId, projectName, getNodeResultMediaType: nodeResultMediaType, titleFallback: configTitleFallback }),
     [nodes, outputHistory, projectId, projectName]
   );
-
-  function flushDraftSnapshot() {
-    if (draftWriteTimerRef.current) {
-      window.clearTimeout(draftWriteTimerRef.current);
-      draftWriteTimerRef.current = null;
-    }
-
-    const snapshot = pendingDraftSnapshotRef.current;
-    if (!snapshot) return;
-
-    try {
-      localStorage.setItem(nodeDraftStorageKey, JSON.stringify(snapshot));
-      pendingDraftSnapshotRef.current = null;
-    } catch {
-      // Local persistence should never interrupt the node editor.
-    }
-  }
 
   React.useEffect(() => {
     nodesRef.current = nodes;
@@ -950,22 +936,6 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
     loadProjects();
     loadOutputHistory();
   }, [active]);
-
-  React.useEffect(() => {
-    pendingDraftSnapshotRef.current = currentDraftSnapshot();
-    if (draftWriteTimerRef.current) {
-      window.clearTimeout(draftWriteTimerRef.current);
-    }
-    draftWriteTimerRef.current = window.setTimeout(flushDraftSnapshot, 300);
-  }, [nodes, edges, groups, viewport, projectId, projectName, savedProjectName, projectPackagePath, workflowFilePath]);
-
-  React.useEffect(() => {
-    window.addEventListener("pagehide", flushDraftSnapshot);
-    return () => {
-      window.removeEventListener("pagehide", flushDraftSnapshot);
-      flushDraftSnapshot();
-    };
-  }, []);
 
   React.useEffect(() => {
     if (!active) return undefined;
@@ -11344,40 +11314,6 @@ async function settleSequential(items, run, delayMs = 0) {
 
 function wait(ms) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
-}
-
-function loadNodeEditorDraft() {
-  const fallbackGraph = normalizeEditorGraph(initialNodes, initialEdges);
-  const fallback = {
-    nodes: fallbackGraph.nodes,
-    edges: fallbackGraph.edges,
-    groups: fallbackGraph.groups,
-    viewport: { x: 0, y: 0, scale: 1 },
-    projectId: null,
-    projectName: "Untitled node project",
-    savedProjectName: null,
-    projectPackagePath: "",
-    workflowFilePath: ""
-  };
-
-  try {
-    const parsed = JSON.parse(localStorage.getItem(nodeDraftStorageKey) || "null");
-    if (!parsed || !Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges)) return fallback;
-    const graph = normalizeEditorGraph(parsed.nodes, parsed.edges, parsed.groups);
-    return {
-      nodes: graph.nodes,
-      edges: graph.edges,
-      groups: graph.groups,
-      viewport: parsed.viewport || fallback.viewport,
-      projectId: parsed.projectId || null,
-      projectName: parsed.projectName || fallback.projectName,
-      savedProjectName: parsed.savedProjectName || null,
-      projectPackagePath: parsed.projectPackagePath || "",
-      workflowFilePath: parsed.workflowFilePath || ""
-    };
-  } catch {
-    return fallback;
-  }
 }
 
 function normalizeEditorGraph(nodes = [], edges = [], groups = []) {
