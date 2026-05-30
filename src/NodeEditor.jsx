@@ -65,7 +65,7 @@ import { appendResultItems, existingResultItemsForNode, normalizedResultItems } 
 import { nodeTypeDefinitions, nodeTypeForOutputItem, nodeTypeLabel } from "./nodeRegistry.js";
 import { buildProjectOutputItems } from "./projectOutputs.js";
 import { GLTFLoader, THREE, cloneSkeleton, degreesToRadians, lerp, radiansToDegrees, useThreeRuntimeReady } from "./threeRuntime.js";
-import { loadNodeEditorDraft, useNodeEditorDraftPersistence } from "./useNodeEditorDraft.js";
+import { loadNodeEditorDraft, nodeEditorDraftSnapshot, useNodeEditorDraftPersistence } from "./useNodeEditorDraft.js";
 import { useWorkflowPersistence } from "./useWorkflowPersistence.js";
 import { appendWorkflowContextFormFields, workflowContextPayload } from "./workflowContext.js";
 import { cloneEdge, cloneGraphState, cloneNode, createNodeId, resetCopiedNodeRuntime } from "./workflowState.js";
@@ -849,7 +849,6 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
     resolveUnsavedWorkflowPrompt,
     workflowRequestContext,
     appendWorkflowContextToForm,
-    currentDraftSnapshot,
     loadProjects,
     saveProject,
     saveProjectAsLocalFile,
@@ -889,7 +888,18 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
     onStatusChange
   });
   const draftSnapshot = React.useMemo(
-    () => currentDraftSnapshot(),
+    () =>
+      nodeEditorDraftSnapshot({
+        nodes,
+        edges,
+        groups,
+        viewport,
+        projectId,
+        projectName,
+        savedProjectName,
+        projectPackagePath,
+        workflowFilePath
+      }),
     [nodes, edges, groups, viewport, projectId, projectName, savedProjectName, projectPackagePath, workflowFilePath]
   );
   useNodeEditorDraftPersistence(draftSnapshot);

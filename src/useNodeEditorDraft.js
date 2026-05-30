@@ -36,6 +36,30 @@ export function loadNodeEditorDraft({ initialNodes = [], initialEdges = [], norm
   }
 }
 
+export function nodeEditorDraftSnapshot({
+  nodes,
+  edges,
+  groups,
+  viewport,
+  projectId,
+  projectName,
+  savedProjectName,
+  projectPackagePath,
+  workflowFilePath
+}) {
+  return {
+    nodes,
+    edges,
+    groups,
+    viewport,
+    projectId,
+    projectName,
+    savedProjectName,
+    projectPackagePath,
+    workflowFilePath
+  };
+}
+
 export function useNodeEditorDraftPersistence(snapshot, { storageKey = nodeDraftStorageKey, delayMs = 300 } = {}) {
   const draftWriteTimerRef = React.useRef(null);
   const pendingDraftSnapshotRef = React.useRef(null);

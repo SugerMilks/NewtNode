@@ -99,20 +99,6 @@ export function useWorkflowPersistence({
     });
   }
 
-  function currentDraftSnapshot() {
-    return {
-      nodes,
-      edges,
-      groups,
-      viewport,
-      projectId,
-      projectName,
-      savedProjectName,
-      projectPackagePath,
-      workflowFilePath
-    };
-  }
-
   async function loadProjects() {
     try {
       const projectList = await workflowApi.listSummary();
@@ -510,7 +496,6 @@ export function useWorkflowPersistence({
     hasUnsavedChanges,
     workflowRequestContext,
     appendWorkflowContextToForm,
-    currentDraftSnapshot,
     loadProjects,
     saveProject,
     saveProjectAsLocalFile,
