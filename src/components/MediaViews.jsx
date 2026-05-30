@@ -1,5 +1,6 @@
 import React from "react";
 import { Box, ChevronLeft, ChevronRight, Download, FileAudio, FileImage, Film, ImagePlus, PanelRightClose, Plus, RefreshCw, Video, X } from "lucide-react";
+import { capitalizeMediaType, outputDragMime as defaultOutputDragMime } from "../mediaAssets.js";
 import { normalizedResultItems, resultDownloadFileName } from "../mediaResults.js";
 import { GLTFLoader, THREE, useThreeRuntimeReady } from "../threeRuntime.js";
 
@@ -44,7 +45,7 @@ export function UploadIcon({ type }) {
   return <Plus size={22} />;
 }
 
-export function ProjectOutputDrawer({ items, onClose, onRefresh, onPreviewOpen, outputDragMime = "application/x-newtnode-output" }) {
+export function ProjectOutputDrawer({ items, onClose, onRefresh, onPreviewOpen, outputDragMime = defaultOutputDragMime }) {
   function startDrag(event, item) {
     event.dataTransfer.effectAllowed = "copy";
     event.dataTransfer.setData(outputDragMime, JSON.stringify(item));
@@ -392,10 +393,4 @@ function disposeThreeObject(root) {
       material.dispose?.();
     });
   });
-}
-
-function capitalizeMediaType(type) {
-  if (type === "model3d") return "3D";
-  const value = String(type || "media");
-  return value.charAt(0).toUpperCase() + value.slice(1);
 }
