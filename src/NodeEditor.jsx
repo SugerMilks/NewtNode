@@ -63,6 +63,18 @@ import {
 } from "./mediaAssets.js";
 import { appendResultItems, existingResultItemsForNode, normalizedResultItems } from "./mediaResults.js";
 import { nodeTypeDefinitions, nodeTypeForOutputItem, nodeTypeLabel } from "./nodeRegistry.js";
+import {
+  buildSelectedRunnableDependencies,
+  formatNodeBatchCount,
+  isRunnableNode,
+  nodeBatchCount,
+  nodeBatchStatusMessage,
+  nodeRunPriority,
+  nodeTitle,
+  runStageLabel,
+  settleSequential,
+  wait
+} from "./nodeRunner.js";
 import { buildProjectOutputItems } from "./projectOutputs.js";
 import { GLTFLoader, THREE, cloneSkeleton, degreesToRadians, lerp, radiansToDegrees, useThreeRuntimeReady } from "./threeRuntime.js";
 import { loadNodeEditorDraft, nodeEditorDraftSnapshot, useNodeEditorDraftPersistence } from "./useNodeEditorDraft.js";
@@ -9578,22 +9590,6 @@ async function runUtilityVideoGeneration({ node, prompt, incoming, projectId, pr
   };
 }
 
-function nodeBatchCount(node) {
-  const count = Number(node.data.batchCount || 1);
-  return Math.min(4, Math.max(1, Number.isFinite(count) ? count : 1));
-}
-
-function formatNodeBatchCount(value) {
-  const count = Number(value) || 1;
-  return `${count} gen${count === 1 ? "" : "s"}`;
-}
-
-function nodeBatchStatusMessage(mediaType, total, completed, failures) {
-  const label = mediaType === "image" ? "image" : "video";
-  const firstError = failures[0]?.reason?.message || "";
-  return `${completed} of ${total} ${label} generations complete.${firstError ? ` ${firstError}` : ""}`;
-}
-
 function connectedPreviewSources(items = []) {
   return items
     .map(({ source, edge }) => {
@@ -11264,66 +11260,6 @@ function normalizeVoidVideoFrameCount(value) {
   const numeric = Number.parseInt(value, 10);
   const target = Number.isFinite(numeric) ? numeric : 85;
   return voidVideoFrameOptions.reduce((nearest, option) => (Math.abs(option - target) < Math.abs(nearest - target) ? option : nearest), 85);
-}
-
-function isRunnableNode(node) {
-  return ["text", "imageModel", "videoModel", "utility", "model3d"].includes(node.type) || (node.type === "camera" && node.data.qwenCameraOpen);
-}
-
-function buildSelectedRunnableDependencies(nodes, edges) {
-  const runnableIds = new Set(nodes.map((node) => node.id));
-  const dependencies = new Map(nodes.map((node) => [node.id, []]));
-
-  edges.forEach((edge) => {
-    if (!runnableIds.has(edge.from.nodeId) || !runnableIds.has(edge.to.nodeId)) return;
-    dependencies.get(edge.to.nodeId)?.push(edge.from.nodeId);
-  });
-
-  return dependencies;
-}
-
-function nodeRunPriority(node) {
-  if (node?.type === "text") return 0;
-  if (node?.type === "camera") return 1;
-  if (node?.type === "imageModel") return 2;
-  if (node?.type === "model3d") return 3;
-  if (node?.type === "utility") return 4;
-  if (node?.type === "videoModel") return 4;
-  return 3;
-}
-
-function runStageLabel(type) {
-  if (type === "text") return "text model";
-  if (type === "camera") return "camera";
-  if (type === "imageModel") return "image";
-  if (type === "model3d") return "3D";
-  if (type === "utility") return "utility";
-  if (type === "videoModel") return "video";
-  return "selected";
-}
-
-function nodeTitle(node) {
-  return node?.data?.title || node?.type || "a dependency";
-}
-
-async function settleSequential(items, run, delayMs = 0) {
-  const results = [];
-
-  for (const [index, item] of items.entries()) {
-    if (index > 0 && delayMs > 0) await wait(delayMs);
-
-    try {
-      results.push({ status: "fulfilled", value: await run(item, index) });
-    } catch (reason) {
-      results.push({ status: "rejected", reason });
-    }
-  }
-
-  return results;
-}
-
-function wait(ms) {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 function normalizeEditorGraph(nodes = [], edges = [], groups = []) {
