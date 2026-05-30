@@ -45,6 +45,48 @@ export function resetCopiedNodeRuntime(data = {}) {
   };
 }
 
+export function sameStringList(first = [], second = []) {
+  if (first.length !== second.length) return false;
+  return first.every((value, index) => value === second[index]);
+}
+
+export function sameEdgeList(first = [], second = []) {
+  if (first.length !== second.length) return false;
+  return first.every((edge, index) => {
+    const nextEdge = second[index];
+    return (
+      edge.id === nextEdge?.id &&
+      edge.from?.nodeId === nextEdge.from?.nodeId &&
+      edge.from?.port === nextEdge.from?.port &&
+      edge.to?.nodeId === nextEdge.to?.nodeId &&
+      edge.to?.port === nextEdge.to?.port &&
+      edge.color === nextEdge.color
+    );
+  });
+}
+
+export function dedupeEdges(edges) {
+  const seen = new Set();
+  return edges.filter((edge) => {
+    const key = `${edge.from.nodeId}:${edge.from.port}->${edge.to.nodeId}:${edge.to.port}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+export function clearStaleRunningState(node) {
+  if (node.data?.status !== "running") return node;
+
+  return {
+    ...node,
+    data: {
+      ...node.data,
+      status: node.data.resultUrl ? "complete" : "ready"
+    }
+  };
+}
+
 export function remapImportedGraph(graph = {}, offset = {}, stamp = Date.now()) {
   const idMap = new Map();
   const safeOffset = {

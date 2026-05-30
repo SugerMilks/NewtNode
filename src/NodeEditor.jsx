@@ -112,7 +112,17 @@ import { GLTFLoader, THREE, cloneSkeleton, degreesToRadians, lerp, radiansToDegr
 import { loadNodeEditorDraft, nodeEditorDraftSnapshot, useNodeEditorDraftPersistence } from "./useNodeEditorDraft.js";
 import { useWorkflowPersistence } from "./useWorkflowPersistence.js";
 import { appendWorkflowContextFormFields, workflowContextPayload } from "./workflowContext.js";
-import { cloneEdge, cloneGraphState, cloneNode, createNodeId, resetCopiedNodeRuntime } from "./workflowState.js";
+import {
+  clearStaleRunningState,
+  cloneEdge,
+  cloneGraphState,
+  cloneNode,
+  createNodeId,
+  dedupeEdges,
+  resetCopiedNodeRuntime,
+  sameEdgeList,
+  sameStringList
+} from "./workflowState.js";
 import "./nodeEditor.css";
 
 const nodeIcons = {
@@ -10041,11 +10051,6 @@ function aspectRatioNumber(value) {
   return width > 0 && height > 0 ? width / height : 21 / 9;
 }
 
-function sameStringList(first = [], second = []) {
-  if (first.length !== second.length) return false;
-  return first.every((value, index) => value === second[index]);
-}
-
 function normalizeComposerAspectRatio(value) {
   return composerAspectRatios[String(value || "")] ? String(value) : "16:9";
 }
@@ -11281,43 +11286,6 @@ function isCameraImageEdge(edge, target) {
   if (target?.type === "videoModel" && ["startFrameIn", "endFrameIn", "referenceImageIn"].includes(edge.to.port)) return true;
   if (target?.type === "utility" && ["imageIn", "referenceImageIn"].includes(edge.to.port)) return true;
   return false;
-}
-
-function sameEdgeList(first = [], second = []) {
-  if (first.length !== second.length) return false;
-  return first.every((edge, index) => {
-    const nextEdge = second[index];
-    return (
-      edge.id === nextEdge?.id &&
-      edge.from?.nodeId === nextEdge.from?.nodeId &&
-      edge.from?.port === nextEdge.from?.port &&
-      edge.to?.nodeId === nextEdge.to?.nodeId &&
-      edge.to?.port === nextEdge.to?.port &&
-      edge.color === nextEdge.color
-    );
-  });
-}
-
-function dedupeEdges(edges) {
-  const seen = new Set();
-  return edges.filter((edge) => {
-    const key = `${edge.from.nodeId}:${edge.from.port}->${edge.to.nodeId}:${edge.to.port}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
-
-function clearStaleRunningState(node) {
-  if (node.data?.status !== "running") return node;
-
-  return {
-    ...node,
-    data: {
-      ...node.data,
-      status: node.data.resultUrl ? "complete" : "ready"
-    }
-  };
 }
 
 function transferTitleFromLegacy(title) {
