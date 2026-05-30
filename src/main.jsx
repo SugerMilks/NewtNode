@@ -16,9 +16,10 @@ import {
   Wand2,
   X
 } from "lucide-react";
-import NodeEditor from "./NodeEditor.jsx";
-import StatsDashboard from "./StatsDashboard.jsx";
 import "./styles.css";
+
+const NodeEditor = React.lazy(() => import("./NodeEditor.jsx"));
+const StatsDashboard = React.lazy(() => import("./StatsDashboard.jsx"));
 
 const videoAspectRatios = ["21:9", "16:9", "9:16", "1:1", "4:3", "3:4", "auto"];
 const videoResolutions = ["720p", "480p", "1080p"];
@@ -59,10 +60,17 @@ function App() {
   const [imageHistory, setImageHistory] = React.useState([]);
   const [workspaceMode, setWorkspaceMode] = React.useState("image");
   const [nodeStatus, setNodeStatus] = React.useState("");
+  const [nodeWorkspaceLoaded, setNodeWorkspaceLoaded] = React.useState(false);
 
   React.useEffect(() => {
     refreshHistory();
   }, []);
+
+  React.useEffect(() => {
+    if (workspaceMode === "nodes") {
+      setNodeWorkspaceLoaded(true);
+    }
+  }, [workspaceMode]);
 
   const activeRoute = React.useMemo(() => {
     if (startFrame) return "Start frame";
@@ -83,7 +91,7 @@ function App() {
 
   async function refreshHistory() {
     try {
-      const response = await fetch("/api/history");
+      const response = await fetch("/api/history?summary=1&limit=200");
       const data = await response.json();
       setVideoHistory(data.filter(isVideoWorkspaceHistory));
       setImageHistory(data.filter(isImageWorkspaceHistory));
@@ -588,13 +596,28 @@ function App() {
           <Gallery history={videoHistory} onRemove={removeHistoryItem} />
         </>
       ) : workspaceMode === "stats" ? (
-        <StatsDashboard />
+        <React.Suspense fallback={<WorkspaceFallback label="Loading stats" />}>
+          <StatsDashboard />
+        </React.Suspense>
       ) : null}
 
-      <div className={`nodes-tab-keepalive ${workspaceMode === "nodes" ? "active" : ""}`} aria-hidden={workspaceMode !== "nodes"}>
-        <NodeEditor active={workspaceMode === "nodes"} onStatusChange={setNodeStatus} />
-      </div>
+      {nodeWorkspaceLoaded && (
+        <div className={`nodes-tab-keepalive ${workspaceMode === "nodes" ? "active" : ""}`} aria-hidden={workspaceMode !== "nodes"}>
+          <React.Suspense fallback={<WorkspaceFallback label="Loading nodes" />}>
+            <NodeEditor active={workspaceMode === "nodes"} onStatusChange={setNodeStatus} />
+          </React.Suspense>
+        </div>
+      )}
     </main>
+  );
+}
+
+function WorkspaceFallback({ label }) {
+  return (
+    <div className="status-panel generating">
+      <span className="status-icon"><Loader2 className="spin" size={18} /></span>
+      <span>{label}</span>
+    </div>
   );
 }
 

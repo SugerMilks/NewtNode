@@ -14,6 +14,7 @@ import { promisify } from "node:util";
 import { fal } from "@fal-ai/client";
 import ffmpegStaticPath from "ffmpeg-static";
 import ffprobeStatic from "ffprobe-static";
+import { directoryStats, fileMetadata, readJsonFile, writeJsonAtomic } from "./json-store.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -32,7 +33,10 @@ const dataDir = path.join(__dirname, "data");
 const historyPath = path.join(dataDir, "history.json");
 const falDebugLogPath = path.join(dataDir, "fal-debug.log");
 const nodeProjectsPath = path.join(dataDir, "node-projects.json");
+const historyIndexPath = path.join(dataDir, "history-index.json");
+const workflowIndexPath = path.join(dataDir, "workflow-index.json");
 const moodBoardOutputFileName = "MOOD_BOARD.png";
+const maxHistoryItems = 500;
 let historyWriteQueue = Promise.resolve();
 const execFile = promisify(execFileCallback);
 const ffmpegBinaryPath = process.env.FFMPEG_PATH || ffmpegStaticPath || "ffmpeg";
@@ -291,15 +295,22 @@ app.get("/api/health", (_req, res) => {
   });
 });
 
-app.get("/api/history", async (_req, res) => {
-  res.json(await readHistory());
+app.get("/api/history", async (req, res) => {
+  await timedApi("history:list", async () => {
+    if (wantsSummary(req)) {
+      return res.json(pageHistorySummaries(await readHistorySummaries(), req));
+    }
+
+    res.json(await readHistory());
+  });
 });
 
 app.get("/api/stats", async (_req, res) => {
-  res.json({
-    history: await readHistory(),
-    projects: await readNodeProjects(),
-    pricing: {
+  await timedApi("stats", async () => {
+    res.json({
+      history: await readHistory(),
+      projects: await readNodeProjects(),
+      pricing: {
       seedance: {
         standardCostPerSecond: seedanceStandardCostPerSecond,
         fastCostPerSecond: seedanceFastCostPerSecond,
@@ -405,7 +416,8 @@ app.get("/api/stats", async (_req, res) => {
           currency: "USD"
         }
       }
-    }
+      }
+    });
   });
 });
 
@@ -414,65 +426,76 @@ app.get("/api/node-projects", async (_req, res) => {
   res.json(projects.map(({ graph, ...project }) => project));
 });
 
-app.get("/api/saved-workflows", async (_req, res) => {
-  const workflows = await readSavedWorkflows();
-  res.json(workflows.map(({ graph, ...workflow }) => workflow));
+app.get("/api/saved-workflows", async (req, res) => {
+  await timedApi("workflows:list", async () => {
+    if (wantsSummary(req)) {
+      return res.json(await readSavedWorkflowSummaries());
+    }
+
+    const workflows = await readSavedWorkflows();
+    res.json(workflows.map(({ graph, ...workflow }) => workflow));
+  });
 });
 
 app.get("/api/saved-workflows/:fileName", async (req, res) => {
-  const fileName = safeWorkflowFileName(req.params.fileName);
-  if (!fileName) {
-    return res.status(400).json({ error: "Invalid workflow file name." });
-  }
-  const workflows = await readSavedWorkflows();
-  const workflow = workflows.find((item) => item.fileName === fileName);
+  await timedApi("workflows:open", async () => {
+    const fileName = safeWorkflowFileName(req.params.fileName);
+    if (!fileName) {
+      return res.status(400).json({ error: "Invalid workflow file name." });
+    }
+    const workflows = await readSavedWorkflows();
+    const workflow = workflows.find((item) => item.fileName === fileName);
 
-  if (!workflow) {
-    return res.status(404).json({ error: "Workflow not found." });
-  }
+    if (!workflow) {
+      return res.status(404).json({ error: "Workflow not found." });
+    }
 
-  res.json(workflow);
+    res.json(workflow);
+  });
 });
 
 app.post("/api/saved-workflows", async (req, res) => {
-  try {
-    const workflows = await readSavedWorkflows();
-    const now = new Date().toISOString();
-    const id = String(req.body.id || randomUUID()).trim();
-    const name = String(req.body.name || "Untitled node project").trim() || "Untitled node project";
-    const existing = workflows.find((item) => item.id === id);
-    const packagePath = workflowPackagePathFromSaveRequest(req.body, existing, name);
-    const fileName = existing?.fileName || uniqueWorkflowFileName(name, workflows);
-    const workflow = {
-      id,
-      name,
-      fileName,
-      createdAt: existing?.createdAt || now,
-      updatedAt: now,
-      app: "NewtNode",
-      version: 1,
-      packagePath: packagePath || "",
-      graph: {
-        nodes: Array.isArray(req.body.nodes) ? req.body.nodes : [],
-        edges: Array.isArray(req.body.edges) ? req.body.edges : [],
-        groups: Array.isArray(req.body.groups) ? req.body.groups : [],
-        viewport: req.body.viewport || { x: 0, y: 0, scale: 1 }
-      }
-    };
+  await timedApi("workflows:save", async () => {
+    try {
+      const workflows = await readSavedWorkflows();
+      const now = new Date().toISOString();
+      const id = String(req.body.id || randomUUID()).trim();
+      const name = String(req.body.name || "Untitled node project").trim() || "Untitled node project";
+      const existing = workflows.find((item) => item.id === id);
+      const packagePath = workflowPackagePathFromSaveRequest(req.body, existing, name);
+      const fileName = existing?.fileName || uniqueWorkflowFileName(name, workflows);
+      const workflow = {
+        id,
+        name,
+        fileName,
+        createdAt: existing?.createdAt || now,
+        updatedAt: now,
+        app: "NewtNode",
+        version: 1,
+        packagePath: packagePath || "",
+        graph: {
+          nodes: Array.isArray(req.body.nodes) ? req.body.nodes : [],
+          edges: Array.isArray(req.body.edges) ? req.body.edges : [],
+          groups: Array.isArray(req.body.groups) ? req.body.groups : [],
+          viewport: req.body.viewport || { x: 0, y: 0, scale: 1 }
+        }
+      };
 
-    const savedWorkflow = packagePath ? await writeWorkflowPackage(workflow, packagePath) : workflow;
-    await writeWorkflowFile(savedWorkflow);
-    res.json(savedWorkflow);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: error.message || "Could not save workflow." });
-  }
+      const savedWorkflow = packagePath ? await writeWorkflowPackage(workflow, packagePath) : workflow;
+      await writeWorkflowFile(savedWorkflow);
+      res.json(savedWorkflow);
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: error.message || "Could not save workflow." });
+    }
+  });
 });
 
 app.post("/api/saved-workflows/register-package", async (req, res) => {
   try {
     const workflow = normalizeWorkflowPackageRegistration(req.body.workflow || req.body);
     const registered = await writeWorkflowFile(workflow);
+    await rebuildWorkflowIndex().catch(() => {});
     res.json(registered);
   } catch (error) {
     console.error(error);
@@ -499,11 +522,18 @@ app.delete("/api/saved-workflows/:fileName", async (req, res) => {
   }
 
   await rm(filePath, { force: true });
+  await rebuildWorkflowIndex().catch(() => {});
   if (deletedWorkflow?.id) {
     await removeLegacyNodeProject(deletedWorkflow.id);
   }
   const workflows = await readSavedWorkflows();
   res.json(workflows.map(({ graph, ...workflow }) => workflow));
+});
+
+app.get("/api/storage/diagnostics", async (_req, res) => {
+  await timedApi("storage:diagnostics", async () => {
+    res.json(await buildStorageDiagnostics());
+  });
 });
 
 app.get("/api/composer-poses", async (_req, res) => {
@@ -525,7 +555,7 @@ app.post("/api/composer-poses", async (req, res) => {
   };
 
   await mkdir(composerPosesDir, { recursive: true });
-  await writeFile(path.join(composerPosesDir, fileName), JSON.stringify(savedPose, null, 2));
+  await writeJsonAtomic(path.join(composerPosesDir, fileName), savedPose);
   res.json({ pose: savedPose, poses: await readComposerPoses() });
 });
 
@@ -3739,8 +3769,8 @@ async function writeWorkflowPackage(workflow, packagePath) {
     assets: assets.manifest
   };
 
-  await writeFile(path.join(packagePath, workflowFileName), JSON.stringify(packagedWorkflow, null, 2));
-  await writeFile(workflowPackageManifestPath(packagePath), JSON.stringify(manifest, null, 2));
+  await writeJsonAtomic(path.join(packagePath, workflowFileName), packagedWorkflow);
+  await writeJsonAtomic(workflowPackageManifestPath(packagePath), manifest);
   await rm(legacyWorkflowPackageManifestPath(packagePath), { force: true }).catch(() => {});
   return packagedWorkflow;
 }
@@ -4371,8 +4401,16 @@ async function readComposerPoses() {
 
 async function readSavedWorkflows() {
   await mkdir(savedWorkflowsDir, { recursive: true });
+  await migrateLegacyNodeProjectsToSavedWorkflows();
   const workflows = await readSavedWorkflowFiles();
+  return workflows.sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+}
+
+async function migrateLegacyNodeProjectsToSavedWorkflows() {
   const legacyProjects = await readNodeProjects();
+  if (!legacyProjects.length) return false;
+
+  const workflows = await readSavedWorkflowSummaryFiles();
   const existingIds = new Set(workflows.map((workflow) => String(workflow.id || "")));
   let migratedLegacyProject = false;
 
@@ -4402,10 +4440,61 @@ async function readSavedWorkflows() {
     await writeWorkflowFile(workflow);
   }
 
-  return (migratedLegacyProject ? await readSavedWorkflowFiles() : workflows).sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+  return migratedLegacyProject;
+}
+
+async function readSavedWorkflowSummaries() {
+  await mkdir(savedWorkflowsDir, { recursive: true });
+  await migrateLegacyNodeProjectsToSavedWorkflows();
+
+  const source = await workflowIndexSource();
+  const cached = await readJsonFile(workflowIndexPath, null);
+  if (cached?.version === 1 && workflowIndexSourceMatches(cached.source, source) && Array.isArray(cached.items)) {
+    return cached.items;
+  }
+
+  return rebuildWorkflowIndex(source);
+}
+
+async function rebuildWorkflowIndex(source = null) {
+  const nextSource = source || await workflowIndexSource();
+  const items = await readSavedWorkflowSummaryFiles();
+  const index = {
+    version: 1,
+    generatedAt: new Date().toISOString(),
+    source: nextSource,
+    items
+  };
+  await writeJsonAtomic(workflowIndexPath, index);
+  return items;
+}
+
+async function readSavedWorkflowSummaryFiles() {
+  await mkdir(savedWorkflowsDir, { recursive: true });
+  const entries = await readdir(savedWorkflowsDir, { withFileTypes: true });
+  const summaries = [];
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.toLowerCase().endsWith(".json")) continue;
+
+    const filePath = path.join(savedWorkflowsDir, entry.name);
+    try {
+      const [registryWorkflow, metadata] = await Promise.all([
+        readJsonFile(filePath, null),
+        fileMetadata(filePath)
+      ]);
+      if (!registryWorkflow) continue;
+      summaries.push(workflowMetadataSummary(registryWorkflow, entry.name, metadata));
+    } catch {
+      // Ignore malformed workflow files instead of blocking the whole loader.
+    }
+  }
+
+  return summaries.sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
 }
 
 async function readSavedWorkflowFiles() {
+  await mkdir(savedWorkflowsDir, { recursive: true });
   const entries = await readdir(savedWorkflowsDir, { withFileTypes: true });
   const workflows = [];
 
@@ -4442,8 +4531,83 @@ async function writeWorkflowFile(workflow) {
     ...workflow,
     fileName: safeWorkflowFileName(workflow.fileName) || workflowFileNameForName(workflow.name || "workflow")
   };
-  await writeFile(path.join(savedWorkflowsDir, registryWorkflow.fileName), JSON.stringify(registryWorkflow, null, 2));
+  await writeJsonAtomic(path.join(savedWorkflowsDir, registryWorkflow.fileName), registryWorkflow);
+  await rebuildWorkflowIndex().catch(() => {});
   return registryWorkflow;
+}
+
+async function workflowIndexSource() {
+  const entries = await readdir(savedWorkflowsDir, { withFileTypes: true }).catch(() => []);
+  const files = [];
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.toLowerCase().endsWith(".json")) continue;
+    const filePath = path.join(savedWorkflowsDir, entry.name);
+    const metadata = await fileMetadata(filePath);
+    if (metadata.exists) {
+      files.push({
+        fileName: entry.name,
+        size: metadata.size,
+        mtimeMs: metadata.mtimeMs
+      });
+    }
+  }
+
+  return {
+    directory: savedWorkflowsDir,
+    files: files.sort((a, b) => a.fileName.localeCompare(b.fileName))
+  };
+}
+
+function workflowIndexSourceMatches(cachedSource, currentSource) {
+  if (!cachedSource || !currentSource) return false;
+  const cachedFiles = Array.isArray(cachedSource.files) ? cachedSource.files : [];
+  const currentFiles = Array.isArray(currentSource.files) ? currentSource.files : [];
+  if (cachedFiles.length !== currentFiles.length) return false;
+
+  return currentFiles.every((file, index) => {
+    const cached = cachedFiles[index];
+    return cached?.fileName === file.fileName && cached.size === file.size && cached.mtimeMs === file.mtimeMs;
+  });
+}
+
+function workflowMetadataSummary(workflow, registryFileName, metadata = {}) {
+  const graph = workflow.graph || {};
+  const nodes = Array.isArray(graph.nodes) ? graph.nodes : [];
+  const edges = Array.isArray(graph.edges) ? graph.edges : [];
+  const groups = Array.isArray(graph.groups) ? graph.groups : [];
+  const fileName = safeWorkflowFileName(workflow.fileName) || registryFileName;
+
+  return {
+    id: workflow.id || registryFileName,
+    name: workflow.name || path.basename(registryFileName, ".json"),
+    fileName,
+    registryFileName,
+    createdAt: workflow.createdAt || "",
+    updatedAt: workflow.updatedAt || "",
+    app: workflow.app || "NewtNode",
+    version: workflow.version || 1,
+    packagePath: workflow.packagePath || workflow.package?.rootPath || "",
+    package: workflow.package
+      ? {
+          id: workflow.package.id || workflow.id || "",
+          name: workflow.package.name || workflow.name || "",
+          rootPath: workflow.package.rootPath || workflow.packagePath || "",
+          workflowFileName: workflow.package.workflowFileName || fileName,
+          assetBaseUrl: workflow.package.assetBaseUrl || "",
+          savedAt: workflow.package.savedAt || workflow.updatedAt || ""
+        }
+      : null,
+    graphStats: {
+      nodes: nodes.length,
+      edges: edges.length,
+      groups: groups.length
+    },
+    file: {
+      size: metadata.size || 0,
+      mtimeMs: metadata.mtimeMs || 0
+    }
+  };
 }
 
 function uniqueReferenceName(value, usedNames) {
@@ -5448,8 +5612,93 @@ async function readHistory() {
     return JSON.parse(await readFile(historyPath, "utf8"));
   } catch {
     await rm(historyPath, { force: true });
+    await rm(historyIndexPath, { force: true }).catch(() => {});
     return [];
   }
+}
+
+async function readHistorySummaries() {
+  const source = await fileMetadata(historyPath);
+  if (!source.exists) return [];
+
+  const cached = await readJsonFile(historyIndexPath, null);
+  if (
+    cached?.version === 1 &&
+    cached.source?.size === source.size &&
+    cached.source?.mtimeMs === source.mtimeMs &&
+    Array.isArray(cached.items)
+  ) {
+    return cached.items;
+  }
+
+  const history = await readHistory();
+  const items = summarizeHistoryItems(history);
+  await writeHistoryIndex(items, source);
+  return items;
+}
+
+async function writeHistoryIndex(items, source = null) {
+  const nextSource = source || await fileMetadata(historyPath);
+  await writeJsonAtomic(historyIndexPath, {
+    version: 1,
+    generatedAt: new Date().toISOString(),
+    source: nextSource,
+    items
+  });
+}
+
+function summarizeHistoryItems(history = []) {
+  return history.map(historyMetadataSummary);
+}
+
+function historyMetadataSummary(item = {}) {
+  return {
+    id: item.id || "",
+    createdAt: item.createdAt || "",
+    updatedAt: item.updatedAt || "",
+    mediaType: item.mediaType || "",
+    prompt: item.prompt || item.text || "",
+    mode: item.mode || "",
+    modelName: item.modelName || "",
+    routeKind: item.routeKind || "",
+    project: item.project || null,
+    node: item.node ? { id: item.node.id || "", title: item.node.title || "", type: item.node.type || "" } : null,
+    localImage: item.localImage || "",
+    localImages: Array.isArray(item.localImages) ? item.localImages : [],
+    localVideo: item.localVideo || "",
+    localVideos: Array.isArray(item.localVideos) ? item.localVideos : [],
+    localAudio: item.localAudio || "",
+    localAudios: Array.isArray(item.localAudios) ? item.localAudios : [],
+    localModel: item.localModel || "",
+    localModels: Array.isArray(item.localModels) ? item.localModels : [],
+    outputFileName: item.outputFileName || "",
+    cost: item.cost || null,
+    duration: item.duration || item.durationSeconds || "",
+    seed: item.seed || ""
+  };
+}
+
+function pageHistorySummaries(items, req) {
+  let paged = Array.isArray(items) ? items : [];
+  const cursor = String(req.query.cursor || "").trim();
+  const limit = boundedInteger(req.query.limit, 50, 1, maxHistoryItems);
+
+  if (cursor) {
+    const cursorIndex = paged.findIndex((item) => item.id === cursor);
+    if (cursorIndex >= 0) {
+      paged = paged.slice(cursorIndex + 1);
+    } else {
+      const cursorTime = Date.parse(cursor);
+      if (Number.isFinite(cursorTime)) {
+        paged = paged.filter((item) => {
+          const itemTime = Date.parse(item.createdAt || item.updatedAt || "");
+          return Number.isFinite(itemTime) && itemTime < cursorTime;
+        });
+      }
+    }
+  }
+
+  return paged.slice(0, limit);
 }
 
 async function subscribeFal(endpoint, options = {}, context = {}) {
@@ -5664,14 +5913,15 @@ async function appendHistory(item) {
   const write = historyWriteQueue.then(async () => {
     const history = await readHistory();
     history.unshift(item);
-    await writeHistory(history.slice(0, 500));
+    await writeHistory(history.slice(0, maxHistoryItems));
   });
   historyWriteQueue = write.catch(() => {});
   return write;
 }
 
 async function writeHistory(history) {
-  await writeFile(historyPath, JSON.stringify(history, null, 2));
+  await writeJsonAtomic(historyPath, history);
+  await writeHistoryIndex(summarizeHistoryItems(history)).catch(() => {});
 }
 
 function errorStatusCode(error) {
@@ -6596,6 +6846,92 @@ function routeKindLabel(routeKind, speed) {
   return `${prefix}text to video`;
 }
 
+function wantsSummary(req) {
+  return ["1", "true", "yes"].includes(String(req.query.summary || "").toLowerCase());
+}
+
+function boundedInteger(value, fallback, min, max) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(max, Math.max(min, Math.floor(number)));
+}
+
+async function timedApi(operation, callback) {
+  const startedAt = Date.now();
+  try {
+    const result = await callback();
+    console.log(JSON.stringify({
+      event: "api_timing",
+      operation,
+      ok: true,
+      elapsedMs: Date.now() - startedAt
+    }));
+    return result;
+  } catch (error) {
+    console.log(JSON.stringify({
+      event: "api_timing",
+      operation,
+      ok: false,
+      elapsedMs: Date.now() - startedAt,
+      error: error?.message || "unknown error"
+    }));
+    throw error;
+  }
+}
+
+async function buildStorageDiagnostics() {
+  const [historySource, workflowSource, historySummaries, workflowSummaries, uploads, outputs, savedWorkflows] = await Promise.all([
+    fileMetadata(historyPath),
+    workflowIndexSource(),
+    readHistorySummaries(),
+    readSavedWorkflowSummaries(),
+    directoryStats(uploadsDir),
+    directoryStats(outputsDir),
+    directoryStats(savedWorkflowsDir)
+  ]);
+  const [historyIndex, workflowIndex] = await Promise.all([
+    readJsonFile(historyIndexPath, null),
+    readJsonFile(workflowIndexPath, null)
+  ]);
+  const historyIndexFresh = Boolean(
+    historyIndex?.version === 1 &&
+    historyIndex.source?.size === historySource.size &&
+    historyIndex.source?.mtimeMs === historySource.mtimeMs
+  );
+  const workflowIndexFresh = Boolean(workflowIndex?.version === 1 && workflowIndexSourceMatches(workflowIndex.source, workflowSource));
+
+  return {
+    generatedAt: new Date().toISOString(),
+    history: {
+      items: historySummaries.length,
+      file: historySource,
+      index: {
+        path: historyIndexPath,
+        fresh: historyIndexFresh,
+        generatedAt: historyIndex?.generatedAt || ""
+      }
+    },
+    workflows: {
+      items: workflowSummaries.length,
+      directory: savedWorkflows,
+      index: {
+        path: workflowIndexPath,
+        fresh: workflowIndexFresh,
+        generatedAt: workflowIndex?.generatedAt || ""
+      }
+    },
+    assets: {
+      uploads,
+      outputs
+    },
+    warnings: [
+      historySummaries.length >= maxHistoryItems ? `History is at the ${maxHistoryItems} item retention limit.` : "",
+      savedWorkflows.bytes > 50 * 1024 * 1024 ? "Saved workflow registry is larger than 50 MB." : "",
+      outputs.bytes > 2 * 1024 * 1024 * 1024 ? "Outputs folder is larger than 2 GB." : ""
+    ].filter(Boolean)
+  };
+}
+
 async function readNodeProjects() {
   if (!existsSync(nodeProjectsPath)) {
     return [];
@@ -6610,7 +6946,7 @@ async function readNodeProjects() {
 }
 
 async function writeNodeProjects(projects) {
-  await writeFile(nodeProjectsPath, JSON.stringify(projects, null, 2));
+  await writeJsonAtomic(nodeProjectsPath, projects);
 }
 
 async function removeLegacyNodeProject(projectId) {

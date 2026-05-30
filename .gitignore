@@ -6,9 +6,13 @@ dist/
 uploads/*
 outputs/*
 saved_workflows/*.json
+saved_workflows/.*.tmp
 server/data/history.json
 server/data/node-projects.json
+server/data/*-index.json
+server/data/.*.tmp
 server/data/*.log
+public/models/poses/.*.tmp
 .vs_ai_logs/
 .newtnode_logs/
 NewtNode.app/Contents/_CodeSignature/

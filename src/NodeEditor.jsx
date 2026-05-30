@@ -1373,7 +1373,7 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
   }
 
   function handleCanvasDragOver(event) {
-    if (outputItemFromDataTransfer(event.dataTransfer) || hasSupportedDroppedFile(event.dataTransfer?.items || event.dataTransfer?.files)) {
+    if (hasOutputItemDragData(event.dataTransfer) || hasSupportedDroppedFile(event.dataTransfer?.items || event.dataTransfer?.files)) {
       event.preventDefault();
       event.dataTransfer.dropEffect = "copy";
     }
@@ -3030,7 +3030,7 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
 
   async function loadProjects() {
     try {
-      const response = await fetch("/api/saved-workflows");
+      const response = await fetch("/api/saved-workflows?summary=1");
       if (!response.ok) throw new Error("Could not load saved workflows.");
       const projectList = await response.json();
       setProjects(projectList);
@@ -3045,7 +3045,7 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
 
   async function loadOutputHistory() {
     try {
-      const response = await fetch("/api/history");
+      const response = await fetch("/api/history?summary=1&limit=500");
       if (!response.ok) throw new Error("Could not load generated outputs.");
       const history = await response.json();
       setOutputHistory(Array.isArray(history) ? history : []);
@@ -4193,8 +4193,8 @@ function ProjectOutputDrawer({ items, onClose, onRefresh, onPreviewOpen }) {
                 onDoubleClick={() => onPreviewOpen?.(item)}
                 title={`${item.label || item.fileName || "Output"}\nDrag to canvas or double-click to preview`}
               >
-                {item.type === "image" && <img src={item.url} alt={item.label || item.fileName || "Generated output"} onError={useNewtNodeImageFallback} />}
-                {item.type === "video" && <video src={item.url} muted playsInline preload="metadata" onError={useNewtNodeVideoFallback} />}
+                {item.type === "image" && <img src={item.url} alt={item.label || item.fileName || "Generated output"} draggable={false} onError={useNewtNodeImageFallback} />}
+                {item.type === "video" && <video src={item.url} muted playsInline preload="metadata" draggable={false} onError={useNewtNodeVideoFallback} />}
                 {(item.type === "model3d" || item.type === "audio") && (
                   <div className="project-output-placeholder">
                     <KindIcon size={22} />
@@ -9682,16 +9682,68 @@ function outputMediaTypeForUrl(url, fallbackType) {
   return ["image", "video", "audio", "model3d"].includes(fallbackType) ? fallbackType : "";
 }
 
+function hasOutputItemDragData(dataTransfer) {
+  const types = Array.from(dataTransfer?.types || []);
+  return types.includes(outputDragMime) || types.includes("text/uri-list") || types.includes("text/plain");
+}
+
 function outputItemFromDataTransfer(dataTransfer) {
   const raw = dataTransfer?.getData(outputDragMime);
-  if (!raw) return null;
-  try {
-    const item = JSON.parse(raw);
-    if (!item?.url || !item?.type || !isLocalOutputUrl(item.url)) return null;
-    return item;
-  } catch {
-    return null;
+  if (raw) {
+    try {
+      const item = JSON.parse(raw);
+      if (item?.url && item?.type && isLocalOutputUrl(item.url)) return item;
+    } catch {
+      // Fall through to URL payloads below.
+    }
   }
+
+  const url = localOutputUrlFromDataTransfer(dataTransfer);
+  const type = outputMediaTypeForUrl(url, "");
+  if (!url || !type) return null;
+
+  const fileName = fileNameFromLocalUrl(url);
+  return {
+    id: `dragged-url:${url}`,
+    url,
+    type,
+    label: fileName || `${capitalizeMediaType(type)} output`,
+    fileName,
+    mimeType: mimeForOutputItem({ url, type })
+  };
+}
+
+function localOutputUrlFromDataTransfer(dataTransfer) {
+  const rawValues = [dataTransfer?.getData("text/uri-list"), dataTransfer?.getData("text/plain")];
+  for (const rawValue of rawValues) {
+    const candidates = String(rawValue || "")
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith("#"));
+
+    for (const candidate of candidates) {
+      const localUrl = normalizeDroppedLocalOutputUrl(candidate);
+      if (localUrl) return localUrl;
+    }
+  }
+
+  return "";
+}
+
+function normalizeDroppedLocalOutputUrl(value) {
+  const candidate = String(value || "").trim();
+  if (isLocalOutputUrl(candidate)) return candidate;
+
+  try {
+    const parsed = new URL(candidate, window.location.origin);
+    if (parsed.origin === window.location.origin && isLocalOutputUrl(parsed.pathname)) {
+      return parsed.pathname;
+    }
+  } catch {
+    return "";
+  }
+
+  return "";
 }
 
 function isOutputItemCompatibleWithNode(item, nodeType) {
