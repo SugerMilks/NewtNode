@@ -31,6 +31,23 @@ const openAiImageAspectRatios = ["21:9", "16:9", "1:1", "9:16"];
 const imageResolutions = ["2K", "1K", "4K"];
 const batchOptions = ["1", "2", "3", "4"];
 
+function normalizeNodeStatus(status) {
+  if (!status) return { title: "", message: "", workflowPath: "", workflowState: "" };
+  if (typeof status === "string") return { title: status, message: status, workflowPath: "", workflowState: "" };
+
+  const message = String(status.message || "").trim();
+  const workflowPath = String(status.workflowPath || "").trim();
+  const workflowState = status.workflowState === "unsaved" ? "unsaved" : status.workflowState === "saved" ? "saved" : "";
+  const title = workflowPath ? `${workflowState === "unsaved" ? "Unsaved" : "Saved"} ${workflowPath}${message ? ` - ${message}` : ""}` : message;
+
+  return {
+    title,
+    message,
+    workflowPath,
+    workflowState
+  };
+}
+
 function App() {
   const promptRef = React.useRef(null);
   const [prompt, setPrompt] = React.useState("");
@@ -62,6 +79,7 @@ function App() {
   const [workspaceMode, setWorkspaceMode] = React.useState("image");
   const [nodeStatus, setNodeStatus] = React.useState("");
   const [nodeWorkspaceLoaded, setNodeWorkspaceLoaded] = React.useState(false);
+  const nodeStatusInfo = normalizeNodeStatus(nodeStatus);
 
   React.useEffect(() => {
     refreshHistory();
@@ -346,9 +364,16 @@ function App() {
             Stats
           </button>
         </div>
-        {workspaceMode === "nodes" && nodeStatus && (
-          <div className="topbar-status" role="status" title={nodeStatus}>
-            {nodeStatus}
+        {workspaceMode === "nodes" && nodeStatusInfo.title && (
+          <div className={`topbar-status ${nodeStatusInfo.workflowState ? `workflow-${nodeStatusInfo.workflowState}` : ""}`} role="status" title={nodeStatusInfo.title}>
+            {nodeStatusInfo.workflowPath ? (
+              <>
+                <span className="topbar-status-state">{nodeStatusInfo.workflowState === "unsaved" ? "Unsaved" : "Saved"}</span>
+                <span className="topbar-status-path">{nodeStatusInfo.workflowPath}</span>
+              </>
+            ) : (
+              nodeStatusInfo.title
+            )}
           </div>
         )}
       </div>

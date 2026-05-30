@@ -871,11 +871,18 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
     }
     return localWorkflowFileName || "";
   }, [workflowFilePath, projectPackagePath, localWorkflowFileName, savedProjectName, projectName]);
-  const workflowPathStatus = currentWorkflowPath ? `${hasUnsavedChanges ? "Unsaved changes in" : "Saved"} ${currentWorkflowPath}` : "";
-
   React.useEffect(() => {
-    onStatusChange?.(saveStatus || workflowPathStatus);
-  }, [onStatusChange, saveStatus, workflowPathStatus]);
+    if (!currentWorkflowPath && !saveStatus) {
+      onStatusChange?.("");
+      return;
+    }
+
+    onStatusChange?.({
+      message: saveStatus || "",
+      workflowPath: currentWorkflowPath,
+      workflowState: currentWorkflowPath ? (hasUnsavedChanges ? "unsaved" : "saved") : ""
+    });
+  }, [onStatusChange, saveStatus, currentWorkflowPath, hasUnsavedChanges]);
 
   function workflowRequestContext(overrides = {}) {
     const workflowName = savedProjectName || selectedProjectName || projectName || "Untitled node project";
@@ -3852,12 +3859,6 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
 
   return (
     <section className={`node-workspace ${toolbarCollapsed ? "toolbar-collapsed" : ""} ${outputsCollapsed ? "outputs-collapsed" : "outputs-open"}`}>
-      {currentWorkflowPath && (
-        <div className={`workflow-path-chip ${hasUnsavedChanges ? "dirty" : "saved"}`} title={currentWorkflowPath} aria-label={`Workflow file ${currentWorkflowPath}`}>
-          <span className="workflow-path-state">{hasUnsavedChanges ? "Unsaved" : "Saved"}</span>
-          <span className="workflow-path-text">{currentWorkflowPath}</span>
-        </div>
-      )}
       {composerEditorNode && (
         <ComposerEditorModal
           node={composerEditorNode}

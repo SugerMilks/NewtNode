@@ -66,6 +66,9 @@ button {
 }
 
 .topbar-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   min-width: 0;
   max-width: min(840px, 52vw);
   margin-left: auto;
@@ -73,6 +76,27 @@ button {
   color: rgba(244, 240, 232, 0.48);
   font-size: 11px;
   font-weight: 680;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topbar-status-state {
+  flex: 0 0 auto;
+  color: rgba(32, 243, 166, 0.86);
+  font-size: 11px;
+  font-weight: 860;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.topbar-status.workflow-unsaved .topbar-status-state {
+  color: rgba(240, 200, 59, 0.94);
+}
+
+.topbar-status-path {
+  min-width: 0;
+  overflow: hidden;
+  color: rgba(244, 240, 232, 0.72);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
