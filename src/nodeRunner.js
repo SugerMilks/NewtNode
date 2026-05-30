@@ -14,6 +14,23 @@ export function nodeBatchStatusMessage(mediaType, total, completed, failures) {
   return `${completed} of ${total} ${label} generations complete.${firstError ? ` ${firstError}` : ""}`;
 }
 
+export function nodeRunIndexes(count) {
+  return Array.from({ length: count }, (_, index) => index);
+}
+
+export function fulfilledRunValues(settledResults, { flatten = false } = {}) {
+  const values = settledResults.filter((item) => item.status === "fulfilled").map((item) => item.value);
+  return flatten ? values.flatMap((value) => (Array.isArray(value) ? value : [value])) : values;
+}
+
+export function rejectedRunResults(settledResults) {
+  return settledResults.filter((item) => item.status === "rejected");
+}
+
+export function firstNewResultIndex(resultItems, newItems) {
+  return Math.max(0, resultItems.length - newItems.length);
+}
+
 export function isRunnableNode(node) {
   return ["text", "imageModel", "videoModel", "utility", "model3d"].includes(node.type) || (node.type === "camera" && node.data.qwenCameraOpen);
 }
