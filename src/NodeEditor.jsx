@@ -11296,4 +11296,3 @@ function transferTitleFromLegacy(title) {
 function roundPreviewScale(value) {
   return Math.round(value * 100) / 100;
 }
-
