@@ -45,13 +45,13 @@ export function UploadIcon({ type }) {
   return <Plus size={22} />;
 }
 
-export function ProjectOutputDrawer({ items, onClose, onRefresh, onPreviewOpen, outputDragMime = defaultOutputDragMime }) {
-  function startDrag(event, item) {
+export const ProjectOutputDrawer = React.memo(function ProjectOutputDrawer({ items, onClose, onRefresh, onPreviewOpen, outputDragMime = defaultOutputDragMime }) {
+  const startDrag = React.useCallback((event, item) => {
     event.dataTransfer.effectAllowed = "copy";
     event.dataTransfer.setData(outputDragMime, JSON.stringify(item));
     event.dataTransfer.setData("text/plain", item.url);
     event.dataTransfer.setData("text/uri-list", item.url);
-  }
+  }, [outputDragMime]);
 
   return (
     <aside className="project-output-drawer">
@@ -67,30 +67,14 @@ export function ProjectOutputDrawer({ items, onClose, onRefresh, onPreviewOpen, 
       </div>
       <div className="project-output-list">
         {items.length ? (
-          items.map((item) => {
-            const KindIcon = item.type === "video" ? Film : item.type === "audio" ? FileAudio : item.type === "model3d" ? Box : FileImage;
-            return (
-              <div
-                key={item.id}
-                className={`project-output-thumb ${item.type}`}
-                draggable
-                onDragStart={(event) => startDrag(event, item)}
-                onDoubleClick={() => onPreviewOpen?.(item)}
-                title={`${item.label || item.fileName || "Output"}\nDrag to canvas or double-click to preview`}
-              >
-                {item.type === "image" && <img src={item.url} alt={item.label || item.fileName || "Generated output"} draggable={false} onError={useNewtNodeImageFallback} />}
-                {item.type === "video" && <video src={item.url} muted playsInline preload="metadata" draggable={false} onError={useNewtNodeVideoFallback} />}
-                {(item.type === "model3d" || item.type === "audio") && (
-                  <div className="project-output-placeholder">
-                    <KindIcon size={22} />
-                  </div>
-                )}
-                <span className="project-output-kind">
-                  <KindIcon size={12} />
-                </span>
-              </div>
-            );
-          })
+          items.map((item) => (
+            <ProjectOutputThumb
+              key={item.id}
+              item={item}
+              onDragStart={startDrag}
+              onPreviewOpen={onPreviewOpen}
+            />
+          ))
         ) : (
           <div className="project-output-empty">
             <ImagePlus size={22} />
@@ -99,6 +83,64 @@ export function ProjectOutputDrawer({ items, onClose, onRefresh, onPreviewOpen, 
       </div>
     </aside>
   );
+});
+
+const ProjectOutputThumb = React.memo(function ProjectOutputThumb({ item, onDragStart, onPreviewOpen }) {
+  const thumbRef = React.useRef(null);
+  const mediaSrc = useLazyRailMediaSrc(thumbRef, item.url);
+  const KindIcon = item.type === "video" ? Film : item.type === "audio" ? FileAudio : item.type === "model3d" ? Box : FileImage;
+
+  return (
+    <div
+      ref={thumbRef}
+      className={`project-output-thumb ${item.type}`}
+      draggable
+      onDragStart={(event) => onDragStart(event, item)}
+      onDoubleClick={() => onPreviewOpen?.(item)}
+      title={`${item.label || item.fileName || "Output"}\nDrag to canvas or double-click to preview`}
+    >
+      {item.type === "image" && mediaSrc && <img src={mediaSrc} alt={item.label || item.fileName || "Generated output"} draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />}
+      {item.type === "video" && mediaSrc && <video src={mediaSrc} muted playsInline preload="metadata" draggable={false} onError={useNewtNodeVideoFallback} />}
+      {(item.type === "model3d" || item.type === "audio" || !mediaSrc) && (
+        <div className="project-output-placeholder">
+          <KindIcon size={22} />
+        </div>
+      )}
+      <span className="project-output-kind">
+        <KindIcon size={12} />
+      </span>
+    </div>
+  );
+});
+
+function useLazyRailMediaSrc(ref, url) {
+  const [loadedUrl, setLoadedUrl] = React.useState("");
+
+  React.useEffect(() => {
+    if (!url) {
+      setLoadedUrl("");
+      return undefined;
+    }
+    if (loadedUrl === url) return undefined;
+    const element = ref.current;
+    if (!element || typeof window === "undefined" || !("IntersectionObserver" in window)) {
+      setLoadedUrl(url);
+      return undefined;
+    }
+
+    const observer = new window.IntersectionObserver(
+      ([entry]) => {
+        if (!entry?.isIntersecting) return;
+        setLoadedUrl(url);
+        observer.disconnect();
+      },
+      { rootMargin: "180px" }
+    );
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [ref, loadedUrl, url]);
+
+  return loadedUrl === url ? url : "";
 }
 
 export function OutputPreviewLightbox({ item, onClose }) {

@@ -36,7 +36,6 @@ import {
 } from "lucide-react";
 import { composerApi, historyApi, nodeApi } from "./api/newtApi.js";
 import { EdgePath, SelectionActionBar, SelectionMarquee, UnsavedWorkflowPrompt } from "./components/CanvasChrome.jsx";
-import { ColorIdMattePicker, ColorIdMatteVideoPicker } from "./components/ColorIdMatteControls.jsx";
 import {
   MediaPreview,
   Model3DViewer,
@@ -125,6 +124,9 @@ import {
   sameStringList
 } from "./workflowState.js";
 import "./nodeEditor.css";
+
+const ColorIdMattePicker = React.lazy(() => import("./components/ColorIdMatteControls.jsx").then((module) => ({ default: module.ColorIdMattePicker })));
+const ColorIdMatteVideoPicker = React.lazy(() => import("./components/ColorIdMatteControls.jsx").then((module) => ({ default: module.ColorIdMatteVideoPicker })));
 
 const nodeIcons = {
   plainText: Type,
@@ -850,6 +852,7 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
   const undoStackRef = React.useRef([]);
   const clipboardRef = React.useRef(null);
   const metadataLoadedRef = React.useRef(false);
+  const outputHistoryLoadedRef = React.useRef(false);
   const savedDraft = React.useMemo(() => loadNodeEditorDraft({ initialNodes, initialEdges, normalizeEditorGraph }), []);
   const nodesRef = React.useRef(savedDraft.nodes);
   const edgesRef = React.useRef(savedDraft.edges);
@@ -998,8 +1001,12 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
     if (!active || metadataLoadedRef.current) return;
     metadataLoadedRef.current = true;
     loadProjects();
-    loadOutputHistory();
   }, [active]);
+
+  React.useEffect(() => {
+    if (!active || outputsCollapsed || outputHistoryLoadedRef.current) return;
+    loadOutputHistory();
+  }, [active, outputsCollapsed]);
 
   React.useEffect(() => {
     if (!active) return undefined;
@@ -3080,6 +3087,7 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
     try {
       const history = await historyApi.listSummary({ limit: 500 });
       setOutputHistory(Array.isArray(history) ? history : []);
+      outputHistoryLoadedRef.current = true;
     } catch {
       // The output rail is helpful, but it should never block the graph editor.
     }
@@ -6124,15 +6132,17 @@ function NodeBody({
               ) : isExtractFrameVideo ? (
                 <ExtractFrameControls videoUrl={connectedAssetUrls(incoming.referenceVideoIn).at(-1)} node={node} onUpdate={onUpdate} />
               ) : isColorIdMatteVideo ? (
-                <ColorIdMatteVideoPicker
-                  videoUrl={connectedAssetUrls(incoming.referenceVideoIn).at(-1)}
-                  node={node}
-                  onUpdate={onUpdate}
-                  rowComponent={NodeRow}
-                  formatFrameTimeDisplay={formatFrameTimeDisplay}
-                  normalizeChoice={normalizeChoice}
-                  outputOptions={colorIdMatteVideoOutputOptions}
-                />
+                <React.Suspense fallback={<small className="upload-status color-id-status">Loading picker...</small>}>
+                  <ColorIdMatteVideoPicker
+                    videoUrl={connectedAssetUrls(incoming.referenceVideoIn).at(-1)}
+                    node={node}
+                    onUpdate={onUpdate}
+                    rowComponent={NodeRow}
+                    formatFrameTimeDisplay={formatFrameTimeDisplay}
+                    normalizeChoice={normalizeChoice}
+                    outputOptions={colorIdMatteVideoOutputOptions}
+                  />
+                </React.Suspense>
               ) : isCompositeVideo ? (
                 <CompositeVideoControls incoming={incoming} maskVideoPort={maskVideoPort} settingsOpen={settingsOpen} node={node} onUpdate={onUpdate} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
               ) : isWanVaceVideo ? (
@@ -6444,7 +6454,9 @@ function NodeBody({
                     <button className={incoming.imageIn?.length ? "connected-field" : ""}>{connectedSummary(incoming.imageIn, "Add image")}</button>
                   </NodeRow>
                   {isColorIdMatte ? (
-                    <ColorIdMattePicker imageUrl={connectedAssetUrls(incoming.imageIn).at(-1)} node={node} onUpdate={onUpdate} rowComponent={NodeRow} />
+                    <React.Suspense fallback={<small className="upload-status color-id-status">Loading picker...</small>}>
+                      <ColorIdMattePicker imageUrl={connectedAssetUrls(incoming.imageIn).at(-1)} node={node} onUpdate={onUpdate} rowComponent={NodeRow} />
+                    </React.Suspense>
                   ) : isPatina ? (
                     <>
                       {patinaMapOptions.map((option) => (
