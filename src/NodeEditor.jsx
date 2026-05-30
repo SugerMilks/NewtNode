@@ -37,6 +37,7 @@ import {
   X
 } from "lucide-react";
 import { composerApi, historyApi, nodeApi, systemApi, workflowApi } from "./api/newtApi.js";
+import { appendResultItems, existingResultItemsForNode, normalizedResultItems, resultDownloadFileName } from "./mediaResults.js";
 import { nodeTypeDefinitions, nodeTypeForOutputItem, nodeTypeLabel } from "./nodeRegistry.js";
 import { ensureWritableWorkflowHandle, workflowDisplayPath, workflowFileNameForProject, writeWorkflowFileHandle } from "./workflowFiles.js";
 import { cloneEdge, cloneGraphState, cloneNode, createNodeId, resetCopiedNodeRuntime, workflowStateFingerprint } from "./workflowState.js";
@@ -7862,15 +7863,6 @@ function ResultPane({ label, resultUrl, resultItems = [], selectedIndex = 0, typ
   );
 }
 
-function resultDownloadFileName(item) {
-  const urlName = String(item?.url || "").split("/").pop() || "";
-  const cleanUrlName = urlName.split("?")[0].split("#")[0];
-  if (cleanUrlName) return cleanUrlName;
-  if (item?.type === "model3d") return "newt-node-model.glb";
-  if (item?.type === "video") return "newt-node-video.mp4";
-  return "newt-node-image.png";
-}
-
 function Model3DViewer({ url, label }) {
   const threeReady = useThreeRuntimeReady();
   const hostRef = React.useRef(null);
@@ -10742,34 +10734,6 @@ async function runUtilityVideoGeneration({ node, prompt, incoming, projectId, pr
     seed: data.seed,
     cost: data.cost
   };
-}
-
-function normalizedResultItems(resultItems, resultUrl, type) {
-  const items = Array.isArray(resultItems) ? resultItems.filter((item) => item?.url) : [];
-  const fallbackLabel = mediaResultLabel(type);
-  if (items.length) return items.map((item, index) => ({ type, label: `${fallbackLabel} ${index + 1}`, ...item }));
-  return resultUrl ? [{ url: resultUrl, type, label: `${fallbackLabel} 1` }] : [];
-}
-
-function existingResultItemsForNode(node, type) {
-  return normalizedResultItems(node?.data?.resultItems, node?.data?.resultUrl, type);
-}
-
-function appendResultItems(previousItems = [], newItems = [], type) {
-  const combined = [...previousItems, ...normalizedResultItems(newItems, "", type)].filter((item) => item?.url);
-  const fallbackLabel = mediaResultLabel(type);
-  return combined.map((item, index) => ({
-    ...item,
-    type: item.type || type,
-    label: item.label && !new RegExp(`^${fallbackLabel} \\d+$`).test(item.label) ? item.label : `${fallbackLabel} ${index + 1}`
-  }));
-}
-
-function mediaResultLabel(type) {
-  if (type === "image") return "Image";
-  if (type === "video") return "Video";
-  if (type === "model3d") return "3D";
-  return "Result";
 }
 
 function nodeBatchCount(node) {
