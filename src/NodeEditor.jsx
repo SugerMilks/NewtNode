@@ -39,6 +39,7 @@ import {
 import { composerApi, historyApi, nodeApi, systemApi, workflowApi } from "./api/newtApi.js";
 import { appendResultItems, existingResultItemsForNode, normalizedResultItems, resultDownloadFileName } from "./mediaResults.js";
 import { nodeTypeDefinitions, nodeTypeForOutputItem, nodeTypeLabel } from "./nodeRegistry.js";
+import { GLTFLoader, THREE, cloneSkeleton, degreesToRadians, lerp, radiansToDegrees, useThreeRuntimeReady } from "./threeRuntime.js";
 import { ensureWritableWorkflowHandle, workflowDisplayPath, workflowFileNameForProject, writeWorkflowFileHandle } from "./workflowFiles.js";
 import { cloneEdge, cloneGraphState, cloneNode, createNodeId, resetCopiedNodeRuntime, workflowStateFingerprint } from "./workflowState.js";
 import "./nodeEditor.css";
@@ -65,66 +66,6 @@ const nodeCatalog = nodeTypeDefinitions.map((definition) => ({
   ...definition,
   icon: nodeIcons[definition.type] || Box
 }));
-
-let THREE = null;
-let GLTFLoader = null;
-let cloneSkeleton = null;
-let threeRuntimePromise = null;
-
-function loadThreeRuntime() {
-  if (THREE && GLTFLoader && cloneSkeleton) {
-    return Promise.resolve({ THREE, GLTFLoader, cloneSkeleton });
-  }
-
-  if (!threeRuntimePromise) {
-    threeRuntimePromise = Promise.all([
-      import("three"),
-      import("three/examples/jsm/loaders/GLTFLoader.js"),
-      import("three/examples/jsm/utils/SkeletonUtils.js")
-    ]).then(([threeModule, loaderModule, skeletonModule]) => {
-      THREE = threeModule;
-      GLTFLoader = loaderModule.GLTFLoader;
-      cloneSkeleton = skeletonModule.clone;
-      return { THREE, GLTFLoader, cloneSkeleton };
-    });
-  }
-
-  return threeRuntimePromise;
-}
-
-function useThreeRuntimeReady() {
-  const [ready, setReady] = React.useState(() => Boolean(THREE && GLTFLoader && cloneSkeleton));
-
-  React.useEffect(() => {
-    if (ready) return undefined;
-    let cancelled = false;
-    loadThreeRuntime()
-      .then(() => {
-        if (!cancelled) setReady(true);
-      })
-      .catch((error) => {
-        if (!cancelled) console.warn("Three.js runtime failed to load.", error);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [ready]);
-
-  return ready;
-}
-
-function degreesToRadians(value) {
-  return (finiteNumber(value, 0) * Math.PI) / 180;
-}
-
-function radiansToDegrees(value) {
-  return (finiteNumber(value, 0) * 180) / Math.PI;
-}
-
-function lerp(start, end, alpha) {
-  return start + (end - start) * alpha;
-}
 
 const portColors = {
   prompt: "#f0c83b",
