@@ -37,6 +37,7 @@ Use this quick pass before implementing a feature, and again before committing i
 | Run scheduling and result state | `src/nodeRunner.js` | Batch counts, batch result aggregation, selected-node dependency scheduling, and run status text belong here. Node-specific API calls can still live near `runNode` until moved as a complete provider pass. |
 | Media drag/drop and imported asset shape | `src/mediaAssets.js` | Output-rail drag payloads, external file type detection, file-to-node mapping, and media accept rules live here. |
 | Result items | `src/mediaResults.js` | Normalize, append, label, and download result items here. Do not hand-roll result array merging in node run branches. |
+| Canvas chrome | `src/components/CanvasChrome.jsx` | Memoized edge paths, selection marquee/action bar, and workflow prompt live here. Keep hot SVG/UI chrome out of `NodeEditor.jsx`. |
 | Preview/result UI | `src/components/MediaViews.jsx` | Shared previews, result panes, project output drawer, output lightbox, and 3D viewer live here. |
 | Project output rail data | `src/projectOutputs.js` | Build and filter project output rail items here; keep filesystem/history filtering out of render code. |
 | Canvas geometry | `src/nodeGeometry.js` | Node bounds, graph bounds, rectangle math, menu clamping, and viewport modulo helpers live here. |
