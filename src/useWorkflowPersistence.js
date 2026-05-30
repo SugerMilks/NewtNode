@@ -8,6 +8,7 @@ import {
   writeWorkflowFileHandle
 } from "./workflowFiles.js";
 import { lastPackageParentPath, rememberOpenedWorkflowPath, rememberPackageParentPath, workflowPickerDefaultPath } from "./workflowPreferences.js";
+import { appendWorkflowRequestContextToForm, currentWorkflowDisplayPath, selectedWorkflowProjectName, workflowRequestContextForState } from "./workflowSession.js";
 import { createNodeId, remapImportedGraph, workflowStateFingerprint } from "./workflowState.js";
 
 export function useWorkflowPersistence({
@@ -50,23 +51,16 @@ export function useWorkflowPersistence({
   const [saveStatus, setSaveStatus] = React.useState("");
   const [unsavedPrompt, setUnsavedPrompt] = React.useState(null);
 
-  const selectedProjectName = projects.find((project) => project.id === projectId)?.name;
+  const selectedProjectName = selectedWorkflowProjectName(projects, projectId);
   const currentWorkflowFingerprint = React.useMemo(
     () => workflowStateFingerprint({ nodes, edges, groups, projectName, projectPackagePath }),
     [nodes, edges, groups, projectName, projectPackagePath]
   );
   const hasUnsavedChanges = currentWorkflowFingerprint !== cleanWorkflowFingerprint;
-  const currentWorkflowPath = React.useMemo(() => {
-    const savedPath = String(workflowFilePath || "").trim();
-    if (savedPath) return savedPath;
-    if (projectPackagePath) {
-      return workflowDisplayPath({
-        packagePath: projectPackagePath,
-        fileName: localWorkflowFileName || workflowFileNameForProject(savedProjectName || projectName)
-      });
-    }
-    return localWorkflowFileName || "";
-  }, [workflowFilePath, projectPackagePath, localWorkflowFileName, savedProjectName, projectName]);
+  const currentWorkflowPath = React.useMemo(
+    () => currentWorkflowDisplayPath({ workflowFilePath, projectPackagePath, localWorkflowFileName, savedProjectName, projectName }),
+    [workflowFilePath, projectPackagePath, localWorkflowFileName, savedProjectName, projectName]
+  );
 
   React.useEffect(() => {
     if (!currentWorkflowPath && !saveStatus) {
@@ -82,22 +76,11 @@ export function useWorkflowPersistence({
   }, [onStatusChange, saveStatus, currentWorkflowPath, hasUnsavedChanges]);
 
   function workflowRequestContext(overrides = {}) {
-    const workflowName = savedProjectName || selectedProjectName || projectName || "Untitled node project";
-    return {
-      projectId: projectId || "",
-      projectName: projectName || "Untitled node project",
-      workflowName,
-      workflowPackageId: projectPackagePath ? projectId || "" : "",
-      workflowPackagePath: projectPackagePath || "",
-      ...overrides
-    };
+    return workflowRequestContextForState({ projectId, projectName, savedProjectName, selectedProjectName, projectPackagePath }, overrides);
   }
 
   function appendWorkflowContextToForm(form, overrides = {}) {
-    const context = workflowRequestContext(overrides);
-    Object.entries(context).forEach(([key, value]) => {
-      form.append(key, value || "");
-    });
+    appendWorkflowRequestContextToForm(form, { projectId, projectName, savedProjectName, selectedProjectName, projectPackagePath }, overrides);
   }
 
   async function loadProjects() {
