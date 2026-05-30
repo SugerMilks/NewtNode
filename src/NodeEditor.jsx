@@ -106,6 +106,8 @@ import {
   runRunnableNodesByDependencyOrder,
   settleSequential
 } from "./nodeRunner.js";
+import { run3DModelGeneration, runCharacterSheetGeneration, runImageModelGeneration } from "./nodeRunners/mediaModels.js";
+import { runTextNodeProcessing } from "./nodeRunners/textModels.js";
 import { buildProjectOutputItems } from "./projectOutputs.js";
 import { GLTFLoader, THREE, cloneSkeleton, degreesToRadians, lerp, radiansToDegrees, useThreeRuntimeReady } from "./threeRuntime.js";
 import { loadNodeEditorDraft, nodeEditorDraftSnapshot, useNodeEditorDraftPersistence } from "./useNodeEditorDraft.js";
@@ -2096,7 +2098,8 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
               prompt,
               portrait,
               wardrobe,
-              workflowContext: workflowRequestContext()
+              workflowContext: workflowRequestContext(),
+              characterTag: characterTag(node)
             });
             return {
               wardrobeId: characterWardrobeVariantId(wardrobe),
@@ -3170,7 +3173,13 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
       }
 
       if (currentNode.type === "text") {
-        const processed = await runTextNodeProcessing({ node: currentNode, incoming, workflowContext: requestContext });
+        const processed = await runTextNodeProcessing({
+          node: currentNode,
+          incoming,
+          workflowContext: requestContext,
+          sourceLabel,
+          promptPiecesForSource
+        });
         updateNode(currentNode.id, {
           status: "complete",
           error: "",
@@ -3272,8 +3281,11 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
       if (currentNode.type === "model3d") {
         const generated = await run3DModelGeneration({
           node: currentNode,
-          incoming,
-          workflowContext: requestContext
+          imageViewUrls: connected3DViewUrls(incoming),
+          workflowContext: requestContext,
+          model: currentNode.data.model || model3DNames.hunyuanPro,
+          generateType: normalizeModel3DGenerateType(currentNode.data.generateType),
+          faceCount: model3DFaceCount(currentNode.data.faceCount)
         });
         const { resultItems, firstNewIndex } = appendedNodeResultState(previous3DResults, [generated], "model3d");
         updateNode(currentNode.id, {
@@ -8254,55 +8266,6 @@ function connectedAssetItems(items = []) {
     .filter(Boolean);
 }
 
-function connectedTextInputItems(items = []) {
-  return items
-    .map(({ source }) => ({
-      label: sourceLabel(source),
-      text: ["plainText", "text"].includes(source.type) ? source.data.resultText || source.data.text : source.data.resultText || source.data.prompt || source.data.title
-    }))
-    .filter((item) => item.text);
-}
-
-function connectedStyleInputItems(items = []) {
-  return items
-    .map(({ source }) => ({
-      label: `Style: ${sourceLabel(source)}`,
-      text: promptPiecesForSource(source).join("\n\n")
-    }))
-    .filter((item) => item.text);
-}
-
-function connectedMediaInputItems(items = [], mediaType) {
-  return items
-    .map(({ source }) => {
-      if (!source.data.resultUrl) return null;
-      return {
-        url: source.data.resultUrl,
-        label: sourceLabel(source),
-        type: mediaType
-      };
-    })
-    .filter(Boolean);
-}
-
-async function runTextNodeProcessing({ node, incoming, projectId, projectName, workflowContext }) {
-  const { response, data } = await nodeApi.processText({
-    text: node.data.text,
-    textInputs: [...connectedTextInputItems(incoming.textIn), ...connectedStyleInputItems(incoming.styleIn)],
-    imageInputs: connectedMediaInputItems(incoming.imageIn, "image"),
-    videoInputs: connectedMediaInputItems(incoming.videoIn, "video"),
-    ...workflowContextPayload(workflowContext, projectId, projectName),
-    nodeId: node.id,
-    nodeTitle: node.data.title
-  });
-  if (!response.ok) throw new Error(data.error || "Text processing failed.");
-
-  return {
-    text: data.text || "",
-    model: data.model || ""
-  };
-}
-
 function connectedAssetLabels(items = []) {
   return items
     .filter(({ source }) => source.data.resultUrl)
@@ -8644,30 +8607,6 @@ function formatTimelineTime(seconds) {
   return `${minutes}:${wholeSeconds.toString().padStart(2, "0")}.${tenths}`;
 }
 
-async function runImageModelGeneration({ node, prompt, aspectRatio, imagePromptItems, projectId, projectName, workflowContext, index }) {
-  const { response, data } = await nodeApi.generateImage({
-    prompt,
-    model: node.data.model,
-    aspectRatio: aspectRatio || node.data.aspectRatio,
-    requestedAspectRatio: node.data.aspectRatio,
-    resolution: node.data.resolution,
-    imagePromptUrls: imagePromptItems.map((item) => item.url),
-    imagePromptLabels: imagePromptItems.map((item) => item.label),
-    ...workflowContextPayload(workflowContext, projectId, projectName),
-    nodeId: node.id,
-    nodeTitle: node.data.title
-  });
-  if (!response.ok) throw new Error(`Run ${index + 1}: ${data.error || "Image generation failed."}`);
-
-  return {
-    url: data.image.localUrl,
-    type: "image",
-    label: `Image ${index + 1}`,
-    text: data.text || "",
-    cost: data.cost
-  };
-}
-
 function normalizedWan27ReferenceDurationLabel(value) {
   const number = Math.min(10, Math.max(2, Math.round(Number(String(value || "").match(/\d+/)?.[0]) || 5)));
   return `${number} seconds`;
@@ -8681,61 +8620,6 @@ function normalizedWan27ReferenceResolution(value) {
 function normalizedWan27ReferenceAspectRatio(value) {
   const normalized = String(value || "16:9").match(/\d+:\d+/)?.[0] || "16:9";
   return wan27ReferenceAspectRatioOptions.includes(normalized) ? normalized : "16:9";
-}
-
-async function run3DModelGeneration({ node, incoming, projectId, projectName, workflowContext }) {
-  const imageViewUrls = connected3DViewUrls(incoming);
-  if (!imageViewUrls.front) throw new Error("Connect a front image to the 3D node.");
-
-  const { response, data } = await nodeApi.generate3d({
-    model: node.data.model || model3DNames.hunyuanPro,
-    imageViewUrls,
-    generateType: normalizeModel3DGenerateType(node.data.generateType),
-    enablePbr: Boolean(node.data.enablePbr),
-    faceCount: model3DFaceCount(node.data.faceCount),
-    ...workflowContextPayload(workflowContext, projectId, projectName),
-    nodeId: node.id,
-    nodeTitle: node.data.title
-  });
-  if (!response.ok) throw new Error(data.error || "3D generation failed.");
-
-  return {
-    url: data.model.localUrl,
-    type: "model3d",
-    label: data.model.label || data.model.fileName || "3D model",
-    text: data.text || "",
-    thumbnailUrl: data.thumbnail?.localUrl || "",
-    seed: data.seed,
-    cost: data.cost
-  };
-}
-
-async function runCharacterSheetGeneration({ node, prompt, portrait, wardrobe, projectId, projectName, workflowContext }) {
-  const references = [
-    { url: portrait.localUrl, label: "The Character portrait reference" },
-    ...(wardrobe?.localUrl ? [{ url: wardrobe.localUrl, label: "Selected wardrobe sheet" }] : [])
-  ];
-  const { response, data } = await nodeApi.generateImage({
-    prompt,
-    model: "OpenAI Image 2",
-    aspectRatio: "16:9",
-    resolution: "4K",
-    imagePromptUrls: references.map((item) => item.url),
-    imagePromptLabels: references.map((item) => item.label),
-    ...workflowContextPayload(workflowContext, projectId, projectName),
-    nodeId: node.id,
-    nodeTitle: `${node.data.title || "Character"} Character Sheet`
-  }, "Character sheet generation");
-  if (!response.ok) throw new Error(data.error || "Character sheet generation failed.");
-
-  return {
-    url: data.image.localUrl,
-    type: "image",
-    label: `@${characterTag(node)} Character Sheet`,
-    fileName: data.image.fileName,
-    text: data.text || "",
-    cost: data.cost
-  };
 }
 
 function connected3DViewUrls(incoming = {}) {
