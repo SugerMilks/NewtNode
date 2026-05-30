@@ -1,7 +1,4 @@
 import React from "react";
-import * as THREE from "three";
-import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-import { clone as cloneSkeleton } from "three/examples/jsm/utils/SkeletonUtils.js";
 import {
   Box,
   Camera,
@@ -67,6 +64,66 @@ const nodeCatalog = nodeTypeDefinitions.map((definition) => ({
   ...definition,
   icon: nodeIcons[definition.type] || Box
 }));
+
+let THREE = null;
+let GLTFLoader = null;
+let cloneSkeleton = null;
+let threeRuntimePromise = null;
+
+function loadThreeRuntime() {
+  if (THREE && GLTFLoader && cloneSkeleton) {
+    return Promise.resolve({ THREE, GLTFLoader, cloneSkeleton });
+  }
+
+  if (!threeRuntimePromise) {
+    threeRuntimePromise = Promise.all([
+      import("three"),
+      import("three/examples/jsm/loaders/GLTFLoader.js"),
+      import("three/examples/jsm/utils/SkeletonUtils.js")
+    ]).then(([threeModule, loaderModule, skeletonModule]) => {
+      THREE = threeModule;
+      GLTFLoader = loaderModule.GLTFLoader;
+      cloneSkeleton = skeletonModule.clone;
+      return { THREE, GLTFLoader, cloneSkeleton };
+    });
+  }
+
+  return threeRuntimePromise;
+}
+
+function useThreeRuntimeReady() {
+  const [ready, setReady] = React.useState(() => Boolean(THREE && GLTFLoader && cloneSkeleton));
+
+  React.useEffect(() => {
+    if (ready) return undefined;
+    let cancelled = false;
+    loadThreeRuntime()
+      .then(() => {
+        if (!cancelled) setReady(true);
+      })
+      .catch((error) => {
+        if (!cancelled) console.warn("Three.js runtime failed to load.", error);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [ready]);
+
+  return ready;
+}
+
+function degreesToRadians(value) {
+  return (finiteNumber(value, 0) * Math.PI) / 180;
+}
+
+function radiansToDegrees(value) {
+  return (finiteNumber(value, 0) * 180) / Math.PI;
+}
+
+function lerp(start, end, alpha) {
+  return start + (end - start) * alpha;
+}
 
 const portColors = {
   prompt: "#f0c83b",
@@ -4783,6 +4840,7 @@ function StyleCollage({ images, locked, outputUrl, outputLabel = moodBoardOutput
 }
 
 function CameraControlViewport({ imageUrl, horizontalAngle, verticalAngle, zoom, onChange }) {
+  const threeReady = useThreeRuntimeReady();
   const mountRef = React.useRef(null);
   const planeMaterialRef = React.useRef(null);
   const cameraMarkerRef = React.useRef(null);
@@ -4796,7 +4854,7 @@ function CameraControlViewport({ imageUrl, horizontalAngle, verticalAngle, zoom,
 
   React.useEffect(() => {
     const mount = mountRef.current;
-    if (!mount) return undefined;
+    if (!mount || !threeReady) return undefined;
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x161616);
@@ -4864,9 +4922,9 @@ function CameraControlViewport({ imageUrl, horizontalAngle, verticalAngle, zoom,
 
     function updateCameraMarker() {
       const state = previewStateRef.current;
-      const azimuth = THREE.MathUtils.degToRad(state.horizontalAngle);
-      const elevation = THREE.MathUtils.degToRad(state.verticalAngle);
-      const distance = THREE.MathUtils.lerp(2.25, 1.05, clamp(state.zoom, 0, 10) / 10);
+      const azimuth = degreesToRadians(state.horizontalAngle);
+      const elevation = degreesToRadians(state.verticalAngle);
+      const distance = lerp(2.25, 1.05, clamp(state.zoom, 0, 10) / 10);
       const groundRadius = distance * Math.cos(elevation);
 
       cameraMarker.position.set(Math.sin(azimuth) * groundRadius, -0.24 + Math.sin(elevation) * 1.35, Math.cos(azimuth) * groundRadius);
@@ -4931,11 +4989,11 @@ function CameraControlViewport({ imageUrl, horizontalAngle, verticalAngle, zoom,
       renderer.dispose();
       renderer.domElement.remove();
     };
-  }, []);
+  }, [threeReady]);
 
   React.useEffect(() => {
     const material = planeMaterialRef.current;
-    if (!material) return undefined;
+    if (!material || !threeReady) return undefined;
 
     let cancelled = false;
     const previousMap = material.map;
@@ -4965,7 +5023,7 @@ function CameraControlViewport({ imageUrl, horizontalAngle, verticalAngle, zoom,
     return () => {
       cancelled = true;
     };
-  }, [imageUrl]);
+  }, [imageUrl, threeReady]);
 
   return (
     <div className="camera-viewport-shell" onPointerDown={(event) => event.stopPropagation()}>
@@ -5320,7 +5378,7 @@ function ComposerEditorModal({ node, incoming = {}, onClose, onUpdate, onCapture
                   </label>
                 )}
                 <ComposerVectorRange label="Location" value={{ x: selectedObject.x, y: selectedObject.y, z: selectedObject.z }} step="0.05" onChange={(value) => patchSelected({ x: value.x, y: value.y, z: value.z })} />
-                <ComposerRotationVectorRange label="Rotation" value={{ x: THREE.MathUtils.degToRad(finiteNumber(selectedObject.rotX, 0)), y: THREE.MathUtils.degToRad(finiteNumber(selectedObject.rotY, 0)), z: THREE.MathUtils.degToRad(finiteNumber(selectedObject.rotZ, 0)) }} onChange={(value) => patchSelected({ rotX: THREE.MathUtils.radToDeg(value.x), rotY: THREE.MathUtils.radToDeg(value.y), rotZ: THREE.MathUtils.radToDeg(value.z) })} />
+                <ComposerRotationVectorRange label="Rotation" value={{ x: degreesToRadians(finiteNumber(selectedObject.rotX, 0)), y: degreesToRadians(finiteNumber(selectedObject.rotY, 0)), z: degreesToRadians(finiteNumber(selectedObject.rotZ, 0)) }} onChange={(value) => patchSelected({ rotX: radiansToDegrees(value.x), rotY: radiansToDegrees(value.y), rotZ: radiansToDegrees(value.z) })} />
                 <ComposerRange label="Scale" step="0.05" value={selectedObject.scale} onChange={(value) => patchSelected({ scale: value })} />
 
                 {selectedKind === "maquette" ? (
@@ -5543,7 +5601,7 @@ function ComposerRange({ label, value, min, max, step, onChange }) {
 }
 
 function ComposerRotationRange({ label, value, onChange }) {
-  const degrees = THREE.MathUtils.radToDeg(finiteNumber(value, 0));
+  const degrees = radiansToDegrees(finiteNumber(value, 0));
   return (
     <ComposerRange
       label={label}
@@ -5551,7 +5609,7 @@ function ComposerRotationRange({ label, value, onChange }) {
       max="360"
       step="1"
       value={degrees}
-      onChange={(nextDegrees) => onChange(THREE.MathUtils.degToRad(nextDegrees))}
+      onChange={(nextDegrees) => onChange(degreesToRadians(nextDegrees))}
     />
   );
 }
@@ -5583,14 +5641,14 @@ function ComposerVectorRange({ label, value, step = "0.05", onChange }) {
 
 function ComposerRotationVectorRange({ label, value, onChange }) {
   const degrees = {
-    x: THREE.MathUtils.radToDeg(finiteNumber(value?.x, 0)),
-    y: THREE.MathUtils.radToDeg(finiteNumber(value?.y, 0)),
-    z: THREE.MathUtils.radToDeg(finiteNumber(value?.z, 0))
+    x: radiansToDegrees(finiteNumber(value?.x, 0)),
+    y: radiansToDegrees(finiteNumber(value?.y, 0)),
+    z: radiansToDegrees(finiteNumber(value?.z, 0))
   };
   const patchAxis = (axis) => (nextDegrees) => {
     onChange({
       ...value,
-      [axis]: THREE.MathUtils.degToRad(nextDegrees)
+      [axis]: degreesToRadians(nextDegrees)
     });
   };
 
@@ -5656,6 +5714,7 @@ function formatComposerControlValue(value, precision) {
 }
 
 const ComposerViewport = React.forwardRef(function ComposerViewport({ sceneData, selectedId, aspectRatio, showGuides, onCameraChange }, ref) {
+  const threeReady = useThreeRuntimeReady();
   const mountRef = React.useRef(null);
   const rendererRef = React.useRef(null);
   const sceneRef = React.useRef(null);
@@ -5669,8 +5728,9 @@ const ComposerViewport = React.forwardRef(function ComposerViewport({ sceneData,
   React.useEffect(() => {
     stateRef.current = { sceneData, selectedId, aspectRatio, showGuides };
     onCameraChangeRef.current = onCameraChange;
+    if (!threeReady) return;
     renderComposerViewport(rendererRef.current, sceneRef.current, cameraRef.current, sceneData, selectedId);
-  }, [sceneData, selectedId, aspectRatio, showGuides, onCameraChange]);
+  }, [sceneData, selectedId, aspectRatio, showGuides, onCameraChange, threeReady]);
 
   React.useImperativeHandle(
     ref,
@@ -5679,7 +5739,7 @@ const ComposerViewport = React.forwardRef(function ComposerViewport({ sceneData,
         const renderer = rendererRef.current;
         const scene = sceneRef.current;
         const camera = cameraRef.current;
-        if (!renderer || !scene || !camera) return "";
+        if (!renderer || !scene || !camera || !threeReady) return "";
         return renderComposerViewport(renderer, scene, camera, stateRef.current.sceneData, "", {
           showGrid: false,
           showSelection: false,
@@ -5692,12 +5752,12 @@ const ComposerViewport = React.forwardRef(function ComposerViewport({ sceneData,
         });
       }
     }),
-    []
+    [threeReady]
   );
 
   React.useEffect(() => {
     const mount = mountRef.current;
-    if (!mount) return undefined;
+    if (!mount || !threeReady) return undefined;
 
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(40, 16 / 9, 0.1, 100);
@@ -5764,8 +5824,8 @@ const ComposerViewport = React.forwardRef(function ComposerViewport({ sceneData,
 
         const cameraData = stateRef.current.sceneData.camera;
         const speed = keysRef.current.has("shift") ? 0.16 : 0.07;
-        const yaw = THREE.MathUtils.degToRad(cameraData.yaw);
-        const pitch = THREE.MathUtils.degToRad(cameraData.pitch);
+        const yaw = degreesToRadians(cameraData.yaw);
+        const pitch = degreesToRadians(cameraData.pitch);
         const forward = new THREE.Vector3(-Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
         const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
         const delta = new THREE.Vector3();
@@ -5841,7 +5901,7 @@ const ComposerViewport = React.forwardRef(function ComposerViewport({ sceneData,
       renderer.dispose();
       mount.innerHTML = "";
     };
-  }, []);
+  }, [threeReady]);
 
   return (
     <div className="composer-viewport-shell" style={{ aspectRatio: composerAspectRatioValue(aspectRatio), "--composer-aspect": composerAspectRatioNumber(aspectRatio) }} ref={mountRef}>
@@ -7812,6 +7872,7 @@ function resultDownloadFileName(item) {
 }
 
 function Model3DViewer({ url, label }) {
+  const threeReady = useThreeRuntimeReady();
   const hostRef = React.useRef(null);
   const [state, setState] = React.useState(url ? "loading" : "empty");
 
@@ -7819,6 +7880,10 @@ function Model3DViewer({ url, label }) {
     const host = hostRef.current;
     if (!host || !url) {
       setState("empty");
+      return undefined;
+    }
+    if (!threeReady) {
+      setState("loading");
       return undefined;
     }
 
@@ -7966,7 +8031,7 @@ function Model3DViewer({ url, label }) {
       renderer.dispose();
       host.innerHTML = "";
     };
-  }, [url]);
+  }, [url, threeReady]);
 
   return (
     <div className={`model-3d-viewer ${state}`} aria-label={label || "3D model viewer"} onPointerDown={(event) => event.stopPropagation()}>
@@ -11733,8 +11798,8 @@ function normalizedComposerScene(scene = null) {
   const cameraDistance = finiteNumber(camera.distance, fallback.camera.distance);
   const cameraTargetY = finiteNumber(camera.targetY, fallback.camera.targetY);
   const hasFreeCameraPosition = Number.isFinite(Number(camera.x)) && Number.isFinite(Number(camera.y)) && Number.isFinite(Number(camera.z));
-  const legacyPitch = THREE.MathUtils.degToRad(cameraPitch);
-  const legacyYaw = THREE.MathUtils.degToRad(cameraYaw);
+  const legacyPitch = degreesToRadians(cameraPitch);
+  const legacyYaw = degreesToRadians(cameraYaw);
   const legacyCameraPosition = {
     x: Math.sin(legacyYaw) * Math.cos(legacyPitch) * cameraDistance,
     y: cameraTargetY + Math.sin(legacyPitch) * cameraDistance,
@@ -11937,8 +12002,8 @@ function renderComposerViewport(renderer, scene, camera, sceneData, selectedId, 
   scene.background = new THREE.Color(0x111111);
 
   camera.fov = data.camera.fov;
-  const yaw = THREE.MathUtils.degToRad(data.camera.yaw);
-  const pitch = THREE.MathUtils.degToRad(data.camera.pitch);
+  const yaw = degreesToRadians(data.camera.yaw);
+  const pitch = degreesToRadians(data.camera.pitch);
   camera.position.set(data.camera.x, data.camera.y, data.camera.z);
   camera.rotation.order = "YXZ";
   camera.rotation.y = yaw;
@@ -12010,7 +12075,7 @@ function createComposerProp(prop) {
   const group = new THREE.Group();
   group.userData.id = prop.id;
   group.position.set(prop.x, prop.y + (prop.height * prop.scale) / 2, prop.z);
-  group.rotation.set(THREE.MathUtils.degToRad(prop.rotX), THREE.MathUtils.degToRad(prop.rotY), THREE.MathUtils.degToRad(prop.rotZ));
+  group.rotation.set(degreesToRadians(prop.rotX), degreesToRadians(prop.rotY), degreesToRadians(prop.rotZ));
   const mesh = new THREE.Mesh(
     createComposerPrimitiveGeometry(prop.primitive),
     new THREE.MeshStandardMaterial({ color: new THREE.Color(prop.color), roughness: 0.74 })
@@ -12038,7 +12103,7 @@ function createComposerImagePlane(plane, renderer, scene, camera, options = {}) 
   const group = new THREE.Group();
   group.userData.id = plane.id;
   group.position.set(plane.x, plane.y, plane.z);
-  group.rotation.set(THREE.MathUtils.degToRad(plane.rotX), THREE.MathUtils.degToRad(plane.rotY), THREE.MathUtils.degToRad(plane.rotZ));
+  group.rotation.set(degreesToRadians(plane.rotX), degreesToRadians(plane.rotY), degreesToRadians(plane.rotZ));
   group.scale.setScalar(plane.scale);
 
   const material = new THREE.MeshBasicMaterial({
@@ -12148,7 +12213,7 @@ function createComposerModelMaquette(maquette, asset) {
 
 function applyComposerObjectTransform(group, object) {
   group.position.set(object.x, object.y, object.z);
-  group.rotation.set(THREE.MathUtils.degToRad(object.rotX), THREE.MathUtils.degToRad(object.rotY), THREE.MathUtils.degToRad(object.rotZ));
+  group.rotation.set(degreesToRadians(object.rotX), degreesToRadians(object.rotY), degreesToRadians(object.rotZ));
   group.scale.setScalar(object.scale);
 }
 
