@@ -766,6 +766,10 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
   const undoStackRef = React.useRef([]);
   const clipboardRef = React.useRef(null);
   const unsavedPromptResolverRef = React.useRef(null);
+  const metadataLoadedRef = React.useRef(false);
+  const draftWriteTimerRef = React.useRef(null);
+  const pendingDraftSnapshotRef = React.useRef(null);
+  const saveInFlightRef = React.useRef(null);
   const savedDraft = React.useMemo(loadNodeEditorDraft, []);
   const nodesRef = React.useRef(savedDraft.nodes);
   const edgesRef = React.useRef(savedDraft.edges);
@@ -848,6 +852,36 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
     });
   }
 
+  function currentDraftSnapshot() {
+    return {
+      nodes,
+      edges,
+      groups,
+      viewport,
+      projectId,
+      projectName,
+      savedProjectName,
+      projectPackagePath
+    };
+  }
+
+  function flushDraftSnapshot() {
+    if (draftWriteTimerRef.current) {
+      window.clearTimeout(draftWriteTimerRef.current);
+      draftWriteTimerRef.current = null;
+    }
+
+    const snapshot = pendingDraftSnapshotRef.current;
+    if (!snapshot) return;
+
+    try {
+      localStorage.setItem(nodeDraftStorageKey, JSON.stringify(snapshot));
+      pendingDraftSnapshotRef.current = null;
+    } catch {
+      // Local persistence should never interrupt the node editor.
+    }
+  }
+
   React.useEffect(() => {
     nodesRef.current = nodes;
   }, [nodes]);
@@ -881,29 +915,27 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
   }, [active, nodes, groups, viewport]);
 
   React.useEffect(() => {
+    if (!active || metadataLoadedRef.current) return;
+    metadataLoadedRef.current = true;
     loadProjects();
     loadOutputHistory();
-  }, []);
+  }, [active]);
 
   React.useEffect(() => {
-    try {
-      localStorage.setItem(
-        nodeDraftStorageKey,
-        JSON.stringify({
-          nodes,
-          edges,
-          groups,
-          viewport,
-          projectId,
-          projectName,
-          savedProjectName,
-          projectPackagePath
-        })
-      );
-    } catch {
-      // Local persistence should never interrupt the node editor.
+    pendingDraftSnapshotRef.current = currentDraftSnapshot();
+    if (draftWriteTimerRef.current) {
+      window.clearTimeout(draftWriteTimerRef.current);
     }
+    draftWriteTimerRef.current = window.setTimeout(flushDraftSnapshot, 300);
   }, [nodes, edges, groups, viewport, projectId, projectName, savedProjectName, projectPackagePath]);
+
+  React.useEffect(() => {
+    window.addEventListener("pagehide", flushDraftSnapshot);
+    return () => {
+      window.removeEventListener("pagehide", flushDraftSnapshot);
+      flushDraftSnapshot();
+    };
+  }, []);
 
   React.useEffect(() => {
     if (!active) return undefined;
@@ -3202,18 +3234,28 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
   }
 
   async function saveProject() {
-    if (localWorkflowHandleRef.current) {
-      try {
-        setSaveStatus("Saving local workflow...");
-        await saveProjectToLocalHandle(localWorkflowHandleRef.current);
-      } catch (error) {
-        setSaveStatus(error.message || "Could not save workflow JSON.");
-        return false;
-      }
-      return true;
-    }
+    if (saveInFlightRef.current) return saveInFlightRef.current;
 
-    return saveProjectToSavedWorkflows();
+    saveInFlightRef.current = (async () => {
+      if (localWorkflowHandleRef.current) {
+        try {
+          setSaveStatus("Saving local workflow...");
+          await saveProjectToLocalHandle(localWorkflowHandleRef.current);
+        } catch (error) {
+          setSaveStatus(error.message || "Could not save workflow JSON.");
+          return false;
+        }
+        return true;
+      }
+
+      return saveProjectToSavedWorkflows();
+    })();
+
+    try {
+      return await saveInFlightRef.current;
+    } finally {
+      saveInFlightRef.current = null;
+    }
   }
 
   function applyWorkflow(project, sourceLabel = "Loaded") {
