@@ -283,6 +283,7 @@ The 3D node establishes the standard for model generation nodes.
 Before committing node or UI changes:
 
 - Run `npm run build`.
+- Run `npm test` when pure helpers, workflow state, node runner scheduling, or geometry changed.
 - Run `node --check server/index.js` when the server changed.
 - Run `git status --short --branch` and confirm only intentional source/doc changes are staged. Runtime files under `server/data/`, `outputs/`, `uploads/`, and generated workflow JSON should stay ignored.
 - Confirm `/api/health` reports any new route flags.
