@@ -8,6 +8,7 @@
     "client": "vite",
     "server": "node --watch server/index.js",
     "build": "vite build",
+    "bundle:report": "node scripts/reportBundle.mjs",
     "preview": "vite preview --host 127.0.0.1",
     "test": "node --test"
   },
