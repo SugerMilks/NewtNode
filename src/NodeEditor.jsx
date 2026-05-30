@@ -62,6 +62,20 @@ import {
   outputItemFromDataTransfer
 } from "./mediaAssets.js";
 import { appendResultItems, existingResultItemsForNode, normalizedResultItems } from "./mediaResults.js";
+import {
+  clamp,
+  clampContextMenuPosition,
+  estimatedNodeHeight,
+  estimatedNodeRect,
+  estimatedNodeWidth,
+  graphBoundsForNodes,
+  groupToRect,
+  normalizeRect,
+  pointInRect,
+  positiveModulo,
+  rectsIntersect,
+  rectsOverlap
+} from "./nodeGeometry.js";
 import { nodeTypeDefinitions, nodeTypeForOutputItem, nodeTypeLabel } from "./nodeRegistry.js";
 import {
   appendedNodeResultState,
@@ -657,7 +671,6 @@ const initialEdges = [
   { id: "edge-2", from: { nodeId: "image-1", port: "imageOut" }, to: { nodeId: "image-model-1", port: "imagePromptIn" }, color: portColors.image }
 ];
 
-const contextMenuSize = { width: 190, height: 420, inset: 8 };
 const viewportScaleFloor = 0.0001;
 const maxZoom = 1.9;
 const previewBaseWidth = 330;
@@ -8629,48 +8642,6 @@ function composerMaquetteLabel(maquette = {}, index = 0) {
   return String(maquette.name || `Maquette ${index + 1}`).trim() || `Maquette ${index + 1}`;
 }
 
-function estimatedNodeWidth(type) {
-  if (type === "imageModel" || type === "videoModel" || type === "utility" || type === "model3d") return 370;
-  if (type === "imageModel" || type === "videoModel" || type === "utility") return 370;
-  if (type === "character") return 760;
-  if (type === "camera") return 360;
-  if (type === "transfer" || type === "preview") return 335;
-  return 310;
-}
-
-function estimatedNodeHeight(type) {
-  if (type === "character") return 520;
-  if (type === "composer") return 410;
-  if (type === "imageModel" || type === "videoModel" || type === "utility" || type === "model3d") return 430;
-  if (type === "transfer" || type === "preview") return 360;
-  if (type === "camera") return 380;
-  return 270;
-}
-
-function estimatedNodeRect(node, padding = 0) {
-  return {
-    left: Number(node?.x || 0) - padding,
-    top: Number(node?.y || 0) - padding,
-    right: Number(node?.x || 0) + estimatedNodeWidth(node?.type) + padding,
-    bottom: Number(node?.y || 0) + estimatedNodeHeight(node?.type) + padding
-  };
-}
-
-function graphBoundsForNodes(nodes = []) {
-  const rects = nodes.map((node) => estimatedNodeRect(node));
-  if (!rects.length) return { left: 0, top: 0, right: 0, bottom: 0 };
-  return {
-    left: Math.min(...rects.map((rect) => rect.left)),
-    top: Math.min(...rects.map((rect) => rect.top)),
-    right: Math.max(...rects.map((rect) => rect.right)),
-    bottom: Math.max(...rects.map((rect) => rect.bottom))
-  };
-}
-
-function rectsOverlap(first, second) {
-  return first.left < second.right && first.right > second.left && first.top < second.bottom && first.bottom > second.top;
-}
-
 function configTitleFallback(type) {
   return nodeTypeLabel(type);
 }
@@ -10453,32 +10424,6 @@ function drawImageCover(context, image, x, y, width, height) {
   context.drawImage(image, sourceX, sourceY, sourceWidth, sourceHeight, x, y, width, height);
 }
 
-function normalizeRect(start, current) {
-  return {
-    left: Math.min(start.x, current.x),
-    top: Math.min(start.y, current.y),
-    right: Math.max(start.x, current.x),
-    bottom: Math.max(start.y, current.y)
-  };
-}
-
-function rectsIntersect(first, second) {
-  return first.left <= second.right && first.right >= second.left && first.top <= second.bottom && first.bottom >= second.top;
-}
-
-function pointInRect(rect, point) {
-  return point.x >= rect.left && point.x <= rect.right && point.y >= rect.top && point.y <= rect.bottom;
-}
-
-function groupToRect(group) {
-  return {
-    left: group.x,
-    top: group.y,
-    right: group.x + group.width,
-    bottom: group.y + group.height
-  };
-}
-
 function sameStringList(first = [], second = []) {
   if (first.length !== second.length) return false;
   return first.every((value, index) => value === second[index]);
@@ -11767,28 +11712,3 @@ function roundPreviewScale(value) {
   return Math.round(value * 100) / 100;
 }
 
-function clamp(value, min, max) {
-  return Math.min(max, Math.max(min, value));
-}
-
-function clampContextMenuPosition(x, y, rect, menuSize = contextMenuSize) {
-  const width = positiveDimension(menuSize.width, contextMenuSize.width);
-  const height = positiveDimension(menuSize.height, contextMenuSize.height);
-  const maxX = Math.max(contextMenuSize.inset, rect.width - width - contextMenuSize.inset);
-  const maxY = Math.max(contextMenuSize.inset, rect.height - height - contextMenuSize.inset);
-
-  return {
-    x: clamp(x, contextMenuSize.inset, maxX),
-    y: clamp(y, contextMenuSize.inset, maxY)
-  };
-}
-
-function positiveDimension(value, fallback) {
-  const number = Number(value);
-  return Number.isFinite(number) && number > 0 ? number : fallback;
-}
-
-function positiveModulo(value, divisor) {
-  if (!divisor) return 0;
-  return ((value % divisor) + divisor) % divisor;
-}
