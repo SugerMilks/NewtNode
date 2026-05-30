@@ -19,10 +19,35 @@ Use this quick pass before implementing a feature, and again before committing i
 
 - Read the relevant standards in this document first.
 - Identify which surfaces the feature touches: node catalog, node data, ports, run order, backend routes, asset persistence, stats, saved workflows, and UI states.
+- Use the code ownership map below before editing `NodeEditor.jsx`; prefer the focused helper modules for pure logic, persistence, media handling, and API calls.
 - Prefer existing helpers and patterns before adding a new storage, request, preview, or result shape.
 - Preserve old saved workflows with normalization or migration when fields, ports, node types, or asset URLs change.
 - Keep generated files and copied dependencies inside the current workflow package when a package is attached.
 - Update this document when the feature intentionally changes one of these standards.
+
+## Refactored Code Ownership
+
+`NodeEditor.jsx` remains the canvas/UI orchestrator, but new work should not default to adding more pure logic there. Keep reusable logic in the smallest existing module that owns the concern.
+
+| Area | Primary files | Standard |
+| --- | --- | --- |
+| API clients | `src/api/newtApi.js` | Add browser-side route wrappers here instead of scattering raw `fetch` calls. |
+| Node registry | `src/nodeRegistry.js`, `src/NodeEditor.jsx` icon map | Add catalog definitions in `nodeRegistry.js`; add only the display icon mapping in `NodeEditor.jsx`. |
+| Node config/defaults/normalization | `src/NodeEditor.jsx` | `getNodeConfig`, `createDefaultNodeData`, and `normalizeCurrentNode` still live here. Keep backward-compatible migrations close to these functions until they are deliberately extracted. |
+| Run scheduling and result state | `src/nodeRunner.js` | Batch counts, batch result aggregation, selected-node dependency scheduling, and run status text belong here. Node-specific API calls can still live near `runNode` until moved as a complete provider pass. |
+| Media drag/drop and imported asset shape | `src/mediaAssets.js` | Output-rail drag payloads, external file type detection, file-to-node mapping, and media accept rules live here. |
+| Result items | `src/mediaResults.js` | Normalize, append, label, and download result items here. Do not hand-roll result array merging in node run branches. |
+| Preview/result UI | `src/components/MediaViews.jsx` | Shared previews, result panes, project output drawer, output lightbox, and 3D viewer live here. |
+| Project output rail data | `src/projectOutputs.js` | Build and filter project output rail items here; keep filesystem/history filtering out of render code. |
+| Canvas geometry | `src/nodeGeometry.js` | Node bounds, graph bounds, rectangle math, menu clamping, and viewport modulo helpers live here. |
+| Canvas media utilities | `src/canvasMedia.js` | Canvas-to-blob, browser image loading, cover drawing, and mood-board collage layout live here. |
+| Color ID matte helpers | `src/colorIdMatte.js` | Color normalization, matte preview rendering, sample radius/tolerance bounds, and matte run item normalization live here. |
+| Three.js runtime | `src/threeRuntime.js` | Lazy Three/GLTF loading and shared 3D math helpers live here. |
+| Workflow persistence | `src/useWorkflowPersistence.js` | Save, Save As, Open, Import, unsaved-change prompts, Recent workflows updates, and workflow status messages live here. |
+| Draft persistence | `src/useNodeEditorDraft.js` | Browser draft loading, snapshotting, and debounced local draft writes live here. |
+| Workflow files/session/state | `src/workflowFiles.js`, `src/workflowSession.js`, `src/workflowPreferences.js`, `src/workflowContext.js`, `src/workflowState.js` | File document shape, display paths, package/request context, picker preferences, graph cloning/remapping/fingerprints, deduping, and stale runtime cleanup live here. |
+
+When adding a new feature, put pure helpers in one of these modules or create a similarly focused module. `NodeEditor.jsx` should coordinate React state, node rendering, event handlers, and node-specific orchestration, not become the home for reusable algorithms.
 
 ## Current Media Types
 
@@ -52,15 +77,15 @@ If a new media type is added, update this table, `portColors`, preview logic, st
 
 Every new node type should touch the same core surfaces unless there is a clear reason not to.
 
-- Add it to `nodeCatalog` with a concise label and lucide icon.
+- Add it to `nodeTypeDefinitions` in `src/nodeRegistry.js` with a concise label, and add the lucide icon mapping in `NodeEditor.jsx`.
 - Add `getNodeConfig(type)` with all input and output ports.
 - Add defaults in `createDefaultNodeData`.
 - Add normalization in `normalizeCurrentNode` so saved workflows remain stable.
 - Add connection rules in `getConnectionError`.
 - Add auto-connect behavior in `preferredAutoInputPorts` and `autoConnectionOutputKind`.
 - Add edge migration/color handling in `normalizeEdgeForCurrentGraph` when needed.
-- Add run behavior in `runNode` and a focused `runXGeneration` helper for API calls.
-- Add result item typing through `normalizedResultItems` and `appendResultItems`.
+- Add run behavior in `runNode`, using `nodeRunner.js` helpers for batch/result state and a focused `runXGeneration` helper for API calls.
+- Add result item typing through `normalizedResultItems`, `appendResultItems`, and `appendedNodeResultState`.
 - Add preview media support through `previewMediaType` and `connectedPreviewSources`.
 - Add backend route support and a health route flag when the node calls the local server.
 - Add history and stats tracking if the node spends money or produces media.
@@ -108,7 +133,9 @@ Nodes should feel like they belong to the same editor.
 - Generated outputs should have a node-level download affordance when possible.
 - 3D outputs should be displayed with the shared Three.js GLTF viewer.
 - If a node returns multiple outputs, store them in `resultItems` with explicit `type`, `url`, `label`, and optional `cost`.
+- Result item normalization and append behavior belongs in `src/mediaResults.js` and `src/nodeRunner.js`; do not duplicate result merging logic inside individual node branches.
 - The project output rail should show recent local outputs from the current graph and matching history only. Include `/outputs/<workflow-name>/...` and packaged `/workflow-assets/<workflow-id>/outputs/...` URLs; do not add absolute machine-local paths or browser object URLs.
+- Project output rail data belongs in `src/projectOutputs.js`; shared preview/result UI belongs in `src/components/MediaViews.jsx`.
 - Dragging from the output rail into a compatible node should reuse the existing local output URL instead of re-uploading or copying the asset. Keep the imported asset shape aligned with normal uploaded assets so saved workflows remain portable.
 - Dragging from the output rail onto the canvas should create a matching media node in place. Dragging external files onto the canvas should import supported media into the current workflow package/app storage and create matching Image, Video, Audio, 3D, or Text nodes; text files store file contents in the Text node.
 - Double-clicking an output rail thumbnail should open a lightweight full-size preview modal instead of expanding the rail.
@@ -116,6 +143,7 @@ Nodes should feel like they belong to the same editor.
 ## Run And Dependency Standards
 
 - `Run All` must respect dependencies.
+- Selected-node dependency scheduling belongs in `src/nodeRunner.js`; `NodeEditor.jsx` should pass callbacks for UI status and skipped-node updates.
 - Prompt/Text processing runs before media generation.
 - Image-producing nodes run before nodes that depend on images.
 - 3D nodes should run after their image dependencies are available.
@@ -172,7 +200,9 @@ Saved workflows are long-lived project files. Changes must avoid breaking them.
 - Save, Save As, Open, and Import live under the left toolbar File menu. Open replaces the current graph; Import merges the selected workflow into the current graph.
 - When a workflow replacement would discard unsaved graph or project-name changes, prompt with Save, Don't Save, and Cancel. Save writes never-saved workflows to the local app saved-workflows folder.
 - Ctrl+S and Cmd+S save the current workflow. If it has never been saved, use the default local saved-workflows registry rather than requiring Save As.
-- The saved workflow dropdown behaves as a Recent Files list backed by the local server registry, not as a live scan of every JSON file on disk. The trash action removes the workflow from the dropdown only; it must not delete the local registry JSON, packaged workflow JSON, or external workflow JSON from disk. Re-saving or re-opening a workflow can register it in the dropdown again.
+- The Recent workflows dropdown behaves as a Recent Files list backed by the local server registry, not as a live scan of every JSON file on disk. The trash action removes the workflow from the dropdown only; it must not delete the local registry JSON, packaged workflow JSON, or external workflow JSON from disk. Re-saving or re-opening a workflow can register it in the dropdown again.
+- Save/Open/Import orchestration belongs in `src/useWorkflowPersistence.js`; workflow document construction and display paths belong in `src/workflowFiles.js`; graph fingerprints, cloning, deduping, import remapping, and stale runtime cleanup belong in `src/workflowState.js`.
+- The dirty/unsaved fingerprint includes nodes, edges, groups, project name, and package path. It intentionally excludes viewport pan/zoom.
 - Add normalization for new node fields.
 - Preserve unknown data fields when normalizing unless they are unsafe runtime state.
 - Migrate renamed node types or ports.
@@ -180,6 +210,8 @@ Saved workflows are long-lived project files. Changes must avoid breaking them.
 - Keep `resultItems`, `resultUrl`, and selected result indexes compatible with older workflows.
 - Store reusable assets under `public/models` or `public/models/poses` only when they should be versioned with the repo.
 - Store unpackaged generated outputs under `/outputs/<workflow-name>/`, unpackaged uploads under `/uploads/<workflow-name>/`, unpackaged helper dependencies under `/outputs/<workflow-name>/dependencies/`, and registry copies of saved workflows under `/saved_workflows`.
+- Treat `/saved_workflows/inputs`, `/saved_workflows/outputs`, and `/saved_workflows/dependencies` as local app storage for copied/generated assets. Keep those media files ignored by git; only `.gitkeep` placeholders should be tracked.
+- Treat `server/data/*.json`, including `recent-workflows.json` and index files, as local runtime state. These files should be ignored by git and never used as source fixtures.
 
 ## Workflow Package Standards
 
@@ -202,7 +234,7 @@ Portable packages are the default Save As shape for workflows that need to move 
 - `outputs/` contains generated media and explicit node outputs.
 - `dependencies/` contains derived helper assets needed to rerun or inspect the graph, such as padded frames, composed mood boards, masks, and other intermediate support files that are not primary user uploads or final outputs.
 - `.newtnode/manifest.json` records package metadata and copied asset entries. It should help diagnose missing assets without becoming required runtime state. Keep the package root visually focused on the workflow JSON and asset folders.
-- A packaged workflow should still appear in the saved workflow dropdown through the local `/saved_workflows` registry copy.
+- A packaged workflow should still appear in the Recent workflows dropdown through the local `/saved_workflows` registry copy.
 - Save updates the attached package in place. Save As copies the graph and its current local assets into the chosen package folder.
 - Once a package is attached, upload and generation requests must include the workflow package context so new files are written into that package.
 - Packaged assets must be served through `/workflow-assets/<workflow-id>/...`.
@@ -250,6 +282,7 @@ Before committing node or UI changes:
 
 - Run `npm run build`.
 - Run `node --check server/index.js` when the server changed.
+- Run `git status --short --branch` and confirm only intentional source/doc changes are staged. Runtime files under `server/data/`, `outputs/`, `uploads/`, and generated workflow JSON should stay ignored.
 - Confirm `/api/health` reports any new route flags.
 - Check that existing saved workflows still load.
 - Check that new ports connect, reject incompatible edges, and auto-connect correctly.

@@ -6,9 +6,13 @@ dist/
 uploads/*
 outputs/*
 saved_workflows/*.json
+saved_workflows/inputs/
+saved_workflows/outputs/
+saved_workflows/dependencies/
 saved_workflows/.*.tmp
 server/data/history.json
 server/data/node-projects.json
+server/data/recent-workflows.json
 server/data/*-index.json
 server/data/.*.tmp
 server/data/*.log
