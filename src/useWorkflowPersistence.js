@@ -470,7 +470,7 @@ export function useWorkflowPersistence({
     try {
       if (!(await guardUnsavedWorkflowChange("load another workflow"))) return;
       const selectedProject = projects.find((project) => project.id === id || project.fileName === id);
-      const fileName = selectedProject?.fileName || id;
+      const fileName = selectedProject?.registryFileName || selectedProject?.fileName || id;
       const project = await workflowApi.open(fileName);
       applyWorkflow(project, "Loaded");
     } catch (error) {

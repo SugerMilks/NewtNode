@@ -35,7 +35,8 @@ const falDebugLogPath = path.join(dataDir, "fal-debug.log");
 const nodeProjectsPath = path.join(dataDir, "node-projects.json");
 const historyIndexPath = path.join(dataDir, "history-index.json");
 const workflowIndexPath = path.join(dataDir, "workflow-index.json");
-const hiddenWorkflowsPath = path.join(dataDir, "hidden-workflows.json");
+const recentWorkflowsPath = path.join(dataDir, "recent-workflows.json");
+const legacyHiddenWorkflowsPath = path.join(dataDir, "hidden-workflows.json");
 const moodBoardOutputFileName = "MOOD_BOARD.png";
 const maxHistoryItems = 500;
 let historyWriteQueue = Promise.resolve();
@@ -442,7 +443,7 @@ app.get("/api/saved-workflows/:fileName", async (req, res) => {
       return res.status(400).json({ error: "Invalid workflow file name." });
     }
     const workflows = await readSavedWorkflows();
-    const workflow = workflows.find((item) => item.fileName === fileName);
+    const workflow = workflows.find((item) => item.fileName === fileName || item.registryFileName === fileName);
 
     if (!workflow) {
       return res.status(404).json({ error: "Workflow not found." });
@@ -455,7 +456,7 @@ app.get("/api/saved-workflows/:fileName", async (req, res) => {
 app.post("/api/saved-workflows", async (req, res) => {
   await timedApi("workflows:save", async () => {
     try {
-      const workflows = await readSavedWorkflows({ includeHidden: true });
+      const workflows = await readSavedWorkflows({ includeAll: true });
       const now = new Date().toISOString();
       const id = String(req.body.id || randomUUID()).trim();
       const name = String(req.body.name || "Untitled node project").trim() || "Untitled node project";
@@ -506,16 +507,10 @@ app.delete("/api/saved-workflows/:fileName", async (req, res) => {
   if (!fileName) {
     return res.status(400).json({ error: "Invalid workflow file name." });
   }
-  const filePath = path.join(savedWorkflowsDir, fileName);
 
-  if (!existsSync(filePath)) {
-    return res.status(404).json({ error: "Workflow not found." });
-  }
-
-  await hideSavedWorkflowFileName(fileName);
+  await removeRecentWorkflowFileName(fileName);
   await rebuildWorkflowIndex().catch(() => {});
-  const workflows = await readSavedWorkflows();
-  res.json(workflows.map(({ graph, ...workflow }) => workflow));
+  res.json(await readSavedWorkflowSummaries());
 });
 
 app.get("/api/storage/diagnostics", async (_req, res) => {
@@ -3690,7 +3685,7 @@ async function hydrateWorkflowPackage(workflow) {
 }
 
 async function findRegisteredWorkflowPackage(workflowId) {
-  const workflows = await readSavedWorkflows({ includeHidden: true });
+  const workflows = await readSavedWorkflows({ includeAll: true });
   return workflows.find((workflow) => String(workflow.id || "") === String(workflowId || "") && workflow.packagePath);
 }
 
@@ -4387,18 +4382,19 @@ async function readComposerPoses() {
   return poses.sort((first, second) => first.name.localeCompare(second.name));
 }
 
-async function readSavedWorkflows({ includeHidden = false } = {}) {
+async function readSavedWorkflows({ includeAll = false } = {}) {
   await mkdir(savedWorkflowsDir, { recursive: true });
   await migrateLegacyNodeProjectsToSavedWorkflows();
-  const workflows = await readSavedWorkflowFiles({ includeHidden });
-  return workflows.sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+  const workflowFileNames = includeAll ? null : await readRecentWorkflowFileNames();
+  const workflows = await readSavedWorkflowFiles({ fileNames: workflowFileNames });
+  return includeAll ? workflows.sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""))) : workflows;
 }
 
 async function migrateLegacyNodeProjectsToSavedWorkflows() {
   const legacyProjects = await readNodeProjects();
   if (!legacyProjects.length) return false;
 
-  const workflows = await readSavedWorkflowSummaryFiles({ includeHidden: true });
+  const workflows = await readSavedWorkflowSummaryFiles();
   const existingIds = new Set(workflows.map((workflow) => String(workflow.id || "")));
   let migratedLegacyProject = false;
 
@@ -4444,9 +4440,9 @@ async function readSavedWorkflowSummaries() {
   return rebuildWorkflowIndex(source);
 }
 
-async function rebuildWorkflowIndex(source = null) {
-  const nextSource = source || await workflowIndexSource();
-  const items = await readSavedWorkflowSummaryFiles();
+async function rebuildWorkflowIndex(_source = null) {
+  const items = await readRecentWorkflowSummaries();
+  const nextSource = await workflowIndexSource();
   const index = {
     version: 1,
     generatedAt: new Date().toISOString(),
@@ -4457,53 +4453,58 @@ async function rebuildWorkflowIndex(source = null) {
   return items;
 }
 
-async function readSavedWorkflowSummaryFiles({ includeHidden = false } = {}) {
+async function readRecentWorkflowSummaries() {
+  const recentFileNames = await readRecentWorkflowFileNames();
+  const summaries = await readSavedWorkflowSummaryFiles({ fileNames: recentFileNames });
+  const foundKeys = new Set(summaries.map((summary) => workflowFileKey(summary.registryFileName || summary.fileName)));
+  const prunedFileNames = recentFileNames.filter((fileName) => foundKeys.has(workflowFileKey(fileName)));
+
+  if (prunedFileNames.length !== recentFileNames.length) {
+    await writeRecentWorkflowFileNames(prunedFileNames);
+  }
+
+  return summaries;
+}
+
+async function readSavedWorkflowSummaryFiles({ fileNames = null } = {}) {
   await mkdir(savedWorkflowsDir, { recursive: true });
-  const entries = await readdir(savedWorkflowsDir, { withFileTypes: true });
-  const hiddenWorkflowKeys = includeHidden ? new Set() : await readHiddenWorkflowFileKeys();
+  const registryFileNames = Array.isArray(fileNames) ? normalizeWorkflowFileNameList(fileNames) : await savedWorkflowRegistryFileNames();
   const summaries = [];
 
-  for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.toLowerCase().endsWith(".json")) continue;
-    if (hiddenWorkflowKeys.has(hiddenWorkflowKey(entry.name))) continue;
-
-    const filePath = path.join(savedWorkflowsDir, entry.name);
+  for (const registryFileName of registryFileNames) {
+    const filePath = path.join(savedWorkflowsDir, registryFileName);
     try {
       const [registryWorkflow, metadata] = await Promise.all([
         readJsonFile(filePath, null),
         fileMetadata(filePath)
       ]);
       if (!registryWorkflow) continue;
-      summaries.push(workflowMetadataSummary(registryWorkflow, entry.name, metadata));
+      summaries.push(workflowMetadataSummary(registryWorkflow, registryFileName, metadata));
     } catch {
       // Ignore malformed workflow files instead of blocking the whole loader.
     }
   }
 
-  return summaries.sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+  return Array.isArray(fileNames) ? summaries : summaries.sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
 }
 
-async function readSavedWorkflowFiles({ includeHidden = false } = {}) {
+async function readSavedWorkflowFiles({ fileNames = null } = {}) {
   await mkdir(savedWorkflowsDir, { recursive: true });
-  const entries = await readdir(savedWorkflowsDir, { withFileTypes: true });
-  const hiddenWorkflowKeys = includeHidden ? new Set() : await readHiddenWorkflowFileKeys();
+  const registryFileNames = Array.isArray(fileNames) ? normalizeWorkflowFileNameList(fileNames) : await savedWorkflowRegistryFileNames();
   const workflows = [];
 
-  for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.toLowerCase().endsWith(".json")) continue;
-    if (hiddenWorkflowKeys.has(hiddenWorkflowKey(entry.name))) continue;
-
+  for (const registryFileName of registryFileNames) {
     try {
-      const registryWorkflowPath = path.join(savedWorkflowsDir, entry.name);
+      const registryWorkflowPath = path.join(savedWorkflowsDir, registryFileName);
       const registryWorkflow = JSON.parse(await readFile(registryWorkflowPath, "utf8"));
       const workflow = await hydrateWorkflowPackage(registryWorkflow);
       workflows.push({
         ...workflow,
-        id: workflow.id || entry.name,
-        name: workflow.name || path.basename(entry.name, ".json"),
-        fileName: registryWorkflow.fileName || entry.name,
-        filePath: workflowFilePathForDisplay(workflow, entry.name),
-        registryFileName: entry.name,
+        id: workflow.id || registryFileName,
+        name: workflow.name || path.basename(registryFileName, ".json"),
+        fileName: registryWorkflow.fileName || registryFileName,
+        filePath: workflowFilePathForDisplay(workflow, registryFileName),
+        registryFileName,
         graph: {
           nodes: Array.isArray(workflow.graph?.nodes) ? workflow.graph.nodes : [],
           edges: Array.isArray(workflow.graph?.edges) ? workflow.graph.edges : [],
@@ -4519,37 +4520,70 @@ async function readSavedWorkflowFiles({ includeHidden = false } = {}) {
   return workflows;
 }
 
-async function readHiddenWorkflowFileKeys() {
-  const hidden = await readJsonFile(hiddenWorkflowsPath, null);
-  const fileNames = Array.isArray(hidden) ? hidden : Array.isArray(hidden?.fileNames) ? hidden.fileNames : [];
-  return new Set(fileNames.map(hiddenWorkflowKey).filter(Boolean));
+async function savedWorkflowRegistryFileNames() {
+  const entries = await readdir(savedWorkflowsDir, { withFileTypes: true }).catch(() => []);
+  return entries.filter((entry) => entry.isFile()).map((entry) => entry.name).filter((name) => safeWorkflowFileName(name));
 }
 
-async function writeHiddenWorkflowFileKeys(hiddenWorkflowKeys) {
-  await writeJsonAtomic(hiddenWorkflowsPath, {
+async function readRecentWorkflowFileNames() {
+  const recent = await readJsonFile(recentWorkflowsPath, null);
+  const recentFileNames = normalizeWorkflowFileNameList(Array.isArray(recent) ? recent : recent?.fileNames);
+  if (recent || recentFileNames.length) return recentFileNames;
+
+  const legacyHiddenKeys = await readLegacyHiddenWorkflowFileKeys();
+  const summaries = await readSavedWorkflowSummaryFiles();
+  const initialFileNames = summaries
+    .map((summary) => summary.registryFileName || summary.fileName)
+    .filter((fileName) => !legacyHiddenKeys.has(workflowFileKey(fileName)));
+  await writeRecentWorkflowFileNames(initialFileNames);
+  return initialFileNames;
+}
+
+async function writeRecentWorkflowFileNames(fileNames) {
+  await writeJsonAtomic(recentWorkflowsPath, {
     version: 1,
     updatedAt: new Date().toISOString(),
-    fileNames: [...hiddenWorkflowKeys].filter(Boolean).sort()
+    fileNames: normalizeWorkflowFileNameList(fileNames).slice(0, 100)
   });
 }
 
-async function hideSavedWorkflowFileName(fileName) {
-  const key = hiddenWorkflowKey(fileName);
-  if (!key) return;
-  const hiddenWorkflowKeys = await readHiddenWorkflowFileKeys();
-  hiddenWorkflowKeys.add(key);
-  await writeHiddenWorkflowFileKeys(hiddenWorkflowKeys);
+async function addRecentWorkflowFileName(fileName) {
+  const safeFileName = safeWorkflowFileName(fileName);
+  if (!safeFileName) return;
+  const currentFileNames = await readRecentWorkflowFileNames();
+  const key = workflowFileKey(safeFileName);
+  await writeRecentWorkflowFileNames([safeFileName, ...currentFileNames.filter((item) => workflowFileKey(item) !== key)]);
 }
 
-async function unhideSavedWorkflowFileName(fileName) {
-  const key = hiddenWorkflowKey(fileName);
+async function removeRecentWorkflowFileName(fileName) {
+  const key = workflowFileKey(fileName);
   if (!key) return;
-  const hiddenWorkflowKeys = await readHiddenWorkflowFileKeys();
-  if (!hiddenWorkflowKeys.delete(key)) return;
-  await writeHiddenWorkflowFileKeys(hiddenWorkflowKeys);
+  const currentFileNames = await readRecentWorkflowFileNames();
+  await writeRecentWorkflowFileNames(currentFileNames.filter((item) => workflowFileKey(item) !== key));
 }
 
-function hiddenWorkflowKey(fileName) {
+async function readLegacyHiddenWorkflowFileKeys() {
+  const hidden = await readJsonFile(legacyHiddenWorkflowsPath, null);
+  const fileNames = Array.isArray(hidden) ? hidden : Array.isArray(hidden?.fileNames) ? hidden.fileNames : [];
+  return new Set(fileNames.map(workflowFileKey).filter(Boolean));
+}
+
+function normalizeWorkflowFileNameList(fileNames = []) {
+  const seen = new Set();
+  const normalized = [];
+
+  for (const value of Array.isArray(fileNames) ? fileNames : []) {
+    const fileName = safeWorkflowFileName(value);
+    const key = workflowFileKey(fileName);
+    if (!fileName || seen.has(key)) continue;
+    seen.add(key);
+    normalized.push(fileName);
+  }
+
+  return normalized;
+}
+
+function workflowFileKey(fileName) {
   return safeWorkflowFileName(fileName).toLowerCase();
 }
 
@@ -4564,8 +4598,8 @@ async function writeWorkflowFile(workflow) {
     ...workflowData,
     fileName: safeWorkflowFileName(workflowData.fileName) || workflowFileNameForName(workflowData.name || "workflow")
   };
-  await unhideSavedWorkflowFileName(registryWorkflow.fileName);
   await writeJsonAtomic(path.join(savedWorkflowsDir, registryWorkflow.fileName), registryWorkflow);
+  await addRecentWorkflowFileName(registryWorkflow.fileName);
   await rebuildWorkflowIndex().catch(() => {});
   return {
     ...registryWorkflow,
@@ -4574,42 +4608,40 @@ async function writeWorkflowFile(workflow) {
 }
 
 async function workflowIndexSource() {
-  const entries = await readdir(savedWorkflowsDir, { withFileTypes: true }).catch(() => []);
+  const recentFileNames = await readRecentWorkflowFileNames();
+  const recentMetadata = await fileMetadata(recentWorkflowsPath);
   const files = [];
-  const hiddenMetadata = await fileMetadata(hiddenWorkflowsPath);
 
-  for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.toLowerCase().endsWith(".json")) continue;
-    const filePath = path.join(savedWorkflowsDir, entry.name);
+  for (const fileName of recentFileNames) {
+    const filePath = path.join(savedWorkflowsDir, fileName);
     const metadata = await fileMetadata(filePath);
-    if (metadata.exists) {
-      files.push({
-        fileName: entry.name,
-        size: metadata.size,
-        mtimeMs: metadata.mtimeMs
-      });
-    }
+    files.push({
+      fileName,
+      exists: metadata.exists,
+      size: metadata.size,
+      mtimeMs: metadata.mtimeMs
+    });
   }
 
   return {
     directory: savedWorkflowsDir,
-    hiddenWorkflows: {
-      exists: hiddenMetadata.exists,
-      size: hiddenMetadata.size,
-      mtimeMs: hiddenMetadata.mtimeMs
+    recentWorkflows: {
+      exists: recentMetadata.exists,
+      size: recentMetadata.size,
+      mtimeMs: recentMetadata.mtimeMs
     },
-    files: files.sort((a, b) => a.fileName.localeCompare(b.fileName))
+    files
   };
 }
 
 function workflowIndexSourceMatches(cachedSource, currentSource) {
   if (!cachedSource || !currentSource) return false;
-  const cachedHidden = cachedSource.hiddenWorkflows || {};
-  const currentHidden = currentSource.hiddenWorkflows || {};
+  const cachedRecent = cachedSource.recentWorkflows || {};
+  const currentRecent = currentSource.recentWorkflows || {};
   if (
-    Boolean(cachedHidden.exists) !== Boolean(currentHidden.exists) ||
-    (cachedHidden.size || 0) !== (currentHidden.size || 0) ||
-    (cachedHidden.mtimeMs || 0) !== (currentHidden.mtimeMs || 0)
+    Boolean(cachedRecent.exists) !== Boolean(currentRecent.exists) ||
+    (cachedRecent.size || 0) !== (currentRecent.size || 0) ||
+    (cachedRecent.mtimeMs || 0) !== (currentRecent.mtimeMs || 0)
   ) {
     return false;
   }
@@ -4620,7 +4652,7 @@ function workflowIndexSourceMatches(cachedSource, currentSource) {
 
   return currentFiles.every((file, index) => {
     const cached = cachedFiles[index];
-    return cached?.fileName === file.fileName && cached.size === file.size && cached.mtimeMs === file.mtimeMs;
+    return cached?.fileName === file.fileName && Boolean(cached.exists) === Boolean(file.exists) && cached.size === file.size && cached.mtimeMs === file.mtimeMs;
   });
 }
 
