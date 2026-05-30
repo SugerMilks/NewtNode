@@ -15,6 +15,8 @@ import { fal } from "@fal-ai/client";
 import ffmpegStaticPath from "ffmpeg-static";
 import ffprobeStatic from "ffprobe-static";
 import { directoryStats, fileMetadata, readJsonFile, writeJsonAtomic } from "./json-store.js";
+import { registerComposerPoseRoutes } from "./routes/composerPoses.js";
+import { registerCoreRoutes } from "./routes/core.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -211,50 +213,28 @@ app.use(cors());
 app.use(express.json({ limit: "16mb" }));
 app.use("/uploads", express.static(uploadsDir));
 app.use("/outputs", express.static(outputsDir));
-app.get(/^\/workflow-assets\/([^/]+)\/(.+)$/, async (req, res) => {
-  try {
-    const workflowId = decodeURIComponent(req.params[0] || "");
-    const relativePath = safeRelativeAssetPath(decodeURIComponent(req.params[1] || ""));
-    if (!workflowId || !relativePath) return res.status(400).send("Invalid workflow asset path.");
-
-    const { filePath } = await resolveLocalAssetPath(workflowPackagePublicPath(workflowId, relativePath));
-    res.sendFile(filePath, (error) => {
-      if (error && !res.headersSent) res.status(error.statusCode || 404).send("Workflow asset not found.");
-    });
-  } catch (error) {
-    if (!res.headersSent) res.status(400).send(error.message || "Invalid workflow asset path.");
-  }
+registerCoreRoutes(app, {
+  safeRelativeAssetPath,
+  resolveLocalAssetPath,
+  workflowPackagePublicPath,
+  selectFolderWithDialog,
+  selectWorkflowFileWithDialog,
+  readWorkflowFromFilePath,
+  buildHealthPayload,
+  timedApi,
+  buildStorageDiagnostics
 });
 
-app.post("/api/system/select-folder", async (req, res) => {
-  try {
-    const selectedPath = await selectFolderWithDialog({
-      title: String(req.body.title || "Choose folder"),
-      defaultPath: String(req.body.defaultPath || "")
-    });
-    res.json({ path: selectedPath });
-  } catch (error) {
-    const status = error.code === "DIALOG_CANCELED" ? 499 : 500;
-    res.status(status).json({ error: error.message || "Folder selection failed.", canceled: error.code === "DIALOG_CANCELED" });
-  }
+registerComposerPoseRoutes(app, {
+  composerPosesDir,
+  readComposerPoses,
+  normalizeComposerPose,
+  safeComposerPoseFileName,
+  uniqueComposerPoseFileName
 });
 
-app.post("/api/system/open-workflow-file", async (req, res) => {
-  try {
-    const selectedPath = await selectWorkflowFileWithDialog({
-      title: String(req.body.title || "Open NewtNode workflow"),
-      defaultPath: String(req.body.defaultPath || "")
-    });
-    const workflow = await readWorkflowFromFilePath(selectedPath);
-    res.json(workflow);
-  } catch (error) {
-    const status = error.code === "DIALOG_CANCELED" ? 499 : 500;
-    res.status(status).json({ error: error.message || "Workflow selection failed.", canceled: error.code === "DIALOG_CANCELED" });
-  }
-});
-
-app.get("/api/health", (_req, res) => {
-  res.json({
+function buildHealthPayload() {
+  return {
     ok: true,
     routes: {
       utilityImage: true,
@@ -291,8 +271,8 @@ app.get("/api/health", (_req, res) => {
     falVisionTextModel,
     falVideoTextModel,
     outputDirectory: outputsDir
-  });
-});
+  };
+}
 
 app.get("/api/history", async (req, res) => {
   await timedApi("history:list", async () => {
@@ -511,35 +491,6 @@ app.delete("/api/saved-workflows/:fileName", async (req, res) => {
   await removeRecentWorkflowFileName(fileName);
   await rebuildWorkflowIndex().catch(() => {});
   res.json(await readSavedWorkflowSummaries());
-});
-
-app.get("/api/storage/diagnostics", async (_req, res) => {
-  await timedApi("storage:diagnostics", async () => {
-    res.json(await buildStorageDiagnostics());
-  });
-});
-
-app.get("/api/composer-poses", async (_req, res) => {
-  res.json({ poses: await readComposerPoses() });
-});
-
-app.post("/api/composer-poses", async (req, res) => {
-  const pose = normalizeComposerPose(req.body.pose || req.body);
-  if (!pose) {
-    return res.status(400).json({ error: "Invalid pose." });
-  }
-
-  const existing = await readComposerPoses();
-  const fileName = pose.fileName && safeComposerPoseFileName(pose.fileName) ? safeComposerPoseFileName(pose.fileName) : uniqueComposerPoseFileName(pose.name, existing);
-  const savedPose = {
-    ...pose,
-    fileName,
-    savedAt: new Date().toISOString()
-  };
-
-  await mkdir(composerPosesDir, { recursive: true });
-  await writeJsonAtomic(path.join(composerPosesDir, fileName), savedPose);
-  res.json({ pose: savedPose, poses: await readComposerPoses() });
 });
 
 app.get("/api/node-projects/:id", async (req, res) => {
