@@ -856,8 +856,8 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
     [nodes, outputHistory, projectId, projectName]
   );
   const currentWorkflowFingerprint = React.useMemo(
-    () => workflowStateFingerprint({ nodes, edges, groups, viewport, projectName, projectPackagePath }),
-    [nodes, edges, groups, viewport, projectName, projectPackagePath]
+    () => workflowStateFingerprint({ nodes, edges, groups, projectName, projectPackagePath }),
+    [nodes, edges, groups, projectName, projectPackagePath]
   );
   const hasUnsavedChanges = currentWorkflowFingerprint !== cleanWorkflowFingerprint;
   const currentWorkflowPath = React.useMemo(() => {

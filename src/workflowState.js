@@ -14,7 +14,6 @@ export function workflowStateFingerprint(state = {}) {
     nodes: (state.nodes || []).map(cloneNode),
     edges: (state.edges || []).map(cloneEdge),
     groups: (state.groups || []).map(cloneGroup),
-    viewport: state.viewport || { x: 0, y: 0, scale: 1 },
     projectName: String(state.projectName || "Untitled node project").trim() || "Untitled node project",
     projectPackagePath: state.projectPackagePath || ""
   });
