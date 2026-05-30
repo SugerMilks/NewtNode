@@ -7,6 +7,7 @@ import {
   workflowFileNameForProject,
   writeWorkflowFileHandle
 } from "./workflowFiles.js";
+import { lastPackageParentPath, rememberOpenedWorkflowPath, rememberPackageParentPath, workflowPickerDefaultPath } from "./workflowPreferences.js";
 import { createNodeId, remapImportedGraph, workflowStateFingerprint } from "./workflowState.js";
 
 export function useWorkflowPersistence({
@@ -190,7 +191,7 @@ export function useWorkflowPersistence({
     const cleanProjectName = String(projectName || "").trim() || "Untitled node project";
 
     try {
-      const suggestedParent = window.localStorage.getItem("newtnode-last-package-parent") || "";
+      const suggestedParent = lastPackageParentPath();
       setSaveStatus("Choosing package folder...");
       const { response, data } = await systemApi.selectFolder({
         title: "Choose parent folder for this NewtNode workflow package",
@@ -210,7 +211,7 @@ export function useWorkflowPersistence({
         return false;
       }
 
-      window.localStorage.setItem("newtnode-last-package-parent", packageParentPath);
+      rememberPackageParentPath(packageParentPath);
       return saveProjectToSavedWorkflows({ packageParentPath, saveAsPackage: true, name: cleanProjectName });
     } catch (error) {
       setSaveStatus(error.message || "Could not save workflow package.");
@@ -365,11 +366,7 @@ export function useWorkflowPersistence({
   async function openWorkflowFromSystemPicker() {
     try {
       if (!(await guardUnsavedWorkflowChange("open another workflow"))) return;
-      const defaultPath =
-        projectPackagePath ||
-        window.localStorage.getItem("newtnode-last-open-workflow") ||
-        window.localStorage.getItem("newtnode-last-package-parent") ||
-        "";
+      const defaultPath = workflowPickerDefaultPath(projectPackagePath);
       setSaveStatus("Opening workflow...");
       const { response, data } = await systemApi.openWorkflowFile(
         {
@@ -388,8 +385,7 @@ export function useWorkflowPersistence({
       }
 
       applyWorkflow(data, "Opened");
-      const openedPackagePath = data.packagePath || data.package?.rootPath || "";
-      window.localStorage.setItem("newtnode-last-open-workflow", openedPackagePath || data.filePath || data.fileName || "");
+      rememberOpenedWorkflowPath(data);
       await loadProjects();
     } catch (error) {
       setSaveStatus(error.message || "Could not open workflow.");
@@ -398,11 +394,7 @@ export function useWorkflowPersistence({
 
   async function importWorkflowFromSystemPicker() {
     try {
-      const defaultPath =
-        projectPackagePath ||
-        window.localStorage.getItem("newtnode-last-open-workflow") ||
-        window.localStorage.getItem("newtnode-last-package-parent") ||
-        "";
+      const defaultPath = workflowPickerDefaultPath(projectPackagePath);
       setSaveStatus("Importing workflow...");
       const { response, data } = await systemApi.openWorkflowFile(
         {
@@ -421,8 +413,7 @@ export function useWorkflowPersistence({
       }
 
       importWorkflow(data);
-      const openedPackagePath = data.packagePath || data.package?.rootPath || "";
-      window.localStorage.setItem("newtnode-last-open-workflow", openedPackagePath || data.filePath || data.fileName || "");
+      rememberOpenedWorkflowPath(data);
       await loadProjects();
     } catch (error) {
       setSaveStatus(error.message || "Could not import workflow.");
