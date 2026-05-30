@@ -65,6 +65,7 @@ import { appendResultItems, existingResultItemsForNode, normalizedResultItems } 
 import { nodeTypeDefinitions, nodeTypeForOutputItem, nodeTypeLabel } from "./nodeRegistry.js";
 import { buildProjectOutputItems } from "./projectOutputs.js";
 import { GLTFLoader, THREE, cloneSkeleton, degreesToRadians, lerp, radiansToDegrees, useThreeRuntimeReady } from "./threeRuntime.js";
+import { appendWorkflowContextFormFields, workflowContextPayload } from "./workflowContext.js";
 import { ensureWritableWorkflowHandle, workflowDisplayPath, workflowFileNameForProject, writeWorkflowFileHandle } from "./workflowFiles.js";
 import { cloneEdge, cloneGraphState, cloneNode, createNodeId, resetCopiedNodeRuntime, workflowStateFingerprint } from "./workflowState.js";
 import "./nodeEditor.css";
@@ -9708,22 +9709,6 @@ function formatTimelineTime(seconds) {
   const wholeSeconds = Math.floor(value % 60);
   const tenths = Math.floor((value % 1) * 10);
   return `${minutes}:${wholeSeconds.toString().padStart(2, "0")}.${tenths}`;
-}
-
-function workflowContextPayload(workflowContext = {}, projectId = "", projectName = "") {
-  return {
-    projectId: workflowContext.projectId || projectId || "",
-    projectName: workflowContext.projectName || projectName || "Untitled node project",
-    workflowName: workflowContext.workflowName || workflowContext.projectName || projectName || "Untitled node project",
-    workflowPackageId: workflowContext.workflowPackageId || "",
-    workflowPackagePath: workflowContext.workflowPackagePath || ""
-  };
-}
-
-function appendWorkflowContextFormFields(form, workflowContext = {}, projectId = "", projectName = "") {
-  Object.entries(workflowContextPayload(workflowContext, projectId, projectName)).forEach(([key, value]) => {
-    form.append(key, value || "");
-  });
 }
 
 async function runImageModelGeneration({ node, prompt, aspectRatio, imagePromptItems, projectId, projectName, workflowContext, index }) {
