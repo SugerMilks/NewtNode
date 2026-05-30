@@ -3503,7 +3503,7 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
                       <button className="project-load" onClick={() => loadProject(project.id)} title={`Load ${project.fileName || project.name}`}>
                         {project.name}
                       </button>
-                      <button className="project-delete" onClick={() => deleteProject(project)} title={`Delete ${project.fileName || project.name}`}>
+                      <button className="project-delete" onClick={() => deleteProject(project)} title={`Remove ${project.registryFileName || project.fileName || project.name} from dropdown`}>
                         <Trash2 size={13} />
                       </button>
                     </div>

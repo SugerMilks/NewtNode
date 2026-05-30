@@ -172,6 +172,7 @@ Saved workflows are long-lived project files. Changes must avoid breaking them.
 - Save, Save As, Open, and Import live under the left toolbar File menu. Open replaces the current graph; Import merges the selected workflow into the current graph.
 - When a workflow replacement would discard unsaved graph or project-name changes, prompt with Save, Don't Save, and Cancel. Save writes never-saved workflows to the local app saved-workflows folder.
 - Ctrl+S and Cmd+S save the current workflow. If it has never been saved, use the default local saved-workflows registry rather than requiring Save As.
+- The saved workflow dropdown trash action removes the workflow from the dropdown only. It must not delete the local registry JSON, packaged workflow JSON, or external workflow JSON from disk. Re-saving or re-opening a workflow can register it in the dropdown again.
 - Add normalization for new node fields.
 - Preserve unknown data fields when normalizing unless they are unsafe runtime state.
 - Migrate renamed node types or ports.

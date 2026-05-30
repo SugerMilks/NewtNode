@@ -479,10 +479,10 @@ export function useWorkflowPersistence({
   }
 
   async function deleteProject(project) {
-    if (!window.confirm(`Delete "${project.name}"?`)) return;
+    if (!window.confirm(`Remove "${project.name}" from the workflow dropdown? The JSON file will stay on disk.`)) return;
 
     try {
-      const nextProjects = await workflowApi.remove(project.fileName || project.id);
+      const nextProjects = await workflowApi.remove(project.registryFileName || project.fileName || project.id);
       setProjects(nextProjects);
       if (projectId === project.id) {
         setProjectId(null);
@@ -492,7 +492,7 @@ export function useWorkflowPersistence({
         setWorkflowFilePath("");
       }
       setProjectMenuOpen(false);
-      setSaveStatus("Workflow deleted");
+      setSaveStatus("Workflow removed from dropdown");
     } catch (error) {
       setSaveStatus(error.message);
     }

@@ -258,7 +258,7 @@ export const workflowApi = {
   },
 
   remove(fileName) {
-    return deleteJson(`/api/saved-workflows/${encodeURIComponent(fileName)}`, "Could not delete workflow.");
+    return deleteJson(`/api/saved-workflows/${encodeURIComponent(fileName)}`, "Could not remove workflow from the dropdown.");
   }
 };
 
