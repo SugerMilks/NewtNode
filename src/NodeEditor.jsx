@@ -35,7 +35,16 @@ import {
   X
 } from "lucide-react";
 import { composerApi, historyApi, nodeApi, systemApi, workflowApi } from "./api/newtApi.js";
-import { MediaPreview, OutputPreviewLightbox, ProjectOutputDrawer, ResultPane, UploadIcon } from "./components/MediaViews.jsx";
+import {
+  MediaPreview,
+  Model3DViewer,
+  OutputPreviewLightbox,
+  ProjectOutputDrawer,
+  ResultPane,
+  UploadIcon,
+  useNewtNodeImageFallback,
+  useNewtNodeVideoFallback
+} from "./components/MediaViews.jsx";
 import { appendResultItems, existingResultItemsForNode, normalizedResultItems } from "./mediaResults.js";
 import { nodeTypeDefinitions, nodeTypeForOutputItem, nodeTypeLabel } from "./nodeRegistry.js";
 import { GLTFLoader, THREE, cloneSkeleton, degreesToRadians, lerp, radiansToDegrees, useThreeRuntimeReady } from "./threeRuntime.js";

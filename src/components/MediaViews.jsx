@@ -209,7 +209,7 @@ export function useNewtNodeVideoFallback(event) {
   video.load();
 }
 
-function Model3DViewer({ url, label }) {
+export function Model3DViewer({ url, label }) {
   const threeReady = useThreeRuntimeReady();
   const hostRef = React.useRef(null);
   const [state, setState] = React.useState(url ? "loading" : "empty");
