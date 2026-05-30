@@ -215,10 +215,7 @@ app.get(/^\/workflow-assets\/([^/]+)\/(.+)$/, async (req, res) => {
     const relativePath = safeRelativeAssetPath(decodeURIComponent(req.params[1] || ""));
     if (!workflowId || !relativePath) return res.status(400).send("Invalid workflow asset path.");
 
-    const workflow = await findRegisteredWorkflowPackage(workflowId);
-    if (!workflow?.packagePath) return res.status(404).send("Workflow package not found.");
-
-    const filePath = path.join(workflow.packagePath, relativePath);
+    const { filePath } = await resolveLocalAssetPath(workflowPackagePublicPath(workflowId, relativePath));
     res.sendFile(filePath, (error) => {
       if (error && !res.headersSent) res.status(error.statusCode || 404).send("Workflow asset not found.");
     });
@@ -7806,26 +7803,92 @@ async function resolveLocalAssetPath(publicPath) {
     const workflowId = decodeURIComponent(packageMatch[1] || "");
     const relativePath = safeRelativeAssetPath(decodeURIComponent(packageMatch[2] || ""));
     const workflow = await findRegisteredWorkflowPackage(workflowId);
-    if (!workflow?.packagePath || !relativePath) throw new Error("Workflow package asset is not registered.");
-    return {
-      fileName: path.basename(relativePath),
-      filePath: path.join(workflow.packagePath, relativePath)
-    };
+    if (!relativePath) throw new Error("Workflow package asset is not registered.");
+
+    const packageFilePath = workflow?.packagePath ? path.join(workflow.packagePath, relativePath) : "";
+    if (packageFilePath && existsSync(packageFilePath)) {
+      return {
+        fileName: path.basename(relativePath),
+        filePath: packageFilePath
+      };
+    }
+
+    const fallbackFilePath = await workflowAssetFallbackFilePath(relativePath);
+    if (fallbackFilePath) {
+      return {
+        fileName: path.basename(fallbackFilePath),
+        filePath: fallbackFilePath
+      };
+    }
+
+    throw new Error("Workflow package asset is not registered.");
   }
 
-  const isUpload = publicPath.startsWith("/uploads/");
-  const prefix = isUpload ? "/uploads/" : "/outputs/";
-  const root = isUpload ? uploadsDir : outputsDir;
-  const relativePath = path.normalize(decodeURIComponent(publicPath.slice(prefix.length)));
-
-  if (path.isAbsolute(relativePath) || relativePath.startsWith("..")) {
+  const localPath = localAssetFilePath(publicPath);
+  if (!localPath) {
     throw new Error("Invalid local asset path.");
   }
 
   return {
-    fileName: path.basename(relativePath),
-    filePath: path.join(root, relativePath)
+    fileName: path.basename(localPath),
+    filePath: localPath
   };
+}
+
+function localAssetFilePath(publicPath) {
+  const isUpload = String(publicPath || "").startsWith("/uploads/");
+  const isOutput = String(publicPath || "").startsWith("/outputs/");
+  if (!isUpload && !isOutput) return "";
+
+  const prefix = isUpload ? "/uploads/" : "/outputs/";
+  const root = isUpload ? uploadsDir : outputsDir;
+  const relativePath = safeRelativeAssetPath(decodeURIComponent(String(publicPath || "").slice(prefix.length)));
+  return relativePath ? path.join(root, relativePath) : "";
+}
+
+async function workflowAssetFallbackFilePath(relativePath) {
+  const cleanPath = safeRelativeAssetPath(relativePath);
+  if (!cleanPath) return "";
+
+  const normalized = cleanPath.split(path.sep).join("/");
+  const [assetGroup, ...restParts] = normalized.split("/");
+  const rest = safeRelativeAssetPath(restParts.join("/"));
+  const fileName = path.basename(rest || normalized);
+  const root = assetGroup === workflowPackageInputDirName ? uploadsDir : outputsDir;
+  const candidates = [
+    rest ? path.join(root, rest) : "",
+    fileName ? path.join(root, fileName) : ""
+  ].filter(Boolean);
+
+  const directMatch = candidates.find((candidate) => existsSync(candidate));
+  if (directMatch || !fileName) return directMatch || "";
+
+  return findLocalAssetByFileName(root, fileName);
+}
+
+async function findLocalAssetByFileName(root, fileName, depth = 3) {
+  if (!root || !fileName || depth < 0) return "";
+
+  let entries = [];
+  try {
+    entries = await readdir(root, { withFileTypes: true });
+  } catch {
+    return "";
+  }
+
+  const expectedName = fileName.toLowerCase();
+  for (const entry of entries) {
+    const entryPath = path.join(root, entry.name);
+    if (entry.isFile() && entry.name.toLowerCase() === expectedName) return entryPath;
+  }
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const nestedMatch = await findLocalAssetByFileName(path.join(root, entry.name), fileName, depth - 1);
+    if (nestedMatch) return nestedMatch;
+  }
+
+  return "";
 }
 
 function mimeForExtension(extension) {

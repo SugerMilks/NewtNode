@@ -9,6 +9,7 @@ import {
   RefreshCcw,
   TrendingUp
 } from "lucide-react";
+import { statsApi } from "./api/newtApi.js";
 
 const defaultPricing = {
   seedance: {
@@ -107,17 +108,15 @@ export default function StatsDashboard() {
   async function refreshStats() {
     try {
       setStatus((current) => (current === "loading" ? "loading" : "refreshing"));
-      const response = await fetch("/api/stats");
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Could not load stats.");
+      const data = await statsApi.load();
       setHistory(Array.isArray(data.history) ? data.history : []);
       setPricing(data.pricing || defaultPricing);
       setStatus("ready");
       setLastUpdated(new Date());
     } catch {
       try {
-        const response = await fetch("/api/history");
-        setHistory(await response.json());
+        const historyData = await statsApi.loadHistoryFallback();
+        setHistory(Array.isArray(historyData) ? historyData : []);
         setStatus("ready");
         setLastUpdated(new Date());
       } catch {

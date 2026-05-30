@@ -16,6 +16,7 @@ import {
   Wand2,
   X
 } from "lucide-react";
+import { generationApi, historyApi } from "./api/newtApi.js";
 import "./styles.css";
 
 const NodeEditor = React.lazy(() => import("./NodeEditor.jsx"));
@@ -91,8 +92,7 @@ function App() {
 
   async function refreshHistory() {
     try {
-      const response = await fetch("/api/history?summary=1&limit=200");
-      const data = await response.json();
+      const data = await historyApi.listSummary({ limit: 200 });
       setVideoHistory(data.filter(isVideoWorkspaceHistory));
       setImageHistory(data.filter(isImageWorkspaceHistory));
     } catch {
@@ -144,17 +144,11 @@ function App() {
       form.append("references", reference.file);
     }
 
-    const response = await fetch("/api/generate", {
-      method: "POST",
-      body: form
-    });
-    const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error(`Run ${index + 1}: ${data.error || "Generation failed."}`);
+    try {
+      return await generationApi.generateVideo(form);
+    } catch (error) {
+      throw new Error(`Run ${index + 1}: ${error.message || "Generation failed."}`);
     }
-
-    return data;
   }
 
   async function generateImage() {
@@ -171,18 +165,7 @@ function App() {
     try {
       const uploadedReferences = [];
       for (const reference of imageReferences) {
-        const uploadForm = new FormData();
-        uploadForm.append("asset", reference.file);
-        const uploadResponse = await fetch("/api/node/upload-asset", {
-          method: "POST",
-          body: uploadForm
-        });
-        const uploadData = await uploadResponse.json();
-
-        if (!uploadResponse.ok) {
-          throw new Error(uploadData.error || "Could not upload a reference image.");
-        }
-
+        const uploadData = await generationApi.uploadAsset(reference.file);
         uploadedReferences.push(uploadData.asset);
       }
 
@@ -203,12 +186,8 @@ function App() {
   }
 
   async function runImageGeneration(index, imagePromptUrls) {
-    const response = await fetch("/api/node/generate-image", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
+    try {
+      return await generationApi.generateImage({
         prompt: imagePrompt.trim(),
         model: imageModel,
         aspectRatio: imageAspectRatio,
@@ -218,15 +197,10 @@ function App() {
         projectName: "Image",
         nodeId: "image-tab",
         nodeTitle: "Image"
-      })
-    });
-    const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error(`Run ${index + 1}: ${data.error || "Image generation failed."}`);
+      });
+    } catch (error) {
+      throw new Error(`Run ${index + 1}: ${error.message || "Image generation failed."}`);
     }
-
-    return data;
   }
 
   function addReferences(files) {
@@ -341,15 +315,7 @@ function App() {
     if (!shouldRemove) return;
 
     try {
-      const response = await fetch(`/api/history/${encodeURIComponent(item.id)}`, {
-        method: "DELETE"
-      });
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || "Could not remove this generation.");
-      }
-
+      const data = await historyApi.remove(item.id);
       setVideoHistory(data.filter(isVideoWorkspaceHistory));
       setImageHistory(data.filter(isImageWorkspaceHistory));
       setMessage("Removed from Recent generations.");
