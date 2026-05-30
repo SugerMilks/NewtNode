@@ -38,12 +38,12 @@ Use this quick pass before implementing a feature, and again before committing i
 | Media drag/drop and imported asset shape | `src/mediaAssets.js` | Output-rail drag payloads, external file type detection, file-to-node mapping, and media accept rules live here. |
 | Result items | `src/mediaResults.js` | Normalize, append, label, and download result items here. Do not hand-roll result array merging in node run branches. |
 | Canvas chrome | `src/components/CanvasChrome.jsx` | Memoized edge paths, selection marquee/action bar, and workflow prompt live here. Keep hot SVG/UI chrome out of `NodeEditor.jsx`. |
-| Preview/result UI | `src/components/MediaViews.jsx` | Shared previews, result panes, project output drawer, output lightbox, lazy output-rail media loading, and 3D viewer live here. |
+| Preview/result UI | `src/components/MediaViews.jsx`, `src/components/Model3DViewer.jsx` | Shared previews, result panes, project output drawer, output lightbox, lazy output-rail media loading, and the lazy 3D viewer wrapper live in `MediaViews.jsx`. The actual GLB renderer lives in `Model3DViewer.jsx`. |
 | Project output rail data | `src/projectOutputs.js` | Build and filter project output rail items here; keep filesystem/history filtering out of render code. |
 | Canvas geometry | `src/nodeGeometry.js` | Node bounds, graph bounds, rectangle math, menu clamping, and viewport modulo helpers live here. |
 | Canvas media utilities | `src/canvasMedia.js` | Canvas-to-blob, browser image loading, cover drawing, and mood-board collage layout live here. |
 | Color ID matte UI/helpers | `src/components/ColorIdMatteControls.jsx`, `src/colorIdMatte.js` | Picker UI state lives in the component file; color normalization, matte preview rendering, sample radius/tolerance bounds, and matte run item normalization live in the helper file. |
-| Three.js runtime | `src/threeRuntime.js` | Lazy Three/GLTF loading and shared 3D math helpers live here. |
+| Three.js runtime | `src/threeRuntime.js` | Lazy Three/GLTF loading and shared 3D math helpers live here. Do not import Three.js directly into common preview modules. |
 | Workflow persistence | `src/useWorkflowPersistence.js` | Save, Save As, Open, Import, unsaved-change prompts, Recent workflows updates, and workflow status messages live here. |
 | Draft persistence | `src/useNodeEditorDraft.js` | Browser draft loading, snapshotting, and debounced local draft writes live here. |
 | Workflow files/session/state | `src/workflowFiles.js`, `src/workflowSession.js`, `src/workflowPreferences.js`, `src/workflowContext.js`, `src/workflowState.js` | File document shape, display paths, package/request context, picker preferences, graph cloning/remapping/fingerprints, deduping, and stale runtime cleanup live here. |
@@ -133,7 +133,7 @@ Nodes should feel like they belong to the same editor.
 - Preview nodes should preserve existing preview history and update to the latest connected generation result.
 - Preview nodes should support stepping through multiple connected or generated results.
 - Generated outputs should have a node-level download affordance when possible.
-- 3D outputs should be displayed with the shared Three.js GLTF viewer.
+- 3D outputs should be displayed with the shared lazy Three.js GLTF viewer.
 - If a node returns multiple outputs, store them in `resultItems` with explicit `type`, `url`, `label`, and optional `cost`.
 - Result item normalization and append behavior belongs in `src/mediaResults.js` and `src/nodeRunner.js`; do not duplicate result merging logic inside individual node branches.
 - The project output rail should show recent local outputs from the current graph and matching history only. Include `/outputs/<workflow-name>/...` and packaged `/workflow-assets/<workflow-id>/outputs/...` URLs; do not add absolute machine-local paths or browser object URLs.
@@ -273,7 +273,7 @@ The 3D node establishes the standard for model generation nodes.
 - Color: teal `#14d8c8`.
 - Output port: `modelOut`.
 - Output media: GLB by default.
-- Preview: shared `Model3DViewer`.
+- Preview: shared lazy `Model3DViewer` wrapper.
 - Required input: `frontImageIn`.
 - Optional inputs: `backImageIn`, `leftImageIn`, `rightImageIn`, `topImageIn`, `bottomImageIn`, `leftFrontImageIn`, `rightFrontImageIn`.
 - Backend payload should preserve named view mapping instead of relying on connection order.
