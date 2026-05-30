@@ -3492,7 +3492,7 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
           />
           <div className="project-picker" ref={projectMenuRef}>
             <button className="project-picker-trigger" onClick={() => setProjectMenuOpen((open) => !open)} title="Load saved workflow">
-              <span>{selectedProjectName || "Load workflow"}</span>
+              <span>{selectedProjectName || "Recent workflows"}</span>
               <ChevronDown size={13} />
             </button>
             {projectMenuOpen && (
