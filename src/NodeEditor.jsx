@@ -66,20 +66,16 @@ import { nodeTypeDefinitions, nodeTypeForOutputItem, nodeTypeLabel } from "./nod
 import {
   appendedNodeResultState,
   batchRunError,
-  buildSelectedRunnableDependencies,
   formatNodeBatchCount,
   fulfilledRunValues,
   ensureRunSuccesses,
   isRunnableNode,
   nodeBatchCount,
   nodeRunIndexes,
-  nodeRunPriority,
-  nodeTitle,
   rejectedRunResults,
   resultTextFromItems,
-  runStageLabel,
-  settleSequential,
-  wait
+  runRunnableNodesByDependencyOrder,
+  settleSequential
 } from "./nodeRunner.js";
 import { buildProjectOutputItems } from "./projectOutputs.js";
 import { GLTFLoader, THREE, cloneSkeleton, degreesToRadians, lerp, radiansToDegrees, useThreeRuntimeReady } from "./threeRuntime.js";
@@ -3345,62 +3341,11 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
   }
 
   async function runNodesByDependencyOrder(runnableNodes) {
-    const nodeMap = new Map(runnableNodes.map((node) => [node.id, node]));
-    const pending = new Set(nodeMap.keys());
-    const completed = new Set();
-    const failed = new Map();
-    const skipped = new Map();
-    const dependencies = buildSelectedRunnableDependencies(runnableNodes, edgesRef.current);
-
-    while (pending.size) {
-      const blocked = [...pending].filter((nodeId) => (dependencies.get(nodeId) || []).some((dependencyId) => failed.has(dependencyId) || skipped.has(dependencyId)));
-
-      blocked.forEach((nodeId) => {
-        const failedDependencyId = (dependencies.get(nodeId) || []).find((dependencyId) => failed.has(dependencyId) || skipped.has(dependencyId));
-        const message = `Skipped because ${nodeTitle(nodeMap.get(failedDependencyId))} did not complete.`;
-        pending.delete(nodeId);
-        skipped.set(nodeId, message);
-        updateNode(nodeId, { status: "error", error: message });
-      });
-
-      const ready = [...pending].filter((nodeId) => (dependencies.get(nodeId) || []).every((dependencyId) => completed.has(dependencyId)));
-
-      if (!ready.length) {
-        [...pending].forEach((nodeId) => {
-          const message = "Skipped because selected node dependencies could not be resolved.";
-          pending.delete(nodeId);
-          skipped.set(nodeId, message);
-          updateNode(nodeId, { status: "error", error: message });
-        });
-        break;
-      }
-
-      const nextPriority = Math.min(...ready.map((nodeId) => nodeRunPriority(nodeMap.get(nodeId))));
-      const batchIds = ready.filter((nodeId) => nodeRunPriority(nodeMap.get(nodeId)) === nextPriority);
-      const batchNodes = batchIds.map((nodeId) => nodeMap.get(nodeId));
-      setSaveStatus(`Running ${batchNodes.length} ${runStageLabel(batchNodes[0]?.type)} node${batchNodes.length === 1 ? "" : "s"}...`);
-
-      const results = await Promise.all(batchNodes.map((node) => runNode(node)));
-      results.forEach((result, index) => {
-        const nodeId = batchIds[index];
-        pending.delete(nodeId);
-
-        if (result?.status === "error") {
-          failed.set(nodeId, result.error || new Error("Node failed."));
-          return;
-        }
-
-        completed.add(nodeId);
-      });
-
-      await wait(0);
-    }
-
-    return {
-      completed: completed.size,
-      failed: failed.size,
-      skipped: skipped.size
-    };
+    return runRunnableNodesByDependencyOrder(runnableNodes, edgesRef.current, {
+      runNode,
+      onStatus: setSaveStatus,
+      onNodeSkipped: (nodeId, message) => updateNode(nodeId, { status: "error", error: message })
+    });
   }
 
   return (
