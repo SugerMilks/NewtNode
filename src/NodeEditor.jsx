@@ -818,6 +818,7 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
   const [projectId, setProjectId] = React.useState(savedDraft.projectId);
   const [savedProjectName, setSavedProjectName] = React.useState(savedDraft.savedProjectName);
   const [projectPackagePath, setProjectPackagePath] = React.useState(savedDraft.projectPackagePath);
+  const [workflowFilePath, setWorkflowFilePath] = React.useState(savedDraft.workflowFilePath);
   const [projects, setProjects] = React.useState([]);
   const [fileMenuOpen, setFileMenuOpen] = React.useState(false);
   const [projectMenuOpen, setProjectMenuOpen] = React.useState(false);
@@ -832,10 +833,6 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
   const [compilingTransferNodeId, setCompilingTransferNodeId] = React.useState(null);
   const [selectedEdgeId, setSelectedEdgeId] = React.useState(null);
   const [composerEditorNodeId, setComposerEditorNodeId] = React.useState(null);
-
-  React.useEffect(() => {
-    onStatusChange?.(saveStatus);
-  }, [onStatusChange, saveStatus]);
 
   const incomingByNode = React.useMemo(() => buildIncomingByNode(nodes, edges), [nodes, edges]);
   const connectedPortKeys = React.useMemo(() => buildConnectedPortKeys(edges), [edges]);
@@ -863,6 +860,22 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
     [nodes, edges, groups, viewport, projectName, projectPackagePath]
   );
   const hasUnsavedChanges = currentWorkflowFingerprint !== cleanWorkflowFingerprint;
+  const currentWorkflowPath = React.useMemo(() => {
+    const savedPath = String(workflowFilePath || "").trim();
+    if (savedPath) return savedPath;
+    if (projectPackagePath) {
+      return workflowDisplayPath({
+        packagePath: projectPackagePath,
+        fileName: localWorkflowFileName || workflowFileNameForProject(savedProjectName || projectName)
+      });
+    }
+    return localWorkflowFileName || "";
+  }, [workflowFilePath, projectPackagePath, localWorkflowFileName, savedProjectName, projectName]);
+  const workflowPathStatus = currentWorkflowPath ? `${hasUnsavedChanges ? "Unsaved changes in" : "Saved"} ${currentWorkflowPath}` : "";
+
+  React.useEffect(() => {
+    onStatusChange?.(saveStatus || workflowPathStatus);
+  }, [onStatusChange, saveStatus, workflowPathStatus]);
 
   function workflowRequestContext(overrides = {}) {
     const workflowName = savedProjectName || selectedProjectName || projectName || "Untitled node project";
@@ -892,7 +905,8 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
       projectId,
       projectName,
       savedProjectName,
-      projectPackagePath
+      projectPackagePath,
+      workflowFilePath
     };
   }
 
@@ -958,7 +972,7 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
       window.clearTimeout(draftWriteTimerRef.current);
     }
     draftWriteTimerRef.current = window.setTimeout(flushDraftSnapshot, 300);
-  }, [nodes, edges, groups, viewport, projectId, projectName, savedProjectName, projectPackagePath]);
+  }, [nodes, edges, groups, viewport, projectId, projectName, savedProjectName, projectPackagePath, workflowFilePath]);
 
   React.useEffect(() => {
     window.addEventListener("pagehide", flushDraftSnapshot);
@@ -3141,6 +3155,7 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
     setProjectName(workflow.name);
     setSavedProjectName(workflow.name);
     setLocalWorkflowFileName(handle.name || workflow.fileName);
+    setWorkflowFilePath(workflowDisplayPath(workflow, handle.name || workflow.fileName));
     markWorkflowClean({ projectName: workflow.name });
     setSaveStatus(`Saved ${workflowDisplayPath(workflow, handle.name || workflow.fileName)}`);
     return true;
@@ -3201,6 +3216,7 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
       const nextPackagePath = project.packagePath || project.package?.rootPath || "";
       setProjectPackagePath(nextPackagePath);
       const savedPath = workflowDisplayPath(project);
+      setWorkflowFilePath(savedPath);
       setSaveStatus(savedPath ? `Saved ${savedPath}` : shouldCreateNewProject ? "Saved as new workflow" : "Saved");
       await loadProjects();
       let cleanNodes = nodes;
@@ -3263,12 +3279,14 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
     const nextProjectName = project.name || "Untitled node project";
     const nextPackagePath = project.packagePath || project.package?.rootPath || "";
     const nextViewport = project.graph?.viewport || { x: 0, y: 0, scale: 1 };
+    const displayPath = workflowDisplayPath(project);
     localWorkflowHandleRef.current = null;
     setLocalWorkflowFileName("");
     setProjectId(project.id || null);
     setProjectName(nextProjectName);
     setSavedProjectName(project.name || null);
     setProjectPackagePath(nextPackagePath);
+    setWorkflowFilePath(displayPath);
     setNodes(graph.nodes);
     setEdges(graph.edges);
     setGroups(graph.groups);
@@ -3284,7 +3302,6 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
       projectName: nextProjectName,
       projectPackagePath: nextPackagePath
     });
-    const displayPath = workflowDisplayPath(project);
     setSaveStatus(displayPath ? `${sourceLabel} ${displayPath}` : sourceLabel);
   }
 
@@ -3302,7 +3319,8 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
         ...project,
         id: project.id || null,
         name: project.name || file.name.replace(/\.json$/i, "") || "Untitled node project",
-        fileName: project.fileName || file.name
+        fileName: project.fileName || file.name,
+        filePath: project.filePath || project.workflowFilePath || project.fullPath || project.path || file.name
       };
 
       if (openedProject.packagePath || openedProject.package?.rootPath) {
@@ -3500,6 +3518,7 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
         setProjectName("Untitled node project");
         setSavedProjectName(null);
         setProjectPackagePath("");
+        setWorkflowFilePath("");
       }
       setProjectMenuOpen(false);
       setSaveStatus("Workflow deleted");
@@ -3833,6 +3852,12 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
 
   return (
     <section className={`node-workspace ${toolbarCollapsed ? "toolbar-collapsed" : ""} ${outputsCollapsed ? "outputs-collapsed" : "outputs-open"}`}>
+      {currentWorkflowPath && (
+        <div className={`workflow-path-chip ${hasUnsavedChanges ? "dirty" : "saved"}`} title={currentWorkflowPath} aria-label={`Workflow file ${currentWorkflowPath}`}>
+          <span className="workflow-path-state">{hasUnsavedChanges ? "Unsaved" : "Saved"}</span>
+          <span className="workflow-path-text">{currentWorkflowPath}</span>
+        </div>
+      )}
       {composerEditorNode && (
         <ComposerEditorModal
           node={composerEditorNode}
@@ -11790,7 +11815,8 @@ function loadNodeEditorDraft() {
     projectId: null,
     projectName: "Untitled node project",
     savedProjectName: null,
-    projectPackagePath: ""
+    projectPackagePath: "",
+    workflowFilePath: ""
   };
 
   try {
@@ -11805,7 +11831,8 @@ function loadNodeEditorDraft() {
       projectId: parsed.projectId || null,
       projectName: parsed.projectName || fallback.projectName,
       savedProjectName: parsed.savedProjectName || null,
-      projectPackagePath: parsed.projectPackagePath || ""
+      projectPackagePath: parsed.projectPackagePath || "",
+      workflowFilePath: parsed.workflowFilePath || ""
     };
   } catch {
     return fallback;

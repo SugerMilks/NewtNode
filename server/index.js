@@ -479,8 +479,8 @@ app.post("/api/saved-workflows", async (req, res) => {
       };
 
       const savedWorkflow = packagePath ? await writeWorkflowPackage(workflow, packagePath) : workflow;
-      await writeWorkflowFile(savedWorkflow);
-      res.json(savedWorkflow);
+      const registeredWorkflow = await writeWorkflowFile(savedWorkflow);
+      res.json(registeredWorkflow);
     } catch (error) {
       console.error(error);
       res.status(500).json({ error: error.message || "Could not save workflow." });
@@ -4499,13 +4499,15 @@ async function readSavedWorkflowFiles() {
     if (!entry.isFile() || !entry.name.toLowerCase().endsWith(".json")) continue;
 
     try {
-      const registryWorkflow = JSON.parse(await readFile(path.join(savedWorkflowsDir, entry.name), "utf8"));
+      const registryWorkflowPath = path.join(savedWorkflowsDir, entry.name);
+      const registryWorkflow = JSON.parse(await readFile(registryWorkflowPath, "utf8"));
       const workflow = await hydrateWorkflowPackage(registryWorkflow);
       workflows.push({
         ...workflow,
         id: workflow.id || entry.name,
         name: workflow.name || path.basename(entry.name, ".json"),
         fileName: registryWorkflow.fileName || entry.name,
+        filePath: workflowFilePathForDisplay(workflow, entry.name),
         registryFileName: entry.name,
         graph: {
           nodes: Array.isArray(workflow.graph?.nodes) ? workflow.graph.nodes : [],
@@ -4524,13 +4526,21 @@ async function readSavedWorkflowFiles() {
 
 async function writeWorkflowFile(workflow) {
   await mkdir(savedWorkflowsDir, { recursive: true });
+  const workflowData = { ...workflow };
+  delete workflowData.filePath;
+  delete workflowData.workflowFilePath;
+  delete workflowData.fullPath;
+  delete workflowData.path;
   const registryWorkflow = {
-    ...workflow,
-    fileName: safeWorkflowFileName(workflow.fileName) || workflowFileNameForName(workflow.name || "workflow")
+    ...workflowData,
+    fileName: safeWorkflowFileName(workflowData.fileName) || workflowFileNameForName(workflowData.name || "workflow")
   };
   await writeJsonAtomic(path.join(savedWorkflowsDir, registryWorkflow.fileName), registryWorkflow);
   await rebuildWorkflowIndex().catch(() => {});
-  return registryWorkflow;
+  return {
+    ...registryWorkflow,
+    filePath: workflowFilePathForDisplay(registryWorkflow, registryWorkflow.fileName)
+  };
 }
 
 async function workflowIndexSource() {
@@ -4579,6 +4589,7 @@ function workflowMetadataSummary(workflow, registryFileName, metadata = {}) {
     id: workflow.id || registryFileName,
     name: workflow.name || path.basename(registryFileName, ".json"),
     fileName,
+    filePath: workflowFilePathForDisplay(workflow, registryFileName),
     registryFileName,
     createdAt: workflow.createdAt || "",
     updatedAt: workflow.updatedAt || "",
@@ -4605,6 +4616,18 @@ function workflowMetadataSummary(workflow, registryFileName, metadata = {}) {
       mtimeMs: metadata.mtimeMs || 0
     }
   };
+}
+
+function workflowFilePathForDisplay(workflow = {}, registryFileName = "") {
+  const packageRoot = normalizeWorkflowPackagePath(workflow.packagePath || workflow.package?.rootPath);
+  const workflowFileName =
+    safeWorkflowFileName(workflow.package?.workflowFileName || workflow.fileName) ||
+    safeWorkflowFileName(registryFileName) ||
+    workflowFileNameForName(workflow.name || "workflow");
+  if (packageRoot) return path.join(packageRoot, workflowFileName);
+
+  const registryName = safeWorkflowFileName(registryFileName || workflow.fileName) || workflowFileName;
+  return path.join(savedWorkflowsDir, registryName);
 }
 
 function uniqueReferenceName(value, usedNames) {
