@@ -1,5 +1,40 @@
+const defaultWorkflowName = "Untitled node project";
+
+export function buildWorkflowDocument({
+  id,
+  name,
+  fileName = null,
+  createdAt = null,
+  updatedAt = null,
+  packagePath = "",
+  nodes = [],
+  edges = [],
+  groups = [],
+  viewport = { x: 0, y: 0, scale: 1 }
+} = {}) {
+  const now = updatedAt || new Date().toISOString();
+  const cleanProjectName = String(name || "").trim() || defaultWorkflowName;
+
+  return {
+    id,
+    name: cleanProjectName,
+    fileName,
+    createdAt: createdAt || now,
+    updatedAt: now,
+    app: "NewtNode",
+    version: 1,
+    packagePath: packagePath || "",
+    graph: {
+      nodes,
+      edges,
+      groups,
+      viewport
+    }
+  };
+}
+
 export function workflowFileNameForProject(name) {
-  const cleanName = String(name || "Untitled node project")
+  const cleanName = String(name || defaultWorkflowName)
     .trim()
     .replace(/[^a-z0-9-_ ]+/gi, "")
     .replace(/\s+/g, "-")

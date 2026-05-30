@@ -66,7 +66,7 @@ import { nodeTypeDefinitions, nodeTypeForOutputItem, nodeTypeLabel } from "./nod
 import { buildProjectOutputItems } from "./projectOutputs.js";
 import { GLTFLoader, THREE, cloneSkeleton, degreesToRadians, lerp, radiansToDegrees, useThreeRuntimeReady } from "./threeRuntime.js";
 import { appendWorkflowContextFormFields, workflowContextPayload } from "./workflowContext.js";
-import { ensureWritableWorkflowHandle, workflowDisplayPath, workflowFileNameForProject, writeWorkflowFileHandle } from "./workflowFiles.js";
+import { buildWorkflowDocument, ensureWritableWorkflowHandle, workflowDisplayPath, workflowFileNameForProject, writeWorkflowFileHandle } from "./workflowFiles.js";
 import { cloneEdge, cloneGraphState, cloneNode, createNodeId, resetCopiedNodeRuntime, workflowStateFingerprint } from "./workflowState.js";
 import "./nodeEditor.css";
 
@@ -3087,25 +3087,17 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
   }
 
   function currentWorkflowDocument({ id = projectId || createNodeId("workflow"), name = projectName, fileName = null, createdAt = null } = {}) {
-    const now = new Date().toISOString();
-    const cleanProjectName = String(name || "").trim() || "Untitled node project";
-
-    return {
+    return buildWorkflowDocument({
       id,
-      name: cleanProjectName,
+      name,
       fileName,
-      createdAt: createdAt || now,
-      updatedAt: now,
-      app: "NewtNode",
-      version: 1,
       packagePath: projectPackagePath || "",
-      graph: {
-        nodes,
-        edges,
-        groups,
-        viewport
-      }
-    };
+      createdAt,
+      nodes,
+      edges,
+      groups,
+      viewport
+    });
   }
 
   function markWorkflowClean(overrides = {}) {
@@ -3114,7 +3106,6 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
         nodes,
         edges,
         groups,
-        viewport,
         projectName,
         projectPackagePath,
         ...overrides
@@ -3246,7 +3237,6 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
         nodes: cleanNodes,
         edges: cleanEdges,
         groups: cleanGroups,
-        viewport: cleanViewport,
         projectName: project.name,
         projectPackagePath: nextPackagePath
       });
@@ -3306,7 +3296,6 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
       nodes: graph.nodes,
       edges: graph.edges,
       groups: graph.groups,
-      viewport: nextViewport,
       projectName: nextProjectName,
       projectPackagePath: nextPackagePath
     });
