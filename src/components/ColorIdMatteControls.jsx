@@ -1,4 +1,5 @@
 import React from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { loadCanvasImage } from "../canvasMedia.js";
 import {
@@ -135,35 +136,37 @@ export function ColorIdMattePicker({ imageUrl, node, onUpdate, rowComponent: Row
       </Row>
       {pickerStatus && <small className="upload-error color-id-status">{pickerStatus}</small>}
       {pickerOpen && (
-        <div className="color-id-picker-modal" role="dialog" aria-modal="true" aria-label="Color ID matte picker" onPointerDown={(event) => event.stopPropagation()}>
-          <div className="color-id-picker-modal-panel">
-            <div className="color-id-picker-modal-header">
-              <div className="color-id-selected">
-                <span className="color-id-swatch" style={{ backgroundColor: selectedColor ? rgbToHex(selectedColor) : "transparent" }} />
-                <span>{selectedHex}</span>
-              </div>
-              <div className="color-id-view-toggle" role="group" aria-label="Picker view">
-                <button type="button" className={pickerView === "rgb" ? "active" : ""} aria-pressed={pickerView === "rgb"} onClick={() => setPickerView("rgb")}>
-                  RGB
+        <ColorIdMatteModalPortal>
+          <div className="color-id-picker-modal" role="dialog" aria-modal="true" aria-label="Color ID matte picker" onPointerDown={(event) => event.stopPropagation()}>
+            <div className="color-id-picker-modal-panel">
+              <div className="color-id-picker-modal-header">
+                <div className="color-id-selected">
+                  <span className="color-id-swatch" style={{ backgroundColor: selectedColor ? rgbToHex(selectedColor) : "transparent" }} />
+                  <span>{selectedHex}</span>
+                </div>
+                <div className="color-id-view-toggle" role="group" aria-label="Picker view">
+                  <button type="button" className={pickerView === "rgb" ? "active" : ""} aria-pressed={pickerView === "rgb"} onClick={() => setPickerView("rgb")}>
+                    RGB
+                  </button>
+                  <button type="button" className={pickerView === "matte" ? "active" : ""} aria-pressed={pickerView === "matte"} onClick={() => setPickerView("matte")} disabled={!selectedColor}>
+                    Matte
+                  </button>
+                </div>
+                <button type="button" className="color-id-picker-close" onClick={() => setPickerOpen(false)} title="Close picker">
+                  <X size={17} />
                 </button>
-                <button type="button" className={pickerView === "matte" ? "active" : ""} aria-pressed={pickerView === "matte"} onClick={() => setPickerView("matte")} disabled={!selectedColor}>
-                  Matte
-                </button>
               </div>
-              <button type="button" className="color-id-picker-close" onClick={() => setPickerOpen(false)} title="Close picker">
-                <X size={17} />
-              </button>
-            </div>
-            <div className="color-id-picker-large">
-              <canvas ref={largeCanvasRef} onClick={(event) => pickColor(event, largeCanvasRef.current)} title="Pick color" />
-            </div>
-            <div className="color-id-modal-controls">
-              <span>Tolerance</span>
-              <input type="range" min="0" max="96" step="1" value={tolerance} onChange={(event) => onUpdate(node.id, { colorIdMatteTolerance: event.target.value })} />
-              <strong>{tolerance}</strong>
+              <div className="color-id-picker-large">
+                <canvas ref={largeCanvasRef} onClick={(event) => pickColor(event, largeCanvasRef.current)} title="Pick color" />
+              </div>
+              <div className="color-id-modal-controls">
+                <span>Tolerance</span>
+                <input type="range" min="0" max="96" step="1" value={tolerance} onChange={(event) => onUpdate(node.id, { colorIdMatteTolerance: event.target.value })} />
+                <strong>{tolerance}</strong>
+              </div>
             </div>
           </div>
-        </div>
+        </ColorIdMatteModalPortal>
       )}
     </>
   );
@@ -453,44 +456,51 @@ export function ColorIdMatteVideoPicker({
       </Row>
       {pickerStatus && <small className="upload-error color-id-status">{pickerStatus}</small>}
       {pickerOpen && (
-        <div className="color-id-picker-modal" role="dialog" aria-modal="true" aria-label="Color ID video matte picker" onPointerDown={(event) => event.stopPropagation()}>
-          <div className="color-id-picker-modal-panel">
-            <div className="color-id-picker-modal-header">
-              <div className="color-id-selected">
-                <span className="color-id-swatch" style={{ backgroundColor: selectedColor ? rgbToHex(selectedColor) : "transparent" }} />
-                <span>{selectedHex}</span>
+        <ColorIdMatteModalPortal>
+          <div className="color-id-picker-modal" role="dialog" aria-modal="true" aria-label="Color ID video matte picker" onPointerDown={(event) => event.stopPropagation()}>
+            <div className="color-id-picker-modal-panel">
+              <div className="color-id-picker-modal-header">
+                <div className="color-id-selected">
+                  <span className="color-id-swatch" style={{ backgroundColor: selectedColor ? rgbToHex(selectedColor) : "transparent" }} />
+                  <span>{selectedHex}</span>
+                </div>
+                <div className="color-id-view-toggle" role="group" aria-label="Picker view">
+                  <button type="button" className={pickerView === "overlay" ? "active" : ""} aria-pressed={pickerView === "overlay"} onClick={() => onUpdate(node.id, { colorIdMattePreviewMode: "overlay" })}>
+                    Overlay
+                  </button>
+                  <button type="button" className={pickerView === "rgb" ? "active" : ""} aria-pressed={pickerView === "rgb"} onClick={() => onUpdate(node.id, { colorIdMattePreviewMode: "rgb" })}>
+                    RGB
+                  </button>
+                  <button type="button" className={pickerView === "matte" ? "active" : ""} aria-pressed={pickerView === "matte"} onClick={() => onUpdate(node.id, { colorIdMattePreviewMode: "matte" })} disabled={!selectedColor}>
+                    Matte
+                  </button>
+                </div>
+                <button type="button" className="color-id-picker-close" onClick={() => setPickerOpen(false)} title="Close picker">
+                  <X size={17} />
+                </button>
               </div>
-              <div className="color-id-view-toggle" role="group" aria-label="Picker view">
-                <button type="button" className={pickerView === "overlay" ? "active" : ""} aria-pressed={pickerView === "overlay"} onClick={() => onUpdate(node.id, { colorIdMattePreviewMode: "overlay" })}>
-                  Overlay
-                </button>
-                <button type="button" className={pickerView === "rgb" ? "active" : ""} aria-pressed={pickerView === "rgb"} onClick={() => onUpdate(node.id, { colorIdMattePreviewMode: "rgb" })}>
-                  RGB
-                </button>
-                <button type="button" className={pickerView === "matte" ? "active" : ""} aria-pressed={pickerView === "matte"} onClick={() => onUpdate(node.id, { colorIdMattePreviewMode: "matte" })} disabled={!selectedColor}>
-                  Matte
-                </button>
+              <div className="color-id-picker-large">
+                <canvas ref={largeCanvasRef} onClick={(event) => pickColor(event, largeCanvasRef.current)} title="Pick color from current frame" />
               </div>
-              <button type="button" className="color-id-picker-close" onClick={() => setPickerOpen(false)} title="Close picker">
-                <X size={17} />
-              </button>
-            </div>
-            <div className="color-id-picker-large">
-              <canvas ref={largeCanvasRef} onClick={(event) => pickColor(event, largeCanvasRef.current)} title="Pick color from current frame" />
-            </div>
-            <div className="color-id-modal-controls">
-              <span>Frame</span>
-              <input type="range" min="0" max={sliderMax || 1} step="0.033" value={Math.min(currentTime, sliderMax || 1)} onChange={(event) => seekVideo(event.target.value)} />
-              <strong>{formatFrameTimeDisplay(currentTime)}</strong>
-            </div>
-            <div className="color-id-modal-controls">
-              <span>Tolerance</span>
-              <input type="range" min="0" max="96" step="1" value={tolerance} onChange={(event) => onUpdate(node.id, { colorIdMatteTolerance: event.target.value })} />
-              <strong>{tolerance}</strong>
+              <div className="color-id-modal-controls">
+                <span>Frame</span>
+                <input type="range" min="0" max={sliderMax || 1} step="0.033" value={Math.min(currentTime, sliderMax || 1)} onChange={(event) => seekVideo(event.target.value)} />
+                <strong>{formatFrameTimeDisplay(currentTime)}</strong>
+              </div>
+              <div className="color-id-modal-controls">
+                <span>Tolerance</span>
+                <input type="range" min="0" max="96" step="1" value={tolerance} onChange={(event) => onUpdate(node.id, { colorIdMatteTolerance: event.target.value })} />
+                <strong>{tolerance}</strong>
+              </div>
             </div>
           </div>
-        </div>
+        </ColorIdMatteModalPortal>
       )}
     </>
   );
+}
+
+function ColorIdMatteModalPortal({ children }) {
+  if (typeof document === "undefined" || !document.body) return null;
+  return createPortal(children, document.body);
 }
