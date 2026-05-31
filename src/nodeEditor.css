@@ -1137,6 +1137,7 @@
 
 .node-body textarea,
 .node-row textarea {
+  box-sizing: border-box;
   width: 100%;
   min-height: 116px;
   border: 1px solid rgba(255, 255, 255, 0.06);
@@ -1144,8 +1145,10 @@
   outline: 0;
   color: #f6f1e8;
   background: rgba(0, 0, 0, 0.34);
+  font-family: inherit;
   font-size: 14px;
   line-height: 1.38;
+  letter-spacing: 0;
   resize: vertical;
 }
 
@@ -3386,18 +3389,24 @@ video.newtnode-video-fallback {
   width: 100%;
   font-size: 14px;
   line-height: 1.38;
+  letter-spacing: 0;
 }
 
 .tagged-prompt-editor textarea {
   position: relative;
   z-index: 2;
-  color: transparent;
+  font: inherit;
+  color: #f6f1e8;
   background: transparent;
   caret-color: #f6f1e8;
+  tab-size: 2;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 .tagged-prompt-editor textarea::selection {
-  color: transparent;
+  color: #f6f1e8;
   background: rgba(221, 198, 49, 0.24);
 }
 
@@ -3405,13 +3414,18 @@ video.newtnode-video-fallback {
   position: absolute;
   z-index: 1;
   inset: 0;
+  box-sizing: border-box;
   overflow: auto;
   padding: 9px;
   border: 1px solid transparent;
   border-radius: 7px;
-  color: #f6f1e8;
+  font: inherit;
+  color: transparent;
+  letter-spacing: 0;
   white-space: pre-wrap;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  word-break: normal;
+  tab-size: 2;
   pointer-events: none;
   scrollbar-width: none;
 }
@@ -3421,11 +3435,13 @@ video.newtnode-video-fallback {
 }
 
 .prompt-tag-mark {
-  padding: 0 2px;
+  padding: 0;
   border-radius: 4px;
-  color: var(--tag-color);
+  color: transparent;
   background: color-mix(in srgb, var(--tag-color), transparent 84%);
-  font-weight: 820;
+  font-weight: inherit;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }
 
 .reference-tag-chips {

@@ -1990,7 +1990,7 @@ app.post("/api/node/generate-video", async (req, res) => {
     });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ error: error.message || "Video generation failed." });
+    sendApiError(res, error, "Video generation failed.");
   }
 });
 
@@ -3335,7 +3335,7 @@ app.post(
       });
     } catch (error) {
       console.error(error);
-      res.status(500).json({ error: error.message || "Generation failed." });
+      sendApiError(res, error, "Generation failed.");
     }
   }
 );
