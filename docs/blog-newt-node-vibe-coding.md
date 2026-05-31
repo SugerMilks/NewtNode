@@ -119,15 +119,15 @@ This matters because image models are strong at style and detail, but they do no
 
 The Composer node is not trying to be final art. It is trying to be visual intent.
 
-## The New 3D Node
+## The 3D Node
 
-The latest addition is a dedicated **3D** node using Hunyuan 3D through Fal.
+Newt_Node includes a dedicated **3D** node using Hunyuan 3D through Fal.
 
 [IMAGE 05: Image-to-3D workflow canvas]
 
 The node takes named image inputs such as Front, Back, Left, Right, Top, Bottom, Left Front, and Right Front. Front is required. The rest are optional. The important part is that the graph preserves the meaning of each view instead of guessing based on connection order.
 
-When the model runs, Newt_Node downloads the generated GLB locally, stores it in the outputs folder, previews it inside the node with a Three.js viewer, and provides a download button directly on the result.
+When the model runs, Newt_Node downloads the generated GLB locally, stores it with the current workflow package or local outputs area, previews it inside the node with a Three.js viewer, and provides a download button directly on the result.
 
 [IMAGE 06: Generated 3D output thumbnail]
 
@@ -193,7 +193,7 @@ That is where this starts to feel empowering.
 
 Newt_Node gives me a way to control media instead of just prompting and hoping. I can build a workflow, steer the references, shape the composition, review the outputs, track the cost, and keep the whole process inside a sandbox that is tuned to how I actually think.
 
-I am already cooking up partnerships for media creation, and I can see how this will blow commercial clients away with visuals that move faster from idea to execution than the old pipeline could allow.
+I am already cooking up partnerships for media creation, and I can see how this will blow commercial clients away with visuals that move faster from idea to execution than a traditional pipeline could allow.
 
 Yes, a lot of this is possible with third-party apps. Krea and Flaura are still out there, and they are still powerful. But there is something incredible about having a bespoke sandbox where I can roll my own.
 

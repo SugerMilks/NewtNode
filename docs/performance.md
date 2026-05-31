@@ -1,6 +1,6 @@
-# Newt Node Performance Notes
+# Newt Node Performance
 
-This note captures the current startup and bundle-loading shape so optimization work stays measurable. Update it when a pass deliberately changes startup loading, code splitting, or heavy runtime ownership.
+This document captures the current startup and bundle-loading shape so optimization work stays measurable. Update it when a pass deliberately changes startup loading, code splitting, or heavy runtime ownership.
 
 ## How To Measure
 

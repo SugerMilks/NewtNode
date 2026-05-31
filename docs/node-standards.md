@@ -21,7 +21,7 @@ Use this quick pass before implementing a feature, and again before committing i
 - Identify which surfaces the feature touches: node catalog, node data, ports, run order, backend routes, asset persistence, stats, saved workflows, and UI states.
 - Use the code ownership map below before editing `NodeEditor.jsx`; prefer the focused helper modules for pure logic, persistence, media handling, and API calls.
 - Prefer existing helpers and patterns before adding a new storage, request, preview, or result shape.
-- Preserve old saved workflows with normalization or migration when fields, ports, node types, or asset URLs change.
+- Preserve existing saved workflows with normalization or migration when fields, ports, node types, or asset URLs change.
 - Keep generated files and copied dependencies inside the current workflow package when a package is attached.
 - When a frontend/server change affects startup, routing, or lazy assets, run `npm run smoke:app` with the dev server running in addition to tests/build.
 - Update this document when the feature intentionally changes one of these standards.
@@ -42,7 +42,7 @@ Use this quick pass before implementing a feature, and again before committing i
 | Canvas chrome | `src/components/CanvasChrome.jsx` | Memoized edge paths, selection marquee/action bar, and workflow prompt live here. Keep hot SVG/UI chrome out of `NodeEditor.jsx`. |
 | Preview/result UI | `src/components/MediaViews.jsx`, `src/components/Model3DViewer.jsx` | Shared previews, result panes, project output drawer, output lightbox, lazy output-rail media loading, and the lazy 3D viewer wrapper live in `MediaViews.jsx`. The actual GLB renderer lives in `Model3DViewer.jsx`. |
 | Small node bodies | `src/components/NodeBodies.jsx` | Plain Text, Text Model, upload media, and Composer summary bodies live here. Preserve their prop-driven behavior and class names when extending them. |
-| Composer/camera 3D UI | `src/components/ComposerViewport.jsx`, `src/components/CameraControlViewport.jsx`, `src/composerState.js`, `src/composerRender.js` | Interactive Three.js viewport shells for Composer and Camera live in the component files. Composer defaults, normalization, saved poses, and image plane helpers live in `composerState.js`; Composer Three.js rendering and mannequin asset loading live in `composerRender.js`. |
+| Composer/camera 3D UI | `src/components/ComposerViewport.jsx`, `src/components/CameraControlViewport.jsx`, `src/composerState.js`, `src/composerRender.js` | Interactive Three.js viewport shells for Composer and Camera live in the component files. Composer defaults, normalization, saved pose fields, and image plane helpers live in `composerState.js`; Composer Three.js rendering and mannequin asset loading live in `composerRender.js`. Composer pose preset API wrappers live in `src/api/newtApi.js`; backend pose-library persistence lives in `server/routes/composerPoses.js`. |
 | Node port rows and transfer collage | `src/components/NodePorts.jsx`, `src/components/StyleCollage.jsx` | Reusable port handles/rows and the transfer mood-board collage live here. Keep class names and drag/drop behavior stable because many node bodies depend on them. |
 | Project output rail data | `src/projectOutputs.js` | Build and filter project output rail items here; keep filesystem/history filtering out of render code. |
 | Canvas geometry | `src/nodeGeometry.js` | Node bounds, graph bounds, rectangle math, menu clamping, and viewport modulo helpers live here. |
@@ -52,33 +52,33 @@ Use this quick pass before implementing a feature, and again before committing i
 | Workflow persistence | `src/useWorkflowPersistence.js` | Save, Save As, Open, Import, unsaved-change prompts, Recent workflows updates, and workflow status messages live here. |
 | Draft persistence | `src/useNodeEditorDraft.js` | Browser draft loading, snapshotting, and debounced local draft writes live here. |
 | Workflow files/session/state | `src/workflowFiles.js`, `src/workflowSession.js`, `src/workflowPreferences.js`, `src/workflowContext.js`, `src/workflowState.js` | File document shape, display paths, package/request context, picker preferences, graph cloning/remapping/fingerprints, deduping, and stale runtime cleanup live here. |
-| Backend route registration | `server/index.js`, `server/routes/*` | `server/index.js` owns shared app setup and legacy route implementations. New low-coupling route groups should register through `server/routes/*` and receive explicit dependencies from `index.js`. |
+| Backend route registration | `server/index.js`, `server/routes/*` | `server/index.js` owns shared app setup and existing route implementations. New low-coupling route groups should register through `server/routes/*` and receive explicit dependencies from `index.js`. |
 
 When adding a new feature, put pure helpers in one of these modules or create a similarly focused module. `NodeEditor.jsx` should coordinate React state, node rendering, event handlers, and node-specific orchestration, not become the home for reusable algorithms.
 
-## Migrating Old-System Features Into The Refactored App
+## Migrating Pre-Refactor Features Into The Current App
 
 Some future features may arrive as patches or branches built before this refactor. Treat those as source material, not as code to paste wholesale. The goal is to preserve the feature behavior while landing it in the current ownership map above.
 
-Start every old-feature merge with this audit:
+Start every pre-refactor feature merge with this audit:
 
-- Identify every touched surface in the old implementation: node catalog, icon, config, defaults, normalization, ports, connection rules, UI body, model options, API client call, backend route, run scheduling, result items, preview behavior, workflow persistence, stats, CSS, and tests.
-- Compare those surfaces to the current ownership map before editing. Move old pure helpers, option lists, request builders, route wrappers, and preview utilities into their current focused modules.
+- Identify every touched surface in the incoming implementation: node catalog, icon, config, defaults, normalization, ports, connection rules, UI body, model options, API client call, backend route, run scheduling, result items, preview behavior, workflow persistence, stats, CSS, and tests.
+- Compare those surfaces to the current ownership map before editing. Move incoming pure helpers, option lists, request builders, route wrappers, and preview utilities into their current focused modules.
 - Keep `NodeEditor.jsx` as the coordinator. It may select node bodies, wire callbacks, own current node config/default/normalization functions, and call runner helpers. It should not regain large copied algorithms, static model catalogs, request payload builders, or reusable media utilities.
-- Preserve saved-workflow compatibility first. If the old feature added or renamed fields, ports, node types, result shapes, or asset URLs, add normalization/migration for old and new saved workflows in the current normalization path.
-- Preserve UI class names and visible behavior unless the feature intentionally changes UI. When moving old JSX into a component, pass data and callbacks through props instead of reaching into editor state from the new component.
+- Preserve saved-workflow compatibility first. If the incoming feature added or renamed fields, ports, node types, result shapes, or asset URLs, add normalization/migration for previous and current saved workflows in the current normalization path.
+- Preserve UI class names and visible behavior unless the feature intentionally changes UI. When moving incoming JSX into a component, pass data and callbacks through props instead of reaching into editor state from the new component.
 - Keep result arrays, selected result indexes, previews, and downloads using `mediaResults.js` and shared preview helpers. Do not introduce a new result shape for one feature unless all shared preview/download/stat surfaces are updated together.
 - Keep model/provider names and dropdown option labels stable. Put new static model names, durations, aspect ratios, presets, and descriptions in `modelOptions.js`; saved workflows may depend on exact strings.
 - Add browser API wrappers in `src/api/newtApi.js` before using a new route in UI code. Avoid scattered raw `fetch` calls.
 - Prefer focused runner helpers under `src/nodeRunners/` for backend payloads and result normalization. The editor should assemble connected inputs and pass them to a runner/builder, not own the full request body when the shape is reusable.
-- Register new backend route groups through `server/routes/*` when possible, with explicit dependencies from `server/index.js`. If extending a legacy route in `server/index.js`, keep the change tightly scoped and document why it stayed there.
+- Register new backend route groups through `server/routes/*` when possible, with explicit dependencies from `server/index.js`. If extending an existing route in `server/index.js`, keep the change tightly scoped and document why it stayed there.
 - Keep workflow package behavior intact. Imported or generated files should continue to use workflow context helpers so Windows and macOS users can move packaged workflows without broken asset references.
 - Check cross-platform assumptions. Do not hard-code Windows path separators, drive letters, shell commands, hidden-folder behavior, or `.exe` names in browser code or shared helpers. Use Node `path` APIs server-side and document platform-specific commands separately when needed.
-- Update this standards document in the same change when the old feature introduces a new durable pattern or changes a current one.
+- Update this standards document in the same change when the incoming feature introduces a new durable pattern or changes a current one.
 
-Use this placement guide while migrating old code:
+Use this placement guide while migrating pre-refactor code:
 
-| Old-system code shape | Current landing place |
+| Incoming code shape | Current landing place |
 | --- | --- |
 | Node catalog entry | `src/nodeRegistry.js`; icon only in `NodeEditor.jsx` |
 | Static model names/options/descriptions | `src/modelOptions.js` |
@@ -88,7 +88,7 @@ Use this placement guide while migrating old code:
 | Small reusable node body JSX | `src/components/NodeBodies.jsx` or a new focused component |
 | Port row/collage UI | `src/components/NodePorts.jsx`, `src/components/StyleCollage.jsx` |
 | Color matte picker/state/math | `src/components/ColorIdMatteControls.jsx`, `src/colorIdMatte.js` |
-| Composer scene defaults, poses, image planes | `src/composerState.js` |
+| Composer scene defaults, pose fields, pose presets, image planes | `src/composerState.js`, `src/api/newtApi.js`, `server/routes/composerPoses.js` |
 | Composer Three.js rendering | `src/composerRender.js` |
 | Camera/Composer viewport shell controls | `src/components/CameraControlViewport.jsx`, `src/components/ComposerViewport.jsx` |
 | Backend request wrappers | `src/api/newtApi.js` |
@@ -98,7 +98,7 @@ Use this placement guide while migrating old code:
 | Draft autosave | `src/useNodeEditorDraft.js` |
 | Backend routes | `server/routes/*` plus explicit registration in `server/index.js` |
 
-Before committing a migrated old feature, run the normal verification checklist. For frontend/server changes, include `npm run smoke:app` with the dev server running. For old features that touch save/load/import, also manually test opening a workflow saved before the feature and one saved after the feature.
+Before committing a migrated pre-refactor feature, run the normal verification checklist. For frontend/server changes, include `npm run smoke:app` with the dev server running. For features that touch save/load/import, also manually test opening a workflow saved before the feature and one saved after the feature.
 
 ## Current Media Types
 
@@ -172,7 +172,7 @@ Nodes should feel like they belong to the same editor.
 - Connector lines inherit the source output color.
 - Incompatible connections should fail with a plain, helpful message.
 - Auto-created nodes from a dragged connector should link only when compatible.
-- Backward compatibility matters: if a port is renamed, migrate old edges in `normalizeEdgeForCurrentGraph`.
+- Backward compatibility matters: if a port is renamed, migrate previous edge shapes in `normalizeEdgeForCurrentGraph`.
 
 ## Result And Preview Standards
 
@@ -216,18 +216,26 @@ Nodes should feel like they belong to the same editor.
 - Composer-bound Character references are identity-only. The Composer guide remains the authority for pose, gesture, stance, limb endpoints, crop, scale, placement, and camera.
 - When an Image Model is running from a Composer frame, the Composer's bound Character input lines should animate as active generation dependencies.
 - The Composer frame should be labeled as the input guide image when sent to backend image-generation routes.
-- Saved workflows with older Composer prompt edges, or Character bindings for deleted maquettes, should drop those edges during graph normalization instead of keeping stale prompt plumbing.
+- Saved workflows with pre-refactor Composer prompt edges, or Character bindings for deleted maquettes, should drop those edges during graph normalization instead of keeping stale prompt plumbing.
+- The Composer modal sidebar uses a visible scene-object list for Camera, maquettes, primitive props, and image planes. Clicking a row selects that object. `Delete Selected` lives in the header as a red destructive button and deletes the selected scene object only; it must never delete the Camera.
+- Maquette object controls are always visible when a maquette is selected: `Name`, `Color`, `Location`, `Rotation`, and `Scale`. Do not hide these controls behind the pose foldout.
+- Pose-specific maquette controls live under a collapsible `Pose Controls` section, closed by default. When open, the section should consume the remaining Composer sidebar height and expose a working scroll area instead of clipping lower controls or leaving dead space.
+- The pose preset row is labeled `Pose Presets`. It contains a legible preset-name dropdown, a trashcan button for the selected preset, and a Save button. Saving writes to the Composer-local saved pose list and attempts to persist the pose under `public/models/poses`; deleting removes the pose from the Composer-local list and deletes the library JSON through `DELETE /api/composer-poses/:poseId` when the preset has a `fileName`.
+- Current maquette pose control order is: `Head`, `Upper Body`, `L Upper Arm`, `L Lower Arm`, `L Hand`, `R Upper Arm`, `R Lower Arm`, `R Hand`, `Hips`, `L Upper Leg`, `L Lower Leg`, `L Foot`, `R Upper Leg`, `R Lower Leg`, `R Foot`.
+- Current saved pose field groups include upper/lower arms, hands, upper/lower legs, feet, head, upper body, hips, and `lean`. When adding a pose field, update the client and server `composerPoseFieldKeys` lists (`src/composerState.js` and `server/index.js`), `defaultComposerMaquette`, `normalizedComposerScene`, saved pose snapshots/patches through the field-key list, the Composer modal controls, and both mannequin/procedural rendering when the field is visual.
 
 ## Backend API Standards
 
-Local node routes should live in `server/index.js` under `/api/node/...`.
+Local API routes should live in the smallest backend owner that fits the route. Node generation routes usually live under `/api/node/...`; focused route groups should live in `server/routes/*` and be registered by `server/index.js` with explicit dependencies.
 
 - Validate required inputs early and return JSON errors.
 - Use local asset helpers such as `readLocalAsset`, `localAssetToFalUrl`, or `uploadLocalOutputToFal` rather than passing local paths to remote APIs.
 - Use managed asset helpers for uploaded, generated, and derived files so the current workflow package is honored.
 - Download generated files into the attached package `outputs/` folder, or into `/outputs/<workflow-name>/` when no package is attached.
 - Return local URLs such as `/workflow-assets/<workflow-id>/outputs/file.glb` for packaged assets or `/outputs/<workflow-name>/file.glb` for unpackaged assets.
-- Add a health route flag for new API routes.
+- Add a health route flag for new API routes and update `scripts/smokeApp.mjs` required routes when the route is part of startup health.
+- Add browser API wrappers in `src/api/newtApi.js` before UI code calls a route.
+- Composer pose library routes live at `/api/composer-poses`: `GET` lists library poses, `POST` saves or updates pose JSON under `public/models/poses`, and `DELETE /api/composer-poses/:poseId` removes the selected library pose file. Keep file names sanitized server-side.
 - Use `subscribeFal` for Fal calls so queue and failure logging stays consistent.
 - Normalize Fal file responses with `normalizeFalFile` and fallback search helpers where useful.
 - Keep request fields aligned with the provider's current API schema.
@@ -260,7 +268,7 @@ Saved workflows are long-lived project files. Changes must avoid breaking them.
 - Preserve unknown data fields when normalizing unless they are unsafe runtime state.
 - Migrate renamed node types or ports.
 - Clear stale `running` state on load.
-- Keep `resultItems`, `resultUrl`, and selected result indexes compatible with older workflows.
+- Keep `resultItems`, `resultUrl`, and selected result indexes compatible with existing workflows.
 - Store reusable assets under `public/models` or `public/models/poses` only when they should be versioned with the repo.
 - Store unpackaged generated outputs under `/outputs/<workflow-name>/`, unpackaged uploads under `/uploads/<workflow-name>/`, unpackaged helper dependencies under `/outputs/<workflow-name>/dependencies/`, and registry copies of saved workflows under `/saved_workflows`.
 - Treat `/saved_workflows/inputs`, `/saved_workflows/outputs`, and `/saved_workflows/dependencies` as local app storage for copied/generated assets. Keep those media files ignored by git; only `.gitkeep` placeholders should be tracked.
@@ -302,6 +310,13 @@ Portable packages are the default Save As shape for workflows that need to move 
 - Google image models should use a direct Google API key only when `GOOGLE_API_KEY` exists. When it is absent, route the same Google-branded image model through Fal instead.
 - Do not automatically fall back from direct Google to Fal after a Google request fails; if the user supplied a Google key, Google model failures should surface as Google failures.
 
+## Cross-Platform App Standards
+
+- Browser and shared helper code must not depend on Windows-only paths, drive letters, hidden-folder behavior, shell commands, or `.exe` names. Use URL helpers in browser code and Node `path`/`fs` APIs server-side.
+- Preserve both Windows and macOS startup entry points when changing app launch behavior: `Launch_NewtNode.ps1`, `Launch_NewtNode.bat`, `Restart_NewtNode.ps1`, `Restart_NewtNode.bat`, `NewtNode.command`, `NewtNode.app`, and `mac/NewtNodeLauncher.applescript`.
+- Preserve app icons and bundle metadata when changing launchers or packaging: `public/icon.png`, `NewtNode.app/Contents/Info.plist`, and the `.icns` resources under `NewtNode.app/Contents/Resources/`.
+- Keep launcher ports, health URLs, package scripts, and README startup instructions aligned. Document platform-specific commands separately rather than baking them into shared code.
+
 ## UI Design Standards
 
 - The canvas is the primary workspace, not a landing page.
@@ -312,6 +327,7 @@ Portable packages are the default Save As shape for workflows that need to move 
 - Do not add decorative orbs, oversized hero elements, or marketing-style sections inside the app.
 - For 3D scenes, use Three.js and verify nonblank rendering.
 - Use stable dimensions for boards, previews, result panes, and tool rows so hover or dynamic content does not shift layout.
+- Scrollable tool panels should consume available space before introducing nested scrollbars. When a control list must scroll, make the scrollbar discoverable and verify the first and last controls are reachable.
 
 ## 3D Node Standard
 
@@ -336,9 +352,10 @@ Before committing node or UI changes:
 - Run `npm run build`.
 - Run `npm run bundle:report` after startup-loading, lazy-loading, or heavy UI ownership changes.
 - Run `npm test` when pure helpers, workflow state, node runner scheduling, or geometry changed.
-- Run `node --check server/index.js` when the server changed.
+- Run `node --check server/index.js` and any touched `server/routes/*.js` file when the server changed.
 - Run `git status --short --branch` and confirm only intentional source/doc changes are staged. Runtime files under `server/data/`, `outputs/`, `uploads/`, and generated workflow JSON should stay ignored.
 - Confirm `/api/health` reports any new route flags.
+- When the dev client is not on the smoke default port, pass explicit smoke URLs, for example `npm run smoke:app -- http://localhost:5174/ http://localhost:3333/api/health`.
 - Check that existing saved workflows still load.
 - Check that new ports connect, reject incompatible edges, and auto-connect correctly.
 - Check collapsed and expanded node states.

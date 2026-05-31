@@ -1,6 +1,6 @@
 # NewtNode
 
-A local browser app for generating images and Seedance 2.0 videos through API providers while keeping your keys on your machine.
+A local node-based creative workflow app for generating, previewing, saving, and remixing images, video, audio, 3D assets, text, and composition guides while keeping your keys on your machine.
 
 ## Setup
 
@@ -35,20 +35,9 @@ A local browser app for generating images and Seedance 2.0 videos through API pr
 
 ## One-Click Launch
 
-Double-click `VS_AI.app` in this folder to start the local backend, start the Vite UI, and open NewtNode in a standalone browser window. `VS_AI.command` does the same thing with terminal logs visible. The launcher filenames are kept for compatibility with existing local shortcuts.
+Windows: double-click `Launch_NewtNode.bat`, or run `Launch_NewtNode.ps1` from PowerShell, to start the local backend, start the Vite UI, and open NewtNode.
 
-## How Routing Works
-
-- No image files: `bytedance/seedance-2.0/text-to-video`
-- Start frame, optional end frame: `bytedance/seedance-2.0/image-to-video`
-- Reference images without a start frame: `bytedance/seedance-2.0/reference-to-video`
-- Fast mode inserts `/fast/` into the same endpoint family.
-
-Generated videos are downloaded into `outputs/`. Uploaded source images are retained in `uploads/`.
-
-## Notes
-
-Fal's Seedance 2.0 schema currently supports `480p`, `720p`, `1080p`, durations from `4` to `15` seconds or `auto`, aspect ratios including `16:9`, `9:16`, `1:1`, and synchronized audio generation.
+macOS: double-click `NewtNode.app` for the app-style launcher, or run `NewtNode.command` when you want terminal logs visible.
 
 ## Development Standards
 
