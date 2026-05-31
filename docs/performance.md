@@ -4,18 +4,27 @@ This note captures the current startup and bundle-loading shape so optimization 
 
 ## How To Measure
 
-Run a production build, then summarize the emitted `dist/` assets:
+Run a production build, then summarize the emitted `dist/` assets. Use the platform-native npm command so Windows and macOS checks measure the same build.
+
+Windows PowerShell:
 
 ```powershell
 npm.cmd run build
 npm.cmd run bundle:report
 ```
 
+macOS/Linux:
+
+```bash
+npm run build
+npm run bundle:report
+```
+
 `bundle:report` classifies assets referenced by `dist/index.html` as the initial shell and everything else as lazy/generated. It reports raw and gzip sizes.
 
 ## Current Baseline
 
-Measured after the NodeEditor UI-island extraction pass.
+Measured after the Composer state/render extraction pass.
 
 | Area | Current behavior |
 | --- | --- |
@@ -36,7 +45,7 @@ Recent production build summary:
 | `assets/vendor-*.js` | modulepreload | 3.53 kB | 1.54 kB |
 | `assets/vendor-react-*.js` | modulepreload | 184.30 kB | 57.63 kB |
 | `assets/vendor-icons-*.js` | modulepreload | 11.48 kB | 3.96 kB |
-| `assets/NodeEditor-*.js` | lazy editor chunk | 288.50 kB | 79.06 kB |
+| `assets/NodeEditor-*.js` | lazy editor chunk | 288.60 kB | 78.60 kB |
 | `assets/NodeEditor-*.css` | lazy editor style | 57.34 kB | 10.47 kB |
 | `assets/Model3DViewer-*.js` | lazy 3D viewer chunk | 3.53 kB | 1.64 kB |
 | `assets/ColorIdMatteControls-*.js` | lazy utility chunk | 12.76 kB | 3.21 kB |
