@@ -3768,7 +3768,7 @@ function ComposerEditorModal({ node, incoming = {}, onClose, onUpdate, onCapture
   const renderSceneData = resolveComposerImagePlaneSources(sceneData, imageSources);
   const composerObjects = [...sceneData.maquettes, ...sceneData.props, ...sceneData.imagePlanes];
   const rawSelectedId = node.data.composerSelectedId || "";
-  const selectedId = rawSelectedId === "camera" ? "camera" : composerObjects.some((item) => item.id === rawSelectedId) ? rawSelectedId : sceneData.maquettes[0]?.id || sceneData.props[0]?.id || sceneData.imagePlanes[0]?.id || "";
+  const selectedId = rawSelectedId === "camera" ? "camera" : composerObjects.some((item) => item.id === rawSelectedId) ? rawSelectedId : sceneData.maquettes[0]?.id || sceneData.props[0]?.id || sceneData.imagePlanes[0]?.id || "camera";
   const selectedMaquette = sceneData.maquettes.find((item) => item.id === selectedId);
   const selectedProp = sceneData.props.find((item) => item.id === selectedId);
   const selectedImagePlane = sceneData.imagePlanes.find((item) => item.id === selectedId);
@@ -3779,6 +3779,12 @@ function ComposerEditorModal({ node, incoming = {}, onClose, onUpdate, onCapture
   const selectedPoseValue =
     selectedKind === "maquette" && savedPoseOptions.some((pose) => pose.id === selectedObject?.pose) ? selectedObject.pose : "";
   const selectedNameValue = selectedKind === "camera" ? "Camera" : selectedObject?.name || "";
+  const sceneObjectList = [
+    { id: "camera", label: "Camera", type: "View" },
+    ...sceneData.maquettes.map((item, index) => ({ id: item.id, label: item.name || `Maquette ${index + 1}`, type: "Maquette" })),
+    ...sceneData.props.map((item, index) => ({ id: item.id, label: item.name || `${composerPrimitiveLabel(item.primitive)} ${index + 1}`, type: composerPrimitiveLabel(item.primitive) })),
+    ...sceneData.imagePlanes.map((item, index) => ({ id: item.id, label: item.name || `Image Plane ${index + 1}`, type: "Image Plane" }))
+  ];
 
   React.useEffect(() => {
     let cancelled = false;
@@ -3941,6 +3947,42 @@ function ComposerEditorModal({ node, incoming = {}, onClose, onUpdate, onCapture
     }
   }
 
+  async function deleteSelectedPose() {
+    if (selectedKind !== "maquette" || !selectedObject || !selectedPoseValue) return;
+
+    const savedPose = savedPoseOptions.find((pose) => pose.id === selectedPoseValue);
+    if (!savedPose) return;
+
+    const confirmed = window.confirm(`Delete pose "${savedPose.name}"?`);
+    if (!confirmed) return;
+
+    const nextSavedPoses = nodeSavedPoses.filter((pose) => pose.id !== savedPose.id);
+    const nextScene = {
+      ...sceneData,
+      maquettes: sceneData.maquettes.map((item) => (item.pose === savedPose.id ? { ...item, pose: "" } : item))
+    };
+
+    onUpdate({
+      composerScene: normalizedComposerScene(nextScene),
+      composerSavedPoses: nextSavedPoses
+    });
+    setLibraryPoses((poses) => poses.filter((pose) => pose.id !== savedPose.id));
+    setPoseStatus(`Deleted "${savedPose.name}" from this Composer.`);
+
+    if (!savedPose.fileName) return;
+
+    try {
+      const { response, data } = await composerApi.deletePose(savedPose.id);
+      if (!response.ok) throw new Error(data.error || "Could not delete the pose library file.");
+
+      setLibraryPoses(normalizeComposerSavedPoses(data.poses));
+      setPoseStatus(`Deleted "${savedPose.name}" from this Composer and public/models/poses.`);
+    } catch (error) {
+      setPoseStatus(`Deleted "${savedPose.name}" from this Composer. Library delete failed until the backend is restarted.`);
+      console.warn(error);
+    }
+  }
+
   function removeSelected() {
     if (!selectedObject) return;
     const nextMaquettes = sceneData.maquettes.filter((item) => item.id !== selectedObject.id);
@@ -3997,6 +4039,9 @@ function ComposerEditorModal({ node, incoming = {}, onClose, onUpdate, onCapture
               Guides
             </button>
             <button onClick={captureFrame}>Capture Frame</button>
+            <button className="composer-danger" onClick={removeSelected} disabled={!selectedObject} title={selectedObject ? "Delete selected scene object" : "Select a scene object to delete"}>
+              Delete Selected
+            </button>
             <button className="icon-only" onClick={onClose} title="Close Composer">
               <X size={17} />
             </button>
@@ -4016,7 +4061,7 @@ function ComposerEditorModal({ node, incoming = {}, onClose, onUpdate, onCapture
             aspectRatioNumber={composerAspectRatioNumber}
           />
 
-          <aside className="composer-controls">
+          <aside className={`composer-controls ${selectedKind === "maquette" ? "maquette-selected" : ""}`}>
             <div className="composer-control-row trio">
               <button onClick={addMaquette}>Add Maquette</button>
               <select value="" onChange={(event) => event.target.value && addPrimitiveProp(event.target.value)} title="Add primitive">
@@ -4033,27 +4078,21 @@ function ComposerEditorModal({ node, incoming = {}, onClose, onUpdate, onCapture
             </div>
 
             <div className="composer-selection-panel">
-              <label className="composer-field highlighted">
-                <span>Selection</span>
-                <select value={selectedId} onChange={(event) => onUpdate({ composerSelectedId: event.target.value })}>
-                  <option value="camera">Camera</option>
-                  {sceneData.maquettes.map((item, index) => (
-                    <option key={item.id} value={item.id}>
-                      {item.name || `Maquette ${index + 1}`}
-                    </option>
-                  ))}
-                  {sceneData.props.map((item, index) => (
-                    <option key={item.id} value={item.id}>
-                      {item.name || `${composerPrimitiveLabel(item.primitive)} ${index + 1}`}
-                    </option>
-                  ))}
-                  {sceneData.imagePlanes.map((item, index) => (
-                    <option key={item.id} value={item.id}>
-                      {item.name || `Image Plane ${index + 1}`}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <div className="composer-object-list" role="listbox" aria-label="Scene objects">
+                {sceneObjectList.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={item.id === selectedId ? "selected" : ""}
+                    onClick={() => onUpdate({ composerSelectedId: item.id })}
+                    role="option"
+                    aria-selected={item.id === selectedId}
+                  >
+                    <span>{item.label}</span>
+                    <small>{item.type}</small>
+                  </button>
+                ))}
+              </div>
               <label className="composer-field highlighted">
                 <span>Name</span>
                 <input value={selectedNameValue} disabled={selectedKind === "camera"} onChange={(event) => patchSelected({ name: event.target.value })} />
@@ -4091,97 +4130,110 @@ function ComposerEditorModal({ node, incoming = {}, onClose, onUpdate, onCapture
                 <ComposerRange label="Lens" step="1" value={sceneData.camera.fov} onChange={(value) => patchCamera({ fov: value })} />
               </div>
             ) : selectedObject ? (
-              <>
-                {selectedKind === "maquette" && (
+              selectedKind === "maquette" ? (
+                <>
                   <label className="composer-field">
                     <span>Color</span>
                     <input type="color" value={selectedObject.color || "#b8b8b2"} onChange={(event) => patchSelected({ color: event.target.value })} />
                   </label>
-                )}
-                <ComposerVectorRange label="Location" value={{ x: selectedObject.x, y: selectedObject.y, z: selectedObject.z }} step="0.05" onChange={(value) => patchSelected({ x: value.x, y: value.y, z: value.z })} />
-                <ComposerRotationVectorRange label="Rotation" value={{ x: degreesToRadians(finiteNumber(selectedObject.rotX, 0)), y: degreesToRadians(finiteNumber(selectedObject.rotY, 0)), z: degreesToRadians(finiteNumber(selectedObject.rotZ, 0)) }} onChange={(value) => patchSelected({ rotX: radiansToDegrees(value.x), rotY: radiansToDegrees(value.y), rotZ: radiansToDegrees(value.z) })} />
-                <ComposerRange label="Scale" step="0.05" value={selectedObject.scale} onChange={(value) => patchSelected({ scale: value })} />
+                  <ComposerVectorRange label="Location" value={{ x: selectedObject.x, y: selectedObject.y, z: selectedObject.z }} step="0.05" onChange={(value) => patchSelected({ x: value.x, y: value.y, z: value.z })} />
+                  <ComposerRotationVectorRange label="Rotation" value={{ x: degreesToRadians(finiteNumber(selectedObject.rotX, 0)), y: degreesToRadians(finiteNumber(selectedObject.rotY, 0)), z: degreesToRadians(finiteNumber(selectedObject.rotZ, 0)) }} onChange={(value) => patchSelected({ rotX: radiansToDegrees(value.x), rotY: radiansToDegrees(value.y), rotZ: radiansToDegrees(value.z) })} />
+                  <ComposerRange label="Scale" step="0.05" value={selectedObject.scale} onChange={(value) => patchSelected({ scale: value })} />
+                  <details className="composer-pose-panel">
+                    <summary>
+                      <span>Pose Controls</span>
+                      <ChevronDown size={14} />
+                    </summary>
+                    <div className="composer-pose-panel-body">
+                      <div className="composer-control-row pose-save">
+                        <label className="composer-field highlighted">
+                          <span>Pose Presets</span>
+                          <select value={selectedPoseValue} onChange={(event) => applySavedPose(event.target.value)}>
+                            <option value="" disabled>
+                              {savedPoseOptions.length ? "Select pose" : "No saved poses"}
+                            </option>
+                            {savedPoseOptions.map((pose) => (
+                              <option key={pose.id} value={pose.id}>
+                                {pose.name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <button type="button" className="composer-pose-delete" onClick={deleteSelectedPose} disabled={!selectedPoseValue} title={selectedPoseValue ? "Delete selected pose" : "Select a pose to delete"} aria-label="Delete selected pose">
+                          <Trash2 size={15} />
+                        </button>
+                        <button type="button" onClick={saveSelectedPose}>
+                          Save
+                        </button>
+                      </div>
+                      {poseStatus && <div className="composer-status">{poseStatus}</div>}
+                      <ComposerRotationVectorRange label="Head" value={composerRotationVector(selectedObject, "headRot")} onChange={(value) => patchSelected(composerRotationVectorPatch("headRot", value, false))} />
+                      <ComposerRotationVectorRange label="Upper Body" value={composerRotationVector(selectedObject, "upperBodyRot")} onChange={(value) => patchSelected(composerRotationVectorPatch("upperBodyRot", value, false))} />
+                      <ComposerRotationVectorRange label="L Upper Arm" value={composerRotationVector(selectedObject, "leftUpperArm")} onChange={(value) => patchSelected(composerRotationVectorPatch("leftUpperArm", value))} />
+                      <ComposerRotationVectorRange label="L Lower Arm" value={composerRotationVector(selectedObject, "leftLowerArm")} onChange={(value) => patchSelected(composerRotationVectorPatch("leftLowerArm", value))} />
+                      <ComposerRotationVectorRange label="L Hand" value={composerRotationVector(selectedObject, "leftHandRot")} onChange={(value) => patchSelected(composerRotationVectorPatch("leftHandRot", value, false))} />
+                      <ComposerRotationVectorRange label="R Upper Arm" value={composerRotationVector(selectedObject, "rightUpperArm")} onChange={(value) => patchSelected(composerRotationVectorPatch("rightUpperArm", value))} />
+                      <ComposerRotationVectorRange label="R Lower Arm" value={composerRotationVector(selectedObject, "rightLowerArm")} onChange={(value) => patchSelected(composerRotationVectorPatch("rightLowerArm", value))} />
+                      <ComposerRotationVectorRange label="R Hand" value={composerRotationVector(selectedObject, "rightHandRot")} onChange={(value) => patchSelected(composerRotationVectorPatch("rightHandRot", value, false))} />
+                      <ComposerRotationVectorRange label="Hips" value={composerRotationVector(selectedObject, "hipsRot")} onChange={(value) => patchSelected(composerRotationVectorPatch("hipsRot", value, false))} />
+                      <ComposerRotationVectorRange label="L Upper Leg" value={composerRotationVector(selectedObject, "leftUpperLeg")} onChange={(value) => patchSelected(composerRotationVectorPatch("leftUpperLeg", value))} />
+                      <ComposerRotationVectorRange label="L Lower Leg" value={composerRotationVector(selectedObject, "leftLowerLeg")} onChange={(value) => patchSelected(composerRotationVectorPatch("leftLowerLeg", value))} />
+                      <ComposerRotationVectorRange label="L Foot" value={composerRotationVector(selectedObject, "leftFootRot")} onChange={(value) => patchSelected(composerRotationVectorPatch("leftFootRot", value, false))} />
+                      <ComposerRotationVectorRange label="R Upper Leg" value={composerRotationVector(selectedObject, "rightUpperLeg")} onChange={(value) => patchSelected(composerRotationVectorPatch("rightUpperLeg", value))} />
+                      <ComposerRotationVectorRange label="R Lower Leg" value={composerRotationVector(selectedObject, "rightLowerLeg")} onChange={(value) => patchSelected(composerRotationVectorPatch("rightLowerLeg", value))} />
+                      <ComposerRotationVectorRange label="R Foot" value={composerRotationVector(selectedObject, "rightFootRot")} onChange={(value) => patchSelected(composerRotationVectorPatch("rightFootRot", value, false))} />
+                    </div>
+                  </details>
+                </>
+              ) : (
+                <>
+                  <ComposerVectorRange label="Location" value={{ x: selectedObject.x, y: selectedObject.y, z: selectedObject.z }} step="0.05" onChange={(value) => patchSelected({ x: value.x, y: value.y, z: value.z })} />
+                  <ComposerRotationVectorRange label="Rotation" value={{ x: degreesToRadians(finiteNumber(selectedObject.rotX, 0)), y: degreesToRadians(finiteNumber(selectedObject.rotY, 0)), z: degreesToRadians(finiteNumber(selectedObject.rotZ, 0)) }} onChange={(value) => patchSelected({ rotX: radiansToDegrees(value.x), rotY: radiansToDegrees(value.y), rotZ: radiansToDegrees(value.z) })} />
+                  <ComposerRange label="Scale" step="0.05" value={selectedObject.scale} onChange={(value) => patchSelected({ scale: value })} />
 
-                {selectedKind === "maquette" ? (
-                  <>
-                    <div className="composer-control-row pose-save">
-                      <label className="composer-field highlighted">
-                        <span>Pose</span>
-                        <select value={selectedPoseValue} onChange={(event) => applySavedPose(event.target.value)}>
-                          <option value="" disabled>
-                            {savedPoseOptions.length ? "Select pose" : "No saved poses"}
-                          </option>
-                          {savedPoseOptions.map((pose) => (
-                            <option key={pose.id} value={pose.id}>
-                              {pose.name}
+                  {selectedKind === "prop" ? (
+                    <>
+                      <label className="composer-field">
+                        <span>Color</span>
+                        <input type="color" value={selectedObject.color || "#496b8f"} onChange={(event) => patchSelected({ color: event.target.value })} />
+                      </label>
+                      <label className="composer-field">
+                        <span>Primitive</span>
+                        <select value={selectedObject.primitive || "box"} onChange={(event) => patchSelected({ primitive: event.target.value })}>
+                          {composerPrimitiveOptions.map((primitive) => (
+                            <option key={primitive.id} value={primitive.id}>
+                              {primitive.label}
                             </option>
                           ))}
                         </select>
                       </label>
-                      <button type="button" onClick={saveSelectedPose}>
-                        Save
-                      </button>
-                    </div>
-                    {poseStatus && <div className="composer-status">{poseStatus}</div>}
-                    <ComposerRotationVectorRange label="L Upper Arm" value={composerRotationVector(selectedObject, "leftUpperArm")} onChange={(value) => patchSelected(composerRotationVectorPatch("leftUpperArm", value))} />
-                    <ComposerRotationVectorRange label="L Lower Arm" value={composerRotationVector(selectedObject, "leftLowerArm")} onChange={(value) => patchSelected(composerRotationVectorPatch("leftLowerArm", value))} />
-                    <ComposerRotationVectorRange label="R Upper Arm" value={composerRotationVector(selectedObject, "rightUpperArm")} onChange={(value) => patchSelected(composerRotationVectorPatch("rightUpperArm", value))} />
-                    <ComposerRotationVectorRange label="R Lower Arm" value={composerRotationVector(selectedObject, "rightLowerArm")} onChange={(value) => patchSelected(composerRotationVectorPatch("rightLowerArm", value))} />
-                    <ComposerRotationVectorRange label="L Upper Leg" value={composerRotationVector(selectedObject, "leftUpperLeg")} onChange={(value) => patchSelected(composerRotationVectorPatch("leftUpperLeg", value))} />
-                    <ComposerRotationVectorRange label="L Lower Leg" value={composerRotationVector(selectedObject, "leftLowerLeg")} onChange={(value) => patchSelected(composerRotationVectorPatch("leftLowerLeg", value))} />
-                    <ComposerRotationVectorRange label="R Upper Leg" value={composerRotationVector(selectedObject, "rightUpperLeg")} onChange={(value) => patchSelected(composerRotationVectorPatch("rightUpperLeg", value))} />
-                    <ComposerRotationVectorRange label="R Lower Leg" value={composerRotationVector(selectedObject, "rightLowerLeg")} onChange={(value) => patchSelected(composerRotationVectorPatch("rightLowerLeg", value))} />
-                    <ComposerRotationVectorRange label="L Hand" value={composerRotationVector(selectedObject, "leftHandRot")} onChange={(value) => patchSelected(composerRotationVectorPatch("leftHandRot", value, false))} />
-                    <ComposerRotationVectorRange label="R Hand" value={composerRotationVector(selectedObject, "rightHandRot")} onChange={(value) => patchSelected(composerRotationVectorPatch("rightHandRot", value, false))} />
-                    <ComposerRotationVectorRange label="Head" value={composerRotationVector(selectedObject, "headRot")} onChange={(value) => patchSelected(composerRotationVectorPatch("headRot", value, false))} />
-                    <ComposerRotationVectorRange label="Upper Body" value={composerRotationVector(selectedObject, "upperBodyRot")} onChange={(value) => patchSelected(composerRotationVectorPatch("upperBodyRot", value, false))} />
-                  </>
-                ) : selectedKind === "prop" ? (
-                  <>
-                    <label className="composer-field">
-                      <span>Color</span>
-                      <input type="color" value={selectedObject.color || "#496b8f"} onChange={(event) => patchSelected({ color: event.target.value })} />
-                    </label>
-                    <label className="composer-field">
-                      <span>Primitive</span>
-                      <select value={selectedObject.primitive || "box"} onChange={(event) => patchSelected({ primitive: event.target.value })}>
-                        {composerPrimitiveOptions.map((primitive) => (
-                          <option key={primitive.id} value={primitive.id}>
-                            {primitive.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <ComposerRange label="Width" min="0.25" max="4" step="0.05" value={selectedObject.width} onChange={(value) => patchSelected({ width: value })} />
-                    <ComposerRange label="Height" min="0.25" max="4" step="0.05" value={selectedObject.height} onChange={(value) => patchSelected({ height: value })} />
-                    <ComposerRange label="Depth" min="0.25" max="4" step="0.05" value={selectedObject.depth} onChange={(value) => patchSelected({ depth: value })} />
-                  </>
-                ) : (
-                  <>
-                    <label className="composer-field">
-                      <span>Image</span>
-                      <select value={selectedObject.imageUrl || ""} onChange={(event) => patchSelected({ imageUrl: event.target.value, name: imageSources.find((item) => item.url === event.target.value)?.label || selectedObject.name })}>
-                        <option value="">No image</option>
-                        {selectedObject.imageUrl && !imageSources.some((item) => item.url === selectedObject.imageUrl) && (
-                          <option value={selectedObject.imageUrl}>Current image</option>
-                        )}
-                        {imageSources.map((item) => (
-                          <option key={item.url} value={item.url}>
-                            {item.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <ComposerRange label="Width" min="0.25" max="8" step="0.05" value={selectedObject.width} onChange={(value) => patchSelected({ width: value })} />
-                    <ComposerRange label="Height" min="0.25" max="8" step="0.05" value={selectedObject.height} onChange={(value) => patchSelected({ height: value })} />
-                    <ComposerRange label="Opacity" min="0.1" max="1" step="0.05" value={selectedObject.opacity} onChange={(value) => patchSelected({ opacity: value })} />
-                  </>
-                )}
-
-                <button className="composer-danger" onClick={removeSelected}>
-                  Remove Selection
-                </button>
-              </>
+                      <ComposerRange label="Width" min="0.25" max="4" step="0.05" value={selectedObject.width} onChange={(value) => patchSelected({ width: value })} />
+                      <ComposerRange label="Height" min="0.25" max="4" step="0.05" value={selectedObject.height} onChange={(value) => patchSelected({ height: value })} />
+                      <ComposerRange label="Depth" min="0.25" max="4" step="0.05" value={selectedObject.depth} onChange={(value) => patchSelected({ depth: value })} />
+                    </>
+                  ) : (
+                    <>
+                      <label className="composer-field">
+                        <span>Image</span>
+                        <select value={selectedObject.imageUrl || ""} onChange={(event) => patchSelected({ imageUrl: event.target.value, name: imageSources.find((item) => item.url === event.target.value)?.label || selectedObject.name })}>
+                          <option value="">No image</option>
+                          {selectedObject.imageUrl && !imageSources.some((item) => item.url === selectedObject.imageUrl) && (
+                            <option value={selectedObject.imageUrl}>Current image</option>
+                          )}
+                          {imageSources.map((item) => (
+                            <option key={item.url} value={item.url}>
+                              {item.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <ComposerRange label="Width" min="0.25" max="8" step="0.05" value={selectedObject.width} onChange={(value) => patchSelected({ width: value })} />
+                      <ComposerRange label="Height" min="0.25" max="8" step="0.05" value={selectedObject.height} onChange={(value) => patchSelected({ height: value })} />
+                      <ComposerRange label="Opacity" min="0.1" max="1" step="0.05" value={selectedObject.opacity} onChange={(value) => patchSelected({ opacity: value })} />
+                    </>
+                  )}
+                </>
+              )
             ) : (
               <div className="composer-empty-selection">Add a maquette or box to begin blocking.</div>
             )}

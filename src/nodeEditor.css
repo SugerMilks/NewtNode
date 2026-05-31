@@ -1987,6 +1987,13 @@ video.newtnode-video-fallback {
   background: rgba(255, 255, 255, 0.025);
 }
 
+.composer-controls.maquette-selected {
+  display: flex;
+  align-content: stretch;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 .composer-control-row.split,
 .composer-control-row.trio,
 .composer-control-row.bookmark,
@@ -2008,12 +2015,87 @@ video.newtnode-video-fallback {
 }
 
 .composer-control-row.pose-save {
-  grid-template-columns: minmax(0, 1fr) 68px;
+  grid-template-areas:
+    "label label label"
+    "select delete save";
+  grid-template-columns: minmax(0, 1fr) 34px 68px;
+  align-items: center;
+}
+
+.composer-control-row.pose-save .composer-field {
+  display: contents;
+}
+
+.composer-control-row.pose-save .composer-field > span {
+  grid-area: label;
+}
+
+.composer-control-row.pose-save .composer-field > select {
+  grid-area: select;
+  min-width: 0;
+}
+
+.composer-control-row.pose-save .composer-pose-delete {
+  grid-area: delete;
+}
+
+.composer-control-row.pose-save > button:not(.composer-pose-delete) {
+  grid-area: save;
 }
 
 .composer-selection-panel {
   display: grid;
   gap: 10px;
+}
+
+.composer-object-list {
+  display: grid;
+  gap: 6px;
+  max-height: 170px;
+  padding: 6px;
+  overflow: auto;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.22);
+}
+
+.composer-object-list button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 0 8px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 7px;
+  color: rgba(244, 240, 232, 0.82);
+  background: rgba(255, 255, 255, 0.045);
+  font-size: 12px;
+  font-weight: 780;
+  text-align: left;
+}
+
+.composer-object-list button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-object-list button small {
+  color: rgba(244, 240, 232, 0.45);
+  font-size: 10px;
+  font-weight: 820;
+  text-transform: uppercase;
+}
+
+.composer-object-list button.selected {
+  border-color: rgba(221, 198, 49, 0.8);
+  color: #111;
+  background: #ddc631;
+}
+
+.composer-object-list button.selected small {
+  color: rgba(17, 17, 17, 0.68);
 }
 
 .composer-field {
@@ -2117,11 +2199,137 @@ video.newtnode-video-fallback {
   cursor: ew-resize;
 }
 
+.composer-pose-panel {
+  display: grid;
+  gap: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.composer-pose-panel summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 36px;
+  padding: 0 10px;
+  color: #ddc631;
+  font-size: 12px;
+  font-weight: 850;
+  cursor: pointer;
+  list-style: none;
+}
+
+.composer-pose-panel summary::-webkit-details-marker {
+  display: none;
+}
+
+.composer-pose-panel summary svg {
+  transition: transform 0.16s ease;
+}
+
+.composer-pose-panel[open] summary svg {
+  transform: rotate(180deg);
+}
+
+.composer-controls.maquette-selected .composer-pose-panel[open] {
+  display: block;
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-color: rgba(221, 198, 49, 0.58) rgba(255, 255, 255, 0.06);
+  scrollbar-width: thin;
+}
+
+.composer-controls.maquette-selected .composer-pose-panel[open] summary {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #151515;
+}
+
+.composer-controls.maquette-selected .composer-pose-panel[open]::-webkit-scrollbar {
+  width: 10px;
+}
+
+.composer-controls.maquette-selected .composer-pose-panel[open]::-webkit-scrollbar-track {
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.composer-controls.maquette-selected .composer-pose-panel[open]::-webkit-scrollbar-thumb {
+  border: 2px solid rgba(18, 18, 18, 0.9);
+  border-radius: 999px;
+  background: rgba(221, 198, 49, 0.62);
+}
+
+.composer-pose-panel-body {
+  display: grid;
+  gap: 10px;
+  max-height: clamp(230px, 32vh, 360px);
+  padding: 0 10px 10px;
+  overflow-y: scroll;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-color: rgba(221, 198, 49, 0.58) rgba(255, 255, 255, 0.06);
+  scrollbar-width: thin;
+}
+
+.composer-pose-panel-body::-webkit-scrollbar {
+  width: 10px;
+}
+
+.composer-pose-panel-body::-webkit-scrollbar-track {
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.composer-pose-panel-body::-webkit-scrollbar-thumb {
+  border: 2px solid rgba(18, 18, 18, 0.9);
+  border-radius: 999px;
+  background: rgba(221, 198, 49, 0.62);
+}
+
+.composer-controls.maquette-selected .composer-pose-panel-body {
+  max-height: none;
+  min-height: 0;
+  overflow: visible;
+  scrollbar-gutter: auto;
+}
+
 .composer-danger {
   color: #f3a288;
   background: rgba(236, 91, 91, 0.12);
 }
 
+.composer-control-row.pose-save .composer-pose-delete {
+  display: grid;
+  width: 34px;
+  padding: 0;
+  place-items: center;
+  color: #ffd7cd;
+  background: rgba(201, 58, 47, 0.24);
+}
+
+.composer-control-row.pose-save .composer-pose-delete:hover:not(:disabled) {
+  color: #fff5f2;
+  background: #c93a2f;
+}
+
+.composer-header-actions .composer-danger {
+  border-color: rgba(239, 68, 68, 0.72);
+  color: #fff5f2;
+  background: #c93a2f;
+}
+
+.composer-header-actions .composer-danger:hover:not(:disabled) {
+  border-color: rgba(255, 126, 103, 0.9);
+  background: #e0483a;
+}
+
+.composer-header-actions button:disabled,
 .composer-control-row button:disabled,
 .composer-control-row.bookmark button:disabled,
 .composer-control-row.pose-save button:disabled {

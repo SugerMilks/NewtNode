@@ -270,8 +270,11 @@ function applyComposerMannequinPose(model, maquette) {
   const leftLowerLeg = composerRotationVector(maquette, "leftLowerLeg");
   const rightUpperLeg = composerRotationVector(maquette, "rightUpperLeg");
   const rightLowerLeg = composerRotationVector(maquette, "rightLowerLeg");
+  const hips = composerRotationVector(maquette, "hipsRot");
   const leftHand = composerRotationVector(maquette, "leftHandRot");
   const rightHand = composerRotationVector(maquette, "rightHandRot");
+  const leftFoot = composerRotationVector(maquette, "leftFootRot");
+  const rightFoot = composerRotationVector(maquette, "rightFootRot");
   const addRotation = (name, x = 0, y = 0, z = 0) => {
     const bone = bones.get(name);
     if (!bone) return;
@@ -288,7 +291,12 @@ function applyComposerMannequinPose(model, maquette) {
       bone.rotation.z += z / liveBones.length;
     });
   };
+  const addFirstRotation = (names, x = 0, y = 0, z = 0) => {
+    const boneName = names.find((name) => bones.has(name));
+    if (boneName) addRotation(boneName, x, y, z);
+  };
 
+  addFirstRotation(["pelvis", "hips"], hips.x, hips.y, hips.z);
   addDistributedRotation(["spine_01", "spine_02", "spine_03", "spine_04", "spine_05"], upperBody.x, upperBody.y, upperBody.z);
   addRotation("head", head.x, head.y, head.z);
 
@@ -303,6 +311,8 @@ function applyComposerMannequinPose(model, maquette) {
   addRotation("calf_l", leftLowerLeg.x, leftLowerLeg.y, leftLowerLeg.z);
   addRotation("thigh_r", rightUpperLeg.x, rightUpperLeg.y, rightUpperLeg.z);
   addRotation("calf_r", rightLowerLeg.x, rightLowerLeg.y, rightLowerLeg.z);
+  addFirstRotation(["foot_l", "ball_l"], leftFoot.x, leftFoot.y, leftFoot.z);
+  addFirstRotation(["foot_r", "ball_r"], rightFoot.x, rightFoot.y, rightFoot.z);
 
   model.updateMatrixWorld(true);
 }
@@ -341,19 +351,27 @@ function createComposerProceduralMaquette(maquette) {
   const leftLowerLeg = composerRotationVector(maquette, "leftLowerLeg");
   const rightUpperLeg = composerRotationVector(maquette, "rightUpperLeg");
   const rightLowerLeg = composerRotationVector(maquette, "rightLowerLeg");
+  const hipsRot = composerRotationVector(maquette, "hipsRot");
   const leftHandRot = composerRotationVector(maquette, "leftHandRot");
   const rightHandRot = composerRotationVector(maquette, "rightHandRot");
+  const leftFootRot = composerRotationVector(maquette, "leftFootRot");
+  const rightFootRot = composerRotationVector(maquette, "rightFootRot");
   const waistY = 1.16;
+  const hipY = 1.08;
   const upperBody = new THREE.Group();
   upperBody.position.y = waistY;
   upperBody.rotation.set(upperBodyRot.x, upperBodyRot.y, upperBodyRot.z);
   root.add(upperBody);
+  const hips = new THREE.Group();
+  hips.position.y = hipY;
+  hips.rotation.set(hipsRot.x, hipsRot.y, hipsRot.z);
+  root.add(hips);
 
   addComposerEllipsoid(upperBody, { x: 0, y: 1.8 - waistY, z: 0, sx: 0.52, sy: 0.54, sz: 0.3, material: highlightMaterial });
   addComposerEllipsoid(upperBody, { x: 0, y: 1.46 - waistY, z: 0.01, sx: 0.34, sy: 0.3, sz: 0.24, material });
-  addComposerEllipsoid(root, { x: 0, y: waistY, z: 0, sx: 0.46, sy: 0.22, sz: 0.28, material });
-  addComposerEllipsoid(root, { x: -0.18, y: 1.18, z: -0.02, sx: 0.22, sy: 0.18, sz: 0.23, material });
-  addComposerEllipsoid(root, { x: 0.18, y: 1.18, z: -0.02, sx: 0.22, sy: 0.18, sz: 0.23, material });
+  addComposerEllipsoid(hips, { x: 0, y: waistY - hipY, z: 0, sx: 0.46, sy: 0.22, sz: 0.28, material });
+  addComposerEllipsoid(hips, { x: -0.18, y: 1.18 - hipY, z: -0.02, sx: 0.22, sy: 0.18, sz: 0.23, material });
+  addComposerEllipsoid(hips, { x: 0.18, y: 1.18 - hipY, z: -0.02, sx: 0.22, sy: 0.18, sz: 0.23, material });
 
   const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.13, 0.24, 18), jointMaterial);
   neck.position.y = 2.22 - waistY;
@@ -372,16 +390,15 @@ function createComposerProceduralMaquette(maquette) {
   head.add(nose);
 
   const shoulderY = 1.98;
-  const hipY = 1.08;
   addComposerArm(upperBody, { side: -1, shoulderY: shoulderY - waistY, upper: leftUpperArm.z, lower: leftLowerArm.z, handRotation: leftHandRot, material, jointMaterial });
   addComposerArm(upperBody, { side: 1, shoulderY: shoulderY - waistY, upper: rightUpperArm.z, lower: rightLowerArm.z, handRotation: rightHandRot, material, jointMaterial });
-  addComposerLeg(root, { side: -1, hipY, upper: leftUpperLeg.z, lower: leftLowerLeg.z, material, jointMaterial });
-  addComposerLeg(root, { side: 1, hipY, upper: rightUpperLeg.z, lower: rightLowerLeg.z, material, jointMaterial });
+  addComposerLeg(hips, { side: -1, hipY: 0, upper: leftUpperLeg.z, lower: leftLowerLeg.z, footRotation: leftFootRot, material, jointMaterial });
+  addComposerLeg(hips, { side: 1, hipY: 0, upper: rightUpperLeg.z, lower: rightLowerLeg.z, footRotation: rightFootRot, material, jointMaterial });
 
   [
-    [-0.24, hipY, 0],
-    [0.24, hipY, 0]
-  ].forEach(([x, y, z]) => addComposerEllipsoid(root, { x, y, z, sx: 0.12, sy: 0.12, sz: 0.12, material: jointMaterial }));
+    [-0.24, 0, 0],
+    [0.24, 0, 0]
+  ].forEach(([x, y, z]) => addComposerEllipsoid(hips, { x, y, z, sx: 0.12, sy: 0.12, sz: 0.12, material: jointMaterial }));
   [
     [-0.55, shoulderY - waistY, 0],
     [0.55, shoulderY - waistY, 0]
@@ -420,7 +437,7 @@ function addComposerArm(root, { side, shoulderY, upper, lower, handRotation, mat
   thumb.rotation.z = side * 0.68;
 }
 
-function addComposerLeg(root, { side, hipY, upper, lower, material, jointMaterial }) {
+function addComposerLeg(root, { side, hipY, upper, lower, footRotation, material, jointMaterial }) {
   const hip = new THREE.Group();
   hip.position.set(side * 0.24, hipY, 0);
   hip.rotation.x = upper;
@@ -439,6 +456,7 @@ function addComposerLeg(root, { side, hipY, upper, lower, material, jointMateria
 
   const ankle = new THREE.Group();
   ankle.position.y = -0.72;
+  ankle.rotation.set(footRotation?.x || 0, footRotation?.y || 0, footRotation?.z || 0);
   knee.add(ankle);
   addComposerEllipsoid(ankle, { x: 0, y: 0, z: 0, sx: 0.07, sy: 0.055, sz: 0.06, material: jointMaterial });
   const foot = addComposerEllipsoid(ankle, { x: 0, y: -0.075, z: -0.13, sx: 0.12, sy: 0.06, sz: 0.25, material });

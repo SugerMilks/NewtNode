@@ -1,5 +1,5 @@
 import path from "node:path";
-import { mkdir } from "node:fs/promises";
+import { mkdir, unlink } from "node:fs/promises";
 import { writeJsonAtomic } from "../json-store.js";
 
 export function registerComposerPoseRoutes(
@@ -33,5 +33,18 @@ export function registerComposerPoseRoutes(
     await mkdir(composerPosesDir, { recursive: true });
     await writeJsonAtomic(path.join(composerPosesDir, fileName), savedPose);
     res.json({ pose: savedPose, poses: await readComposerPoses() });
+  });
+
+  app.delete("/api/composer-poses/:poseId", async (req, res) => {
+    const poseId = String(req.params.poseId || "");
+    const existing = await readComposerPoses();
+    const pose = existing.find((item) => item.id === poseId || item.pose === poseId || item.fileName === poseId);
+    const fileName = safeComposerPoseFileName(pose?.fileName || poseId);
+    if (!pose || !fileName) {
+      return res.status(404).json({ error: "Pose not found." });
+    }
+
+    await unlink(path.join(composerPosesDir, fileName));
+    res.json({ deletedId: pose.id, fileName, poses: await readComposerPoses() });
   });
 }

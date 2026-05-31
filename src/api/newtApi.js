@@ -237,6 +237,10 @@ export const composerApi = {
 
   savePose(pose) {
     return fetchJsonApi("/api/composer-poses", jsonBody({ pose }), "Pose save");
+  },
+
+  deletePose(poseId) {
+    return fetchJsonApi(`/api/composer-poses/${encodeURIComponent(poseId)}`, { method: "DELETE" }, "Pose delete");
   }
 };
 
