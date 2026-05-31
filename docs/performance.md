@@ -24,7 +24,7 @@ npm run bundle:report
 
 ## Current Baseline
 
-Measured after the model option registry extraction pass.
+Measured after the video runner helper extraction pass.
 
 | Area | Current behavior |
 | --- | --- |
@@ -45,7 +45,7 @@ Recent production build summary:
 | `assets/vendor-*.js` | modulepreload | 3.53 kB | 1.54 kB |
 | `assets/vendor-react-*.js` | modulepreload | 184.30 kB | 57.63 kB |
 | `assets/vendor-icons-*.js` | modulepreload | 11.48 kB | 3.96 kB |
-| `assets/NodeEditor-*.js` | lazy editor chunk | 289.57 kB | 78.94 kB |
+| `assets/NodeEditor-*.js` | lazy editor chunk | 290.43 kB | 79.55 kB |
 | `assets/NodeEditor-*.css` | lazy editor style | 57.34 kB | 10.47 kB |
 | `assets/Model3DViewer-*.js` | lazy 3D viewer chunk | 3.53 kB | 1.64 kB |
 | `assets/ColorIdMatteControls-*.js` | lazy utility chunk | 12.76 kB | 3.21 kB |
