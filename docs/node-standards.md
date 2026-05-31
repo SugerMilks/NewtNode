@@ -56,6 +56,50 @@ Use this quick pass before implementing a feature, and again before committing i
 
 When adding a new feature, put pure helpers in one of these modules or create a similarly focused module. `NodeEditor.jsx` should coordinate React state, node rendering, event handlers, and node-specific orchestration, not become the home for reusable algorithms.
 
+## Migrating Old-System Features Into The Refactored App
+
+Some future features may arrive as patches or branches built before this refactor. Treat those as source material, not as code to paste wholesale. The goal is to preserve the feature behavior while landing it in the current ownership map above.
+
+Start every old-feature merge with this audit:
+
+- Identify every touched surface in the old implementation: node catalog, icon, config, defaults, normalization, ports, connection rules, UI body, model options, API client call, backend route, run scheduling, result items, preview behavior, workflow persistence, stats, CSS, and tests.
+- Compare those surfaces to the current ownership map before editing. Move old pure helpers, option lists, request builders, route wrappers, and preview utilities into their current focused modules.
+- Keep `NodeEditor.jsx` as the coordinator. It may select node bodies, wire callbacks, own current node config/default/normalization functions, and call runner helpers. It should not regain large copied algorithms, static model catalogs, request payload builders, or reusable media utilities.
+- Preserve saved-workflow compatibility first. If the old feature added or renamed fields, ports, node types, result shapes, or asset URLs, add normalization/migration for old and new saved workflows in the current normalization path.
+- Preserve UI class names and visible behavior unless the feature intentionally changes UI. When moving old JSX into a component, pass data and callbacks through props instead of reaching into editor state from the new component.
+- Keep result arrays, selected result indexes, previews, and downloads using `mediaResults.js` and shared preview helpers. Do not introduce a new result shape for one feature unless all shared preview/download/stat surfaces are updated together.
+- Keep model/provider names and dropdown option labels stable. Put new static model names, durations, aspect ratios, presets, and descriptions in `modelOptions.js`; saved workflows may depend on exact strings.
+- Add browser API wrappers in `src/api/newtApi.js` before using a new route in UI code. Avoid scattered raw `fetch` calls.
+- Prefer focused runner helpers under `src/nodeRunners/` for backend payloads and result normalization. The editor should assemble connected inputs and pass them to a runner/builder, not own the full request body when the shape is reusable.
+- Register new backend route groups through `server/routes/*` when possible, with explicit dependencies from `server/index.js`. If extending a legacy route in `server/index.js`, keep the change tightly scoped and document why it stayed there.
+- Keep workflow package behavior intact. Imported or generated files should continue to use workflow context helpers so Windows and macOS users can move packaged workflows without broken asset references.
+- Check cross-platform assumptions. Do not hard-code Windows path separators, drive letters, shell commands, hidden-folder behavior, or `.exe` names in browser code or shared helpers. Use Node `path` APIs server-side and document platform-specific commands separately when needed.
+- Update this standards document in the same change when the old feature introduces a new durable pattern or changes a current one.
+
+Use this placement guide while migrating old code:
+
+| Old-system code shape | Current landing place |
+| --- | --- |
+| Node catalog entry | `src/nodeRegistry.js`; icon only in `NodeEditor.jsx` |
+| Static model names/options/descriptions | `src/modelOptions.js` |
+| Upload, drag/drop, media accept/type detection | `src/mediaAssets.js` |
+| Result item normalization or append logic | `src/mediaResults.js` |
+| Preview/result/lightbox/output rail UI | `src/components/MediaViews.jsx` or a focused component imported there |
+| Small reusable node body JSX | `src/components/NodeBodies.jsx` or a new focused component |
+| Port row/collage UI | `src/components/NodePorts.jsx`, `src/components/StyleCollage.jsx` |
+| Color matte picker/state/math | `src/components/ColorIdMatteControls.jsx`, `src/colorIdMatte.js` |
+| Composer scene defaults, poses, image planes | `src/composerState.js` |
+| Composer Three.js rendering | `src/composerRender.js` |
+| Camera/Composer viewport shell controls | `src/components/CameraControlViewport.jsx`, `src/components/ComposerViewport.jsx` |
+| Backend request wrappers | `src/api/newtApi.js` |
+| Node-specific payload/result builders | `src/nodeRunners/*` |
+| Graph geometry, bounds, placement, import offsets | `src/nodeGeometry.js`, `src/workflowState.js` |
+| Save/open/import/recent workflows | `src/useWorkflowPersistence.js`, `src/workflowFiles.js`, `src/workflowSession.js` |
+| Draft autosave | `src/useNodeEditorDraft.js` |
+| Backend routes | `server/routes/*` plus explicit registration in `server/index.js` |
+
+Before committing a migrated old feature, run the normal verification checklist. For frontend/server changes, include `npm run smoke:app` with the dev server running. For old features that touch save/load/import, also manually test opening a workflow saved before the feature and one saved after the feature.
+
 ## Current Media Types
 
 Use these internal media type names consistently in node config, result items, preview handling, history, stats, and connection rules.
