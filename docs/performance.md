@@ -22,6 +22,22 @@ npm run bundle:report
 
 `bundle:report` classifies assets referenced by `dist/index.html` as the initial shell and everything else as lazy/generated. It reports raw and gzip sizes.
 
+With the dev server running, smoke the browser shell and API health route:
+
+Windows PowerShell:
+
+```powershell
+npm.cmd run smoke:app
+```
+
+macOS/Linux:
+
+```bash
+npm run smoke:app
+```
+
+The smoke harness fetches the client HTML, its referenced module/style assets, and `/api/health`. Override `NEWT_SMOKE_CLIENT_URL` or `NEWT_SMOKE_API_URL` when testing a non-default port.
+
 ## Current Baseline
 
 Measured after the video runner helper extraction pass.

@@ -23,6 +23,7 @@ Use this quick pass before implementing a feature, and again before committing i
 - Prefer existing helpers and patterns before adding a new storage, request, preview, or result shape.
 - Preserve old saved workflows with normalization or migration when fields, ports, node types, or asset URLs change.
 - Keep generated files and copied dependencies inside the current workflow package when a package is attached.
+- When a frontend/server change affects startup, routing, or lazy assets, run `npm run smoke:app` with the dev server running in addition to tests/build.
 - Update this document when the feature intentionally changes one of these standards.
 
 ## Refactored Code Ownership
