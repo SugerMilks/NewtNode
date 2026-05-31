@@ -56,11 +56,17 @@ const seedanceFastCostPerThousandTokens = Number(process.env.SEEDANCE_FAST_COST_
 const nanoBananaCost1K2K = Number(process.env.NANO_BANANA_IMAGE_COST_1K_2K || 0.15);
 const nanoBananaCost4K = Number(process.env.NANO_BANANA_IMAGE_COST_4K || 0.3);
 const openAiImage2MediumCost = Number(process.env.OPENAI_IMAGE_2_MEDIUM_COST || 0.053);
+const lumaPhotonCostPerMegapixel = Number(process.env.LUMA_PHOTON_COST_PER_MEGAPIXEL || 0.019);
+const lumaRay2BaseCostPerFiveSeconds = Number(process.env.LUMA_RAY2_COST_PER_5_SECONDS || 0.5);
 const hunyuan3DProBaseCost = Number(process.env.HUNYUAN_3D_PRO_BASE_COST || 0.375);
 const hunyuan3DProAddOnCost = Number(process.env.HUNYUAN_3D_PRO_ADD_ON_COST || 0.15);
 const nanoImageAspectRatios = ["21:9", "16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3", "4:5", "5:4"];
 const openAiImageAspectRatios = nanoImageAspectRatios;
+const lumaImageAspectRatios = ["21:9", "16:9", "9:16", "1:1", "4:3", "3:4", "9:21"];
+const lumaVideoAspectRatios = ["16:9", "9:16", "4:3", "3:4", "21:9", "9:21"];
 const falNanoBananaProEndpoint = process.env.FAL_NANO_BANANA_PRO_ENDPOINT || "fal-ai/nano-banana-pro";
+const falLumaPhotonEndpoint = process.env.FAL_LUMA_PHOTON_ENDPOINT || "fal-ai/luma-photon";
+const falLumaRay2Endpoint = process.env.FAL_LUMA_RAY2_ENDPOINT || "fal-ai/luma-dream-machine/ray-2";
 const falTextRequestCost = Number(process.env.FAL_TEXT_REQUEST_COST || 0.001);
 const falVisionTextUnitCost = Number(process.env.FAL_VISION_TEXT_UNIT_COST || 0.01);
 const falVideoTextUnitCost = Number(process.env.FAL_VIDEO_TEXT_UNIT_COST || 0.01);
@@ -263,6 +269,8 @@ function buildHealthPayload() {
     googleApiKeyConfigured: Boolean(process.env.GOOGLE_API_KEY),
     googleImageModelsUseGoogleDirect: Boolean(process.env.GOOGLE_API_KEY),
     falNanoBananaProEndpoint,
+    falLumaPhotonEndpoint,
+    falLumaRay2Endpoint,
     openAiKeyConfigured: Boolean(process.env.OPENAI_API_KEY || openAiTextApiKey),
     openAiTextKeyConfigured: Boolean(openAiTextApiKey),
     openAiImage2ViaFalConfigured: Boolean(process.env.FAL_KEY),
@@ -306,6 +314,11 @@ app.get("/api/stats", async (_req, res) => {
       nanoBananaPro: {
         cost1K2K: nanoBananaCost1K2K,
         cost4K: nanoBananaCost4K,
+        currency: "USD"
+      },
+      luma: {
+        photonCostPerMegapixel: lumaPhotonCostPerMegapixel,
+        ray2CostPerFiveSeconds540p: lumaRay2BaseCostPerFiveSeconds,
         currency: "USD"
       },
       openAiImage2: {
@@ -904,6 +917,60 @@ app.post("/api/node/generate-image", async (req, res) => {
         cost,
         image: {
           ...openAiImage.remoteImage,
+          localUrl: output.publicPath,
+          fileName: output.fileName,
+          mimeType: output.mimeType
+        }
+      });
+    }
+
+    if (selectedModel.provider === "fal-luma-photon") {
+      if (!process.env.FAL_KEY) {
+        return res.status(400).json({ error: "Missing FAL_KEY in .env." });
+      }
+
+      const lumaImage = await generateFalLumaPhoton({
+        prompt,
+        imagePromptUrls,
+        imagePromptLabels,
+        aspectRatio
+      });
+      const output = await downloadImage(req, lumaImage.remoteImage.url, "luma-photon", lumaImage.remoteImage.content_type || lumaImage.remoteImage.mimeType);
+      const cost = estimateLumaPhotonCost({ aspectRatio, remoteImage: lumaImage.remoteImage, endpoint: lumaImage.endpoint });
+
+      await appendHistory({
+        id: lumaImage.requestId || randomUUID(),
+        createdAt: new Date().toISOString(),
+        mediaType: "image",
+        provider: "fal.ai",
+        modelName: selectedModel.displayName,
+        endpoint: lumaImage.endpoint,
+        mode: imagePromptUrls.length ? "Luma image edit" : "Luma image generation",
+        prompt,
+        submittedPrompt: lumaImage.submittedPrompt,
+        project: projectFromBody(req.body),
+        node: nodeFromBody(req.body),
+        settings: {
+          model: req.body.model || selectedModel.displayName,
+          aspectRatio,
+          requestedAspectRatio: requestedAspectRatio || aspectRatio,
+          resolution: req.body.resolution || "",
+          imagePromptCount: imagePromptUrls.length,
+          imagePromptLabels: cleanReferenceLabels
+        },
+        cost,
+        remoteImage: lumaImage.remoteImage,
+        localImage: output.publicPath,
+        outputFileName: output.fileName,
+        outputBytes: output.bytes,
+        text: lumaImage.resultText || ""
+      });
+
+      return res.json({
+        text: lumaImage.resultText || "",
+        cost,
+        image: {
+          ...lumaImage.remoteImage,
           localUrl: output.publicPath,
           fileName: output.fileName,
           mimeType: output.mimeType
@@ -1860,6 +1927,16 @@ app.post("/api/node/generate-video", async (req, res) => {
       });
     }
 
+    if (selectedVideoModel.provider === "fal-luma-ray2") {
+      return runLumaRay2Video(req, res, {
+        prompt,
+        startFrameUrls: Array.isArray(req.body.startFrameUrls) ? req.body.startFrameUrls.filter(isLocalAssetUrl) : [],
+        endFrameUrls: Array.isArray(req.body.endFrameUrls) ? req.body.endFrameUrls.filter(isLocalAssetUrl) : [],
+        referenceImageUrls: Array.isArray(req.body.referenceImageUrls) ? req.body.referenceImageUrls.filter(isLocalAssetUrl) : [],
+        selectedVideoModel
+      });
+    }
+
     const speed = selectedVideoModel.speed;
     const speedPrefix = speed === "fast" ? "fast/" : "";
     const startFrameUrl = firstLocalOutput(req.body.startFrameUrls);
@@ -1980,6 +2057,7 @@ app.post("/api/node/generate-video", async (req, res) => {
       requestId: result.requestId,
       seed: result?.data?.seed,
       endpoint,
+      modelName: speed === "fast" ? "Seedance 2.0 Fast" : "Seedance 2.0",
       submittedPrompt,
       cost,
       video: {
@@ -2318,6 +2396,83 @@ async function runHappyHorseReferenceVideo(req, res, { prompt, referenceImageUrl
     cost,
     video: {
       ...remoteVideo,
+      localUrl: output.publicPath,
+      fileName: output.fileName
+    }
+  });
+}
+
+async function runLumaRay2Video(req, res, { prompt, startFrameUrls, endFrameUrls, referenceImageUrls, selectedVideoModel }) {
+  const startFrameUrl = firstLocalOutput(startFrameUrls) || firstLocalOutput(referenceImageUrls);
+  const endFrameUrl = firstLocalOutput(endFrameUrls);
+  if (endFrameUrl && !startFrameUrl) {
+    return res.status(400).json({ error: "Luma Dream Machine end frame requires a start frame." });
+  }
+
+  const routeKind = startFrameUrl ? "image-to-video" : "text-to-video";
+  const endpoint = routeKind === "image-to-video" ? `${selectedVideoModel.id.replace(/\/image-to-video$/i, "")}/image-to-video` : selectedVideoModel.id.replace(/\/image-to-video$/i, "");
+  const resolution = normalizeLumaVideoResolution(req.body.resolution);
+  const duration = normalizeLumaVideoDuration(req.body.duration);
+  const aspectRatio = normalizeLumaVideoAspectRatio(req.body.aspectRatio);
+  const input = {
+    prompt,
+    aspect_ratio: aspectRatio,
+    resolution,
+    duration,
+    loop: Boolean(req.body.loop)
+  };
+
+  if (startFrameUrl) {
+    input.image_url = await uploadLocalOutputToFal(startFrameUrl);
+    if (endFrameUrl) input.end_image_url = await uploadLocalOutputToFal(endFrameUrl);
+  }
+
+  const result = await subscribeFal(endpoint, { input, logs: true });
+  const remoteVideo = normalizeFalFile(result?.data?.video);
+
+  if (!remoteVideo?.url) {
+    return res.status(502).json({ error: "Fal returned no Luma Dream Machine video URL.", raw: result?.data });
+  }
+
+  const output = await downloadVideo(req, remoteVideo.url, "luma-dream-machine");
+  const outputVideo = enrichVideoMetadata(remoteVideo, await probeVideoFile(output.filePath));
+  const cost = estimateLumaRay2Cost({ endpoint, resolution, duration, routeKind });
+  await appendHistory({
+    id: result.requestId || randomUUID(),
+    createdAt: new Date().toISOString(),
+    mediaType: "video",
+    provider: "fal.ai",
+    modelName: selectedVideoModel.displayName,
+    endpoint,
+    mode: routeKind === "image-to-video" ? "Luma Ray2 image to video" : "Luma Ray2 text to video",
+    prompt,
+    submittedPrompt: prompt,
+    project: projectFromBody(req.body),
+    node: nodeFromBody(req.body),
+    settings: {
+      model: selectedVideoModel.displayName,
+      duration,
+      resolution,
+      aspectRatio,
+      loop: input.loop,
+      startFrameCount: startFrameUrl ? 1 : 0,
+      endFrameCount: endFrameUrl ? 1 : 0,
+      referenceImageCount: referenceImageUrls.length
+    },
+    cost,
+    remoteVideo: outputVideo,
+    localVideo: output.publicPath,
+    outputFileName: output.fileName,
+    outputBytes: output.bytes
+  });
+
+  return res.json({
+    requestId: result.requestId,
+    endpoint,
+    modelName: selectedVideoModel.displayName,
+    cost,
+    video: {
+      ...outputVideo,
       localUrl: output.publicPath,
       fileName: output.fileName
     }
@@ -6473,6 +6628,47 @@ function estimateImageCost({ resolution }) {
   };
 }
 
+function estimateLumaRay2Cost({ endpoint, duration, resolution, routeKind }) {
+  const seconds = durationToSeconds(duration);
+  const durationMultiplier = seconds > 5 ? 2 : 1;
+  const resolutionMultiplier = resolution === "1080p" ? 4 : resolution === "720p" ? 2 : 1;
+  const amountUsd = roundCurrency(lumaRay2BaseCostPerFiveSeconds * durationMultiplier * resolutionMultiplier);
+
+  return {
+    amountUsd,
+    currency: "USD",
+    unitRateUsd: lumaRay2BaseCostPerFiveSeconds,
+    units: durationMultiplier * resolutionMultiplier,
+    unit: "5s 540p Ray2 equivalent",
+    mediaType: "video",
+    resolution,
+    durationSeconds: seconds,
+    pricingBasis: "Luma Ray2 fal.ai estimate: $0.50 per 5-second 540p clip; 9s costs 2x, 720p costs 2x, 1080p costs 4x",
+    pricingSource: "fal-model-page-2026-05-31",
+    endpoint,
+    routeKind
+  };
+}
+
+function estimateLumaPhotonCost({ aspectRatio, remoteImage = {}, endpoint }) {
+  const width = Number(remoteImage.width || remoteImage.metadata?.width || 0);
+  const height = Number(remoteImage.height || remoteImage.metadata?.height || 0);
+  const megapixels = width > 0 && height > 0 ? (width * height) / 1000000 : 1;
+
+  return {
+    amountUsd: roundCurrency(megapixels * lumaPhotonCostPerMegapixel),
+    currency: "USD",
+    unitRateUsd: lumaPhotonCostPerMegapixel,
+    units: roundUsageUnits(megapixels),
+    unit: "megapixel",
+    mediaType: "image",
+    aspectRatio,
+    pricingBasis: "Luma Photon fal.ai per-megapixel estimate",
+    pricingSource: "fal-model-page-2026-05-31",
+    endpoint
+  };
+}
+
 function estimateHunyuan3DProCost({ generateType, enablePbr, faceCount, inputImageCount = 1, endpoint }) {
   const customFaceCount = Number(faceCount) !== 500000;
   const multiView = Number(inputImageCount) > 1;
@@ -7032,6 +7228,14 @@ function resolveImageModel(model) {
     };
   }
 
+  if (normalized.includes("luma") || normalized.includes("photon")) {
+    return {
+      provider: "fal-luma-photon",
+      displayName: "Luma Dream Machine",
+      id: falLumaPhotonEndpoint
+    };
+  }
+
   const useGoogleDirect = Boolean(process.env.GOOGLE_API_KEY);
   return {
     provider: useGoogleDirect ? "google" : "fal-nano-banana-pro",
@@ -7237,6 +7441,15 @@ function resolveVideoModel(model) {
     };
   }
 
+  if (normalized.includes("luma") || normalized.includes("dream") || normalized.includes("ray2") || normalized.includes("ray 2")) {
+    return {
+      provider: "fal-luma-ray2",
+      displayName: "Luma Dream Machine",
+      id: falLumaRay2Endpoint,
+      speed: "luma-ray2"
+    };
+  }
+
   if (normalized.includes("wan 2.7") || normalized.includes("wan2.7") || normalized.includes("reference-to-video")) {
     return {
       provider: "fal-wan-2-7-reference-to-video",
@@ -7283,6 +7496,7 @@ function normalizeImageAspectRatioForProvider(value, provider) {
 }
 
 function imageAspectRatiosForProvider(provider) {
+  if (provider === "fal-luma-photon") return lumaImageAspectRatios;
   return provider === "fal-openai-image-2" ? openAiImageAspectRatios : nanoImageAspectRatios;
 }
 
@@ -7535,6 +7749,47 @@ async function generateFalNanoBananaPro({ prompt, imagePromptUrls, imagePromptLa
   };
 }
 
+async function generateFalLumaPhoton({ prompt, imagePromptUrls, imagePromptLabels, aspectRatio }) {
+  const imageInputs = [];
+
+  for (const [index, imagePromptUrl] of imagePromptUrls.entries()) {
+    const asset = await readLocalAsset(imagePromptUrl);
+    if (!asset.mimeType.startsWith("image/")) continue;
+    imageInputs.push({
+      ...asset,
+      label: cleanImagePromptLabel(imagePromptLabels[index])
+    });
+  }
+
+  const baseEndpoint = falLumaPhotonEndpoint.replace(/\/modify$/i, "");
+  const endpoint = imageInputs.length ? `${baseEndpoint}/modify` : baseEndpoint;
+  const submittedPrompt = promptWithReferenceLabels(prompt, imageInputs.slice(0, 1));
+  const input = {
+    prompt: submittedPrompt,
+    aspect_ratio: normalizeImageAspectRatioForProvider(aspectRatio, "fal-luma-photon")
+  };
+
+  if (imageInputs.length) {
+    input.image_url = await uploadImageInputToFal(imageInputs[0], 0);
+    input.strength = clampNumber(process.env.LUMA_PHOTON_MODIFY_STRENGTH || 0.8, 0, 1, 0.8);
+  }
+
+  const result = await subscribeFal(endpoint, { input, logs: true });
+  const remoteImage = firstFalImageResult(result?.data);
+
+  if (!remoteImage?.url) {
+    throw new Error("Fal returned no Luma Photon image URL.");
+  }
+
+  return {
+    endpoint,
+    requestId: result.requestId,
+    remoteImage,
+    submittedPrompt,
+    resultText: result?.data?.description || result?.data?.text || ""
+  };
+}
+
 function httpError(status, message, extra = {}) {
   return Object.assign(new Error(message), {
     status,
@@ -7701,6 +7956,20 @@ function normalizeHappyHorseResolution(value) {
 function normalizeHappyHorseAspectRatio(value) {
   const normalized = String(value || "16:9").match(/\d+:\d+/)?.[0] || "16:9";
   return normalizeChoice(normalized, ["16:9", "9:16", "1:1", "4:3", "3:4"], "16:9");
+}
+
+function normalizeLumaVideoDuration(value) {
+  const seconds = String(value || "5").match(/\d+/)?.[0] || "5";
+  return `${normalizeChoice(seconds, ["5", "9"], "5")}s`;
+}
+
+function normalizeLumaVideoResolution(value) {
+  return normalizeChoice(String(value || "540p"), ["540p", "720p", "1080p"], "540p");
+}
+
+function normalizeLumaVideoAspectRatio(value) {
+  const normalized = String(value || "16:9").match(/\d+:\d+/)?.[0] || "16:9";
+  return normalizeChoice(normalized, lumaVideoAspectRatios, "16:9");
 }
 
 function normalizeAspectRatio(value) {

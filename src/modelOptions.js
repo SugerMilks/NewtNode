@@ -1,8 +1,26 @@
 export const characterTraitOptions = ["serious", "pleasant", "happy", "angry", "sad", "silly", "confident", "content", "excited", "passionate", "fanatic", "anxious", "scared", "arrogant", "stubborn", "curious"];
 export const batchOptions = ["1", "2", "3", "4"];
 export const imageModelAutoAspectRatio = "Auto";
+export const imageModelNames = {
+  nanoBananaPro: "Nano Banana Pro",
+  openAiImage2: "OpenAI Image 2",
+  lumaDreamMachine: "Luma Dream Machine"
+};
+export const imageModelOptions = [
+  imageModelNames.nanoBananaPro,
+  imageModelNames.openAiImage2,
+  imageModelNames.lumaDreamMachine
+];
 export const nanoImageAspectRatios = ["21:9", "16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3", "4:5", "5:4"];
 export const openAiImageAspectRatios = nanoImageAspectRatios;
+export const lumaImageAspectRatios = ["21:9", "16:9", "9:16", "1:1", "4:3", "3:4", "9:21"];
+export const imageResolutionOptions = ["2K", "1K", "4K"];
+export const seedanceVideoDurationOptions = ["15 seconds", "10 seconds", "5 seconds"];
+export const seedanceVideoResolutionOptions = ["720p", "480p", "1080p"];
+export const seedanceVideoAspectRatioOptions = ["16:9 (Landscape)", "21:9", "9:16 (Portrait)", "1:1"];
+export const lumaVideoDurationOptions = ["5 seconds", "9 seconds"];
+export const lumaVideoResolutionOptions = ["540p", "720p", "1080p"];
+export const lumaVideoAspectRatioOptions = ["16:9", "9:16", "4:3", "3:4", "21:9", "9:21"];
 export const happyHorseDurationOptions = Array.from({ length: 13 }, (_value, index) => `${index + 3} seconds`);
 export const voidVideoFrameOptions = [69, 77, 85, 93, 101, 109, 117, 125, 133, 141, 149, 157, 165, 173, 181, 189, 197];
 
@@ -76,12 +94,22 @@ export const qwenCameraDefaults = {
 export const videoModelNames = {
   seedance: "Seedance 2.0",
   seedanceFast: "Seedance 2.0 Fast",
+  lumaDreamMachine: "Luma Dream Machine",
   happyHorse: "Happy Horse",
   wanFunControl: "Wan Fun Control",
   wan27Reference: "Wan 2.7 Reference-to-Video",
   aurora: "Creatify Aurora",
   sam3Video: "SAM 3 Video"
 };
+export const videoModelOptions = [
+  videoModelNames.seedance,
+  videoModelNames.seedanceFast,
+  videoModelNames.wan27Reference,
+  videoModelNames.happyHorse,
+  videoModelNames.lumaDreamMachine,
+  videoModelNames.aurora
+];
+export const videoWorkspaceModelOptions = videoModelOptions.filter((model) => model !== videoModelNames.aurora);
 export const wan27ReferenceDurationOptions = ["2 seconds", "3 seconds", "4 seconds", "5 seconds", "6 seconds", "7 seconds", "8 seconds", "9 seconds", "10 seconds"];
 export const wan27ReferenceResolutionOptions = ["1080p", "720p"];
 export const wan27ReferenceAspectRatioOptions = ["16:9", "9:16", "1:1", "4:3", "3:4"];

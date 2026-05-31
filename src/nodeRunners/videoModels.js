@@ -21,6 +21,7 @@ export function buildVideoGenerationRequest({
     resolution: node.data.resolution,
     aspectRatio: node.data.aspectRatio,
     generateAudio: node.data.generateAudio,
+    loop: Boolean(node.data.loop),
     seed: node.data.seed || "",
     enableSafetyChecker: node.data.enableSafetyChecker !== false,
     startFrameUrls,

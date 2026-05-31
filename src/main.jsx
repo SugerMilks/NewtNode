@@ -17,19 +17,32 @@ import {
   X
 } from "lucide-react";
 import { generationApi, historyApi } from "./api/newtApi.js";
+import {
+  batchOptions,
+  happyHorseDurationOptions,
+  imageModelNames,
+  imageModelOptions,
+  imageResolutionOptions,
+  lumaImageAspectRatios,
+  lumaVideoAspectRatioOptions,
+  lumaVideoDurationOptions,
+  lumaVideoResolutionOptions,
+  nanoImageAspectRatios,
+  openAiImageAspectRatios,
+  seedanceVideoAspectRatioOptions,
+  seedanceVideoDurationOptions,
+  seedanceVideoResolutionOptions,
+  videoModelNames,
+  videoWorkspaceModelOptions,
+  wan27ReferenceAspectRatioOptions,
+  wan27ReferenceDurationOptions,
+  wan27ReferenceResolutionOptions
+} from "./modelOptions.js";
 import "./styles.css";
 
 const NodeEditor = React.lazy(() => import("./NodeEditor.jsx"));
 const StatsDashboard = React.lazy(() => import("./StatsDashboard.jsx"));
 
-const videoAspectRatios = ["21:9", "16:9", "9:16", "1:1", "4:3", "3:4", "auto"];
-const videoResolutions = ["720p", "480p", "1080p"];
-const speeds = ["standard", "fast"];
-const imageModels = ["Nano Banana Pro", "OpenAI Image 2"];
-const nanoImageAspectRatios = ["21:9", "16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3", "4:5", "5:4"];
-const openAiImageAspectRatios = ["21:9", "16:9", "1:1", "9:16"];
-const imageResolutions = ["2K", "1K", "4K"];
-const batchOptions = ["1", "2", "3", "4"];
 
 function normalizeNodeStatus(status) {
   if (!status) return { title: "", message: "", workflowPath: "", workflowState: "" };
@@ -59,7 +72,8 @@ function App() {
   const [duration, setDuration] = React.useState("15");
   const [aspectRatio, setAspectRatio] = React.useState("21:9");
   const [generateAudio, setGenerateAudio] = React.useState(true);
-  const [speed, setSpeed] = React.useState("standard");
+  const [videoModel, setVideoModel] = React.useState(videoModelNames.seedance);
+  const [loopVideo, setLoopVideo] = React.useState(false);
   const [seed, setSeed] = React.useState("");
   const [status, setStatus] = React.useState("idle");
   const [message, setMessage] = React.useState("");
@@ -67,7 +81,7 @@ function App() {
   const [videoBatchCount, setVideoBatchCount] = React.useState("1");
   const [videoHistory, setVideoHistory] = React.useState([]);
   const [imagePrompt, setImagePrompt] = React.useState("");
-  const [imageModel, setImageModel] = React.useState("Nano Banana Pro");
+  const [imageModel, setImageModel] = React.useState(imageModelNames.nanoBananaPro);
   const [imageReferences, setImageReferences] = React.useState([]);
   const [imageResolution, setImageResolution] = React.useState("2K");
   const [imageAspectRatio, setImageAspectRatio] = React.useState("21:9");
@@ -98,15 +112,31 @@ function App() {
   }, [references.length, startFrame]);
 
   const activeImageAspectRatios = React.useMemo(
-    () => (imageModel === "OpenAI Image 2" ? openAiImageAspectRatios : nanoImageAspectRatios),
+    () => imageAspectRatiosForModel(imageModel),
     [imageModel]
   );
+  const activeVideoSettings = React.useMemo(() => videoSettingsForModel(videoModel), [videoModel]);
+  const supportsVideoAudio = isSeedanceVideoModel(videoModel);
+  const supportsVideoSeed = isSeedanceVideoModel(videoModel) || isHappyHorseVideoModel(videoModel) || isWan27VideoModel(videoModel);
+  const supportsVideoLoop = isLumaVideoModel(videoModel);
 
   React.useEffect(() => {
     if (!activeImageAspectRatios.includes(imageAspectRatio)) {
       setImageAspectRatio(activeImageAspectRatios[0]);
     }
   }, [activeImageAspectRatios, imageAspectRatio]);
+
+  React.useEffect(() => {
+    if (!activeVideoSettings.resolutions.includes(resolution)) {
+      setResolution(activeVideoSettings.resolutions[0]);
+    }
+    if (!activeVideoSettings.aspectRatios.includes(aspectRatio)) {
+      setAspectRatio(activeVideoSettings.aspectRatios[0]);
+    }
+    if (!activeVideoSettings.durationValues.includes(duration)) {
+      setDuration(activeVideoSettings.defaultDuration || activeVideoSettings.durationValues[0]);
+    }
+  }, [activeVideoSettings, aspectRatio, duration, resolution]);
 
   async function refreshHistory() {
     try {
@@ -147,23 +177,31 @@ function App() {
   }
 
   async function runVideoGeneration(index) {
-    const form = new FormData();
-    form.append("prompt", prompt.trim());
-    form.append("resolution", resolution);
-    form.append("duration", duration);
-    form.append("aspectRatio", aspectRatio);
-    form.append("generateAudio", String(generateAudio));
-    form.append("speed", speed);
-    if (seed.trim()) form.append("seed", seed.trim());
-    if (startFrame) form.append("startFrame", startFrame);
-    if (endFrame) form.append("endFrame", endFrame);
-    form.append("referenceNames", JSON.stringify(references.map((reference) => reference.name)));
-    for (const reference of references) {
-      form.append("references", reference.file);
-    }
-
     try {
-      return await generationApi.generateVideo(form);
+      const [uploadedStartFrame, uploadedEndFrame, uploadedReferences] = await Promise.all([
+        startFrame ? generationApi.uploadAsset(startFrame) : Promise.resolve(null),
+        endFrame ? generationApi.uploadAsset(endFrame) : Promise.resolve(null),
+        Promise.all(references.map((reference) => generationApi.uploadAsset(reference.file)))
+      ]);
+      const response = await generationApi.generateNodeVideo({
+        prompt: prompt.trim(),
+        model: videoModel,
+        resolution,
+        duration: durationToLabel(duration),
+        aspectRatio,
+        generateAudio: supportsVideoAudio ? generateAudio : false,
+        loop: supportsVideoLoop ? loopVideo : false,
+        seed: seed.trim(),
+        startFrameUrls: uploadedStartFrame ? [uploadedStartFrame.asset.localUrl] : [],
+        endFrameUrls: uploadedEndFrame ? [uploadedEndFrame.asset.localUrl] : [],
+        referenceImageUrls: uploadedReferences.map((item) => item.asset.localUrl),
+        referenceImageLabels: references.map((reference) => reference.name),
+        projectId: "video",
+        projectName: "Video",
+        nodeId: "video-tab",
+        nodeTitle: "Video"
+      });
+      return response;
     } catch (error) {
       throw new Error(`Run ${index + 1}: ${error.message || "Generation failed."}`);
     }
@@ -407,13 +445,13 @@ function App() {
               />
 
               <div className="control-row">
-                <SelectChip icon={<Wand2 size={17} />} value={imageModel} options={imageModels} onChange={setImageModel} />
+                <SelectChip icon={<Wand2 size={17} />} value={imageModel} options={imageModelOptions} onChange={setImageModel} />
 
                 <SelectChip icon={<Sparkles size={16} />} value={imageBatchCount} options={batchOptions} onChange={setImageBatchCount} formatter={formatBatchCount} />
 
                 <ReferenceChip count={imageReferences.length} onSelect={addImageReferences} />
 
-                <SelectChip icon={<Maximize2 size={16} />} value={imageResolution} options={imageResolutions} onChange={setImageResolution} />
+                <SelectChip icon={<Maximize2 size={16} />} value={imageResolution} options={imageResolutionOptions} onChange={setImageResolution} />
 
                 <SelectChip value={imageAspectRatio} options={activeImageAspectRatios} onChange={setImageAspectRatio} />
 
@@ -506,7 +544,7 @@ function App() {
               )}
 
               <div className="control-row">
-                <SelectChip icon={<Wand2 size={17} />} value={speed} options={speeds} onChange={setSpeed} formatter={(value) => (value === "fast" ? "Seedance 2.0 Fast" : "Seedance 2.0")} />
+                <SelectChip icon={<Wand2 size={17} />} value={videoModel} options={videoWorkspaceModelOptions} onChange={setVideoModel} />
 
                 <SelectChip icon={<Sparkles size={16} />} value={videoBatchCount} options={batchOptions} onChange={setVideoBatchCount} formatter={formatBatchCount} />
 
@@ -532,24 +570,34 @@ function App() {
                   onClear={() => setEndFrame(null)}
                 />
 
-                <SelectChip icon={<Maximize2 size={16} />} value={resolution} options={videoResolutions} onChange={setResolution} />
+                <SelectChip icon={<Maximize2 size={16} />} value={resolution} options={activeVideoSettings.resolutions} onChange={setResolution} />
 
-                <DurationChip duration={duration} onChange={setDuration} />
+                <DurationChip duration={duration} options={activeVideoSettings.durations} onChange={setDuration} />
 
-                <SelectChip value={aspectRatio} options={videoAspectRatios} onChange={setAspectRatio} />
+                <SelectChip value={aspectRatio} options={activeVideoSettings.aspectRatios} onChange={setAspectRatio} />
 
-                <button className={`chip icon-chip ${generateAudio ? "active" : ""}`} onClick={() => setGenerateAudio((value) => !value)} title="Audio">
-                  {generateAudio ? <Music2 size={17} /> : <Pause size={17} />}
-                </button>
+                {supportsVideoAudio && (
+                  <button className={`chip icon-chip ${generateAudio ? "active" : ""}`} onClick={() => setGenerateAudio((value) => !value)} title="Audio">
+                    {generateAudio ? <Music2 size={17} /> : <Pause size={17} />}
+                  </button>
+                )}
 
-                <input
-                  className="seed-input"
-                  inputMode="numeric"
-                  value={seed}
-                  onChange={(event) => setSeed(event.target.value.replace(/[^\d]/g, ""))}
-                  placeholder="Seed"
-                  title="Seed"
-                />
+                {supportsVideoLoop && (
+                  <button className={`chip icon-chip ${loopVideo ? "active" : ""}`} onClick={() => setLoopVideo((value) => !value)} title="Loop">
+                    {loopVideo ? <Play size={17} /> : <Pause size={17} />}
+                  </button>
+                )}
+
+                {supportsVideoSeed && (
+                  <input
+                    className="seed-input"
+                    inputMode="numeric"
+                    value={seed}
+                    onChange={(event) => setSeed(event.target.value.replace(/[^\d]/g, ""))}
+                    placeholder="Seed"
+                    title="Seed"
+                  />
+                )}
 
                 <button className="generate-button" onClick={generateVideo} disabled={status === "generating"} title="Generate">
                   {status === "generating" ? <Loader2 className="spin" size={22} /> : <ArrowUp size={22} />}
@@ -558,12 +606,14 @@ function App() {
             </div>
 
             <div className="route-strip">
+              <span>{videoModel}</span>
               <span>{activeRoute}</span>
               <span>{formatBatchCount(Number(videoBatchCount))}</span>
               <span>{resolution}</span>
-              <span>{duration === "auto" ? "Auto" : `${duration}s`}</span>
+              <span>{formatDurationValue(duration)}</span>
               <span>{aspectRatio}</span>
-              <span>{generateAudio ? "Audio" : "Silent"}</span>
+              {supportsVideoAudio && <span>{generateAudio ? "Audio" : "Silent"}</span>}
+              {supportsVideoLoop && <span>{loopVideo ? "Loop" : "No loop"}</span>}
             </div>
 
             <div className="result-zone">
@@ -574,8 +624,8 @@ function App() {
                     <div className="video-stage" key={item.video?.localUrl || index}>
                       <video controls src={item.video.localUrl} />
                       <div className="video-meta">
-                        <span>{result.length > 1 ? `Video ${index + 1}` : item.mode}</span>
-                        <span>{item.seed ? `Seed ${item.seed}` : "Seed auto"}</span>
+                        <span>{result.length > 1 ? `Video ${index + 1}` : item.modelName || item.mode || videoModel}</span>
+                        {supportsVideoSeed && <span>{item.seed ? `Seed ${item.seed}` : "Seed auto"}</span>}
                       </div>
                     </div>
                   ))}
@@ -749,28 +799,32 @@ function SelectChip({ icon, value, options, onChange, formatter = (item) => item
   );
 }
 
-function DurationChip({ duration, onChange }) {
-  const numberDuration = duration === "auto" ? 15 : Number(duration);
+function DurationChip({ duration, options, onChange }) {
+  const durationOptions = options?.length ? options : ["auto", ...Array.from({ length: 12 }, (_value, index) => String(index + 4))];
+  const numericOptions = durationOptions.map(durationValueToNumber).filter((value) => Number.isFinite(value));
+  const minDuration = Math.min(...numericOptions);
+  const maxDuration = Math.max(...numericOptions);
+  const numberDuration = durationValueToNumber(duration);
+  const canStep = Number.isFinite(numberDuration) && Number.isFinite(minDuration) && Number.isFinite(maxDuration) && minDuration < maxDuration;
 
   return (
     <span className="chip duration-chip">
-      <button title="Shorter" onClick={() => onChange(String(Math.max(4, numberDuration - 1)))}>
+      <button title="Shorter" disabled={!canStep} onClick={() => onChange(nearestDurationOption(durationOptions, numberDuration - 1))}>
         -
       </button>
       <label className="duration-select-shell" title="Duration">
         <Clock3 size={15} />
-        <span>{duration === "auto" ? "Auto" : `${duration}s`}</span>
+        <span>{formatDurationValue(duration)}</span>
         <ChevronDown size={14} />
         <select value={duration} onChange={(event) => onChange(event.target.value)} title="Duration">
-          <option value="auto">Auto</option>
-          {Array.from({ length: 12 }, (_, index) => String(index + 4)).map((option) => (
+          {durationOptions.map((option) => (
             <option key={option} value={option}>
-              {option}s
+              {formatDurationValue(option)}
             </option>
           ))}
         </select>
       </label>
-      <button title="Longer" onClick={() => onChange(String(Math.min(15, numberDuration + 1)))}>
+      <button title="Longer" disabled={!canStep} onClick={() => onChange(nearestDurationOption(durationOptions, numberDuration + 1))}>
         +
       </button>
     </span>
@@ -823,6 +877,106 @@ function isVideoWorkspaceHistory(item) {
 
 function isImageWorkspaceHistory(item) {
   return item?.mediaType === "image" && item?.project?.id === "image" && Boolean(item?.localImage);
+}
+
+function imageAspectRatiosForModel(model) {
+  if (isLumaImageModel(model)) return lumaImageAspectRatios;
+  return model === imageModelNames.openAiImage2 ? openAiImageAspectRatios : nanoImageAspectRatios;
+}
+
+function videoSettingsForModel(model) {
+  if (isLumaVideoModel(model)) {
+    return {
+      durations: lumaVideoDurationOptions.map(durationLabelToValue),
+      durationValues: lumaVideoDurationOptions.map(durationLabelToValue),
+      defaultDuration: "5",
+      resolutions: lumaVideoResolutionOptions,
+      aspectRatios: lumaVideoAspectRatioOptions
+    };
+  }
+
+  if (isHappyHorseVideoModel(model)) {
+    return {
+      durations: happyHorseDurationOptions.map(durationLabelToValue),
+      durationValues: happyHorseDurationOptions.map(durationLabelToValue),
+      defaultDuration: "5",
+      resolutions: ["1080p", "720p"],
+      aspectRatios: ["16:9", "9:16", "1:1", "4:3", "3:4"]
+    };
+  }
+
+  if (isWan27VideoModel(model)) {
+    return {
+      durations: wan27ReferenceDurationOptions.map(durationLabelToValue),
+      durationValues: wan27ReferenceDurationOptions.map(durationLabelToValue),
+      defaultDuration: "5",
+      resolutions: wan27ReferenceResolutionOptions,
+      aspectRatios: wan27ReferenceAspectRatioOptions
+    };
+  }
+
+  return {
+    durations: seedanceVideoDurationOptions.map(durationLabelToValue),
+    durationValues: seedanceVideoDurationOptions.map(durationLabelToValue),
+    defaultDuration: "15",
+    resolutions: seedanceVideoResolutionOptions,
+    aspectRatios: seedanceVideoAspectRatioOptions.map((option) => option.match(/\d+:\d+/)?.[0] || option)
+  };
+}
+
+function isSeedanceVideoModel(model) {
+  const normalized = String(model || "").toLowerCase();
+  return normalized.includes("seedance");
+}
+
+function isLumaImageModel(model) {
+  const normalized = String(model || "").toLowerCase();
+  return normalized.includes("luma") || normalized.includes("photon");
+}
+
+function isLumaVideoModel(model) {
+  const normalized = String(model || "").toLowerCase();
+  return normalized.includes("luma") || normalized.includes("dream") || normalized.includes("ray2") || normalized.includes("ray 2");
+}
+
+function isHappyHorseVideoModel(model) {
+  const normalized = String(model || "").toLowerCase();
+  return normalized.includes("happy") || normalized.includes("horse");
+}
+
+function isWan27VideoModel(model) {
+  const normalized = String(model || "").toLowerCase();
+  return normalized.includes("wan 2.7") || normalized.includes("wan2.7") || normalized.includes("reference-to-video");
+}
+
+function durationLabelToValue(value) {
+  return String(value || "").match(/\d+/)?.[0] || "5";
+}
+
+function durationToLabel(value) {
+  const seconds = durationLabelToValue(value);
+  return value === "auto" ? "auto" : `${seconds} seconds`;
+}
+
+function durationValueToNumber(value) {
+  if (value === "auto") return 15;
+  return Number(durationLabelToValue(value));
+}
+
+function nearestDurationOption(options, target) {
+  if (!options?.length) return String(target);
+  const targetNumber = Number(target);
+  return options.reduce((nearest, option) => {
+    const optionNumber = durationValueToNumber(option);
+    const nearestNumber = durationValueToNumber(nearest);
+    return Math.abs(optionNumber - targetNumber) < Math.abs(nearestNumber - targetNumber) ? option : nearest;
+  }, options[0]);
+}
+
+function formatDurationValue(value) {
+  if (value === "auto") return "Auto";
+  const seconds = durationLabelToValue(value);
+  return `${seconds}s`;
 }
 
 function formatCost(cost) {

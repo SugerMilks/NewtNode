@@ -26,6 +26,10 @@ const defaultPricing = {
   openAiImage2: {
     mediumCost: 0.053
   },
+  luma: {
+    photonCostPerMegapixel: 0.019,
+    ray2CostPerFiveSeconds540p: 0.5
+  },
   hunyuan3DPro: {
     baseCost: 0.375,
     addOnCost: 0.15
@@ -525,6 +529,10 @@ function estimateItemCost(item, mediaType, pricing) {
     return estimateSeedanceStatsCost(item, settings, pricing);
   }
 
+  if (modelKey.includes("luma") || modelKey.includes("luma-dream-machine") || modelKey.includes("luma-photon")) {
+    return mediaType === "image" ? estimateLumaPhotonStatsCost(item, pricing) : estimateLumaRay2StatsCost(item, settings, pricing);
+  }
+
   if (modelKey.includes("wan-fun-control") || modelKey.includes("wan fun control")) {
     const utilityPricing = pricing.utility?.wanFunControl || defaultPricing.utility.wanFunControl;
     const billingFrames = settings.matchInputNumFrames === false ? Number(settings.numFrames || 81) : 81;
@@ -636,6 +644,21 @@ function estimateSeedanceStatsCost(item, settings, pricing) {
   const dimensions = seedanceBillingDimensions(settings.resolution || item.cost?.resolution, settings.aspectRatio || item.cost?.aspectRatio);
   const billableUnits = (dimensions.width * dimensions.height * durationSeconds * billingFps) / 1024 / 1000;
   return billableUnits * unitRate;
+}
+
+function estimateLumaPhotonStatsCost(item, pricing) {
+  const lumaPricing = pricing.luma || defaultPricing.luma;
+  const megapixelCost = estimateMegapixelCost(item.remoteImage, lumaPricing.photonCostPerMegapixel);
+  return megapixelCost === null ? lumaPricing.photonCostPerMegapixel : megapixelCost;
+}
+
+function estimateLumaRay2StatsCost(item, settings, pricing) {
+  const lumaPricing = pricing.luma || defaultPricing.luma;
+  const seconds = durationToSeconds(settings.duration || item.cost?.durationSeconds || "5");
+  const durationMultiplier = seconds > 5 ? 2 : 1;
+  const resolution = String(settings.resolution || item.cost?.resolution || "540p").toLowerCase();
+  const resolutionMultiplier = resolution === "1080p" ? 4 : resolution === "720p" ? 2 : 1;
+  return lumaPricing.ray2CostPerFiveSeconds540p * durationMultiplier * resolutionMultiplier;
 }
 
 function seedanceBillingDimensions(resolution, aspectRatio) {

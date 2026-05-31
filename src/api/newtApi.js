@@ -167,6 +167,10 @@ export const generationApi = {
 
   generateImage(body) {
     return postJson("/api/node/generate-image", body, "Image generation failed.");
+  },
+
+  generateNodeVideo(body) {
+    return postJson("/api/node/generate-video", body, "Video generation failed.");
   }
 };
 

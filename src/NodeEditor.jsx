@@ -112,9 +112,16 @@ import {
   characterTraitOptions,
   colorIdMatteVideoOutputOptions,
   happyHorseDurationOptions,
+  imageModelNames,
+  imageModelOptions,
   imageModelAutoAspectRatio,
+  imageResolutionOptions,
   lensPresetNames,
   lensPresetPrompts,
+  lumaImageAspectRatios,
+  lumaVideoAspectRatioOptions,
+  lumaVideoDurationOptions,
+  lumaVideoResolutionOptions,
   model3DDescription,
   model3DNames,
   model3DViewInputs,
@@ -123,6 +130,9 @@ import {
   patinaMapOptions,
   qwenCameraDefaults,
   sam3SegmentationModelsEnabled,
+  seedanceVideoAspectRatioOptions,
+  seedanceVideoDurationOptions,
+  seedanceVideoResolutionOptions,
   shotPresetNames,
   shotPresetPrompts,
   stylePresetNames,
@@ -135,6 +145,7 @@ import {
   utilityImageModelNames,
   utilityModelDescriptions,
   utilityVideoModelNames,
+  videoModelOptions,
   videoModelNames,
   voidVideoFrameOptions,
   wan27ReferenceAspectRatioOptions,
@@ -490,7 +501,7 @@ const initialNodes = [
     y: 126,
     data: {
       title: "Image Model",
-      model: "Nano Banana Pro",
+      model: imageModelNames.nanoBananaPro,
       prompt: "A serene landscape with mountains",
       aspectRatio: "21:9",
       resolution: "2K"
@@ -503,7 +514,7 @@ const initialNodes = [
     y: 44,
     data: {
       title: "Video Model",
-      model: "Seedance 2.0",
+      model: videoModelNames.seedance,
       prompt: "A beautiful sunset over a calm ocean",
       duration: "15 seconds",
       resolution: "720p",
@@ -5903,8 +5914,9 @@ function NodeBody({
           )}
           <NodeRow label="Model">
             <select value={node.data.model} onChange={(event) => onUpdate(node.id, imageModelSelectionPatch(node.data, event.target.value))}>
-              <option>Nano Banana Pro</option>
-              <option>OpenAI Image 2</option>
+              {imageModelOptions.map((model) => (
+                <option key={model}>{model}</option>
+              ))}
               {sam3SegmentationModelsEnabled && <option>SAM 3 Image</option>}
             </select>
           </NodeRow>
@@ -5945,9 +5957,9 @@ function NodeBody({
               </NodeRow>
               <NodeRow label="Resolution">
                 <select value={node.data.resolution} onChange={(event) => onUpdate(node.id, { resolution: event.target.value })}>
-                  <option>2K</option>
-                  <option>1K</option>
-                  <option>4K</option>
+                  {imageResolutionOptions.map((option) => (
+                    <option key={option}>{option}</option>
+                  ))}
                 </select>
               </NodeRow>
             </>
@@ -5971,6 +5983,7 @@ function NodeBody({
   const isWan27Reference = isWan27ReferenceModel(node.data.model);
   const isAurora = isAuroraModel(node.data.model);
   const isHappyHorse = isHappyHorseModel(node.data.model);
+  const isLumaVideo = isLumaVideoModel(node.data.model);
   const isSam3Video = isSam3VideoModel(node.data.model);
   const wan27Duration = normalizedWan27ReferenceDurationLabel(node.data.duration);
   const wan27Resolution = normalizedWan27ReferenceResolution(node.data.resolution);
@@ -5978,10 +5991,13 @@ function NodeBody({
   const happyHorseDuration = normalizedHappyHorseDurationLabel(node.data.duration);
   const happyHorseResolution = normalizedHappyHorseResolution(node.data.resolution);
   const happyHorseAspectRatio = normalizedHappyHorseAspectRatio(node.data.aspectRatio);
+  const lumaDuration = normalizedLumaVideoDurationLabel(node.data.duration);
+  const lumaResolution = normalizedLumaVideoResolution(node.data.resolution);
+  const lumaAspectRatio = normalizedLumaVideoAspectRatio(node.data.aspectRatio);
   const happyHorseReferenceImageCount = Math.min(incoming.referenceImageIn?.length || 0, 9);
   const wan27ReferenceImageCount = incoming.referenceImageIn?.length || 0;
   const wan27ReferenceVideoCount = incoming.referenceVideoIn?.length || 0;
-  const tagMatches = isWanFunControl || isAurora || isSam3Video ? [] : videoModelReferenceTagMatches(promptValue, incoming);
+  const tagMatches = isWanFunControl || isAurora || isLumaVideo || isSam3Video ? [] : videoModelReferenceTagMatches(promptValue, incoming);
   const characterConnected = Boolean(incoming.characterIn?.length);
   const settingsOpen = Boolean(node.data.settingsOpen);
   const collapsedPorts = isWanFunControl
@@ -5992,6 +6008,8 @@ function NodeBody({
       ? [promptPort, referenceImagePort, referenceAudioPort, characterPort]
       : isHappyHorse
         ? [promptPort, referenceImagePort, characterPort]
+    : isLumaVideo
+      ? [promptPort, startFramePort, endFramePort, referenceImagePort, characterPort]
     : isSam3Video
       ? [promptPort, referenceVideoPort]
       : [promptPort, startFramePort, endFramePort, referenceImagePort, referenceVideoPort, referenceAudioPort, characterPort];
@@ -6030,11 +6048,9 @@ function NodeBody({
         <summary>Settings</summary>
         <NodeRow label="Model">
           <select value={node.data.model} onChange={(event) => onUpdate(node.id, videoModelSelectionPatch(node.data, event.target.value))}>
-            <option>{videoModelNames.seedance}</option>
-            <option>{videoModelNames.seedanceFast}</option>
-            <option>{videoModelNames.wan27Reference}</option>
-            <option>{videoModelNames.happyHorse}</option>
-            <option>{videoModelNames.aurora}</option>
+            {videoModelOptions.map((model) => (
+              <option key={model}>{model}</option>
+            ))}
             {sam3SegmentationModelsEnabled && <option>{videoModelNames.sam3Video}</option>}
           </select>
         </NodeRow>
@@ -6223,6 +6239,47 @@ function NodeBody({
               </button>
             </NodeRow>
           </>
+        ) : isLumaVideo ? (
+          <>
+            <NodeRow label="Start Frame" inputPort={settingsOpen ? startFramePort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+              <button className={incoming.startFrameIn?.length ? "connected-field" : ""}>{connectedSummary(incoming.startFrameIn, "Optional image")}</button>
+            </NodeRow>
+            <NodeRow label="End Frame" inputPort={settingsOpen ? endFramePort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+              <button className={incoming.endFrameIn?.length ? "connected-field" : ""}>{connectedSummary(incoming.endFrameIn, "Optional image")}</button>
+            </NodeRow>
+            <NodeRow label="Reference Image" inputPort={settingsOpen ? referenceImagePort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+              <button className={incoming.referenceImageIn?.length ? "connected-field" : ""}>{connectedSummary(incoming.referenceImageIn, "Optional start")}</button>
+            </NodeRow>
+            <NodeRow label="Character" inputPort={settingsOpen ? characterPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+              <button className={incoming.characterIn?.length ? "connected-field" : ""}>{connectedSummary(incoming.characterIn, "Optional character")}</button>
+            </NodeRow>
+            <NodeRow label="Duration">
+              <select value={lumaDuration} onChange={(event) => onUpdate(node.id, { duration: event.target.value })}>
+                {lumaVideoDurationOptions.map((option) => (
+                  <option key={option}>{option}</option>
+                ))}
+              </select>
+            </NodeRow>
+            <NodeRow label="Resolution">
+              <select value={lumaResolution} onChange={(event) => onUpdate(node.id, { resolution: event.target.value })}>
+                {lumaVideoResolutionOptions.map((option) => (
+                  <option key={option}>{option}</option>
+                ))}
+              </select>
+            </NodeRow>
+            <NodeRow label="Aspect Ratio">
+              <select value={lumaAspectRatio} onChange={(event) => onUpdate(node.id, { aspectRatio: event.target.value })}>
+                {lumaVideoAspectRatioOptions.map((option) => (
+                  <option key={option}>{option}</option>
+                ))}
+              </select>
+            </NodeRow>
+            <NodeRow label="Loop">
+              <button className={`node-toggle ${node.data.loop ? "enabled" : ""}`} onClick={() => onUpdate(node.id, { loop: !node.data.loop })}>
+                <span />
+              </button>
+            </NodeRow>
+          </>
         ) : isSam3Video ? (
           <>
             <NodeRow label="Video" inputPort={settingsOpen ? referenceVideoPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
@@ -6251,24 +6308,23 @@ function NodeBody({
             </NodeRow>
             <NodeRow label="Duration">
               <select value={node.data.duration} onChange={(event) => onUpdate(node.id, { duration: event.target.value })}>
-                <option>15 seconds</option>
-                <option>10 seconds</option>
-                <option>5 seconds</option>
+                {seedanceVideoDurationOptions.map((option) => (
+                  <option key={option}>{option}</option>
+                ))}
               </select>
             </NodeRow>
             <NodeRow label="Resolution">
               <select value={node.data.resolution} onChange={(event) => onUpdate(node.id, { resolution: event.target.value })}>
-                <option>720p</option>
-                <option>480p</option>
-                <option>1080p</option>
+                {seedanceVideoResolutionOptions.map((option) => (
+                  <option key={option}>{option}</option>
+                ))}
               </select>
             </NodeRow>
             <NodeRow label="Aspect Ratio">
               <select value={node.data.aspectRatio} onChange={(event) => onUpdate(node.id, { aspectRatio: event.target.value })}>
-                <option>16:9 (Landscape)</option>
-                <option>21:9</option>
-                <option>9:16 (Portrait)</option>
-                <option>1:1</option>
+                {seedanceVideoAspectRatioOptions.map((option) => (
+                  <option key={option}>{option}</option>
+                ))}
               </select>
             </NodeRow>
             <NodeRow label="Generate Audio">
@@ -6281,6 +6337,7 @@ function NodeBody({
       </details>
       {isAurora && <small className="upload-status model-status-note">lipsync model</small>}
       {isHappyHorse && <small className="upload-status model-status-note">reference image model</small>}
+      {isLumaVideo && <small className="upload-status model-status-note">Luma Ray2 via Fal</small>}
       {isWan27Reference && <small className="upload-status model-status-note">multi-reference image/video model</small>}
       {isSam3Video && <small className="upload-status model-status-note">segmentation mask model</small>}
     </div>
@@ -6931,7 +6988,7 @@ function createDefaultNodeData(type, label, count) {
   if (type === "imageModel") {
     return {
       title,
-      model: "Nano Banana Pro",
+      model: imageModelNames.nanoBananaPro,
       prompt: "",
       aspectRatio: "21:9",
       resolution: "2K",
@@ -6941,12 +6998,13 @@ function createDefaultNodeData(type, label, count) {
 
   return {
     title,
-    model: "Seedance 2.0",
+    model: videoModelNames.seedance,
     prompt: "",
     duration: "15 seconds",
     resolution: "720p",
     aspectRatio: "16:9 (Landscape)",
     generateAudio: true,
+    loop: false,
     negativePrompt: "",
     multiShots: false,
     enableSafetyChecker: true,
@@ -6958,7 +7016,8 @@ function createDefaultNodeData(type, label, count) {
 function imageModelSelectionPatch(data = {}, model) {
   return {
     model,
-    aspectRatio: normalizeImageModelAspectRatio(data.aspectRatio, model)
+    aspectRatio: normalizeImageModelAspectRatio(data.aspectRatio, model),
+    resolution: normalizeImageModelResolution(data.resolution)
   };
 }
 
@@ -6985,6 +7044,7 @@ function imageModelAspectRatioOptions(model) {
 }
 
 function imageModelSupportedAspectRatios(model) {
+  if (isLumaImageModel(model)) return lumaImageAspectRatios;
   return isOpenAiImageModel(model) ? openAiImageAspectRatios : nanoImageAspectRatios;
 }
 
@@ -7000,6 +7060,11 @@ function isAutoImageAspectRatio(value) {
 
 function isOpenAiImageModel(model) {
   return String(model || "").toLowerCase().includes("openai");
+}
+
+function isLumaImageModel(model) {
+  const normalized = String(model || "").toLowerCase();
+  return normalized.includes("luma") || normalized.includes("photon");
 }
 
 function isWanFunControlModel(model) {
@@ -7022,6 +7087,11 @@ function isHappyHorseModel(model) {
   return normalized.includes("happy") || normalized.includes("horse") || normalized.includes("alibaba");
 }
 
+function isLumaVideoModel(model) {
+  const normalized = String(model || "").toLowerCase();
+  return normalized.includes("luma") || normalized.includes("dream") || normalized.includes("ray2") || normalized.includes("ray 2");
+}
+
 function videoModelSelectionPatch(data = {}, model) {
   if (isWan27ReferenceModel(model)) {
     return {
@@ -7036,8 +7106,24 @@ function videoModelSelectionPatch(data = {}, model) {
     };
   }
 
+  if (isLumaVideoModel(model)) {
+    return {
+      model,
+      duration: isLumaVideoModel(data.model) ? normalizedLumaVideoDurationLabel(data.duration) : "5 seconds",
+      resolution: isLumaVideoModel(data.model) ? normalizedLumaVideoResolution(data.resolution) : "540p",
+      aspectRatio: isLumaVideoModel(data.model) ? normalizedLumaVideoAspectRatio(data.aspectRatio) : "16:9",
+      loop: Boolean(data.loop)
+    };
+  }
+
   if (!isHappyHorseModel(model)) {
-    return { model };
+    return {
+      model,
+      duration: seedanceVideoDurationOptions.includes(data.duration) ? data.duration : "15 seconds",
+      resolution: seedanceVideoResolutionOptions.includes(data.resolution) ? data.resolution : "720p",
+      aspectRatio: seedanceVideoAspectRatioOptions.includes(data.aspectRatio) ? data.aspectRatio : "16:9 (Landscape)",
+      generateAudio: data.generateAudio !== false
+    };
   }
 
   return {
@@ -7048,6 +7134,24 @@ function videoModelSelectionPatch(data = {}, model) {
     enableSafetyChecker: data.enableSafetyChecker !== false,
     seed: data.seed || ""
   };
+}
+
+function normalizeImageModelResolution(value) {
+  return imageResolutionOptions.includes(value) ? value : "2K";
+}
+
+function normalizedLumaVideoDurationLabel(value) {
+  const seconds = String(value || "").match(/\d+/)?.[0] || "5";
+  return lumaVideoDurationOptions.includes(`${seconds} seconds`) ? `${seconds} seconds` : "5 seconds";
+}
+
+function normalizedLumaVideoResolution(value) {
+  return lumaVideoResolutionOptions.includes(value) ? value : "540p";
+}
+
+function normalizedLumaVideoAspectRatio(value) {
+  const normalized = String(value || "16:9").match(/\d+:\d+/)?.[0] || "16:9";
+  return lumaVideoAspectRatioOptions.includes(normalized) ? normalized : "16:9";
 }
 
 function normalizedHappyHorseDurationLabel(value) {
@@ -8514,6 +8618,13 @@ function normalizeCurrentNode(node) {
     };
   }
 
+  if (nextNode.type === "videoModel") {
+    return {
+      ...nextNode,
+      data: normalizeVideoModelData(data)
+    };
+  }
+
   if (nextNode.type === "model3d") {
     return {
       ...nextNode,
@@ -8579,14 +8690,26 @@ function normalizeModel3DData(data = {}) {
 }
 
 function normalizeImageModelData(data = {}) {
-  const model = data.model || "Nano Banana Pro";
+  const model = data.model || imageModelNames.nanoBananaPro;
   return {
     ...data,
     title: data.title || "Image Model",
     model,
     prompt: data.prompt || "",
     aspectRatio: normalizeImageModelAspectRatio(data.aspectRatio, model),
-    resolution: data.resolution || "2K",
+    resolution: normalizeImageModelResolution(data.resolution),
+    batchCount: data.batchCount || "1"
+  };
+}
+
+function normalizeVideoModelData(data = {}) {
+  const model = data.model || videoModelNames.seedance;
+  return {
+    ...createDefaultNodeData("videoModel", data.title || "Video Model", 1),
+    ...data,
+    ...videoModelSelectionPatch(data, model),
+    title: data.title || "Video Model",
+    prompt: data.prompt || "",
     batchCount: data.batchCount || "1"
   };
 }
