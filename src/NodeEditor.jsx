@@ -39,15 +39,14 @@ import { CameraControlViewport } from "./components/CameraControlViewport.jsx";
 import { EdgePath, SelectionActionBar, SelectionMarquee, UnsavedWorkflowPrompt } from "./components/CanvasChrome.jsx";
 import { ComposerViewport } from "./components/ComposerViewport.jsx";
 import {
-  MediaPreview,
   Model3DViewer,
   OutputPreviewLightbox,
   ProjectOutputDrawer,
   ResultPane,
-  UploadIcon,
   useNewtNodeImageFallback,
   useNewtNodeVideoFallback
 } from "./components/MediaViews.jsx";
+import { ComposerNodeBody, MediaAssetNodeBody, PlainTextNodeBody, TextModelNodeBody } from "./components/NodeBodies.jsx";
 import { NodeRow, OutputPortRow, PortHandle } from "./components/NodePorts.jsx";
 import { StyleCollage } from "./components/StyleCollage.jsx";
 import { canvasToBlob, createTransferCollageBlob, loadCanvasImage } from "./canvasMedia.js";
@@ -95,7 +94,6 @@ import {
   hasOutputItemDragData,
   hasSupportedDroppedFile,
   isOutputItemCompatibleWithNode,
-  mediaAccept,
   mimeForOutputItem,
   nodeTypeForDroppedFile,
   outputDragMime,
@@ -4588,99 +4586,45 @@ function NodeBody({
 
   if (node.type === "plainText") {
     return (
-      <div className="node-body text-node-body plain-text-node-body">
-        <OutputPortRow node={node} port={outputPort} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
-        <div className="text-single-panel">
-          <label className="text-field-group">
-            <span>Prompt</span>
-            <textarea aria-label="Text prompt" value={node.data.text || ""} onChange={(event) => onUpdate(node.id, { text: event.target.value })} />
-          </label>
-        </div>
-      </div>
+      <PlainTextNodeBody
+        node={node}
+        outputPort={outputPort}
+        onUpdate={onUpdate}
+        onConnectStart={onConnectStart}
+        onDisconnectInput={onDisconnectInput}
+        connectedPortKeys={connectedPortKeys}
+      />
     );
   }
 
   if (node.type === "text") {
-    const hasOutputPanel = Boolean(node.data.resultText) || node.data.status === "running" || node.data.status === "complete";
-    const textPort = config.input.find((port) => port.id === "textIn");
-    const imagePort = config.input.find((port) => port.id === "imageIn");
-    const videoPort = config.input.find((port) => port.id === "videoIn");
-    const stylePort = config.input.find((port) => port.id === "styleIn");
-    const hasRunInput =
-      Boolean(String(node.data.text || "").trim()) ||
-      Boolean(incoming.textIn?.length) ||
-      Boolean(incoming.imageIn?.length) ||
-      Boolean(incoming.videoIn?.length) ||
-      Boolean(incoming.styleIn?.length);
     return (
-      <div className="node-body text-node-body">
-        <OutputPortRow node={node} port={outputPort} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
-        <div className="text-input-port-stack" aria-label="Text Model node inputs">
-          {[textPort, imagePort, videoPort, stylePort].filter(Boolean).map((port) => (
-            <PortHandle
-              key={port.id}
-              node={node}
-              port={port}
-              side="input"
-              onConnectStart={onConnectStart}
-              onDisconnectInput={onDisconnectInput}
-              connectedPortKeys={connectedPortKeys}
-            />
-          ))}
-        </div>
-        <div className={hasOutputPanel ? "text-split-panel" : "text-single-panel"}>
-          <label className="text-field-group">
-            <span>Original prompt</span>
-            <textarea aria-label="Text Model prompt" value={node.data.text || ""} onChange={(event) => onUpdate(node.id, { text: event.target.value })} />
-          </label>
-          {hasOutputPanel && (
-            <label className="text-field-group">
-              <span>Output</span>
-              <textarea
-                value={node.data.resultText || ""}
-                placeholder={running ? "Running..." : "Output will appear here"}
-                onChange={(event) => onUpdate(node.id, { resultText: event.target.value })}
-              />
-            </label>
-          )}
-        </div>
-        <button className="run-node-button" onClick={() => onRun(node)} disabled={running || !hasRunInput}>
-          {running ? "Running..." : "Run Text Model"}
-        </button>
-        {node.data.lastRunModel && <small className="upload-status">Processed with {node.data.lastRunModel}</small>}
-        {node.data.error && <small className="upload-error">{node.data.error}</small>}
-      </div>
+      <TextModelNodeBody
+        node={node}
+        config={config}
+        outputPort={outputPort}
+        incoming={incoming}
+        onUpdate={onUpdate}
+        onRun={onRun}
+        running={running}
+        onConnectStart={onConnectStart}
+        onDisconnectInput={onDisconnectInput}
+        connectedPortKeys={connectedPortKeys}
+      />
     );
   }
 
   if (node.type === "image" || node.type === "video" || node.type === "audio") {
     return (
-      <div
-        className="node-body media-node-body"
-        onDragOver={allowFileDrop}
-        onDrop={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          const outputItem = outputItemFromDataTransfer(event.dataTransfer);
-          if (outputItem) {
-            onOutputImport?.(node, outputItem);
-            return;
-          }
-          const file = firstAcceptedFile(event.dataTransfer.files, node.type);
-          if (file) onUpload(node, file);
-        }}
-      >
-        <OutputPortRow node={node} port={outputPort} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
-        <MediaPreview node={node} />
-        <label className="media-upload-card">
-          <UploadIcon type={node.type} />
-          <span>{node.data.resultUrl ? "Replace upload" : "Upload"}</span>
-          <input type="file" accept={mediaAccept(node.type)} onChange={(event) => onUpload(node, event.target.files?.[0])} />
-        </label>
-        {node.data.fileName && <small>{node.data.fileName}</small>}
-        {node.data.status === "uploading" && <small className="upload-status">Uploading...</small>}
-        {node.data.error && <small className="upload-error">{node.data.error}</small>}
-      </div>
+      <MediaAssetNodeBody
+        node={node}
+        outputPort={outputPort}
+        onUpload={onUpload}
+        onOutputImport={onOutputImport}
+        onConnectStart={onConnectStart}
+        onDisconnectInput={onDisconnectInput}
+        connectedPortKeys={connectedPortKeys}
+      />
     );
   }
 
@@ -4691,39 +4635,15 @@ function NodeBody({
     const composerInputPorts = [imageInputPort, ...characterInputPorts].filter(Boolean);
 
     return (
-      <div className="node-body composer-node-body">
-        {imageOutputPort && <OutputPortRow node={node} port={imageOutputPort} label="Frame output" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />}
-        <div className={`composer-node-preview ${node.data.resultUrl ? "" : "empty"}`}>
-          {node.data.resultUrl ? (
-            <img src={node.data.resultUrl} alt="Composer frame" />
-          ) : (
-            <>
-              <Box size={28} />
-              <span>No frame captured</span>
-            </>
-          )}
-        </div>
-        <button className="run-node-button" onClick={() => onOpenComposer?.(node.id)}>
-          Open Composer
-        </button>
-        <div className="composer-input-list" aria-label="Composer inputs">
-          {composerInputPorts.map((port) => (
-            <div key={port.id} className="composer-input-row">
-              <PortHandle
-                node={node}
-                port={port}
-                side="input"
-                onConnectStart={onConnectStart}
-                onDisconnectInput={onDisconnectInput}
-                connectedPortKeys={connectedPortKeys}
-              />
-              <span title={port.label}>{port.label}</span>
-            </div>
-          ))}
-        </div>
-        {node.data.status === "uploading" && <small className="upload-status">Capturing...</small>}
-        {node.data.error && <small className="upload-error">{node.data.error}</small>}
-      </div>
+      <ComposerNodeBody
+        node={node}
+        imageOutputPort={imageOutputPort}
+        composerInputPorts={composerInputPorts}
+        onOpenComposer={onOpenComposer}
+        onConnectStart={onConnectStart}
+        onDisconnectInput={onDisconnectInput}
+        connectedPortKeys={connectedPortKeys}
+      />
     );
   }
 
