@@ -42,40 +42,42 @@ Current release: `v2.0.0-beta.0`
 
 ## Setup
 
-1. Install dependencies:
+Add your API keys to `.env` after copying it from `.env.example`:
 
-   ```bash
-   npm install
-   ```
+```bash
+FAL_KEY=your_fal_key_here
+GOOGLE_API_KEY=your_google_api_key_here
+```
 
-   If you already have the repository locally and just pulled new changes, run `npm install` again before starting the app.
+### macOS
 
-2. Create your local environment file:
+From Terminal in the repository folder:
 
-   ```bash
-   cp .env.example .env
-   ```
+```bash
+npm install
+cp .env.example .env
+open -e .env
+npm run dev
+```
 
-3. Add your local API keys to `.env`:
+Then open `http://127.0.0.1:5173`.
 
-   ```bash
-   FAL_KEY=your_fal_key_here
-   GOOGLE_API_KEY=your_google_api_key_here
-   ```
+You can also double-click `NewtNode.app` for the app-style launcher, or run `NewtNode.command` when you want terminal logs visible.
 
-4. Start the app:
+### Windows
 
-   ```bash
-   npm run dev
-   ```
+From PowerShell in the repository folder:
 
-5. Open `http://127.0.0.1:5173`.
+```powershell
+npm.cmd install
+Copy-Item .env.example .env
+notepad .env
+npm.cmd run dev
+```
 
-## One-Click Launch
+Then open `http://127.0.0.1:5173`.
 
-Windows: double-click `Launch_NewtNode.bat`, or run `Launch_NewtNode.ps1` from PowerShell, to start the local backend, start the Vite UI, and open NewtNode.
-
-macOS: double-click `NewtNode.app` for the app-style launcher, or run `NewtNode.command` when you want terminal logs visible.
+You can also double-click `Launch_NewtNode.bat`, or run `Launch_NewtNode.ps1` from PowerShell, to start the local backend, start the Vite UI, and open NewtNode.
 
 ## Useful Commands
 
