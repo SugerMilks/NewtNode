@@ -48,6 +48,8 @@ import {
   useNewtNodeImageFallback,
   useNewtNodeVideoFallback
 } from "./components/MediaViews.jsx";
+import { NodeRow, OutputPortRow, PortHandle } from "./components/NodePorts.jsx";
+import { StyleCollage } from "./components/StyleCollage.jsx";
 import { canvasToBlob, createTransferCollageBlob, loadCanvasImage } from "./canvasMedia.js";
 import {
   colorIdMatteBlur,
@@ -3932,45 +3934,6 @@ function NodeCard({
   );
 }
 
-function PortHandle({ node, port, side, onConnectStart, onDisconnectInput, connectedPortKeys }) {
-  const connected = connectedPortKeys.has(`${node.id}:${port.id}`);
-
-  return (
-    <button
-      className={`inline-port ${side} ${connected ? "connected" : ""}`}
-      data-port-role={side}
-      data-node-id={node.id}
-      data-port-id={port.id}
-      data-port-key={`${node.id}:${port.id}`}
-      style={{ "--port-color": port.color }}
-      onPointerDown={(event) => {
-        if (side === "output") {
-          onConnectStart(event, node.id, port.id, port.color);
-          return;
-        }
-        onDisconnectInput(event, node.id, port.id);
-      }}
-      title={side === "input" ? `Disconnect ${port.label}` : `Connect ${port.label}`}
-    />
-  );
-}
-
-function OutputPortRow({ node, port, onConnectStart, onDisconnectInput, connectedPortKeys, label = port.label }) {
-  return (
-    <div className="port-row output-row">
-      <span>{label}</span>
-      <PortHandle
-        node={node}
-        port={port}
-        side="output"
-        onConnectStart={onConnectStart}
-        onDisconnectInput={onDisconnectInput}
-        connectedPortKeys={connectedPortKeys}
-      />
-    </div>
-  );
-}
-
 function CharacterVoicePlayer({ voice }) {
   const audioRef = React.useRef(null);
   const [playing, setPlaying] = React.useState(false);
@@ -4099,54 +4062,6 @@ function StillFrameScrubber({ videoUrl, value, onChange }) {
         <input type="range" min="0" max={sliderMax} step="0.01" value={displayTime} onChange={handleScrub} disabled={loadState === "error"} aria-label="Still frame position" />
         <span>{loadState === "error" ? "Load failed" : `${formatTimelineTime(displayTime)} / ${formatTimelineTime(usableDuration)}`}</span>
       </div>
-    </div>
-  );
-}
-
-function StyleCollage({ images, locked, outputUrl, outputLabel = moodBoardOutputFileName, onRemove, onDropImages, onDropOutput }) {
-  function handleDrop(event) {
-    event.preventDefault();
-    event.stopPropagation();
-    const outputItem = outputItemFromDataTransfer(event.dataTransfer);
-    if (outputItem) {
-      onDropOutput?.(outputItem);
-      return;
-    }
-    onDropImages?.(event.dataTransfer.files);
-  }
-
-  if (locked && outputUrl) {
-    return (
-      <div className="style-collage transfer-output-preview locked">
-        <div className="style-collage-cell">
-          <img src={outputUrl} alt={outputLabel} onError={useNewtNodeImageFallback} />
-          <span>{outputLabel}</span>
-        </div>
-      </div>
-    );
-  }
-
-  if (!images.length) {
-    return (
-      <div className="style-collage empty" onDragOver={allowFileDrop} onDrop={handleDrop}>
-        <Compass size={24} />
-        <span>Drop mood board images here</span>
-      </div>
-    );
-  }
-
-  return (
-    <div className={`style-collage count-${images.length} ${locked ? "locked" : ""}`} onDragOver={allowFileDrop} onDrop={handleDrop}>
-      {images.map((image) => (
-        <div className="style-collage-cell" key={image.id}>
-          <img src={image.localUrl} alt={image.fileName || "Mood board reference"} onError={useNewtNodeImageFallback} />
-          {!locked && (
-            <button onClick={() => onRemove(image.id)} title="Remove image">
-              <X size={12} />
-            </button>
-          )}
-        </div>
-      ))}
     </div>
   );
 }
@@ -7105,27 +7020,6 @@ function formatFrameTimeDisplay(value) {
   const remainder = seconds - minutes * 60;
   if (minutes > 0) return `${minutes}:${remainder.toFixed(2).padStart(5, "0")}`;
   return `${remainder.toFixed(2)}s`;
-}
-
-function NodeRow({ label, children, inputPort, node, onConnectStart, onDisconnectInput, connectedPortKeys }) {
-  return (
-    <div className={`node-row ${inputPort ? "has-port" : ""}`}>
-      <span className="node-row-label">
-        {inputPort && (
-          <PortHandle
-            node={node}
-            port={inputPort}
-            side="input"
-            onConnectStart={onConnectStart}
-            onDisconnectInput={onDisconnectInput}
-            connectedPortKeys={connectedPortKeys}
-          />
-        )}
-        <span>{label}</span>
-      </span>
-      {children}
-    </div>
-  );
 }
 
 function getNodeConfig(type) {
