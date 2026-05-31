@@ -101,6 +101,51 @@ import {
 } from "./mediaAssets.js";
 import { appendResultItems, existingResultItemsForNode, normalizedResultItems } from "./mediaResults.js";
 import {
+  batchOptions,
+  birefnetModelOptions,
+  birefnetResolutionOptions,
+  bytedanceUpscalerFidelityOptions,
+  bytedanceUpscalerFpsOptions,
+  bytedanceUpscalerPresetOptions,
+  bytedanceUpscalerResolutionOptions,
+  bytedanceUpscalerTierOptions,
+  characterTraitOptions,
+  colorIdMatteVideoOutputOptions,
+  happyHorseDurationOptions,
+  imageModelAutoAspectRatio,
+  lensPresetNames,
+  lensPresetPrompts,
+  model3DDescription,
+  model3DNames,
+  model3DViewInputs,
+  nanoImageAspectRatios,
+  openAiImageAspectRatios,
+  patinaMapOptions,
+  qwenCameraDefaults,
+  sam3SegmentationModelsEnabled,
+  shotPresetNames,
+  shotPresetPrompts,
+  stylePresetNames,
+  stylePresetPrompts,
+  topazUpscalerBillingTierOptions,
+  topazUpscalerFpsOptions,
+  topazUpscalerModelOptions,
+  typePresetNames,
+  typePresetPrompts,
+  utilityImageModelNames,
+  utilityModelDescriptions,
+  utilityVideoModelNames,
+  videoModelNames,
+  voidVideoFrameOptions,
+  wan27ReferenceAspectRatioOptions,
+  wan27ReferenceDurationOptions,
+  wan27ReferenceResolutionOptions,
+  wanVaceAccelerationOptions,
+  wanVaceAspectRatioOptions,
+  wanVaceResolutionOptions,
+  wanVaceSamplerOptions
+} from "./modelOptions.js";
+import {
   clamp,
   clampContextMenuPosition,
   estimatedNodeHeight,
@@ -202,13 +247,6 @@ const characterWardrobePrompt =
   "Wardrobe rule: use exactly one outfit across all six views. Study the selected wardrobe sheet reference and apply only the clothing design, garments, materials, colors, and styling from that reference consistently to the character in every panel. If any person, model, face, body, skin, hair, pose, environment, background, text, or unrelated subject appears in the wardrobe reference, ignore it completely. Do not transfer the wardrobe reference person's identity, anatomy, facial features, pose, body shape, or composition. The character portrait reference is the only source for character identity. Do not show the basic black outfit, the original wardrobe, alternate clothing, or a wardrobe comparison. No nudity; editorial fashion styling only.";
 const characterVoicePrompt =
   "Use the provided dialogue audio file for the character and make sure the dialogue is seamlessly and realistically integrated into the scene with professional mixing techniques.";
-const characterTraitOptions = ["serious", "pleasant", "happy", "angry", "sad", "silly", "confident", "content", "excited", "passionate", "fanatic", "anxious", "scared", "arrogant", "stubborn", "curious"];
-const batchOptions = ["1", "2", "3", "4"];
-const imageModelAutoAspectRatio = "Auto";
-const nanoImageAspectRatios = ["21:9", "16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3", "4:5", "5:4"];
-const openAiImageAspectRatios = nanoImageAspectRatios;
-const happyHorseDurationOptions = Array.from({ length: 13 }, (_value, index) => `${index + 3} seconds`);
-const voidVideoFrameOptions = [69, 77, 85, 93, 101, 109, 117, 125, 133, 141, 149, 157, 165, 173, 181, 189, 197];
 const composerReferencePrompt = (writtenPrompt = "") => {
   const cleanWrittenPrompt = String(writtenPrompt || "").trim();
   return `Use the input guide image as a locked spatial blueprint. Use the written prompt as the sole source for the final subject matter, character design, wardrobe, environment, lighting, color, material, texture, style, mood, and rendering quality.
@@ -419,70 +457,6 @@ Generate the final image as a fully rendered interpretation of the written promp
 };
 const transferPromptSuffix =
   "Only use the uploaded image labeled MOOD_BOARD.png as a reference for overall style, color grading and image qualities. The generated image should NOT take any elements, subjects, or compositional framing of the content from MOOD_BOARD.png directly; only use MOOD_BOARD.png as a visual guide to transfer the style to the generation.";
-const stylePresetPrompts = {
-  None: "",
-  Cinematic:
-    "High-end cinematic still frame, shot on ARRI Alexa 35, high quality prime lens, high dynamic range, shallow depth of field, atmospheric cinematography, high production value, feature film look.",
-  Storyboard:
-    "Hand-drawn digital storyboard, line drawing with minimalistic shading, grayscale shading, cinematic composition, production-planning style, loose but intentional drawing, simple tonal blocking, clear visual storytelling. A black and white line drawing. No color. No pencil or charcoal sketches. No text or numbers unless described. No frame boarders.",
-  Commercial:
-    "Polished commercial image, premium advertising style, clean composition, bright refined lighting, shallow depth of field, elevated brand look, modern campaign aesthetic, crisp details, visually appealing.",
-  Anime:
-    "Stylized anime illustration, clean linework, expressive design, cinematic art lighting, vibrant controlled color palette, detailed background art, dynamic framing, polished animated look, emotionally engaging atmosphere.",
-  Claymation:
-    "Handmade claymation style, stop-motion look, sculpted clay characters, environment, and props, tactile surfaces, visible handmade imperfections, miniature set design, soft lighting, charming handcrafted aesthetic.",
-  "2D Animation":
-    "Clean 2D animation style, bold graphic shapes, smooth color blocking, expressive poses, simplified forms, clear silhouettes, modern animated design, playful and readable composition.",
-  "3D Animation":
-    "Stylized 3D animation look, polished modeling, soft global illumination, appealing textures, expressive forms, cinematic framing, animated feature quality, clean rendering, vibrant and dimensional.",
-  "Dark as Fuk":
-    "Haunting atmospheric style, eerie stillness, very disturbing and unsettling mood, quiet tension, ghostly lighting, muted colors, shadows, liminal spaces, subtle surreal details, lonely composition, restrained horror tone, dreamlike unease, beautiful but disturbing visual atmosphere.",
-  "Pop as Fuk":
-    "Poppy fun style, bright bold colors, playful composition, energetic, upbeat mood, glossy visual polish, cheerful, vibrant contrast, whimsical details, modern campaign-ready look, colorful and instantly engaging, super poppy music video vibes.",
-  "Sexy as Fuk":
-    "High-fashion edgy style, natural, anatomy allure, elegant sensuality, bare skin, bare anatomy, minimal, sculptural, flattering dramatic lighting, skin highlights, premium fashion photography, magnetic presence, sophisticated mood, form and shape, soft skin texture, risky high fashion, edgy.",
-  "Strange as Fuk":
-    "Strange surreal style, offbeat visual logic, unexpected shapes, odd proportions, unusual textures, dreamlike atmosphere, slightly unsettling but playful tone, surreal composition, imaginative art direction, weird in a smart and intentional way, strange morphs, unexpected abstract realism."
-};
-const stylePresetNames = Object.keys(stylePresetPrompts);
-const shotPresetPrompts = {
-  None: "",
-  CU: "A close up shot.",
-  MS: "A medium shot.",
-  WS: "A wide shot.",
-  ECU: "An extreme close up shot.",
-  EWS: "An extreme wide shot."
-};
-const lensPresetPrompts = {
-  None: "",
-  "18mm": "Shot on a wide 18mm prime lens.",
-  "35mm": "Shot on a wide 35mm prime lens.",
-  "50mm": "Shot on a 50mm prime lens.",
-  "85mm": "Shot on a long 85mm prime lens.",
-  "120mm": "Shot on a long 120mm prime lens.",
-  Macro: "Shot on a macro probe lens."
-};
-const typePresetPrompts = {
-  None: "",
-  "Low Angle": "A low angle shot.",
-  "High Angle": "A high angle shot.",
-  "Extreme High": "A bird's eye view from extremely high angled shot.",
-  "Extreme Low": "A worm's eye view from extremely low angled shot.",
-  Portrait: "A portrait shot.",
-  Profile: "A profile shot."
-};
-const shotPresetNames = Object.keys(shotPresetPrompts);
-const lensPresetNames = Object.keys(lensPresetPrompts);
-const typePresetNames = Object.keys(typePresetPrompts);
-const qwenCameraDefaults = {
-  horizontalAngle: 90,
-  verticalAngle: 0,
-  zoom: 5,
-  additionalPrompt: "",
-  loraScale: 1,
-  guidanceScale: 4.5,
-  numInferenceSteps: 28
-};
 const initialNodes = [
   {
     id: "text-1",
@@ -558,130 +532,6 @@ const referenceTagPalette = ["#4d8dff", "#ff4fb3", "#9b5cff", "#58ce63", "#ff8b3
 const groupPadding = { x: 42, top: 62, bottom: 42 };
 const groupSizeFloor = 1;
 const imageRunStaggerMs = 850;
-const videoModelNames = {
-  seedance: "Seedance 2.0",
-  seedanceFast: "Seedance 2.0 Fast",
-  happyHorse: "Happy Horse",
-  wanFunControl: "Wan Fun Control",
-  wan27Reference: "Wan 2.7 Reference-to-Video",
-  aurora: "Creatify Aurora",
-  sam3Video: "SAM 3 Video"
-};
-const wan27ReferenceDurationOptions = ["2 seconds", "3 seconds", "4 seconds", "5 seconds", "6 seconds", "7 seconds", "8 seconds", "9 seconds", "10 seconds"];
-const wan27ReferenceResolutionOptions = ["1080p", "720p"];
-const wan27ReferenceAspectRatioOptions = ["16:9", "9:16", "1:1", "4:3", "3:4"];
-const model3DNames = {
-  hunyuanPro: "Hunyuan 3D 3.1 Pro"
-};
-const model3DViewInputs = [
-  { id: "frontImageIn", view: "front", label: "Front" },
-  { id: "backImageIn", view: "back", label: "Back" },
-  { id: "leftImageIn", view: "left", label: "Left" },
-  { id: "rightImageIn", view: "right", label: "Right" },
-  { id: "topImageIn", view: "top", label: "Top" },
-  { id: "bottomImageIn", view: "bottom", label: "Bottom" },
-  { id: "leftFrontImageIn", view: "leftFront", label: "Left Front" },
-  { id: "rightFrontImageIn", view: "rightFront", label: "Right Front" }
-];
-const model3DDescription =
-  "Generates a GLB 3D model from connected view images. Front is required; Back, Left, Right, Top, Bottom, Left Front, and Right Front are optional.";
-const utilityImageModelNames = {
-  colorIdMatte: "Color ID Matte",
-  stillFrame: "Grab Still Frame",
-  dwpose: "DWPose",
-  depthAnything: "Depth Anything",
-  patina: "Patina",
-  sam3Image: "SAM 3 Image",
-  birefnetImage: "BiRefNet Image"
-};
-const patinaMapOptions = [
-  { id: "basecolor", label: "Basecolor" },
-  { id: "normal", label: "Normal" },
-  { id: "roughness", label: "Roughness" },
-  { id: "metalness", label: "Metalness" },
-  { id: "height", label: "Height" }
-];
-const utilityVideoModelNames = {
-  wanFunControl: "Wan Fun Control",
-  extractFrame: "Extract Frame",
-  colorIdMatte: "Color ID Matte",
-  compositeVideo: "Composite Video",
-  wanVaceMaskToVideo: "Wan VACE Mask-to-Video",
-  wanVaceInpainting: "Wan VACE 14B Inpainting",
-  sam3Video: "SAM 3 Video",
-  voidVideoInpainting: "VOID Video Inpainting",
-  birefnetVideo: "BiRefNet Video",
-  rifeVideo: "RIFE Video",
-  bytedanceUpscaler: "Bytedance Video Upscaler",
-  topazUpscaler: "Topaz Video Upscale"
-};
-const birefnetModelOptions = ["General Use (Light)", "General Use (Light 2K)", "General Use (Heavy)", "Matting", "Portrait", "General Use (Dynamic)"];
-const birefnetResolutionOptions = ["1024x1024", "2048x2048", "2304x2304"];
-const bytedanceUpscalerResolutionOptions = ["1080p", "2k", "4k"];
-const bytedanceUpscalerFpsOptions = ["30fps", "60fps"];
-const bytedanceUpscalerPresetOptions = ["general", "ugc", "short_series", "aigc", "old_film"];
-const bytedanceUpscalerTierOptions = ["fast", "standard", "pro"];
-const bytedanceUpscalerFidelityOptions = ["high", "medium"];
-const topazUpscalerModelOptions = [
-  "Proteus",
-  "Artemis HQ",
-  "Artemis MQ",
-  "Artemis LQ",
-  "Nyx",
-  "Nyx Fast",
-  "Nyx XL",
-  "Nyx HF",
-  "Gaia HQ",
-  "Gaia CG",
-  "Gaia 2",
-  "Starlight Precise 1",
-  "Starlight Precise 2",
-  "Starlight Precise 2.5",
-  "Starlight HQ",
-  "Starlight Mini",
-  "Starlight Sharp",
-  "Starlight Fast 1",
-  "Starlight Fast 2"
-];
-const topazUpscalerFpsOptions = ["source", "30", "60"];
-const topazUpscalerBillingTierOptions = [
-  ["auto", "Auto"],
-  ["up-to-720p", "Up to 720p"],
-  ["720p-1080p", "720p to 1080p"],
-  ["above-1080p", "Above 1080p"]
-];
-const colorIdMatteVideoOutputOptions = [
-  ["mp4", "MP4 mask"],
-  ["webm", "WebM mask"],
-  ["mov", "ProRes mask"]
-];
-const wanVaceResolutionOptions = ["480p", "580p", "720p"];
-const wanVaceAspectRatioOptions = ["auto", "16:9", "9:16"];
-const wanVaceSamplerOptions = ["unipc", "dpm++", "euler"];
-const wanVaceAccelerationOptions = ["regular", "low", "none"];
-const utilityModelDescriptions = {
-  [utilityImageModelNames.colorIdMatte]: "Creates a black and white ID matte from pixels matching a picked source-image color.",
-  [utilityImageModelNames.stillFrame]: "Extracts a still PNG frame from a connected video locally, without an API call.",
-  [utilityImageModelNames.dwpose]: "Creates pose/control maps from a source image for character and body-guided generation.",
-  [utilityImageModelNames.depthAnything]: "Extracts a depth map from an image for depth-aware control and composition.",
-  [utilityImageModelNames.patina]: "Generates PBR texture maps such as basecolor, normal, roughness, metalness, and height.",
-  [utilityImageModelNames.sam3Image]: "Segments prompted objects in an image and returns the masked result.",
-  [utilityImageModelNames.birefnetImage]: "Removes an image background with BiRefNet and can optionally return the mask.",
-  [utilityVideoModelNames.wanFunControl]: "Uses a control video, optional reference image, and prompt to guide a new video.",
-  [utilityVideoModelNames.extractFrame]: "Captures the current frame from a connected video and outputs it as a still image.",
-  [utilityVideoModelNames.colorIdMatte]: "Creates a black and white ID matte video from frames matching a picked source-video color.",
-  [utilityVideoModelNames.compositeVideo]: "Locally composites a generated layer video over a base video through a connected matte video.",
-  [utilityVideoModelNames.wanVaceMaskToVideo]: "Uses Fal Wan VACE to create a prompted video from a reference image inside a connected mask video.",
-  [utilityVideoModelNames.wanVaceInpainting]: "Uses Fal Wan VACE 14B with source video, mask video, prompt, and optional reference images for masked video generation.",
-  [utilityVideoModelNames.sam3Video]: "Segments prompted objects through a video and returns a mask video.",
-  [utilityVideoModelNames.voidVideoInpainting]: "Removes an object from a video and inpaints the affected background over time.",
-  [utilityVideoModelNames.birefnetVideo]: "Removes a video background with BiRefNet and can optionally return the mask video.",
-  [utilityVideoModelNames.rifeVideo]: "Interpolates in-between frames with RIFE optical-flow style motion estimation to smooth low-FPS video.",
-  [utilityVideoModelNames.bytedanceUpscaler]: "Upscales video with Bytedance's Fal upscaler using resolution, FPS, preset, tier, and fidelity controls.",
-  [utilityVideoModelNames.topazUpscaler]: "Upscales and enhances video with Topaz Video AI models, with optional interpolation and billing-tier tracking."
-};
-const sam3SegmentationModelsEnabled = false; // Flip back to true when revisiting SAM 3 segmentation.
-
 export default function NodeEditor({ active = true, onStatusChange } = {}) {
   const canvasRef = React.useRef(null);
   const fileMenuRef = React.useRef(null);
