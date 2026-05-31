@@ -1,7 +1,7 @@
 # NewtNode
 
 <p align="center">
-  <img src="public/icon.png" alt="NewtNode logo" width="112" />
+  <img src="public/newtnode-logo.png" alt="NewtNode wordmark" width="620" />
 </p>
 
 <p align="center">
