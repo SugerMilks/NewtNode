@@ -83,8 +83,8 @@ function App() {
   const [imagePrompt, setImagePrompt] = React.useState("");
   const [imageModel, setImageModel] = React.useState(imageModelNames.nanoBananaPro);
   const [imageReferences, setImageReferences] = React.useState([]);
-  const [imageResolution, setImageResolution] = React.useState("2K");
-  const [imageAspectRatio, setImageAspectRatio] = React.useState("21:9");
+  const [imageResolution, setImageResolution] = React.useState("1K");
+  const [imageAspectRatio, setImageAspectRatio] = React.useState("16:9");
   const [imageStatus, setImageStatus] = React.useState("idle");
   const [imageMessage, setImageMessage] = React.useState("");
   const [imageResult, setImageResult] = React.useState([]);

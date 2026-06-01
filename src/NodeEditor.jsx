@@ -503,8 +503,8 @@ const initialNodes = [
       title: "Image Model",
       model: imageModelNames.nanoBananaPro,
       prompt: "A serene landscape with mountains",
-      aspectRatio: "21:9",
-      resolution: "2K"
+      aspectRatio: "16:9",
+      resolution: "1K"
     }
   },
   {
@@ -6990,8 +6990,8 @@ function createDefaultNodeData(type, label, count) {
       title,
       model: imageModelNames.nanoBananaPro,
       prompt: "",
-      aspectRatio: "21:9",
-      resolution: "2K",
+      aspectRatio: "16:9",
+      resolution: "1K",
       batchCount: "1"
     };
   }
@@ -7051,7 +7051,7 @@ function imageModelSupportedAspectRatios(model) {
 function normalizeImageModelAspectRatio(value, model) {
   if (isAutoImageAspectRatio(value)) return imageModelAutoAspectRatio;
   const ratio = extractAspectRatio(value);
-  return imageModelSupportedAspectRatios(model).includes(ratio) ? ratio : "21:9";
+  return imageModelSupportedAspectRatios(model).includes(ratio) ? ratio : "16:9";
 }
 
 function isAutoImageAspectRatio(value) {
@@ -7137,7 +7137,7 @@ function videoModelSelectionPatch(data = {}, model) {
 }
 
 function normalizeImageModelResolution(value) {
-  return imageResolutionOptions.includes(value) ? value : "2K";
+  return imageResolutionOptions.includes(value) ? value : "1K";
 }
 
 function normalizedLumaVideoDurationLabel(value) {
@@ -8147,7 +8147,7 @@ function cleanImageReferenceLabel(value) {
 }
 
 async function resolveImageModelAspectRatio(node, incoming = {}) {
-  const configuredAspectRatio = node.data.aspectRatio || "21:9";
+  const configuredAspectRatio = node.data.aspectRatio || "16:9";
   if (!isAutoImageAspectRatio(configuredAspectRatio)) {
     return normalizeImageModelAspectRatio(configuredAspectRatio, node.data.model);
   }
@@ -8470,18 +8470,19 @@ function extractAspectRatio(value) {
 
 function closestAspectRatio(ratio, options = []) {
   const normalizedRatio = Number(ratio);
-  if (!Number.isFinite(normalizedRatio) || normalizedRatio <= 0) return options[0] || "21:9";
+  const fallback = options.includes("16:9") ? "16:9" : options[0] || "16:9";
+  if (!Number.isFinite(normalizedRatio) || normalizedRatio <= 0) return fallback;
 
   return options.reduce((closest, option) => {
     const optionRatio = aspectRatioNumber(option);
     const closestRatio = aspectRatioNumber(closest);
     return Math.abs(Math.log(optionRatio / normalizedRatio)) < Math.abs(Math.log(closestRatio / normalizedRatio)) ? option : closest;
-  }, options[0] || "21:9");
+  }, fallback);
 }
 
 function aspectRatioNumber(value) {
-  const [width = 21, height = 9] = extractAspectRatio(value).split(":").map(Number);
-  return width > 0 && height > 0 ? width / height : 21 / 9;
+  const [width = 16, height = 9] = extractAspectRatio(value).split(":").map(Number);
+  return width > 0 && height > 0 ? width / height : 16 / 9;
 }
 
 function finiteNumber(value, fallback) {

@@ -898,7 +898,7 @@ app.post("/api/node/generate-image", async (req, res) => {
           model: req.body.model || selectedModel.displayName,
           aspectRatio,
           requestedAspectRatio: requestedAspectRatio || aspectRatio,
-          resolution: req.body.resolution || "2K",
+          resolution: req.body.resolution || "1K",
           imageSize: openAiImage.size,
           quality: openAiImage.quality,
           imagePromptCount: imagePromptUrls.length,
@@ -1088,7 +1088,7 @@ app.post("/api/node/generate-image", async (req, res) => {
         model: req.body.model || selectedModel.displayName,
         aspectRatio,
         requestedAspectRatio: requestedAspectRatio || aspectRatio,
-        resolution: req.body.resolution || "2K",
+        resolution: req.body.resolution || "1K",
         imageConfig,
         attempts,
         imagePromptCount: imagePromptUrls.length,
@@ -6612,7 +6612,7 @@ function estimateQwenCameraEditCost({ endpoint, image }) {
 }
 
 function estimateImageCost({ resolution }) {
-  const normalized = String(resolution || "2K").toUpperCase();
+  const normalized = String(resolution || "1K").toUpperCase();
   const amountUsd = normalized.includes("4K") ? nanoBananaCost4K : nanoBananaCost1K2K;
 
   return {
@@ -7491,8 +7491,8 @@ async function resolveImageGenerationAspectRatio({ value, imagePromptUrls, provi
 }
 
 function normalizeImageAspectRatioForProvider(value, provider) {
-  const ratio = String(value || "21:9").match(/\d+:\d+/)?.[0] || "21:9";
-  return normalizeChoice(ratio, imageAspectRatiosForProvider(provider), "21:9");
+  const ratio = String(value || "16:9").match(/\d+:\d+/)?.[0] || "16:9";
+  return normalizeChoice(ratio, imageAspectRatiosForProvider(provider), "16:9");
 }
 
 function imageAspectRatiosForProvider(provider) {
@@ -7611,28 +7611,29 @@ function webpDimensionsFromBuffer(buffer) {
 
 function closestAspectRatio(ratio, options = []) {
   const normalizedRatio = Number(ratio);
-  if (!Number.isFinite(normalizedRatio) || normalizedRatio <= 0) return options[0] || "21:9";
+  const fallback = options.includes("16:9") ? "16:9" : options[0] || "16:9";
+  if (!Number.isFinite(normalizedRatio) || normalizedRatio <= 0) return fallback;
 
   return options.reduce((closest, option) => {
     const optionRatio = aspectRatioNumber(option);
     const closestRatio = aspectRatioNumber(closest);
     return Math.abs(Math.log(optionRatio / normalizedRatio)) < Math.abs(Math.log(closestRatio / normalizedRatio)) ? option : closest;
-  }, options[0] || "21:9");
+  }, fallback);
 }
 
 function aspectRatioNumber(value) {
-  const [width = 21, height = 9] = String(value || "").match(/\d+:\d+/)?.[0]?.split(":").map(Number) || [];
-  return width > 0 && height > 0 ? width / height : 21 / 9;
+  const [width = 16, height = 9] = String(value || "").match(/\d+:\d+/)?.[0]?.split(":").map(Number) || [];
+  return width > 0 && height > 0 ? width / height : 16 / 9;
 }
 
 function normalizeGeminiImageAspectRatio(value) {
-  const normalized = String(value || "21:9").match(/\d+:\d+/)?.[0] || "21:9";
-  return normalizeChoice(normalized, ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"], "21:9");
+  const normalized = String(value || "16:9").match(/\d+:\d+/)?.[0] || "16:9";
+  return normalizeChoice(normalized, ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"], "16:9");
 }
 
 function normalizeGeminiImageSize(value) {
-  const normalized = String(value || "2K").toUpperCase();
-  return normalizeChoice(normalized, ["1K", "2K", "4K"], "2K");
+  const normalized = String(value || "1K").toUpperCase();
+  return normalizeChoice(normalized, ["1K", "2K", "4K"], "1K");
 }
 
 async function generateGeminiImageWithRetries({ model, parts, imageConfig }) {
@@ -7874,8 +7875,8 @@ function normalizeOpenAiImageQuality(value) {
 }
 
 function normalizeOpenAiImageSize({ aspectRatio, resolution }) {
-  const ratio = String(aspectRatio || "21:9").match(/\d+:\d+/)?.[0] || "21:9";
-  const normalizedResolution = String(resolution || "2K").toUpperCase();
+  const ratio = String(aspectRatio || "16:9").match(/\d+:\d+/)?.[0] || "16:9";
+  const normalizedResolution = String(resolution || "1K").toUpperCase();
   const sizeMap = {
     "1K": {
       "21:9": "1344x576",
@@ -7902,7 +7903,7 @@ function normalizeOpenAiImageSize({ aspectRatio, resolution }) {
 
 function openAiImageSizeForAspectRatio(aspectRatio, resolution) {
   const ratio = aspectRatioNumber(aspectRatio);
-  const normalizedResolution = ["1K", "2K", "4K"].includes(resolution) ? resolution : "2K";
+  const normalizedResolution = ["1K", "2K", "4K"].includes(resolution) ? resolution : "1K";
   const longSideMap = { "1K": 1280, "2K": 2048, "4K": 3840 };
   const squareSideMap = { "1K": 1024, "2K": 2048, "4K": 2880 };
   const maxPixelsMap = { "1K": 1024 * 1024, "2K": 2048 * 2048, "4K": 3840 * 2160 };

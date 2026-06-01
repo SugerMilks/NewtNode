@@ -307,6 +307,7 @@ Portable packages are the default Save As shape for workflows that need to move 
 ## Provider Key Routing
 
 - Fal is the default provider route for remote models.
+- Image Model nodes and image-generation fallbacks default to `16:9` aspect ratio and `1K` resolution.
 - Google image models should use a direct Google API key only when `GOOGLE_API_KEY` exists. When it is absent, route the same Google-branded image model through Fal instead.
 - Do not automatically fall back from direct Google to Fal after a Google request fails; if the user supplied a Google key, Google model failures should surface as Google failures.
 
