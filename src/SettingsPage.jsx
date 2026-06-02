@@ -22,6 +22,7 @@ export default function SettingsPage() {
   const [message, setMessage] = React.useState("");
   const [updateLog, setUpdateLog] = React.useState("");
   const [lastUpdated, setLastUpdated] = React.useState(null);
+  const initialSecretsRef = React.useRef({ falKey: "", googleApiKey: "" });
   const actionsDisabled = status === "loading" || Boolean(busy);
 
   React.useEffect(() => {
@@ -32,10 +33,7 @@ export default function SettingsPage() {
     try {
       setStatus((current) => (current === "loading" ? "loading" : "refreshing"));
       const data = await settingsApi.load();
-      setSettings(data);
-      setFalKey(data.secrets?.falKey || "");
-      setGoogleApiKey(data.secrets?.googleApiKey || "");
-      setRepository(data.repository || "");
+      applyLoadedSettings(data);
       setStatus("ready");
       setMessage(data.apiKeysFound ? "" : "No API keys found.");
       setLastUpdated(new Date());
@@ -50,13 +48,14 @@ export default function SettingsPage() {
     setMessage("");
     setUpdateLog("");
     try {
-      const data = await settingsApi.save({
-        falKey,
-        googleApiKey,
-        repository
-      });
-      setSettings(data);
-      setRepository(data.repository || repository);
+      const initialSecrets = initialSecretsRef.current;
+      const payload = { repository };
+      if (falKey !== initialSecrets.falKey) payload.falKey = falKey;
+      if (googleApiKey !== initialSecrets.googleApiKey) payload.googleApiKey = googleApiKey;
+
+      await settingsApi.save(payload);
+      const data = await settingsApi.load();
+      applyLoadedSettings(data);
       setMessage(data.apiKeysFound ? "Settings saved." : "No API keys found.");
       setLastUpdated(new Date());
     } catch (error) {
@@ -103,6 +102,18 @@ export default function SettingsPage() {
     await waitForServerAndReload();
   }
 
+  function applyLoadedSettings(data) {
+    const secrets = {
+      falKey: data.secrets?.falKey || "",
+      googleApiKey: data.secrets?.googleApiKey || ""
+    };
+    initialSecretsRef.current = secrets;
+    setSettings(data);
+    setFalKey(secrets.falKey);
+    setGoogleApiKey(secrets.googleApiKey);
+    setRepository(data.repository || "");
+  }
+
   return (
     <section className="stats-page settings-page">
       <header className="stats-hero settings-hero">
@@ -135,7 +146,7 @@ export default function SettingsPage() {
                   type={falKeyVisible ? "text" : "password"}
                   value={falKey}
                   onChange={(event) => setFalKey(event.target.value)}
-                  placeholder={settings?.falKeyConfigured ? "Configured" : "Paste Fal key"}
+                  placeholder={secretPlaceholder(settings?.keySources?.fal, "Fal")}
                   autoComplete="off"
                   spellCheck="false"
                 />
@@ -160,7 +171,7 @@ export default function SettingsPage() {
                   type={googleApiKeyVisible ? "text" : "password"}
                   value={googleApiKey}
                   onChange={(event) => setGoogleApiKey(event.target.value)}
-                  placeholder={settings?.googleApiKeyConfigured ? "Configured" : "Paste Google API key"}
+                  placeholder={secretPlaceholder(settings?.keySources?.google, "Google API")}
                   autoComplete="off"
                   spellCheck="false"
                 />
@@ -246,6 +257,12 @@ function keyDetail(source, status) {
   if (source === "env") return ".env";
   if (source === "settings") return "Settings";
   return statusLabel(status);
+}
+
+function secretPlaceholder(source, label) {
+  if (source === "env") return "Using .env key";
+  if (source === "settings") return "Settings override";
+  return `Paste ${label} key`;
 }
 
 function branchMetricValue(settings) {

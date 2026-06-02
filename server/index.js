@@ -308,9 +308,10 @@ function buildHealthPayload() {
 }
 
 async function readRuntimeSettings({ includeSecrets = false } = {}) {
-  const [repository, branch] = await Promise.all([
+  const [repository, branch, settingsValues] = await Promise.all([
     resolveUpdateRepository(),
-    currentGitBranch()
+    currentGitBranch(),
+    readRuntimeSettingsStore()
   ]);
   const branchStatus = await resolveBranchStatus(repository, branch);
   const apiKeysFound = Boolean(process.env.FAL_KEY || process.env.GOOGLE_API_KEY);
@@ -333,8 +334,8 @@ async function readRuntimeSettings({ includeSecrets = false } = {}) {
 
   if (includeSecrets) {
     payload.secrets = {
-      falKey: process.env.FAL_KEY || "",
-      googleApiKey: process.env.GOOGLE_API_KEY || ""
+      falKey: settingsValues.falKey || "",
+      googleApiKey: settingsValues.googleApiKey || ""
     };
   }
 
@@ -342,13 +343,13 @@ async function readRuntimeSettings({ includeSecrets = false } = {}) {
 }
 
 async function saveRuntimeSettings(body = {}) {
-  const falKey = optionalRuntimeSetting(body.falKey);
-  const googleApiKey = optionalRuntimeSetting(body.googleApiKey);
+  const falKey = submittedRuntimeSetting(body.falKey);
+  const googleApiKey = submittedRuntimeSetting(body.googleApiKey);
   const repository = normalizeUpdateRepository(body.repository);
   const updates = {};
 
-  if (falKey !== null) updates.falKey = falKey;
-  if (googleApiKey !== null) updates.googleApiKey = googleApiKey;
+  if (falKey !== undefined) updates.falKey = falKey;
+  if (googleApiKey !== undefined) updates.googleApiKey = googleApiKey;
   if (repository) updates.repository = repository;
 
   if (Object.keys(updates).length) {
@@ -440,8 +441,8 @@ async function refreshRuntimeConfigFromEnvFile() {
     readRuntimeSettingsStore()
   ]);
 
-  applyRuntimeConfigValue("FAL_KEY", envValues.FAL_KEY, settingsValues.falKey);
-  applyRuntimeConfigValue("GOOGLE_API_KEY", envValues.GOOGLE_API_KEY, settingsValues.googleApiKey);
+  applyRuntimeConfigValue("FAL_KEY", envValues.FAL_KEY, settingsValues.falKey, { preferSettings: true });
+  applyRuntimeConfigValue("GOOGLE_API_KEY", envValues.GOOGLE_API_KEY, settingsValues.googleApiKey, { preferSettings: true });
   applyRuntimeConfigValue(updateRepositoryEnvKey, envValues[updateRepositoryEnvKey], settingsValues.repository);
 
   if (process.env.FAL_KEY) {
@@ -495,7 +496,14 @@ function parseEnvValue(value) {
   return text;
 }
 
-function applyRuntimeConfigValue(key, envValue, settingsValue) {
+function applyRuntimeConfigValue(key, envValue, settingsValue, { preferSettings = false } = {}) {
+  const settingsText = optionalRuntimeSetting(settingsValue);
+  if (preferSettings && settingsText !== null) {
+    process.env[key] = settingsText;
+    runtimeConfigSources[key] = "settings";
+    return;
+  }
+
   const envText = optionalRuntimeSetting(envValue);
   if (envText !== null) {
     process.env[key] = envText;
@@ -503,8 +511,7 @@ function applyRuntimeConfigValue(key, envValue, settingsValue) {
     return;
   }
 
-  const settingsText = optionalRuntimeSetting(settingsValue);
-  if (settingsText !== null) {
+  if (!preferSettings && settingsText !== null) {
     process.env[key] = settingsText;
     runtimeConfigSources[key] = "settings";
     return;
@@ -640,6 +647,11 @@ function optionalRuntimeSetting(value) {
   if (value === undefined || value === null) return null;
   const text = String(value).trim();
   return text || null;
+}
+
+function submittedRuntimeSetting(value) {
+  if (value === undefined || value === null) return undefined;
+  return String(value).trim();
 }
 
 function normalizeUpdateRepository(value) {
