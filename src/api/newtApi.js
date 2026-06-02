@@ -94,6 +94,7 @@ function localApiRouteKey(path) {
   if (path.includes("composer-frame")) return "composerFrame";
   if (path.includes("composer-poses")) return "composerPoses";
   if (path.includes("generate-3d")) return "generate3d";
+  if (path.includes("settings")) return "settings";
   return "";
 }
 
@@ -231,6 +232,24 @@ export const systemApi = {
 
   openWorkflowFile(body, label = "Open workflow") {
     return fetchJsonApi("/api/system/open-workflow-file", jsonBody(body), label);
+  }
+};
+
+export const settingsApi = {
+  load() {
+    return getJson("/api/settings?includeSecrets=1", "Could not load settings.");
+  },
+
+  save(body) {
+    return postJson("/api/settings", body, "Could not save settings.");
+  },
+
+  update(body) {
+    return postJson("/api/settings/update", body, "Could not update NewtNode.");
+  },
+
+  restart() {
+    return postJson("/api/settings/restart", {}, "Could not restart NewtNode.");
   }
 };
 

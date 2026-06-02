@@ -17,6 +17,7 @@ import ffprobeStatic from "ffprobe-static";
 import { directoryStats, fileMetadata, readJsonFile, writeJsonAtomic } from "./json-store.js";
 import { registerComposerPoseRoutes } from "./routes/composerPoses.js";
 import { registerCoreRoutes } from "./routes/core.js";
+import "./restart-marker.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -39,10 +40,20 @@ const historyIndexPath = path.join(dataDir, "history-index.json");
 const workflowIndexPath = path.join(dataDir, "workflow-index.json");
 const recentWorkflowsPath = path.join(dataDir, "recent-workflows.json");
 const legacyHiddenWorkflowsPath = path.join(dataDir, "hidden-workflows.json");
+const runtimeSettingsPath = path.join(dataDir, "runtime-settings.json");
+const envFilePath = path.join(rootDir, ".env");
 const moodBoardOutputFileName = "MOOD_BOARD.png";
 const maxHistoryItems = 500;
 let historyWriteQueue = Promise.resolve();
+let updatePromise = null;
+let restartRequested = false;
 const execFile = promisify(execFileCallback);
+const updateRepositoryEnvKey = "NEWTNODE_UPDATE_REPOSITORY";
+const runtimeConfigSources = {
+  FAL_KEY: process.env.FAL_KEY ? "runtime" : "",
+  GOOGLE_API_KEY: process.env.GOOGLE_API_KEY ? "runtime" : "",
+  [updateRepositoryEnvKey]: process.env[updateRepositoryEnvKey] ? "runtime" : ""
+};
 const ffmpegBinaryPath = process.env.FFMPEG_PATH || ffmpegStaticPath || "ffmpeg";
 const ffprobeBinaryPath = process.env.FFPROBE_PATH || ffprobeStatic?.path || "ffprobe";
 const port = Number(process.env.PORT || 3333);
@@ -194,9 +205,7 @@ await Promise.all([
   mkdir(dataDir, { recursive: true })
 ]);
 
-if (process.env.FAL_KEY) {
-  fal.config({ credentials: process.env.FAL_KEY });
-}
+await refreshRuntimeConfigFromEnvFile();
 
 const storage = multer.diskStorage({
   destination: (_req, _file, callback) => callback(null, uploadsDir),
@@ -219,6 +228,14 @@ app.use(cors());
 app.use(express.json({ limit: "16mb" }));
 app.use("/uploads", express.static(uploadsDir));
 app.use("/outputs", express.static(outputsDir));
+app.use("/api", async (_req, _res, next) => {
+  try {
+    await refreshRuntimeConfigFromEnvFile();
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
 registerCoreRoutes(app, {
   safeRelativeAssetPath,
   resolveLocalAssetPath,
@@ -228,7 +245,11 @@ registerCoreRoutes(app, {
   readWorkflowFromFilePath,
   buildHealthPayload,
   timedApi,
-  buildStorageDiagnostics
+  buildStorageDiagnostics,
+  readRuntimeSettings,
+  saveRuntimeSettings,
+  pullRuntimeUpdate,
+  requestServerRestart
 });
 
 registerComposerPoseRoutes(app, {
@@ -240,6 +261,7 @@ registerComposerPoseRoutes(app, {
 });
 
 function buildHealthPayload() {
+  const apiKeysFound = Boolean(process.env.FAL_KEY || process.env.GOOGLE_API_KEY);
   return {
     ok: true,
     routes: {
@@ -256,7 +278,8 @@ function buildHealthPayload() {
       voidFrameValidation: true,
       sam3VideoMaskOutput: true,
       extractVideoFrame: true,
-      generate3d: true
+      generate3d: true,
+      settings: true
     },
     ffmpeg: {
       configured: Boolean(ffmpegBinaryPath),
@@ -267,6 +290,8 @@ function buildHealthPayload() {
     },
     falKeyConfigured: Boolean(process.env.FAL_KEY),
     googleApiKeyConfigured: Boolean(process.env.GOOGLE_API_KEY),
+    apiKeysFound,
+    apiKeyStatus: apiKeysFound ? "API keys configured" : "No API keys found",
     googleImageModelsUseGoogleDirect: Boolean(process.env.GOOGLE_API_KEY),
     falNanoBananaProEndpoint,
     falLumaPhotonEndpoint,
@@ -280,6 +305,391 @@ function buildHealthPayload() {
     falVideoTextModel,
     outputDirectory: outputsDir
   };
+}
+
+async function readRuntimeSettings({ includeSecrets = false } = {}) {
+  const [repository, branch] = await Promise.all([
+    resolveUpdateRepository(),
+    currentGitBranch()
+  ]);
+  const branchStatus = await resolveBranchStatus(repository, branch);
+  const apiKeysFound = Boolean(process.env.FAL_KEY || process.env.GOOGLE_API_KEY);
+
+  const payload = {
+    falKeyConfigured: Boolean(process.env.FAL_KEY),
+    googleApiKeyConfigured: Boolean(process.env.GOOGLE_API_KEY),
+    apiKeysFound,
+    apiKeyStatus: apiKeysFound ? "API keys configured" : "No API keys found",
+    keySources: {
+      fal: runtimeConfigSources.FAL_KEY || "",
+      google: runtimeConfigSources.GOOGLE_API_KEY || ""
+    },
+    repository,
+    branch,
+    branchStatus,
+    updateInProgress: Boolean(updatePromise),
+    restartRequested
+  };
+
+  if (includeSecrets) {
+    payload.secrets = {
+      falKey: process.env.FAL_KEY || ""
+    };
+  }
+
+  return payload;
+}
+
+async function saveRuntimeSettings(body = {}) {
+  const falKey = optionalRuntimeSetting(body.falKey);
+  const googleApiKey = optionalRuntimeSetting(body.googleApiKey);
+  const repository = normalizeUpdateRepository(body.repository);
+  const updates = {};
+
+  if (falKey !== null) updates.falKey = falKey;
+  if (googleApiKey !== null) updates.googleApiKey = googleApiKey;
+  if (repository) updates.repository = repository;
+
+  if (Object.keys(updates).length) {
+    await writeRuntimeSettingsStore(updates);
+  }
+
+  await refreshRuntimeConfigFromEnvFile();
+  return readRuntimeSettings();
+}
+
+async function pullRuntimeUpdate(body = {}) {
+  if (updatePromise) {
+    const error = new Error("An update is already running.");
+    error.status = 409;
+    throw error;
+  }
+
+  const repository = normalizeUpdateRepository(body.repository) || await resolveUpdateRepository();
+  if (!repository) {
+    const error = new Error("Enter a repository URL before updating.");
+    error.status = 400;
+    throw error;
+  }
+
+  if (normalizeUpdateRepository(body.repository)) {
+    await writeRuntimeSettingsStore({ repository });
+    await refreshRuntimeConfigFromEnvFile();
+  }
+
+  const branch = await currentGitBranch() || "main";
+  const startedAt = new Date().toISOString();
+  updatePromise = execFile("git", ["pull", "--ff-only", repository, branch], {
+    cwd: rootDir,
+    timeout: 300000,
+    maxBuffer: 1024 * 1024,
+    windowsHide: true
+  });
+
+  try {
+    const { stdout = "", stderr = "" } = await updatePromise;
+    return {
+      ok: true,
+      repository,
+      branch,
+      branchStatus: await resolveBranchStatus(repository, branch),
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      stdout: String(stdout).trim(),
+      stderr: String(stderr).trim()
+    };
+  } catch (error) {
+    error.status = error.status || 500;
+    throw error;
+  } finally {
+    updatePromise = null;
+  }
+}
+
+async function requestServerRestart() {
+  if (!restartRequested) {
+    restartRequested = true;
+    const restartDelayMs = 650;
+    const timer = setTimeout(() => {
+      console.log("NewtNode server restart requested from settings panel.");
+      writeRestartMarker().catch((error) => {
+        console.error("Failed to write restart marker.", error);
+        restartRequested = false;
+      });
+    }, restartDelayMs);
+    timer.unref?.();
+
+    return {
+      ok: true,
+      scheduled: true,
+      delayMs: restartDelayMs
+    };
+  }
+
+  return {
+    ok: true,
+    scheduled: true,
+    delayMs: 0
+  };
+}
+
+async function refreshRuntimeConfigFromEnvFile() {
+  const [envValues, settingsValues] = await Promise.all([
+    readEnvFileValues(["FAL_KEY", "GOOGLE_API_KEY", updateRepositoryEnvKey]),
+    readRuntimeSettingsStore()
+  ]);
+
+  applyRuntimeConfigValue("FAL_KEY", envValues.FAL_KEY, settingsValues.falKey);
+  applyRuntimeConfigValue("GOOGLE_API_KEY", envValues.GOOGLE_API_KEY, settingsValues.googleApiKey);
+  applyRuntimeConfigValue(updateRepositoryEnvKey, envValues[updateRepositoryEnvKey], settingsValues.repository);
+
+  if (process.env.FAL_KEY) {
+    fal.config({ credentials: process.env.FAL_KEY });
+  }
+}
+
+async function readRuntimeSettingsStore() {
+  const data = await readJsonFile(runtimeSettingsPath, {});
+  return {
+    falKey: optionalRuntimeSetting(data?.falKey) || "",
+    googleApiKey: optionalRuntimeSetting(data?.googleApiKey) || "",
+    repository: normalizeUpdateRepository(data?.repository)
+  };
+}
+
+async function writeRuntimeSettingsStore(patch) {
+  const current = await readJsonFile(runtimeSettingsPath, {});
+  const next = {
+    ...(current && typeof current === "object" ? current : {}),
+    updatedAt: new Date().toISOString()
+  };
+  if (patch.falKey !== undefined) next.falKey = String(patch.falKey || "");
+  if (patch.googleApiKey !== undefined) next.googleApiKey = String(patch.googleApiKey || "");
+  if (patch.repository !== undefined) next.repository = normalizeUpdateRepository(patch.repository);
+  await writeJsonAtomic(runtimeSettingsPath, next);
+}
+
+async function readEnvFileValues(keys) {
+  if (!existsSync(envFilePath)) return {};
+  const text = await readFile(envFilePath, "utf8");
+  const values = {};
+  for (const line of text.split(/\r?\n/)) {
+    const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/);
+    if (!match || !keys.includes(match[1])) continue;
+    values[match[1]] = parseEnvValue(match[2]);
+  }
+  return values;
+}
+
+function parseEnvValue(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  if ((text.startsWith("\"") && text.endsWith("\"")) || (text.startsWith("'") && text.endsWith("'"))) {
+    try {
+      return JSON.parse(text);
+    } catch {
+      return text.slice(1, -1);
+    }
+  }
+  return text;
+}
+
+function applyRuntimeConfigValue(key, envValue, settingsValue) {
+  const envText = optionalRuntimeSetting(envValue);
+  if (envText !== null) {
+    process.env[key] = envText;
+    runtimeConfigSources[key] = "env";
+    return;
+  }
+
+  const settingsText = optionalRuntimeSetting(settingsValue);
+  if (settingsText !== null) {
+    process.env[key] = settingsText;
+    runtimeConfigSources[key] = "settings";
+    return;
+  }
+
+  if (runtimeConfigSources[key] === "env" || runtimeConfigSources[key] === "settings") {
+    delete process.env[key];
+    runtimeConfigSources[key] = "";
+  }
+}
+
+async function writeRestartMarker() {
+  const timestamp = new Date().toISOString();
+  await writeFile(
+    path.join(__dirname, "restart-marker.js"),
+    `export const restartMarker = ${JSON.stringify(timestamp)};\n`,
+    "utf8"
+  );
+}
+
+async function resolveUpdateRepository() {
+  const envRepository = normalizeUpdateRepository(process.env[updateRepositoryEnvKey]);
+  if (envRepository) return envRepository;
+  return gitRemoteOriginUrl();
+}
+
+async function resolveBranchStatus(repository, branch) {
+  const cleanRepository = normalizeUpdateRepository(repository);
+  const cleanBranch = String(branch || "").trim();
+  if (!cleanRepository || !cleanBranch) {
+    return {
+      state: "unknown",
+      label: "Unknown",
+      detail: "Repository or branch unavailable"
+    };
+  }
+
+  try {
+    const [localHead, remoteHead] = await Promise.all([
+      currentGitHead(),
+      remoteBranchHead(cleanRepository, cleanBranch)
+    ]);
+
+    if (!localHead || !remoteHead) {
+      return {
+        state: "unknown",
+        label: "Unknown",
+        detail: "Could not compare branch"
+      };
+    }
+
+    if (localHead === remoteHead) {
+      return {
+        state: "up-to-date",
+        label: "Up-to-date",
+        detail: cleanBranch,
+        localHead: shortCommit(localHead),
+        remoteHead: shortCommit(remoteHead)
+      };
+    }
+
+    return {
+      state: "update-available",
+      label: "Update available",
+      detail: cleanBranch,
+      localHead: shortCommit(localHead),
+      remoteHead: shortCommit(remoteHead)
+    };
+  } catch (error) {
+    return {
+      state: "unknown",
+      label: "Could not check",
+      detail: "Repository status unavailable"
+    };
+  }
+}
+
+async function currentGitHead() {
+  try {
+    const { stdout = "" } = await execFile("git", ["rev-parse", "HEAD"], {
+      cwd: rootDir,
+      timeout: 10000,
+      windowsHide: true
+    });
+    return String(stdout).trim();
+  } catch {
+    return "";
+  }
+}
+
+async function remoteBranchHead(repository, branch) {
+  const { stdout = "" } = await execFile("git", ["ls-remote", repository, `refs/heads/${branch}`], {
+    cwd: rootDir,
+    timeout: 15000,
+    maxBuffer: 256 * 1024,
+    windowsHide: true
+  });
+  const [hash = ""] = String(stdout).trim().split(/\s+/);
+  return /^[a-f0-9]{40}$/i.test(hash) ? hash : "";
+}
+
+function shortCommit(value) {
+  return String(value || "").slice(0, 7);
+}
+
+async function currentGitBranch() {
+  try {
+    const { stdout = "" } = await execFile("git", ["branch", "--show-current"], {
+      cwd: rootDir,
+      timeout: 10000,
+      windowsHide: true
+    });
+    return String(stdout).trim();
+  } catch {
+    return "";
+  }
+}
+
+async function gitRemoteOriginUrl() {
+  try {
+    const { stdout = "" } = await execFile("git", ["remote", "get-url", "origin"], {
+      cwd: rootDir,
+      timeout: 10000,
+      windowsHide: true
+    });
+    return normalizeUpdateRepository(stdout);
+  } catch {
+    return "";
+  }
+}
+
+function optionalRuntimeSetting(value) {
+  if (value === undefined || value === null) return null;
+  const text = String(value).trim();
+  return text || null;
+}
+
+function normalizeUpdateRepository(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  if (text.length > 500 || /[\0\r\n]/.test(text)) {
+    const error = new Error("Repository must be a single valid URL or path.");
+    error.status = 400;
+    throw error;
+  }
+  return text;
+}
+
+async function updateEnvFileValues(updates) {
+  const keys = Object.keys(updates).filter((key) => /^[A-Z0-9_]+$/.test(key));
+  if (!keys.length) return;
+
+  let text = "";
+  if (existsSync(envFilePath)) {
+    text = await readFile(envFilePath, "utf8");
+  }
+
+  const usedKeys = new Set();
+  const lines = text ? text.split(/\r?\n/) : [];
+  const nextLines = lines.map((line) => {
+    for (const key of keys) {
+      if (new RegExp(`^\\s*${key}\\s*=`).test(line)) {
+        usedKeys.add(key);
+        return `${key}=${formatEnvValue(updates[key])}`;
+      }
+    }
+    return line;
+  });
+
+  for (const key of keys) {
+    if (!usedKeys.has(key)) nextLines.push(`${key}=${formatEnvValue(updates[key])}`);
+  }
+
+  await writeFile(envFilePath, `${trimTrailingBlankLines(nextLines).join("\n")}\n`, "utf8");
+}
+
+function formatEnvValue(value) {
+  const text = String(value || "");
+  if (/^[A-Za-z0-9_./:@+=-]+$/.test(text)) return text;
+  return JSON.stringify(text);
+}
+
+function trimTrailingBlankLines(lines) {
+  const nextLines = [...lines];
+  while (nextLines.length && nextLines[nextLines.length - 1] === "") nextLines.pop();
+  return nextLines;
 }
 
 app.get("/api/history", async (req, res) => {
@@ -3500,8 +3910,12 @@ app.use("/api", (error, _req, res, _next) => {
   sendApiError(res, error, "API request failed.");
 });
 
-app.listen(port, "127.0.0.1", () => {
+const httpServer = app.listen(port, "127.0.0.1", () => {
   console.log(`NewtNode server running on http://127.0.0.1:${port}`);
+});
+
+httpServer.on("error", (error) => {
+  console.error("NewtNode server failed to start.", error);
 });
 
 function resolveRoute({ startFrame, references, speed }) {

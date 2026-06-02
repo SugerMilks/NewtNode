@@ -13,6 +13,7 @@ saved_workflows/.*.tmp
 server/data/history.json
 server/data/node-projects.json
 server/data/recent-workflows.json
+server/data/runtime-settings.json
 server/data/*-index.json
 server/data/.*.tmp
 server/data/*.log

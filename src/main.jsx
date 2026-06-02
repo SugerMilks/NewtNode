@@ -42,6 +42,7 @@ import "./styles.css";
 
 const NodeEditor = React.lazy(() => import("./NodeEditor.jsx"));
 const StatsDashboard = React.lazy(() => import("./StatsDashboard.jsx"));
+const SettingsPage = React.lazy(() => import("./SettingsPage.jsx"));
 
 
 function normalizeNodeStatus(status) {
@@ -401,6 +402,9 @@ function App() {
           <button className={workspaceMode === "stats" ? "active" : ""} onClick={() => setWorkspaceMode("stats")}>
             Stats
           </button>
+          <button className={workspaceMode === "settings" ? "active" : ""} onClick={() => setWorkspaceMode("settings")}>
+            Settings
+          </button>
         </div>
         {workspaceMode === "nodes" && nodeStatusInfo.title && (
           <div className={`topbar-status ${nodeStatusInfo.workflowState ? `workflow-${nodeStatusInfo.workflowState}` : ""}`} role="status" title={nodeStatusInfo.title}>
@@ -639,6 +643,10 @@ function App() {
       ) : workspaceMode === "stats" ? (
         <React.Suspense fallback={<WorkspaceFallback label="Loading stats" />}>
           <StatsDashboard />
+        </React.Suspense>
+      ) : workspaceMode === "settings" ? (
+        <React.Suspense fallback={<WorkspaceFallback label="Loading settings" />}>
+          <SettingsPage />
         </React.Suspense>
       ) : null}
 

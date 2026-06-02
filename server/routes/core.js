@@ -9,7 +9,11 @@ export function registerCoreRoutes(
     readWorkflowFromFilePath,
     buildHealthPayload,
     timedApi,
-    buildStorageDiagnostics
+    buildStorageDiagnostics,
+    readRuntimeSettings,
+    saveRuntimeSettings,
+    pullRuntimeUpdate,
+    requestServerRestart
   }
 ) {
   app.get(/^\/workflow-assets\/([^/]+)\/(.+)$/, async (req, res) => {
@@ -56,6 +60,32 @@ export function registerCoreRoutes(
 
   app.get("/api/health", (_req, res) => {
     res.json(buildHealthPayload());
+  });
+
+  app.get("/api/settings", async (req, res) => {
+    await timedApi("settings:read", async () => {
+      res.json(await readRuntimeSettings({
+        includeSecrets: ["1", "true", "yes"].includes(String(req.query.includeSecrets || "").toLowerCase())
+      }));
+    });
+  });
+
+  app.post("/api/settings", async (req, res) => {
+    await timedApi("settings:save", async () => {
+      res.json(await saveRuntimeSettings(req.body || {}));
+    });
+  });
+
+  app.post("/api/settings/update", async (req, res) => {
+    await timedApi("settings:update", async () => {
+      res.json(await pullRuntimeUpdate(req.body || {}));
+    });
+  });
+
+  app.post("/api/settings/restart", async (_req, res) => {
+    await timedApi("settings:restart", async () => {
+      res.json(await requestServerRestart());
+    });
   });
 
   app.get("/api/storage/diagnostics", async (_req, res) => {
