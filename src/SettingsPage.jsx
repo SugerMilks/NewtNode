@@ -15,6 +15,7 @@ export default function SettingsPage() {
   const [falKey, setFalKey] = React.useState("");
   const [falKeyVisible, setFalKeyVisible] = React.useState(false);
   const [googleApiKey, setGoogleApiKey] = React.useState("");
+  const [googleApiKeyVisible, setGoogleApiKeyVisible] = React.useState(false);
   const [repository, setRepository] = React.useState("");
   const [status, setStatus] = React.useState("loading");
   const [busy, setBusy] = React.useState("");
@@ -33,6 +34,7 @@ export default function SettingsPage() {
       const data = await settingsApi.load();
       setSettings(data);
       setFalKey(data.secrets?.falKey || "");
+      setGoogleApiKey(data.secrets?.googleApiKey || "");
       setRepository(data.repository || "");
       setStatus("ready");
       setMessage(data.apiKeysFound ? "" : "No API keys found.");
@@ -55,7 +57,6 @@ export default function SettingsPage() {
       });
       setSettings(data);
       setRepository(data.repository || repository);
-      setGoogleApiKey("");
       setMessage(data.apiKeysFound ? "Settings saved." : "No API keys found.");
       setLastUpdated(new Date());
     } catch (error) {
@@ -153,15 +154,26 @@ export default function SettingsPage() {
 
             <label className="settings-field">
               <span>Google API</span>
-              <div className="settings-input-row">
+              <div className="settings-input-row secret">
                 <KeyRound size={15} />
                 <input
-                  type="password"
+                  type={googleApiKeyVisible ? "text" : "password"}
                   value={googleApiKey}
                   onChange={(event) => setGoogleApiKey(event.target.value)}
                   placeholder={settings?.googleApiKeyConfigured ? "Configured" : "Paste Google API key"}
                   autoComplete="off"
+                  spellCheck="false"
                 />
+                <button
+                  type="button"
+                  className="settings-secret-toggle"
+                  onClick={() => setGoogleApiKeyVisible((value) => !value)}
+                  disabled={!googleApiKey}
+                  title={googleApiKeyVisible ? "Hide Google API key" : "Show Google API key"}
+                  aria-label={googleApiKeyVisible ? "Hide Google API key" : "Show Google API key"}
+                >
+                  {googleApiKeyVisible ? <EyeOff size={15} /> : <Eye size={15} />}
+                </button>
               </div>
             </label>
           </div>

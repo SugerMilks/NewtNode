@@ -333,7 +333,8 @@ async function readRuntimeSettings({ includeSecrets = false } = {}) {
 
   if (includeSecrets) {
     payload.secrets = {
-      falKey: process.env.FAL_KEY || ""
+      falKey: process.env.FAL_KEY || "",
+      googleApiKey: process.env.GOOGLE_API_KEY || ""
     };
   }
 
