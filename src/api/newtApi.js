@@ -1,3 +1,6 @@
+const localApiPort = import.meta.env.VITE_API_PORT || "3336";
+const localApiBaseUrl = `http://127.0.0.1:${localApiPort}`;
+
 function ensureOk(response, data, fallbackMessage) {
   if (!response.ok) {
     throw new Error(data?.error || fallbackMessage || "Request failed.");
@@ -32,14 +35,14 @@ export async function fetchJsonApi(path, options = {}, label = "Request") {
     if (!error.htmlApiResponse || !canRetryLocalApi(path) || requestUrl !== path) throw error;
 
     try {
-      const healthResponse = await fetch("http://127.0.0.1:3333/api/health");
+      const healthResponse = await fetch(`${localApiBaseUrl}/api/health`);
       const healthData = await readJsonResponse(healthResponse, "Server health");
       const routeKey = localApiRouteKey(path);
       if (!healthResponse.ok || (routeKey && !healthData?.routes?.[routeKey])) {
         throw new Error("The backend is running, but it does not have the updated API routes.");
       }
 
-      const retryResponse = await fetch(`http://127.0.0.1:3333${path}`, options);
+      const retryResponse = await fetch(`${localApiBaseUrl}${path}`, options);
       return {
         response: retryResponse,
         data: await readJsonResponse(retryResponse, label)
@@ -75,7 +78,7 @@ async function readJsonResponse(response, label) {
 
 function localApiFetchUrl(path) {
   if (!canRetryLocalApi(path)) return path;
-  return `http://127.0.0.1:3333${path}`;
+  return `${localApiBaseUrl}${path}`;
 }
 
 function canRetryLocalApi(path) {
@@ -83,7 +86,7 @@ function canRetryLocalApi(path) {
   if (typeof window === "undefined") return false;
   const hostname = window.location.hostname;
   const isLocalhost = hostname === "127.0.0.1" || hostname === "localhost" || hostname === "0.0.0.0";
-  return isLocalhost && window.location.port !== "3333";
+  return isLocalhost && window.location.port !== localApiPort;
 }
 
 function localApiRouteKey(path) {

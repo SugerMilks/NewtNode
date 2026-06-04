@@ -20,7 +20,7 @@ server/data/*.log
 public/models/poses/.*.tmp
 .vs_ai_logs/
 .newtnode_logs/
-NewtNode.app/Contents/_CodeSignature/
+*.app/Contents/_CodeSignature/
 !uploads/.gitkeep
 !outputs/.gitkeep
 !saved_workflows/.gitkeep

@@ -4,6 +4,7 @@ import { composerRotationVector, normalizeComposerPrimitiveType, normalizedCompo
 
 const composerMannequinModelPath = "/models/male_mannequin.glb";
 const composerMannequinModelScale = 1.45;
+const localApiPort = import.meta.env.VITE_API_PORT || "3336";
 
 let composerMannequinAsset = null;
 let composerMannequinAssetPromise = null;
@@ -168,7 +169,7 @@ function composerTextureUrl(url) {
   if (typeof window === "undefined") return url;
   if (/^\/(?:uploads|outputs|workflow-assets)\//i.test(url)) {
     const mediaOrigin = ["127.0.0.1", "localhost"].includes(window.location.hostname)
-      ? `${window.location.protocol}//${window.location.hostname}:3333`
+      ? `${window.location.protocol}//${window.location.hostname}:${localApiPort}`
       : window.location.origin;
     return `${mediaOrigin}${url}`;
   }

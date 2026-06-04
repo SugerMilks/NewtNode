@@ -356,7 +356,7 @@ Before committing node or UI changes:
 - Run `node --check server/index.js` and any touched `server/routes/*.js` file when the server changed.
 - Run `git status --short --branch` and confirm only intentional source/doc changes are staged. Runtime files under `server/data/`, `outputs/`, `uploads/`, and generated workflow JSON should stay ignored.
 - Confirm `/api/health` reports any new route flags.
-- When the dev client is not on the smoke default port, pass explicit smoke URLs, for example `npm run smoke:app -- http://localhost:5174/ http://localhost:3333/api/health`.
+- When the dev client is not on the smoke default port, pass explicit smoke URLs, for example `npm run smoke:app -- http://localhost:5176/ http://localhost:3336/api/health`.
 - Check that existing saved workflows still load.
 - Check that new ports connect, reject incompatible edges, and auto-connect correctly.
 - Check collapsed and expanded node states.

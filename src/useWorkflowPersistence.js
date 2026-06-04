@@ -228,25 +228,10 @@ export function useWorkflowPersistence({
       setWorkflowFilePath(savedPath);
       setSaveStatus(savedPath ? `Saved ${savedPath}` : shouldCreateNewProject ? "Saved as new workflow" : "Saved");
       await loadProjects();
-      let cleanNodes = nodes;
-      let cleanEdges = edges;
-      let cleanGroups = groups;
-      let cleanViewport = viewport;
-      if (project.graph) {
-        const graph = normalizeEditorGraph(project.graph.nodes || [], project.graph.edges || [], project.graph.groups || []);
-        cleanNodes = graph.nodes;
-        cleanEdges = graph.edges;
-        cleanGroups = graph.groups;
-        cleanViewport = project.graph.viewport || viewport;
-        setNodes(graph.nodes);
-        setEdges(graph.edges);
-        setGroups(graph.groups);
-        setViewport(cleanViewport);
-      }
       markWorkflowClean({
-        nodes: cleanNodes,
-        edges: cleanEdges,
-        groups: cleanGroups,
+        nodes,
+        edges,
+        groups,
         projectName: project.name,
         projectPackagePath: nextPackagePath
       });

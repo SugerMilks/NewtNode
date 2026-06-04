@@ -1,6 +1,10 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
+const clientPort = Number(process.env.VITE_CLIENT_PORT || 5176);
+const apiPort = Number(process.env.VITE_API_PORT || process.env.PORT || 3336);
+const apiTarget = `http://127.0.0.1:${apiPort}`;
+
 export default defineConfig({
   plugins: [react()],
   build: {
@@ -19,12 +23,12 @@ export default defineConfig({
   },
   server: {
     host: "127.0.0.1",
-    port: 5173,
+    port: clientPort,
     proxy: {
-      "/api": "http://127.0.0.1:3333",
-      "/uploads": "http://127.0.0.1:3333",
-      "/outputs": "http://127.0.0.1:3333",
-      "/workflow-assets": "http://127.0.0.1:3333"
+      "/api": apiTarget,
+      "/uploads": apiTarget,
+      "/outputs": apiTarget,
+      "/workflow-assets": apiTarget
     }
   }
 });

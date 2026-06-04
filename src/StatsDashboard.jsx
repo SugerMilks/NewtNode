@@ -23,6 +23,9 @@ const defaultPricing = {
     cost1K2K: 0.15,
     cost4K: 0.3
   },
+  zImage: {
+    costPerMegapixel: 0.005
+  },
   openAiImage2: {
     mediumCost: 0.053
   },
@@ -475,6 +478,10 @@ function estimateItemCost(item, mediaType, pricing) {
       return estimateMegapixelCost(item.remoteImage, 0.035);
     }
 
+    if (modelKey.includes("z-image") || modelKey.includes("z image") || modelKey.includes("zimage")) {
+      return estimateZImageStatsCost(item, settings, pricing);
+    }
+
     if (modelKey.includes("sam 3") || modelKey.includes("sam-3")) {
       return pricing.utility?.sam3Image?.costPerRequest ?? defaultPricing.utility.sam3Image.costPerRequest;
     }
@@ -596,6 +603,19 @@ function usageCost(usage) {
 function estimateMegapixelCost(image, unitRateUsd) {
   const width = Number(image?.width || 0);
   const height = Number(image?.height || 0);
+  if (width <= 0 || height <= 0) return null;
+  return (width * height * unitRateUsd) / 1000000;
+}
+
+function estimateZImageStatsCost(item, settings, pricing) {
+  const zImagePricing = pricing.zImage || defaultPricing.zImage;
+  const unitRateUsd = zImagePricing.costPerMegapixel ?? defaultPricing.zImage.costPerMegapixel;
+  const remoteImageCost = estimateMegapixelCost(item.remoteImage, unitRateUsd);
+  if (remoteImageCost !== null) return remoteImageCost;
+
+  const imageSize = settings.imageSize || item.cost?.imageSize;
+  const width = Number(imageSize?.width || 0);
+  const height = Number(imageSize?.height || 0);
   if (width <= 0 || height <= 0) return null;
   return (width * height * unitRateUsd) / 1000000;
 }

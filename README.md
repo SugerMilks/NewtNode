@@ -10,7 +10,7 @@
 
 NewtNode is a desktop-friendly browser app for building repeatable creative pipelines with connected nodes. It can generate, preview, save, import, and remix images, video, audio, 3D assets, text, character references, style references, camera instructions, and Composer guide frames while keeping API keys and workflow files on your machine.
 
-Current release: `v2.0.0-beta.0`
+Current release: `v2.0.0-beta.1`
 
 ## What It Does
 
@@ -60,9 +60,9 @@ open -e .env
 npm run dev
 ```
 
-Then open `http://127.0.0.1:5173`.
+Then open `http://127.0.0.1:5176`.
 
-You can also double-click `NewtNode.app` for the app-style launcher, or run `NewtNode.command` when you want terminal logs visible.
+You can also double-click `Versus_NewtNode.app` for the app-style launcher when it is included, or run `NewtNode.command` / `Versus_NewtNode.command` when you want terminal logs visible.
 
 ### Windows
 
@@ -75,9 +75,15 @@ notepad .env
 npm.cmd run dev
 ```
 
-Then open `http://127.0.0.1:5173`.
+Then open `http://127.0.0.1:5176`.
 
 You can also double-click `Launch_NewtNode.bat`, or run `Launch_NewtNode.ps1` from PowerShell, to start the local backend, start the Vite UI, and open NewtNode.
+
+If PowerShell blocks scripts, use the `.bat` launcher or run PowerShell as:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\Launch_NewtNode.ps1
+```
 
 ## Useful Commands
 

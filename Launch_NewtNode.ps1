@@ -16,7 +16,7 @@ function Test-NewtNodeUrl($url) {
 }
 
 function Find-NewtNodeUrl {
-  foreach ($port in 5173..5199) {
+  foreach ($port in 5176..5199) {
     $url = "http://127.0.0.1:$port/"
     if (Test-NewtNodeUrl $url) {
       return $url
@@ -27,7 +27,7 @@ function Find-NewtNodeUrl {
 }
 
 try {
-  Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:3333/api/health" -TimeoutSec 1 | Out-Null
+  Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:3336/api/health" -TimeoutSec 1 | Out-Null
   Write-Host "NewtNode server is already running."
 } catch {
   Write-Host "Starting NewtNode server..."

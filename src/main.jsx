@@ -16,12 +16,16 @@ import {
   Wand2,
   X
 } from "lucide-react";
-import { generationApi, historyApi } from "./api/newtApi.js";
+import { generationApi, historyApi, settingsApi } from "./api/newtApi.js";
 import {
   batchOptions,
+  defaultModelPreferences,
+  enabledImageModelOptions,
+  enabledVideoModelOptions,
+  firstEnabledImageModel,
+  firstEnabledVideoModel,
   happyHorseDurationOptions,
   imageModelNames,
-  imageModelOptions,
   imageResolutionOptions,
   lumaImageAspectRatios,
   lumaVideoAspectRatioOptions,
@@ -32,8 +36,8 @@ import {
   seedanceVideoAspectRatioOptions,
   seedanceVideoDurationOptions,
   seedanceVideoResolutionOptions,
+  normalizeModelPreferences,
   videoModelNames,
-  videoWorkspaceModelOptions,
   wan27ReferenceAspectRatioOptions,
   wan27ReferenceDurationOptions,
   wan27ReferenceResolutionOptions
@@ -74,6 +78,7 @@ function App() {
   const [aspectRatio, setAspectRatio] = React.useState("21:9");
   const [generateAudio, setGenerateAudio] = React.useState(true);
   const [videoModel, setVideoModel] = React.useState(videoModelNames.seedance);
+  const [modelPreferences, setModelPreferences] = React.useState(defaultModelPreferences);
   const [loopVideo, setLoopVideo] = React.useState(false);
   const [seed, setSeed] = React.useState("");
   const [status, setStatus] = React.useState("idle");
@@ -82,9 +87,9 @@ function App() {
   const [videoBatchCount, setVideoBatchCount] = React.useState("1");
   const [videoHistory, setVideoHistory] = React.useState([]);
   const [imagePrompt, setImagePrompt] = React.useState("");
-  const [imageModel, setImageModel] = React.useState(imageModelNames.nanoBananaPro);
+  const [imageModel, setImageModel] = React.useState(imageModelNames.zImage);
   const [imageReferences, setImageReferences] = React.useState([]);
-  const [imageResolution, setImageResolution] = React.useState("1K");
+  const [imageResolution, setImageResolution] = React.useState("2K");
   const [imageAspectRatio, setImageAspectRatio] = React.useState("16:9");
   const [imageStatus, setImageStatus] = React.useState("idle");
   const [imageMessage, setImageMessage] = React.useState("");
@@ -95,9 +100,22 @@ function App() {
   const [nodeStatus, setNodeStatus] = React.useState("");
   const [nodeWorkspaceLoaded, setNodeWorkspaceLoaded] = React.useState(false);
   const nodeStatusInfo = normalizeNodeStatus(nodeStatus);
+  const enabledImageOptions = React.useMemo(() => enabledImageModelOptions(modelPreferences), [modelPreferences]);
+  const enabledVideoWorkspaceOptions = React.useMemo(() => enabledVideoModelOptions(modelPreferences, { workspaceOnly: true }), [modelPreferences]);
 
   React.useEffect(() => {
     refreshHistory();
+    refreshModelPreferences();
+  }, []);
+
+  React.useEffect(() => {
+    function handleModelSettingsUpdated(event) {
+      const nextPreferences = normalizeModelPreferences(event.detail);
+      setModelPreferences(nextPreferences);
+    }
+
+    window.addEventListener("newtnode:model-settings-updated", handleModelSettingsUpdated);
+    return () => window.removeEventListener("newtnode:model-settings-updated", handleModelSettingsUpdated);
   }, []);
 
   React.useEffect(() => {
@@ -120,6 +138,18 @@ function App() {
   const supportsVideoAudio = isSeedanceVideoModel(videoModel);
   const supportsVideoSeed = isSeedanceVideoModel(videoModel) || isHappyHorseVideoModel(videoModel) || isWan27VideoModel(videoModel);
   const supportsVideoLoop = isLumaVideoModel(videoModel);
+
+  React.useEffect(() => {
+    if (!enabledImageOptions.includes(imageModel)) {
+      setImageModel(firstEnabledImageModel(modelPreferences));
+    }
+  }, [enabledImageOptions, imageModel, modelPreferences]);
+
+  React.useEffect(() => {
+    if (!enabledVideoWorkspaceOptions.includes(videoModel)) {
+      setVideoModel(firstEnabledVideoModel(modelPreferences, { workspaceOnly: true }));
+    }
+  }, [enabledVideoWorkspaceOptions, modelPreferences, videoModel]);
 
   React.useEffect(() => {
     if (!activeImageAspectRatios.includes(imageAspectRatio)) {
@@ -147,6 +177,15 @@ function App() {
     } catch {
       setVideoHistory([]);
       setImageHistory([]);
+    }
+  }
+
+  async function refreshModelPreferences() {
+    try {
+      const data = await settingsApi.load();
+      setModelPreferences(normalizeModelPreferences(data.modelPreferences));
+    } catch {
+      setModelPreferences(defaultModelPreferences);
     }
   }
 
@@ -386,8 +425,8 @@ function App() {
   return (
     <main className={`app-shell ${workspaceMode === "nodes" ? "node-app-shell" : ""}`}>
       <div className="topbar">
-        <div className="brand-lockup" aria-label="NewtNode">
-          <img src="/newtnode-logo.png" alt="NewtNode" />
+        <div className="brand-lockup" aria-label="Versus NewtNode">
+          <img src="/newtnode-logo.png" alt="Versus NewtNode" />
         </div>
         <div className="mode-switch" aria-label="Workspace mode">
           <button className={workspaceMode === "image" ? "active" : ""} onClick={() => setWorkspaceMode("image")}>
@@ -409,10 +448,7 @@ function App() {
         {workspaceMode === "nodes" && nodeStatusInfo.title && (
           <div className={`topbar-status ${nodeStatusInfo.workflowState ? `workflow-${nodeStatusInfo.workflowState}` : ""}`} role="status" title={nodeStatusInfo.title}>
             {nodeStatusInfo.workflowPath ? (
-              <>
-                <span className="topbar-status-state">{nodeStatusInfo.workflowState === "unsaved" ? "Unsaved" : "Saved"}</span>
-                <span className="topbar-status-path">{nodeStatusInfo.workflowPath}</span>
-              </>
+              <span className="topbar-status-state">{nodeStatusInfo.workflowState === "unsaved" ? "Unsaved" : "Saved"}</span>
             ) : (
               nodeStatusInfo.title
             )}
@@ -449,7 +485,7 @@ function App() {
               />
 
               <div className="control-row">
-                <SelectChip icon={<Wand2 size={17} />} value={imageModel} options={imageModelOptions} onChange={setImageModel} />
+                <SelectChip icon={<Wand2 size={17} />} value={imageModel} options={enabledImageOptions} onChange={setImageModel} />
 
                 <SelectChip icon={<Sparkles size={16} />} value={imageBatchCount} options={batchOptions} onChange={setImageBatchCount} formatter={formatBatchCount} />
 
@@ -548,7 +584,7 @@ function App() {
               )}
 
               <div className="control-row">
-                <SelectChip icon={<Wand2 size={17} />} value={videoModel} options={videoWorkspaceModelOptions} onChange={setVideoModel} />
+                <SelectChip icon={<Wand2 size={17} />} value={videoModel} options={enabledVideoWorkspaceOptions} onChange={setVideoModel} />
 
                 <SelectChip icon={<Sparkles size={16} />} value={videoBatchCount} options={batchOptions} onChange={setVideoBatchCount} formatter={formatBatchCount} />
 
@@ -653,7 +689,7 @@ function App() {
       {nodeWorkspaceLoaded && (
         <div className={`nodes-tab-keepalive ${workspaceMode === "nodes" ? "active" : ""}`} aria-hidden={workspaceMode !== "nodes"}>
           <React.Suspense fallback={<WorkspaceFallback label="Loading nodes" />}>
-            <NodeEditor active={workspaceMode === "nodes"} onStatusChange={setNodeStatus} />
+            <NodeEditor active={workspaceMode === "nodes"} onStatusChange={setNodeStatus} modelPreferences={modelPreferences} />
           </React.Suspense>
         </div>
       )}

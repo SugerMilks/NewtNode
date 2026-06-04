@@ -1120,6 +1120,14 @@
   cursor: crosshair;
 }
 
+.inline-port.disabled,
+.inline-port.input.disabled,
+.inline-port.output.disabled {
+  cursor: not-allowed;
+  opacity: 0.28;
+  filter: grayscale(1);
+}
+
 .port-row {
   display: flex;
   align-items: center;
@@ -3172,7 +3180,7 @@ video.newtnode-video-fallback {
 
 .preview-result-browser {
   display: grid;
-  grid-template-columns: 30px 1fr 30px;
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
   align-items: center;
   width: 100%;
@@ -3556,6 +3564,18 @@ video.newtnode-video-fallback {
   font-weight: 680;
 }
 
+.node-row.disabled {
+  color: rgba(244, 240, 232, 0.28);
+}
+
+.node-row.disabled > button,
+.node-row > button:disabled {
+  cursor: not-allowed;
+  border: 1px solid rgba(255, 255, 255, 0.045);
+  color: rgba(244, 240, 232, 0.28);
+  background: rgba(255, 255, 255, 0.035);
+}
+
 .utility-node-body .node-row {
   grid-template-columns: 110px minmax(0, 1fr);
 }
@@ -3708,12 +3728,29 @@ video.newtnode-video-fallback {
   background: rgba(221, 198, 49, 0.08);
 }
 
+.node-row.disabled .connected-field,
+.node-row.disabled > button,
+.node-row.disabled > button:disabled {
+  border-color: rgba(255, 255, 255, 0.045);
+  color: rgba(244, 240, 232, 0.28);
+  background: rgba(255, 255, 255, 0.035);
+}
+
 .model-status-note {
   display: block;
   margin-top: 8px;
   color: #ddc631;
   font-size: 12px;
   font-weight: 700;
+}
+
+.model-limitation-note {
+  display: block;
+  margin: -2px 0 10px 146px;
+  color: rgba(244, 240, 232, 0.46);
+  font-size: 11px;
+  font-weight: 760;
+  line-height: 1.35;
 }
 
 .node-card details {

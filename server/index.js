@@ -56,7 +56,7 @@ const runtimeConfigSources = {
 };
 const ffmpegBinaryPath = process.env.FFMPEG_PATH || ffmpegStaticPath || "ffmpeg";
 const ffprobeBinaryPath = process.env.FFPROBE_PATH || ffprobeStatic?.path || "ffprobe";
-const port = Number(process.env.PORT || 3333);
+const port = Number(process.env.PORT || 3336);
 const seedanceStandardCostPerSecond = Number(process.env.SEEDANCE_STANDARD_COST_PER_SECOND || 0.3034);
 const seedanceFastCostPerSecond = Number(process.env.SEEDANCE_FAST_COST_PER_SECOND || 0.2419);
 const happyHorse720pCostPerSecond = Number(process.env.HAPPY_HORSE_720P_COST_PER_SECOND || 0.14);
@@ -66,6 +66,7 @@ const seedanceStandardCostPerThousandTokens = Number(process.env.SEEDANCE_STANDA
 const seedanceFastCostPerThousandTokens = Number(process.env.SEEDANCE_FAST_COST_PER_1000_TOKENS || (seedanceFastCostPerSecond / 21.6));
 const nanoBananaCost1K2K = Number(process.env.NANO_BANANA_IMAGE_COST_1K_2K || 0.15);
 const nanoBananaCost4K = Number(process.env.NANO_BANANA_IMAGE_COST_4K || 0.3);
+const zImageCostPerMegapixel = Number(process.env.Z_IMAGE_COST_PER_MEGAPIXEL || 0.005);
 const openAiImage2MediumCost = Number(process.env.OPENAI_IMAGE_2_MEDIUM_COST || 0.053);
 const lumaPhotonCostPerMegapixel = Number(process.env.LUMA_PHOTON_COST_PER_MEGAPIXEL || 0.019);
 const lumaRay2BaseCostPerFiveSeconds = Number(process.env.LUMA_RAY2_COST_PER_5_SECONDS || 0.5);
@@ -75,7 +76,40 @@ const nanoImageAspectRatios = ["21:9", "16:9", "9:16", "1:1", "4:3", "3:4", "3:2
 const openAiImageAspectRatios = nanoImageAspectRatios;
 const lumaImageAspectRatios = ["21:9", "16:9", "9:16", "1:1", "4:3", "3:4", "9:21"];
 const lumaVideoAspectRatios = ["16:9", "9:16", "4:3", "3:4", "21:9", "9:21"];
+const imageModelNames = {
+  zImage: "Z-Image",
+  nanoBananaPro: "Nano Banana Pro",
+  openAiImage2: "OpenAI Image 2",
+  lumaDreamMachine: "Luma Dream Machine"
+};
+const imageModelOptions = [
+  imageModelNames.zImage,
+  imageModelNames.nanoBananaPro,
+  imageModelNames.openAiImage2,
+  imageModelNames.lumaDreamMachine
+];
+const videoModelNames = {
+  seedance: "Seedance 2.0",
+  seedanceFast: "Seedance 2.0 Fast",
+  wan27Reference: "Wan 2.7 Reference-to-Video",
+  happyHorse: "Happy Horse",
+  lumaDreamMachine: "Luma Dream Machine",
+  aurora: "Creatify Aurora"
+};
+const videoModelOptions = [
+  videoModelNames.seedance,
+  videoModelNames.seedanceFast,
+  videoModelNames.wan27Reference,
+  videoModelNames.happyHorse,
+  videoModelNames.lumaDreamMachine,
+  videoModelNames.aurora
+];
+const defaultModelPreferences = {
+  image: Object.fromEntries(imageModelOptions.map((model) => [model, model === imageModelNames.zImage])),
+  video: Object.fromEntries(videoModelOptions.map((model) => [model, true]))
+};
 const falNanoBananaProEndpoint = process.env.FAL_NANO_BANANA_PRO_ENDPOINT || "fal-ai/nano-banana-pro";
+const falZImageEndpoint = process.env.FAL_Z_IMAGE_ENDPOINT || "fal-ai/z-image/turbo";
 const falLumaPhotonEndpoint = process.env.FAL_LUMA_PHOTON_ENDPOINT || "fal-ai/luma-photon";
 const falLumaRay2Endpoint = process.env.FAL_LUMA_RAY2_ENDPOINT || "fal-ai/luma-dream-machine/ray-2";
 const falTextRequestCost = Number(process.env.FAL_TEXT_REQUEST_COST || 0.001);
@@ -293,6 +327,7 @@ function buildHealthPayload() {
     apiKeysFound,
     apiKeyStatus: apiKeysFound ? "API keys configured" : "No API keys found",
     googleImageModelsUseGoogleDirect: Boolean(process.env.GOOGLE_API_KEY),
+    falZImageEndpoint,
     falNanoBananaProEndpoint,
     falLumaPhotonEndpoint,
     falLumaRay2Endpoint,
@@ -328,6 +363,7 @@ async function readRuntimeSettings({ includeSecrets = false } = {}) {
     repository,
     branch,
     branchStatus,
+    modelPreferences: normalizeModelPreferences(settingsValues.modelPreferences),
     updateInProgress: Boolean(updatePromise),
     restartRequested
   };
@@ -351,6 +387,7 @@ async function saveRuntimeSettings(body = {}) {
   if (falKey !== undefined) updates.falKey = falKey;
   if (googleApiKey !== undefined) updates.googleApiKey = googleApiKey;
   if (repository) updates.repository = repository;
+  if (body.modelPreferences !== undefined) updates.modelPreferences = normalizeModelPreferences(body.modelPreferences);
 
   if (Object.keys(updates).length) {
     await writeRuntimeSettingsStore(updates);
@@ -455,7 +492,8 @@ async function readRuntimeSettingsStore() {
   return {
     falKey: optionalRuntimeSetting(data?.falKey) || "",
     googleApiKey: optionalRuntimeSetting(data?.googleApiKey) || "",
-    repository: normalizeUpdateRepository(data?.repository)
+    repository: normalizeUpdateRepository(data?.repository),
+    modelPreferences: normalizeModelPreferences(data?.modelPreferences)
   };
 }
 
@@ -468,7 +506,20 @@ async function writeRuntimeSettingsStore(patch) {
   if (patch.falKey !== undefined) next.falKey = String(patch.falKey || "");
   if (patch.googleApiKey !== undefined) next.googleApiKey = String(patch.googleApiKey || "");
   if (patch.repository !== undefined) next.repository = normalizeUpdateRepository(patch.repository);
+  if (patch.modelPreferences !== undefined) next.modelPreferences = normalizeModelPreferences(patch.modelPreferences);
   await writeJsonAtomic(runtimeSettingsPath, next);
+}
+
+function normalizeModelPreferences(value = {}) {
+  const incomingImage = value?.image && typeof value.image === "object" ? value.image : {};
+  const incomingVideo = value?.video && typeof value.video === "object" ? value.video : {};
+  const image = Object.fromEntries(imageModelOptions.map((model) => [model, Boolean(incomingImage[model] ?? defaultModelPreferences.image[model])]));
+  const video = Object.fromEntries(videoModelOptions.map((model) => [model, Boolean(incomingVideo[model] ?? defaultModelPreferences.video[model])]));
+
+  if (!Object.values(image).some(Boolean)) image[imageModelNames.zImage] = true;
+  if (!Object.values(video).some(Boolean)) video[videoModelNames.seedance] = true;
+
+  return { image, video };
 }
 
 async function readEnvFileValues(keys) {
@@ -737,6 +788,10 @@ app.get("/api/stats", async (_req, res) => {
       nanoBananaPro: {
         cost1K2K: nanoBananaCost1K2K,
         cost4K: nanoBananaCost4K,
+        currency: "USD"
+      },
+      zImage: {
+        costPerMegapixel: zImageCostPerMegapixel,
         currency: "USD"
       },
       luma: {
@@ -1286,6 +1341,62 @@ app.post("/api/node/generate-image", async (req, res) => {
       provider: selectedModel.provider
     });
 
+    if (selectedModel.provider === "fal-z-image") {
+      if (!process.env.FAL_KEY) {
+        return res.status(400).json({ error: "Missing FAL_KEY in .env." });
+      }
+
+      const zImage = await generateFalZImage({
+        prompt,
+        imagePromptUrls,
+        imagePromptLabels,
+        aspectRatio,
+        resolution: req.body.resolution
+      });
+      const output = await downloadImage(req, zImage.remoteImage.url, "z-image", zImage.remoteImage.content_type || zImage.remoteImage.mimeType);
+      const cost = estimateZImageCost({ endpoint: zImage.endpoint, resolution: zImage.resolution, imageSize: zImage.imageSize });
+
+      await appendHistory({
+        id: zImage.requestId || randomUUID(),
+        createdAt: new Date().toISOString(),
+        mediaType: "image",
+        provider: "fal.ai",
+        modelName: selectedModel.displayName,
+        endpoint: zImage.endpoint,
+        mode: imagePromptUrls.length ? "Z-Image generation with reference" : "Z-Image generation",
+        prompt,
+        submittedPrompt: zImage.submittedPrompt,
+        project: projectFromBody(req.body),
+        node: nodeFromBody(req.body),
+        settings: {
+          model: req.body.model || selectedModel.displayName,
+          aspectRatio,
+          requestedAspectRatio: requestedAspectRatio || aspectRatio,
+          resolution: zImage.resolution,
+          imageSize: zImage.imageSize,
+          imagePromptCount: imagePromptUrls.length,
+          imagePromptLabels: cleanReferenceLabels
+        },
+        cost,
+        remoteImage: zImage.remoteImage,
+        localImage: output.publicPath,
+        outputFileName: output.fileName,
+        outputBytes: output.bytes,
+        text: zImage.resultText || ""
+      });
+
+      return res.json({
+        text: zImage.resultText || "",
+        cost,
+        image: {
+          ...zImage.remoteImage,
+          localUrl: output.publicPath,
+          fileName: output.fileName,
+          mimeType: output.mimeType
+        }
+      });
+    }
+
     if (selectedModel.provider === "fal-openai-image-2") {
       if (!process.env.FAL_KEY) {
         return res.status(400).json({ error: "Missing FAL_KEY in .env." });
@@ -1321,7 +1432,7 @@ app.post("/api/node/generate-image", async (req, res) => {
           model: req.body.model || selectedModel.displayName,
           aspectRatio,
           requestedAspectRatio: requestedAspectRatio || aspectRatio,
-          resolution: req.body.resolution || "1K",
+          resolution: req.body.resolution || "2K",
           imageSize: openAiImage.size,
           quality: openAiImage.quality,
           imagePromptCount: imagePromptUrls.length,
@@ -1511,7 +1622,7 @@ app.post("/api/node/generate-image", async (req, res) => {
         model: req.body.model || selectedModel.displayName,
         aspectRatio,
         requestedAspectRatio: requestedAspectRatio || aspectRatio,
-        resolution: req.body.resolution || "1K",
+        resolution: req.body.resolution || "2K",
         imageConfig,
         attempts,
         imagePromptCount: imagePromptUrls.length,
@@ -7039,7 +7150,7 @@ function estimateQwenCameraEditCost({ endpoint, image }) {
 }
 
 function estimateImageCost({ resolution }) {
-  const normalized = String(resolution || "1K").toUpperCase();
+  const normalized = String(resolution || "2K").toUpperCase();
   const amountUsd = normalized.includes("4K") ? nanoBananaCost4K : nanoBananaCost1K2K;
 
   return {
@@ -7052,6 +7163,25 @@ function estimateImageCost({ resolution }) {
     resolution,
     pricingBasis: "Nano Banana Pro fal.ai per-image estimate",
     pricingSource: "fal-model-page-2026-05-15"
+  };
+}
+
+function estimateZImageCost({ endpoint, resolution, imageSize }) {
+  const width = Number(imageSize?.width || 0);
+  const height = Number(imageSize?.height || 0);
+  const megapixels = width > 0 && height > 0 ? (width * height) / 1000000 : null;
+  return {
+    amountUsd: megapixels ? roundCurrency(megapixels * zImageCostPerMegapixel) : null,
+    currency: "USD",
+    unitRateUsd: zImageCostPerMegapixel,
+    units: megapixels ? roundUsageUnits(megapixels) : null,
+    unit: "megapixel",
+    mediaType: "image",
+    resolution,
+    imageSize,
+    pricingBasis: "Z-Image Turbo fal.ai per-megapixel estimate at $0.005/MP",
+    pricingSource: "fal-model-page-2026-06-04",
+    endpoint
   };
 }
 
@@ -7647,6 +7777,14 @@ function resolveImageModel(model) {
     };
   }
 
+  if (normalized.includes("z-image") || normalized.includes("z image") || normalized.includes("zimage")) {
+    return {
+      provider: "fal-z-image",
+      displayName: imageModelNames.zImage,
+      id: falZImageEndpoint
+    };
+  }
+
   if (normalized.includes("openai") || normalized.includes("gpt-image-2") || normalized.includes("image 2")) {
     return {
       provider: "fal-openai-image-2",
@@ -8059,8 +8197,8 @@ function normalizeGeminiImageAspectRatio(value) {
 }
 
 function normalizeGeminiImageSize(value) {
-  const normalized = String(value || "1K").toUpperCase();
-  return normalizeChoice(normalized, ["1K", "2K", "4K"], "1K");
+  const normalized = String(value || "2K").toUpperCase();
+  return normalizeChoice(normalized, ["1K", "2K", "4K"], "2K");
 }
 
 async function generateGeminiImageWithRetries({ model, parts, imageConfig }) {
@@ -8174,6 +8312,52 @@ async function generateFalNanoBananaPro({ prompt, imagePromptUrls, imagePromptLa
     resolution: normalizedResolution,
     submittedPrompt: input.prompt,
     description: result?.data?.description || result?.data?.text || ""
+  };
+}
+
+async function generateFalZImage({ prompt, imagePromptUrls, imagePromptLabels, aspectRatio, resolution }) {
+  const imageInputs = [];
+
+  for (const [index, imagePromptUrl] of imagePromptUrls.entries()) {
+    const asset = await readLocalAsset(imagePromptUrl);
+    if (!asset.mimeType.startsWith("image/")) continue;
+    imageInputs.push({
+      ...asset,
+      label: cleanImagePromptLabel(imagePromptLabels[index])
+    });
+  }
+
+  const normalizedResolution = normalizeGeminiImageSize(resolution);
+  const imageSize = imageSizeForResolutionAndAspectRatio({ resolution: normalizedResolution, aspectRatio });
+  const submittedPrompt = promptWithReferenceLabels(prompt, imageInputs.slice(0, 1));
+  const input = {
+    prompt: submittedPrompt,
+    image_size: imageSize,
+    num_images: 1,
+    enable_safety_checker: true,
+    output_format: "png",
+    sync_mode: false
+  };
+
+  if (imageInputs.length) {
+    input.image_url = await uploadImageInputToFal(imageInputs[0], 0);
+  }
+
+  const result = await subscribeFal(falZImageEndpoint, { input, logs: true });
+  const remoteImage = firstFalImageResult(result?.data);
+
+  if (!remoteImage?.url) {
+    throw new Error("Fal returned no Z-Image URL.");
+  }
+
+  return {
+    endpoint: falZImageEndpoint,
+    requestId: result.requestId,
+    remoteImage,
+    resolution: normalizedResolution,
+    imageSize,
+    submittedPrompt,
+    resultText: result?.data?.description || result?.data?.text || ""
   };
 }
 
@@ -8303,7 +8487,7 @@ function normalizeOpenAiImageQuality(value) {
 
 function normalizeOpenAiImageSize({ aspectRatio, resolution }) {
   const ratio = String(aspectRatio || "16:9").match(/\d+:\d+/)?.[0] || "16:9";
-  const normalizedResolution = String(resolution || "1K").toUpperCase();
+  const normalizedResolution = String(resolution || "2K").toUpperCase();
   const sizeMap = {
     "1K": {
       "21:9": "1344x576",
@@ -8330,7 +8514,7 @@ function normalizeOpenAiImageSize({ aspectRatio, resolution }) {
 
 function openAiImageSizeForAspectRatio(aspectRatio, resolution) {
   const ratio = aspectRatioNumber(aspectRatio);
-  const normalizedResolution = ["1K", "2K", "4K"].includes(resolution) ? resolution : "1K";
+  const normalizedResolution = ["1K", "2K", "4K"].includes(resolution) ? resolution : "2K";
   const longSideMap = { "1K": 1280, "2K": 2048, "4K": 3840 };
   const squareSideMap = { "1K": 1024, "2K": 2048, "4K": 2880 };
   const maxPixelsMap = { "1K": 1024 * 1024, "2K": 2048 * 2048, "4K": 3840 * 2160 };
@@ -8352,6 +8536,30 @@ function openAiImageSizeForAspectRatio(aspectRatio, resolution) {
   }
 
   return `${roundOpenAiImageDimension(width)}x${roundOpenAiImageDimension(height)}`;
+}
+
+function imageSizeForResolutionAndAspectRatio({ resolution, aspectRatio }) {
+  const ratioText = String(aspectRatio || "16:9").match(/\d+:\d+/)?.[0] || "16:9";
+  const [ratioWidth = 16, ratioHeight = 9] = ratioText.split(":").map(Number);
+  const ratio = ratioWidth > 0 && ratioHeight > 0 ? ratioWidth / ratioHeight : 16 / 9;
+  const normalizedResolution = ["1K", "2K", "4K"].includes(resolution) ? resolution : "2K";
+  const longSideMap = { "1K": 1280, "2K": 2048, "4K": 3840 };
+  const maxPixelsMap = { "1K": 1280 * 1280, "2K": 2048 * 2048, "4K": 3840 * 2160 };
+  const longSide = longSideMap[normalizedResolution];
+  let width = ratio >= 1 ? longSide : longSide * ratio;
+  let height = ratio >= 1 ? longSide / ratio : longSide;
+  const maxPixels = maxPixelsMap[normalizedResolution];
+
+  if (width * height > maxPixels) {
+    const scale = Math.sqrt(maxPixels / (width * height));
+    width *= scale;
+    height *= scale;
+  }
+
+  return {
+    width: roundOpenAiImageDimension(width),
+    height: roundOpenAiImageDimension(height)
+  };
 }
 
 function roundOpenAiImageDimension(value) {

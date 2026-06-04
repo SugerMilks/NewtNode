@@ -2,11 +2,13 @@ export const characterTraitOptions = ["serious", "pleasant", "happy", "angry", "
 export const batchOptions = ["1", "2", "3", "4"];
 export const imageModelAutoAspectRatio = "Auto";
 export const imageModelNames = {
+  zImage: "Z-Image",
   nanoBananaPro: "Nano Banana Pro",
   openAiImage2: "OpenAI Image 2",
   lumaDreamMachine: "Luma Dream Machine"
 };
 export const imageModelOptions = [
+  imageModelNames.zImage,
   imageModelNames.nanoBananaPro,
   imageModelNames.openAiImage2,
   imageModelNames.lumaDreamMachine
@@ -110,6 +112,36 @@ export const videoModelOptions = [
   videoModelNames.aurora
 ];
 export const videoWorkspaceModelOptions = videoModelOptions.filter((model) => model !== videoModelNames.aurora);
+export const defaultModelPreferences = {
+  image: Object.fromEntries(imageModelOptions.map((model) => [model, model === imageModelNames.zImage])),
+  video: Object.fromEntries(videoModelOptions.map((model) => [model, true]))
+};
+export function normalizeModelPreferences(value = {}) {
+  const incomingImage = value?.image && typeof value.image === "object" ? value.image : {};
+  const incomingVideo = value?.video && typeof value.video === "object" ? value.video : {};
+  const image = Object.fromEntries(imageModelOptions.map((model) => [model, Boolean(incomingImage[model] ?? defaultModelPreferences.image[model])]));
+  const video = Object.fromEntries(videoModelOptions.map((model) => [model, Boolean(incomingVideo[model] ?? defaultModelPreferences.video[model])]));
+
+  if (!Object.values(image).some(Boolean)) image[imageModelNames.zImage] = true;
+  if (!Object.values(video).some(Boolean)) video[videoModelNames.seedance] = true;
+
+  return { image, video };
+}
+export function enabledImageModelOptions(preferences) {
+  const normalized = normalizeModelPreferences(preferences);
+  return imageModelOptions.filter((model) => normalized.image[model]);
+}
+export function enabledVideoModelOptions(preferences, { workspaceOnly = false } = {}) {
+  const normalized = normalizeModelPreferences(preferences);
+  const options = workspaceOnly ? videoWorkspaceModelOptions : videoModelOptions;
+  return options.filter((model) => normalized.video[model]);
+}
+export function firstEnabledImageModel(preferences) {
+  return enabledImageModelOptions(preferences)[0] || imageModelNames.zImage;
+}
+export function firstEnabledVideoModel(preferences, { workspaceOnly = false } = {}) {
+  return enabledVideoModelOptions(preferences, { workspaceOnly })[0] || videoModelNames.seedance;
+}
 export const wan27ReferenceDurationOptions = ["2 seconds", "3 seconds", "4 seconds", "5 seconds", "6 seconds", "7 seconds", "8 seconds", "9 seconds", "10 seconds"];
 export const wan27ReferenceResolutionOptions = ["1080p", "720p"];
 export const wan27ReferenceAspectRatioOptions = ["16:9", "9:16", "1:1", "4:3", "3:4"];
@@ -132,6 +164,7 @@ export const model3DDescription =
 
 export const utilityImageModelNames = {
   colorIdMatte: "Color ID Matte",
+  qwenCameraEdit: "Qwen Camera Edit",
   stillFrame: "Grab Still Frame",
   dwpose: "DWPose",
   depthAnything: "Depth Anything",
@@ -208,6 +241,7 @@ export const wanVaceAccelerationOptions = ["regular", "low", "none"];
 
 export const utilityModelDescriptions = {
   [utilityImageModelNames.colorIdMatte]: "Creates a black and white ID matte from pixels matching a picked source-image color.",
+  [utilityImageModelNames.qwenCameraEdit]: "Reframes a connected image with Qwen camera controls.",
   [utilityImageModelNames.stillFrame]: "Extracts a still PNG frame from a connected video locally, without an API call.",
   [utilityImageModelNames.dwpose]: "Creates pose/control maps from a source image for character and body-guided generation.",
   [utilityImageModelNames.depthAnything]: "Extracts a depth map from an image for depth-aware control and composition.",

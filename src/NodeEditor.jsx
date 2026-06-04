@@ -112,8 +112,11 @@ import {
   characterTraitOptions,
   colorIdMatteVideoOutputOptions,
   happyHorseDurationOptions,
+  enabledImageModelOptions,
+  enabledVideoModelOptions,
+  firstEnabledImageModel,
+  firstEnabledVideoModel,
   imageModelNames,
-  imageModelOptions,
   imageModelAutoAspectRatio,
   imageResolutionOptions,
   lensPresetNames,
@@ -145,7 +148,6 @@ import {
   utilityImageModelNames,
   utilityModelDescriptions,
   utilityVideoModelNames,
-  videoModelOptions,
   videoModelNames,
   voidVideoFrameOptions,
   wan27ReferenceAspectRatioOptions,
@@ -501,10 +503,10 @@ const initialNodes = [
     y: 126,
     data: {
       title: "Image Model",
-      model: imageModelNames.nanoBananaPro,
+      model: imageModelNames.zImage,
       prompt: "A serene landscape with mountains",
       aspectRatio: "16:9",
-      resolution: "1K"
+      resolution: "2K"
     }
   },
   {
@@ -546,10 +548,12 @@ const namedColorPalette = [
 const groupPalette = namedColorPalette.map((item) => item.color);
 const nodeColorPalette = [{ label: "Neutral", color: "" }, ...namedColorPalette];
 const referenceTagPalette = ["#4d8dff", "#ff4fb3", "#9b5cff", "#58ce63", "#ff8b35", "#f0c83b"];
+const zImageUnsupportedInputPorts = new Set(["cameraIn", "styleIn", "transferIn", "characterIn"]);
+const zImageUnsupportedSourceTypes = new Set(["camera", "style", "transfer", "character"]);
 const groupPadding = { x: 42, top: 62, bottom: 42 };
 const groupSizeFloor = 1;
 const imageRunStaggerMs = 850;
-export default function NodeEditor({ active = true, onStatusChange } = {}) {
+export default function NodeEditor({ active = true, onStatusChange, modelPreferences } = {}) {
   const canvasRef = React.useRef(null);
   const fileMenuRef = React.useRef(null);
   const projectMenuRef = React.useRef(null);
@@ -589,6 +593,8 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
   const incomingByNode = React.useMemo(() => buildIncomingByNode(nodes, edges), [nodes, edges]);
   const connectedPortKeys = React.useMemo(() => buildConnectedPortKeys(edges), [edges]);
   const selectedNodeSet = React.useMemo(() => new Set(selectedNodeIds), [selectedNodeIds]);
+  const enabledImageModels = React.useMemo(() => enabledImageModelOptions(modelPreferences), [modelPreferences]);
+  const enabledVideoModels = React.useMemo(() => enabledVideoModelOptions(modelPreferences), [modelPreferences]);
   const activeEdgeIds = React.useMemo(() => buildActiveEdgeIds(nodes, edges), [nodes, edges]);
   const inactiveEdgeIds = React.useMemo(() => buildInactiveEdgeIds(nodes, edges), [nodes, edges]);
   const referenceTagHighlights = React.useMemo(() => buildReferenceTagHighlights(nodes, incomingByNode), [nodes, incomingByNode]);
@@ -677,6 +683,22 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
   React.useEffect(() => {
     edgesRef.current = edges;
   }, [edges]);
+
+  React.useEffect(() => {
+    const fallbackImageModel = firstEnabledImageModel(modelPreferences);
+    const fallbackVideoModel = firstEnabledVideoModel(modelPreferences);
+    setNodes((current) =>
+      current.map((node) => {
+        if (node.type === "imageModel" && !isSam3ImageModel(node.data.model) && !enabledImageModels.includes(node.data.model)) {
+          return { ...node, data: { ...node.data, model: fallbackImageModel } };
+        }
+        if (node.type === "videoModel" && !isSam3VideoModel(node.data.model) && !enabledVideoModels.includes(node.data.model)) {
+          return { ...node, data: { ...node.data, model: fallbackVideoModel } };
+        }
+        return node;
+      })
+    );
+  }, [enabledImageModels, enabledVideoModels, modelPreferences]);
 
   React.useEffect(() => {
     setEdges((current) => {
@@ -2497,7 +2519,7 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
   }
 
   function autoConnectionOutputKind(source, from) {
-    if (source.type === "camera") return from.port === "cameraOut" ? "camera" : "image";
+    if (source.type === "camera") return "camera";
     if (source.type === "composer") return "image";
     if (source.type === "utility") return utilityOutputType(source);
     if (source.type === "style") return "style";
@@ -2518,28 +2540,12 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
     if (!source || !target) return "Choose a valid connection";
     if (!outputPortIdsForNode(source).includes(from.port)) return "Choose a valid output";
     if (!inputPortIdsForNode(target).includes(to.port)) return "Choose a valid input";
+    if (isZImageUnsupportedInput(target, to.port)) return zImageUnsupportedInputMessage();
 
     if (source.type === "camera") {
-      if (from.port === "imageOut") {
-        if (target.type === "preview" && to.port === "sourceIn") return "";
-        if (target.type === "text" && to.port === "imageIn") return "";
-        if (target.type === "camera" && to.port === "imageIn") return "";
-        if (target.type === "composer" && to.port === "imageIn") return "";
-        if (target.type === "model3d" && isModel3DImageInputPort(to.port)) return "";
-        if (target.type === "imageModel" && ["imagePromptIn", "transferIn"].includes(to.port)) return "";
-        if (target.type === "videoModel" && ["startFrameIn", "endFrameIn", "referenceImageIn"].includes(to.port)) return "";
-        if (target.type === "utility" && ["imageIn", "referenceImageIn"].includes(to.port)) return "";
-        return "Camera image output connects to image inputs";
-      }
-
       if (!hasCameraPreset(source)) return "Choose a Camera preset before connecting";
       if (target.type === "imageModel" && to.port === "cameraIn") return "";
       return "Camera connects to the Image Model camera input";
-    }
-
-    if (target.type === "camera" && to.port === "imageIn") {
-      if (["image", "imageModel", "transfer"].includes(source.type)) return "";
-      return "Camera image input accepts image outputs";
     }
 
     if (source?.type === "style") {
@@ -2590,7 +2596,6 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
 
       if (target.type === "preview" && to.port === "sourceIn") return "";
       if (target.type === "text" && to.port === "imageIn") return "";
-      if (target.type === "camera" && to.port === "imageIn") return "";
       if (target.type === "composer" && to.port === "imageIn") return "";
       if (target.type === "model3d" && isModel3DImageInputPort(to.port)) return "";
       if (target.type === "imageModel" && ["imagePromptIn", "transferIn"].includes(to.port)) return "";
@@ -2633,7 +2638,6 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
       if (from.port === "imageOut") {
         if (target.type === "preview" && to.port === "sourceIn") return "";
         if (target.type === "text" && to.port === "imageIn") return "";
-        if (target.type === "camera" && to.port === "imageIn") return "";
         if (target.type === "composer" && to.port === "imageIn") return "";
         if (target.type === "model3d" && isModel3DImageInputPort(to.port)) return "";
         if (target.type === "imageModel" && ["imagePromptIn", "transferIn"].includes(to.port)) return "";
@@ -2644,7 +2648,6 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
     }
 
     if (target?.type === "model3d" && isModel3DImageInputPort(to.port)) {
-      if (source.type === "camera") return from.port === "imageOut" ? "" : "3D image input accepts Camera image output";
       if (source.type === "composer") return from.port === "imageOut" ? "" : "3D image input accepts Composer frame output";
       if (source.type === "utility") return utilityOutputType(source) === "image" ? "" : "3D image input accepts image outputs";
       if (["image", "imageModel", "transfer"].includes(source.type)) return "";
@@ -2856,7 +2859,6 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
           isUtilityExtractFrameVideoModel(currentNode.data.utilityVideoModel) ||
           isUtilityColorIdMatteModel(currentNode.data.utilityVideoModel)));
     const batchCount = isSingleRunSegmentation ? 1 : nodeBatchCount(currentNode);
-    const previousImageResults = existingResultItemsForNode(currentNode, "image");
     const previousVideoResults = existingResultItemsForNode(currentNode, "video");
     const previous3DResults = existingResultItemsForNode(currentNode, "model3d");
     const previousUtilityResults = existingResultItemsForNode(currentNode, currentNode.type === "utility" ? utilityOutputType(currentNode) : "image");
@@ -2868,22 +2870,6 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
           ? { status: "running", error: "" }
           : { status: "running", error: "" };
       updateNode(currentNode.id, runningPatch);
-
-      if (currentNode.type === "camera") {
-        const generated = await runCameraQwenEdit({ node: currentNode, incoming, workflowContext: requestContext });
-        const { resultItems, firstNewIndex } = appendedNodeResultState(previousImageResults, [generated], "image");
-        updateNode(currentNode.id, {
-          status: "complete",
-          resultUrl: generated.url,
-          resultItems,
-          selectedResultIndex: firstNewIndex,
-          resultText: generated.prompt || "",
-          seed: generated.seed,
-          error: ""
-        });
-        loadOutputHistory();
-        return { status: "complete" };
-      }
 
       if (currentNode.type === "text") {
         const processed = await runTextNodeProcessing({
@@ -2957,10 +2943,19 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
 
       if (currentNode.type === "imageModel") {
         const isSegmentation = isSam3ImageModel(currentNode.data.model);
+        const isZImage = isZImageImageModel(currentNode.data.model);
         const aspectRatio = isSegmentation ? currentNode.data.aspectRatio : await resolveImageModelAspectRatio(currentNode, incoming);
-        const imagePromptItems = connectedImagePromptItems(isSegmentation ? incoming.imagePromptIn || [] : [...(incoming.imagePromptIn || []), ...(incoming.transferIn || []), ...(incoming.characterIn || [])], currentIncomingByNode);
+        const imagePromptItems = connectedImagePromptItems(
+          isSegmentation || isZImage
+            ? zImageSupportedReferenceConnections(incoming.imagePromptIn || [])
+            : [...(incoming.imagePromptIn || []), ...(incoming.transferIn || []), ...(incoming.characterIn || [])],
+          currentIncomingByNode,
+          { includeComposerCharacterBindings: !isZImage }
+        );
         const prompt = isSegmentation
           ? basePrompt
+          : isZImage
+            ? basePrompt
           : buildEffectiveImagePrompt(basePrompt, [...(incoming.imagePromptIn || []), ...(incoming.cameraIn || []), ...(incoming.styleIn || []), ...(incoming.transferIn || []), ...(incoming.characterIn || [])], aspectRatio, currentIncomingByNode);
         const runIndexes = nodeRunIndexes(batchCount);
         const settled = await settleSequential(runIndexes, (index) =>
@@ -2977,7 +2972,7 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
         const successes = fulfilledRunValues(settled);
         const failures = rejectedRunResults(settled);
         ensureRunSuccesses(successes, failures, "Image generation failed.");
-        const { resultItems, firstNewIndex } = appendedNodeResultState(previousImageResults, successes, "image");
+        const { resultItems, firstNewIndex } = appendedNodeResultState([], successes, "image");
 
         updateNode(currentNode.id, {
           status: "complete",
@@ -3315,6 +3310,8 @@ export default function NodeEditor({ active = true, onStatusChange } = {}) {
               transferCompiling={compilingTransferNodeId === node.id}
               selected={selectedNodeSet.has(node.id)}
               tagHighlight={referenceTagHighlights.get(node.id)}
+              imageModelOptions={enabledImageModels}
+              videoModelOptions={enabledVideoModels}
             />
           ))}
         </div>
@@ -3511,7 +3508,9 @@ function NodeCard({
   running,
   transferCompiling,
   selected,
-  tagHighlight
+  tagHighlight,
+  imageModelOptions,
+  videoModelOptions
 }) {
   const config = getNodeConfig(node.type);
   const Icon = config.icon;
@@ -3630,6 +3629,8 @@ function NodeCard({
         onPreviewResizeStart={onPreviewResizeStart}
         onOpenComposer={onOpenComposer}
         transferCompiling={transferCompiling}
+        imageModelOptions={imageModelOptions}
+        videoModelOptions={videoModelOptions}
       />
     </article>
   );
@@ -4497,7 +4498,9 @@ function NodeBody({
   onPreviewResizeStart,
   onOpenComposer,
   incomingByNode,
-  transferCompiling
+  transferCompiling,
+  imageModelOptions,
+  videoModelOptions
 }) {
   const config = getNodeConfig(node.type);
   const outputPort = config.output[0];
@@ -4813,15 +4816,6 @@ function NodeBody({
   if (node.type === "camera") {
     const cameraSelected = hasCameraPreset(node);
     const cameraOutputPort = config.output.find((port) => port.id === "cameraOut");
-    const imageOutputPort = config.output.find((port) => port.id === "imageOut");
-    const imageInputPort = config.input.find((port) => port.id === "imageIn");
-    const imageInputUrl = connectedAssetUrls(incoming.imageIn).at(-1) || "";
-    const imageInputLabel = connectedSummary(incoming.imageIn, "Add image");
-    const cameraPresetDisabled = Boolean(imageInputUrl);
-    const qwenOpen = Boolean(node.data.qwenCameraOpen);
-    const horizontalAngle = finiteNumber(node.data.horizontalAngle, qwenCameraDefaults.horizontalAngle);
-    const verticalAngle = finiteNumber(node.data.verticalAngle, qwenCameraDefaults.verticalAngle);
-    const zoom = finiteNumber(node.data.zoom, qwenCameraDefaults.zoom);
     return (
       <div className="node-body style-only-node-body camera-node-body">
         {cameraSelected ? (
@@ -4829,104 +4823,31 @@ function NodeBody({
         ) : (
           <div className="style-output-placeholder">Choose camera preset to enable output</div>
         )}
-        <OutputPortRow node={node} port={imageOutputPort} label="Camera image" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
-        {!qwenOpen && imageInputPort && (
-          <div className="model-input-port-stack camera-input-port-stack" aria-label="Camera edit inputs">
-            <PortHandle
-              node={node}
-              port={imageInputPort}
-              side="input"
-              onConnectStart={onConnectStart}
-              onDisconnectInput={onDisconnectInput}
-              connectedPortKeys={connectedPortKeys}
-            />
-          </div>
-        )}
 
-        <div className={`style-preset-row ${cameraPresetDisabled ? "disabled" : ""}`}>
+        <div className="style-preset-row">
           <span>Shot</span>
-          <select value={node.data.shotPreset || "None"} disabled={cameraPresetDisabled} onChange={(event) => onUpdate(node.id, { shotPreset: event.target.value })}>
+          <select value={node.data.shotPreset || "None"} onChange={(event) => onUpdate(node.id, { shotPreset: event.target.value })}>
             {shotPresetNames.map((presetName) => (
               <option key={presetName}>{presetName}</option>
             ))}
           </select>
         </div>
-        <div className={`style-preset-row ${cameraPresetDisabled ? "disabled" : ""}`}>
+        <div className="style-preset-row">
           <span>Lens</span>
-          <select value={node.data.lensPreset || "None"} disabled={cameraPresetDisabled} onChange={(event) => onUpdate(node.id, { lensPreset: event.target.value })}>
+          <select value={node.data.lensPreset || "None"} onChange={(event) => onUpdate(node.id, { lensPreset: event.target.value })}>
             {lensPresetNames.map((presetName) => (
               <option key={presetName}>{presetName}</option>
             ))}
           </select>
         </div>
-        <div className={`style-preset-row ${cameraPresetDisabled ? "disabled" : ""}`}>
+        <div className="style-preset-row">
           <span>Type</span>
-          <select value={node.data.typePreset || "None"} disabled={cameraPresetDisabled} onChange={(event) => onUpdate(node.id, { typePreset: event.target.value })}>
+          <select value={node.data.typePreset || "None"} onChange={(event) => onUpdate(node.id, { typePreset: event.target.value })}>
             {typePresetNames.map((presetName) => (
               <option key={presetName}>{presetName}</option>
             ))}
           </select>
         </div>
-        <details className="model-settings-drawer camera-control-drawer" open={qwenOpen} onToggle={(event) => onUpdate(node.id, { qwenCameraOpen: event.currentTarget.open })}>
-          <summary>Qwen Camera Edit</summary>
-          <NodeRow label="Image" inputPort={qwenOpen ? imageInputPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-            <button className={imageInputUrl ? "connected-field" : ""}>{imageInputLabel}</button>
-          </NodeRow>
-          <CameraControlViewport
-            imageUrl={imageInputUrl}
-            horizontalAngle={horizontalAngle}
-            verticalAngle={verticalAngle}
-            zoom={zoom}
-            onChange={(patch) => onUpdate(node.id, patch)}
-          />
-          <div className="camera-control-grid">
-            <div className="camera-control-toolbar">
-              <button
-                className="camera-reset-button"
-                onClick={() =>
-                  onUpdate(node.id, {
-                    horizontalAngle: qwenCameraDefaults.horizontalAngle,
-                    verticalAngle: qwenCameraDefaults.verticalAngle,
-                    zoom: qwenCameraDefaults.zoom
-                  })
-                }
-              >
-                Reset
-              </button>
-            </div>
-            <label>
-              <span>Azimuth</span>
-              <input type="range" min="0" max="360" step="1" value={horizontalAngle} onChange={(event) => onUpdate(node.id, { horizontalAngle: Number(event.target.value) })} />
-              <strong>{Math.round(horizontalAngle)} deg</strong>
-            </label>
-            <label>
-              <span>Elevation</span>
-              <input type="range" min="-30" max="90" step="1" value={verticalAngle} onChange={(event) => onUpdate(node.id, { verticalAngle: Number(event.target.value) })} />
-              <strong>{Math.round(verticalAngle)} deg</strong>
-            </label>
-            <label>
-              <span>Zoom</span>
-              <input type="range" min="0" max="10" step="0.1" value={zoom} onChange={(event) => onUpdate(node.id, { zoom: Number(event.target.value) })} />
-              <strong>{zoom.toFixed(1)}</strong>
-            </label>
-          </div>
-          <NodeRow label="Prompt">
-            <textarea
-              value={node.data.additionalPrompt || ""}
-              onChange={(event) => onUpdate(node.id, { additionalPrompt: event.target.value })}
-              placeholder="Optional extra instruction"
-            />
-          </NodeRow>
-          {node.data.resultUrl && (
-            <div className="camera-generated-preview">
-              <img src={node.data.resultUrl} alt="Qwen camera edit result" />
-            </div>
-          )}
-          {node.data.error && <small className="upload-error">{node.data.error}</small>}
-          <button className="run-node-button" onClick={() => onRun(node)} disabled={running || !imageInputUrl}>
-            {running ? "Running Camera..." : "Run Camera Edit"}
-          </button>
-        </details>
       </div>
     );
   }
@@ -5018,10 +4939,38 @@ function NodeBody({
     const { source: previewSource, item: previewItem, itemIndex: previewIndex } = previewSelectionForNode(node, previewSources);
     const previewItems = previewSource?.items || [];
     const sourcePort = config.input.find((port) => port.id === "sourceIn");
-    function stepPreview(direction) {
-      if (!previewItems.length) return;
-      const nextIndex = (previewIndex + direction + previewItems.length) % previewItems.length;
-      onUpdate(node.id, { previewSourceId: previewSource.id, previewItemIndex: nextIndex });
+
+    function selectPreviewItem(index, event) {
+      event?.preventDefault?.();
+      event?.stopPropagation?.();
+      if (!previewSource || !previewItems.length) return;
+      const nextIndex = ((index % previewItems.length) + previewItems.length) % previewItems.length;
+      const item = previewItems[nextIndex];
+      if (!item?.url) return;
+      onUpdate(previewSource.sourceNodeId, {
+        selectedResultIndex: item.sourceResultIndex ?? nextIndex,
+        resultUrl: item.url
+      });
+      onUpdate(node.id, {
+        previewSourceId: previewSource.id,
+        previewItemIndex: nextIndex
+      });
+    }
+
+    function startPreviewThumbDrag(event, item, index) {
+      if (!item?.url || !item?.type) return;
+      const dragItem = {
+        id: `preview:${previewSource.id}:${index}`,
+        url: item.url,
+        type: item.type,
+        label: item.label || `${previewSource.label} ${index + 1}`,
+        fileName: item.fileName || fileNameFromLocalUrl(item.url),
+        mimeType: item.mimeType || mimeForOutputItem(item)
+      };
+      event.dataTransfer.effectAllowed = "copy";
+      event.dataTransfer.setData(outputDragMime, JSON.stringify(dragItem));
+      event.dataTransfer.setData("text/plain", dragItem.url);
+      event.dataTransfer.setData("text/uri-list", dragItem.url);
     }
 
     return (
@@ -5044,28 +4993,39 @@ function NodeBody({
             <button className={previewSource ? "connected-field" : ""}>{previewSource ? previewSource.label : "Connect media"}</button>
           )}
         </NodeRow>
-        <div className={`preview-stage ${previewItem ? "has-preview" : ""}`}>
-          {previewItem?.type === "image" && <img key={previewItem.url} src={previewItem.url} alt={previewItem.label || previewSource.label} onError={useNewtNodeImageFallback} />}
-          {previewItem?.type === "video" && <video key={previewItem.url} src={previewItem.url} controls loop data-preview-video-node-id={node.id} onError={useNewtNodeVideoFallback} />}
+        <div className={`preview-stage ${previewItem ? "has-preview" : ""}`} onDragStart={(event) => event.preventDefault()}>
+          {previewItem?.type === "image" && <img key={previewItem.url} src={previewItem.url} alt={previewItem.label || previewSource.label} draggable={false} onError={useNewtNodeImageFallback} />}
+          {previewItem?.type === "video" && <video key={previewItem.url} src={previewItem.url} controls loop draggable={false} data-preview-video-node-id={node.id} onError={useNewtNodeVideoFallback} />}
           {previewItem?.type === "model3d" && <Model3DViewer key={previewItem.url} url={previewItem.url} label={previewItem.label || previewSource.label} />}
           {!previewItem && <span>Preview will appear here</span>}
         </div>
         {previewItems.length > 1 && (
-          <div className="preview-result-browser" onPointerDown={(event) => event.stopPropagation()}>
-            <button type="button" onClick={() => stepPreview(-1)} title="Previous preview" aria-label="Previous preview">
+          <div className="preview-frame-nav" onPointerDown={(event) => event.stopPropagation()}>
+            <button type="button" onClick={(event) => selectPreviewItem(previewIndex - 1, event)} title="Previous preview" aria-label="Previous preview">
               <ChevronLeft size={15} />
             </button>
+            <span>{previewIndex + 1} / {previewItems.length}</span>
+            <button type="button" onClick={(event) => selectPreviewItem(previewIndex + 1, event)} title="Next preview" aria-label="Next preview">
+              <ChevronRight size={15} />
+            </button>
+          </div>
+        )}
+        {previewItems.length > 0 && (
+          <div className="preview-result-browser" onPointerDown={(event) => event.stopPropagation()}>
             <div className="preview-thumb-strip">
               {previewItems.map((item, index) => (
                 <button
                   key={`${previewSource.id}-${item.url}-${index}`}
                   type="button"
                   className={index === previewIndex ? "active" : ""}
-                  onClick={() => onUpdate(node.id, { previewSourceId: previewSource.id, previewItemIndex: index })}
-                  title={item.label || `${previewSource.label} ${index + 1}`}
+                  draggable
+                  onClick={(event) => selectPreviewItem(index, event)}
+                  onDragStart={(event) => startPreviewThumbDrag(event, item, index)}
+                  title={`Select or drag ${item.label || `${previewSource.label} ${index + 1}`}`}
+                  aria-label={`Select preview ${index + 1}`}
                 >
-                  {item.type === "image" && <img src={item.url} alt={item.label || `Preview ${index + 1}`} onError={useNewtNodeImageFallback} />}
-                  {item.type === "video" && <video src={item.url} muted playsInline preload="metadata" onError={useNewtNodeVideoFallback} />}
+                  {item.type === "image" && <img src={item.url} alt={item.label || `Preview ${index + 1}`} draggable={false} onError={useNewtNodeImageFallback} />}
+                  {item.type === "video" && <video src={item.url} muted playsInline preload="metadata" draggable={false} onError={useNewtNodeVideoFallback} />}
                   {item.type === "model3d" && (
                     <span className="preview-thumb-model">
                       <Box size={18} />
@@ -5074,9 +5034,6 @@ function NodeBody({
                 </button>
               ))}
             </div>
-            <button type="button" onClick={() => stepPreview(1)} title="Next preview" aria-label="Next preview">
-              <ChevronRight size={15} />
-            </button>
           </div>
         )}
         <button className="preview-resize-handle" onPointerDown={(event) => onPreviewResizeStart(event, node)} title="Resize preview" />
@@ -5096,6 +5053,7 @@ function NodeBody({
     const utilityImageModel = normalizedUtilityImageModelName(node.data.utilityImageModel);
     const utilityVideoModel = normalizedUtilityVideoModelName(node.data.utilityVideoModel);
     const isColorIdMatte = isUtilityColorIdMatteModel(utilityImageModel);
+    const isQwenCameraEdit = isUtilityQwenCameraEditModel(utilityImageModel);
     const isDepthAnything = isDepthAnythingModel(utilityImageModel);
     const isPatina = isPatinaModel(utilityImageModel);
     const isStillFrame = isUtilityStillFrameModel(utilityImageModel);
@@ -5116,6 +5074,10 @@ function NodeBody({
     const isVideoUpscaler = isUtilityVideoUpscalerModel(utilityVideoModel);
     const utilityOutputMediaType = isVideoMode ? utilityVideoOutputType(utilityVideoModel) : "image";
     const stillFrameVideoUrl = isStillFrame ? connectedAssetUrls(incoming.referenceVideoIn).at(-1) || "" : "";
+    const qwenImageInputUrl = isQwenCameraEdit ? connectedAssetUrls(incoming.imageIn).at(-1) || "" : "";
+    const qwenHorizontalAngle = finiteNumber(node.data.horizontalAngle, qwenCameraDefaults.horizontalAngle);
+    const qwenVerticalAngle = finiteNumber(node.data.verticalAngle, qwenCameraDefaults.verticalAngle);
+    const qwenZoom = finiteNumber(node.data.zoom, qwenCameraDefaults.zoom);
     const utilityOutputPort = {
       ...config.output[0],
       label: utilityOutputMediaType === "video" ? "Video output" : "Image output",
@@ -5175,6 +5137,8 @@ function NodeBody({
                           : "Run Wan Fun Control"
       : isColorIdMatte
         ? "Run Color Matte"
+        : isQwenCameraEdit
+          ? "Run Camera Edit"
         : isSam3Image
         ? "Run SAM 3 Image"
         : isBirefnetImage
@@ -5257,7 +5221,7 @@ function NodeBody({
           </div>
         )}
         <button className="run-node-button" onClick={() => onRun(node)} disabled={running || !canRun}>
-          {running ? (isVideoMode ? "Running Video..." : isStillFrame ? "Grabbing Still..." : "Running Image...") : utilityRunLabel}
+          {running ? (isVideoMode ? "Running Video..." : isStillFrame ? "Grabbing Still..." : isQwenCameraEdit ? "Running Camera..." : "Running Image...") : utilityRunLabel}
         </button>
         <details className="model-settings-drawer" open={settingsOpen} onToggle={(event) => onUpdate(node.id, { settingsOpen: event.currentTarget.open })}>
           <summary>{isVideoMode ? "Video" : "Image"}</summary>
@@ -5599,6 +5563,7 @@ function NodeBody({
               <NodeRow label="Model">
                 <select value={utilityImageModel} onChange={(event) => onUpdate(node.id, { utilityImageModel: event.target.value, resultUrl: "", resultItems: [], resultType: "image", error: "" })}>
                   <option>{utilityImageModelNames.colorIdMatte}</option>
+                  <option>{utilityImageModelNames.qwenCameraEdit}</option>
                   <option>{utilityImageModelNames.stillFrame}</option>
                   <option>{utilityImageModelNames.dwpose}</option>
                   <option>{utilityImageModelNames.depthAnything}</option>
@@ -5618,6 +5583,57 @@ function NodeBody({
                     <button className={incoming.referenceVideoIn?.length ? "connected-field" : ""}>{connectedSummary(incoming.referenceVideoIn, "Add video")}</button>
                   </NodeRow>
                   <StillFrameScrubber videoUrl={stillFrameVideoUrl} value={node.data.stillFrameTime ?? 0} onChange={(stillFrameTime) => onUpdate(node.id, { stillFrameTime })} />
+                </>
+              ) : isQwenCameraEdit ? (
+                <>
+                  <NodeRow label="Image" inputPort={settingsOpen ? imagePort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+                    <button className={qwenImageInputUrl ? "connected-field" : ""}>{connectedSummary(incoming.imageIn, "Add image")}</button>
+                  </NodeRow>
+                  <CameraControlViewport
+                    imageUrl={qwenImageInputUrl}
+                    horizontalAngle={qwenHorizontalAngle}
+                    verticalAngle={qwenVerticalAngle}
+                    zoom={qwenZoom}
+                    onChange={(patch) => onUpdate(node.id, patch)}
+                  />
+                  <div className="camera-control-grid">
+                    <div className="camera-control-toolbar">
+                      <button
+                        className="camera-reset-button"
+                        onClick={() =>
+                          onUpdate(node.id, {
+                            horizontalAngle: qwenCameraDefaults.horizontalAngle,
+                            verticalAngle: qwenCameraDefaults.verticalAngle,
+                            zoom: qwenCameraDefaults.zoom
+                          })
+                        }
+                      >
+                        Reset
+                      </button>
+                    </div>
+                    <label>
+                      <span>Azimuth</span>
+                      <input type="range" min="0" max="360" step="1" value={qwenHorizontalAngle} onChange={(event) => onUpdate(node.id, { horizontalAngle: Number(event.target.value) })} />
+                      <strong>{Math.round(qwenHorizontalAngle)} deg</strong>
+                    </label>
+                    <label>
+                      <span>Elevation</span>
+                      <input type="range" min="-30" max="90" step="1" value={qwenVerticalAngle} onChange={(event) => onUpdate(node.id, { verticalAngle: Number(event.target.value) })} />
+                      <strong>{Math.round(qwenVerticalAngle)} deg</strong>
+                    </label>
+                    <label>
+                      <span>Zoom</span>
+                      <input type="range" min="0" max="10" step="0.1" value={qwenZoom} onChange={(event) => onUpdate(node.id, { zoom: Number(event.target.value) })} />
+                      <strong>{qwenZoom.toFixed(1)}</strong>
+                    </label>
+                  </div>
+                  <NodeRow label="Prompt">
+                    <textarea
+                      value={node.data.additionalPrompt || ""}
+                      onChange={(event) => onUpdate(node.id, { additionalPrompt: event.target.value })}
+                      placeholder="Optional extra instruction"
+                    />
+                  </NodeRow>
                 </>
               ) : (
                 <>
@@ -5838,12 +5854,14 @@ function NodeBody({
     const promptValue = resolvedPromptText(incoming.promptIn) || node.data.prompt;
     const promptConnected = Boolean(resolvedPromptText(incoming.promptIn));
     const isSam3Image = isSam3ImageModel(node.data.model);
+    const isZImage = isZImageImageModel(node.data.model);
     const imageInstructionSources = [...(incoming.imagePromptIn || []), ...(incoming.cameraIn || []), ...(incoming.styleIn || []), ...(incoming.transferIn || []), ...(incoming.characterIn || [])];
-    const effectivePromptValue = isSam3Image ? promptValue : buildEffectiveImagePrompt(promptValue, imageInstructionSources, node.data.aspectRatio, incomingByNode);
+    const effectivePromptValue = isSam3Image || isZImage ? promptValue : buildEffectiveImagePrompt(promptValue, imageInstructionSources, node.data.aspectRatio, incomingByNode);
     const promptHasGeneratedAdditions = effectivePromptValue !== promptValue;
     const appliedInstructionLabels = activeImageInstructionLabels(imageInstructionSources, incomingByNode);
-    const characterTagMatches = isSam3Image ? [] : imageModelCharacterTagMatches(promptValue, imageInstructionSources, incomingByNode);
-    const imagePromptLabel = connectedSummary(incoming.imagePromptIn, "Add file");
+    const characterTagMatches = isSam3Image || isZImage ? [] : imageModelCharacterTagMatches(promptValue, imageInstructionSources, incomingByNode);
+    const imagePromptConnections = isZImage ? zImageSupportedReferenceConnections(incoming.imagePromptIn || []) : incoming.imagePromptIn;
+    const imagePromptLabel = connectedSummary(imagePromptConnections, "Add file");
     const cameraPromptLabel = connectedSummary(incoming.cameraIn, "Add camera");
     const stylePromptLabel = connectedSummary(incoming.styleIn, "Add style");
     const transferPromptLabel = connectedSummary(incoming.transferIn, "Add mood board");
@@ -5854,8 +5872,12 @@ function NodeBody({
     const stylePort = config.input.find((port) => port.id === "styleIn");
     const transferPort = config.input.find((port) => port.id === "transferIn");
     const characterPort = config.input.find((port) => port.id === "characterIn");
+    const disabledCameraPort = imageModelInputPortForModel(node, cameraPort);
+    const disabledStylePort = imageModelInputPortForModel(node, stylePort);
+    const disabledTransferPort = imageModelInputPortForModel(node, transferPort);
+    const disabledCharacterPort = imageModelInputPortForModel(node, characterPort);
     const settingsOpen = Boolean(node.data.settingsOpen);
-    const collapsedPorts = isSam3Image ? [promptPort, imagePromptPort] : [promptPort, imagePromptPort, cameraPort, stylePort, transferPort, characterPort];
+    const collapsedPorts = isSam3Image ? [promptPort, imagePromptPort] : [promptPort, imagePromptPort, disabledCameraPort, disabledStylePort, disabledTransferPort, disabledCharacterPort];
     return (
       <div className="node-body model-node-body image-model-body">
         <ResultPane
@@ -5920,22 +5942,23 @@ function NodeBody({
               {sam3SegmentationModelsEnabled && <option>SAM 3 Image</option>}
             </select>
           </NodeRow>
+          {isZImage && <small className="model-limitation-note">{zImageUnsupportedInputMessage()}</small>}
           <NodeRow label={isSam3Image ? "Image" : "Image Prompt"} inputPort={settingsOpen ? imagePromptPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
             <button className={imagePromptLabel !== "Add file" ? "connected-field" : ""}>{imagePromptLabel}</button>
           </NodeRow>
           {!isSam3Image && (
             <>
-              <NodeRow label="Camera" inputPort={settingsOpen ? cameraPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-                <button className={cameraPromptLabel !== "Add camera" ? "connected-field" : ""}>{cameraPromptLabel}</button>
+              <NodeRow label="Camera" inputPort={settingsOpen ? disabledCameraPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+                <button disabled={isZImage} className={cameraPromptLabel !== "Add camera" ? "connected-field" : ""}>{isZImage ? "Not supported" : cameraPromptLabel}</button>
               </NodeRow>
-              <NodeRow label="Style" inputPort={settingsOpen ? stylePort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-                <button className={stylePromptLabel !== "Add style" ? "connected-field" : ""}>{stylePromptLabel}</button>
+              <NodeRow label="Style" inputPort={settingsOpen ? disabledStylePort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+                <button disabled={isZImage} className={stylePromptLabel !== "Add style" ? "connected-field" : ""}>{isZImage ? "Not supported" : stylePromptLabel}</button>
               </NodeRow>
-              <NodeRow label="Mood Board" inputPort={settingsOpen ? transferPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-                <button className={transferPromptLabel !== "Add mood board" ? "connected-field" : ""}>{transferPromptLabel}</button>
+              <NodeRow label="Mood Board" inputPort={settingsOpen ? disabledTransferPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+                <button disabled={isZImage} className={transferPromptLabel !== "Add mood board" ? "connected-field" : ""}>{isZImage ? "Not supported" : transferPromptLabel}</button>
               </NodeRow>
-              <NodeRow label="Character" inputPort={settingsOpen ? characterPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-                <button className={characterPromptLabel !== "Add character" ? "connected-field" : ""}>{characterPromptLabel}</button>
+              <NodeRow label="Character" inputPort={settingsOpen ? disabledCharacterPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+                <button disabled={isZImage} className={characterPromptLabel !== "Add character" ? "connected-field" : ""}>{isZImage ? "Not supported" : characterPromptLabel}</button>
               </NodeRow>
               <NodeRow label="Generations">
                 <select value={node.data.batchCount || "1"} onChange={(event) => onUpdate(node.id, { batchCount: event.target.value })}>
@@ -6747,11 +6770,8 @@ function getNodeConfig(type) {
     },
     camera: {
       icon: Camera,
-      input: [{ id: "imageIn", label: "Image", color: portColors.image }],
-      output: [
-        { id: "cameraOut", label: "Camera", color: portColors.camera },
-        { id: "imageOut", label: "Image", color: portColors.image }
-      ]
+      input: [],
+      output: [{ id: "cameraOut", label: "Camera", color: portColors.camera }]
     },
     composer: {
       icon: Box,
@@ -6887,9 +6907,7 @@ function createDefaultNodeData(type, label, count) {
       title,
       shotPreset: "None",
       lensPreset: "None",
-      typePreset: "None",
-      qwenCameraOpen: false,
-      ...qwenCameraDefaults
+      typePreset: "None"
     };
   }
   if (type === "transfer") {
@@ -6910,6 +6928,7 @@ function createDefaultNodeData(type, label, count) {
       utilityImageModel: utilityImageModelNames.dwpose,
       utilityVideoModel: utilityVideoModelNames.wanFunControl,
       stillFrameTime: 0,
+      ...qwenCameraDefaults,
       dwposeDrawMode: "body-pose",
       patinaMaps: patinaMapOptions.map((option) => option.id),
       patinaOutputFormat: "png",
@@ -6988,10 +7007,10 @@ function createDefaultNodeData(type, label, count) {
   if (type === "imageModel") {
     return {
       title,
-      model: imageModelNames.nanoBananaPro,
+      model: imageModelNames.zImage,
       prompt: "",
       aspectRatio: "16:9",
-      resolution: "1K",
+      resolution: "2K",
       batchCount: "1"
     };
   }
@@ -7060,6 +7079,39 @@ function isAutoImageAspectRatio(value) {
 
 function isOpenAiImageModel(model) {
   return String(model || "").toLowerCase().includes("openai");
+}
+
+function isZImageImageModel(model) {
+  const normalized = String(model || "").toLowerCase();
+  return normalized.includes("z-image") || normalized.includes("z image") || normalized.includes("zimage");
+}
+
+function zImageUnsupportedInputMessage() {
+  return "Z-Image supports Prompt and Image Prompt only; Camera, Style, Mood Board, and Character inputs are not supported.";
+}
+
+function isZImageUnsupportedInput(node, portId) {
+  return node?.type === "imageModel" && isZImageImageModel(node.data?.model) && zImageUnsupportedInputPorts.has(portId);
+}
+
+function isZImageUnsupportedSource(target, source) {
+  return target?.type === "imageModel" && isZImageImageModel(target.data?.model) && zImageUnsupportedSourceTypes.has(source?.type);
+}
+
+function zImageSupportedReferenceConnections(items = []) {
+  return items.filter(({ source, edge }) => {
+    if (!source?.data?.resultUrl || zImageUnsupportedSourceTypes.has(source.type)) return false;
+    return previewMediaType(source, edge) === "image";
+  });
+}
+
+function imageModelInputPortForModel(node, port) {
+  if (!port || !isZImageUnsupportedInput(node, port.id)) return port;
+  return {
+    ...port,
+    disabled: true,
+    disabledReason: zImageUnsupportedInputMessage()
+  };
 }
 
 function isLumaImageModel(model) {
@@ -7137,7 +7189,7 @@ function videoModelSelectionPatch(data = {}, model) {
 }
 
 function normalizeImageModelResolution(value) {
-  return imageResolutionOptions.includes(value) ? value : "1K";
+  return imageResolutionOptions.includes(value) ? value : "2K";
 }
 
 function normalizedLumaVideoDurationLabel(value) {
@@ -7193,6 +7245,11 @@ function isPatinaModel(model) {
 function isUtilityColorIdMatteModel(model) {
   const normalized = String(model || "").toLowerCase();
   return normalized.includes("color") && normalized.includes("matte");
+}
+
+function isUtilityQwenCameraEditModel(model) {
+  const normalized = String(model || "").toLowerCase();
+  return normalized.includes("qwen") && normalized.includes("camera");
 }
 
 function isUtilityCompositeVideoModel(model) {
@@ -7276,6 +7333,7 @@ function utilityResultType(node) {
 function utilityInputPortIds(mode, imageModel = utilityImageModelNames.dwpose, videoModel = utilityVideoModelNames.wanFunControl) {
   if (mode === "image") {
     if (isUtilityStillFrameModel(imageModel)) return ["referenceVideoIn"];
+    if (isUtilityQwenCameraEditModel(imageModel)) return ["imageIn"];
     return isUtilitySam3ImageModel(imageModel) ? ["promptIn", "imageIn"] : ["imageIn"];
   }
 
@@ -7294,6 +7352,7 @@ function utilityInputPortIds(mode, imageModel = utilityImageModelNames.dwpose, v
 function normalizedUtilityImageModelName(model) {
   const normalized = String(model || "").toLowerCase();
   if (normalized.includes("color") && normalized.includes("matte")) return utilityImageModelNames.colorIdMatte;
+  if (isUtilityQwenCameraEditModel(normalized)) return utilityImageModelNames.qwenCameraEdit;
   if (normalized.includes("still") || normalized.includes("frame")) return utilityImageModelNames.stillFrame;
   if (normalized.includes("sam") && normalized.includes("image")) return utilityImageModelNames.sam3Image;
   if (normalized.includes("birefnet")) return utilityImageModelNames.birefnetImage;
@@ -7430,7 +7489,7 @@ function buildReferenceTagHighlights(nodes, incomingByNode) {
   nodes.forEach((node) => {
     const incoming = incomingByNode[node.id] || {};
     const prompt = connectedText(incoming.promptIn) || node.data.prompt || "";
-    const matches = node.type === "imageModel" && !isSam3ImageModel(node.data.model)
+    const matches = node.type === "imageModel" && !isSam3ImageModel(node.data.model) && !isZImageImageModel(node.data.model)
       ? imageModelCharacterTagMatches(prompt, incoming.characterIn)
       : node.type === "videoModel" && !isWanFunControlModel(node.data.model) && !isAuroraModel(node.data.model) && !isSam3VideoModel(node.data.model)
         ? videoModelReferenceTagMatches(prompt, incoming)
@@ -7482,6 +7541,9 @@ function buildInactiveEdgeIds(nodes, edges) {
     edges
       .filter((edge) => {
         const source = nodeMap.get(edge.from.nodeId);
+        const target = nodeMap.get(edge.to.nodeId);
+        if (isZImageUnsupportedInput(target, edge.to.port)) return true;
+        if (isZImageUnsupportedSource(target, source)) return true;
         return (
           (source?.type === "transfer" || source?.type === "character") &&
           (!source.data?.locked || !source.data?.activated || !source.data?.resultUrl)
@@ -7640,7 +7702,7 @@ function escapeRegExp(value) {
 
 async function runCameraQwenEdit({ node, incoming, projectId, projectName, workflowContext }) {
   const imageUrl = connectedAssetUrls(incoming.imageIn).at(-1);
-  if (!imageUrl) throw new Error("Connect an image to the Camera node.");
+  if (!imageUrl) throw new Error("Connect an image to the Utility node.");
 
   const { response, data } = await nodeApi.qwenCameraEdit({
     imageUrls: [imageUrl],
@@ -7679,6 +7741,10 @@ async function runUtilityImageGeneration({ node, prompt, incoming, projectId, pr
       workflowContext
     });
     return [still];
+  }
+
+  if (isUtilityQwenCameraEditModel(modelName)) {
+    return [await runCameraQwenEdit({ node, incoming, projectId, projectName, workflowContext })];
   }
 
   const imageUrl = connectedAssetUrls(incoming.imageIn).at(-1);
@@ -7960,7 +8026,7 @@ function connectedPreviewSources(items = []) {
       const sourceType = previewMediaType(source, edge);
       const resultItems = normalizedResultItems(source.data.resultItems, source.data.resultUrl, sourceType);
       if (!resultItems.length) return null;
-      const sourceName = source.type === "camera" && edge.from.port === "imageOut" ? "Camera image" : sourceLabel(source);
+      const sourceName = sourceLabel(source);
       const selectedResultIndex = Math.trunc(Number(source.data.selectedResultIndex));
       return {
         id: `${source.id}:${edge.from.port}`,
@@ -7991,14 +8057,6 @@ function previewVideoSourceForNode(node, incomingByNode) {
 function previewSelectionForNode(node, previewSources = []) {
   if (!previewSources.length) return { source: null, item: null, itemIndex: 0 };
   const data = node?.data || {};
-  if (!data.previewSourceId && data.previewSelectedIndex !== undefined && data.previewSelectedIndex !== null && data.previewSelectedIndex !== "") {
-    const flatItems = previewSources.flatMap((source) => source.items.map((item, itemIndex) => ({ source, item, itemIndex })));
-    const maxIndex = Math.max(0, flatItems.length - 1);
-    const selectedIndex = Math.trunc(Number(data.previewSelectedIndex));
-    const selected = flatItems[Math.min(Math.max(Number.isFinite(selectedIndex) ? selectedIndex : 0, 0), maxIndex)];
-    if (selected) return selected;
-  }
-
   const source =
     selectedPreviewSource(previewSources, data.previewSourceId) ||
     previewSources.find((previewSource) => previewSource.items.some((item) => item.sourceSelectedResult)) ||
@@ -8013,13 +8071,6 @@ function previewSelectionForNode(node, previewSources = []) {
 
 function previewSelectedItemIndexForSource(node, source) {
   const items = source?.items || [];
-  const maxIndex = Math.max(0, items.length - 1);
-  const data = node?.data || {};
-  if (data.previewItemIndex !== undefined && data.previewItemIndex !== null && data.previewItemIndex !== "") {
-    const selectedIndex = Math.trunc(Number(data.previewItemIndex));
-    return Math.min(Math.max(Number.isFinite(selectedIndex) ? selectedIndex : 0, 0), maxIndex);
-  }
-
   const sourceSelectedIndex = items.findIndex((item) => item.sourceSelectedResult);
   return sourceSelectedIndex >= 0 ? sourceSelectedIndex : 0;
 }
@@ -8038,8 +8089,9 @@ function previewMediaType(source, edge) {
   return "image";
 }
 
-function connectedImagePromptItems(items = [], incomingByNode = null) {
-  const namedCharacterReferences = activeConnectedCharacterSources(items, incomingByNode).length > 1;
+function connectedImagePromptItems(items = [], incomingByNode = null, options = {}) {
+  const includeComposerCharacterBindings = options.includeComposerCharacterBindings !== false;
+  const namedCharacterReferences = includeComposerCharacterBindings && activeConnectedCharacterSources(items, incomingByNode).length > 1;
   const uniqueItems = new Map();
 
   items
@@ -8049,6 +8101,9 @@ function connectedImagePromptItems(items = [], incomingByNode = null) {
         return { url: source.data.resultUrl, label: characterReferenceLabel(source, namedCharacterReferences) };
       }
       if (source.type === "composer") {
+        if (!includeComposerCharacterBindings) {
+          return { url: source.data.resultUrl, label: sourceLabel(source) };
+        }
         return [
           { url: source.data.resultUrl, label: "Input guide image" },
           ...composerCharacterBindingsForSource(source, incomingByNode).map((binding) => ({
@@ -8152,7 +8207,7 @@ async function resolveImageModelAspectRatio(node, incoming = {}) {
     return normalizeImageModelAspectRatio(configuredAspectRatio, node.data.model);
   }
 
-  const imageUrl = imageModelAutoAspectInputUrls(incoming)[0];
+  const imageUrl = imageModelAutoAspectInputUrls(incoming, node.data.model)[0];
   if (!imageUrl) {
     throw new Error("Auto aspect ratio needs a connected image.");
   }
@@ -8165,10 +8220,12 @@ async function resolveImageModelAspectRatio(node, incoming = {}) {
   return closestAspectRatio(dimensions.width / Math.max(1, dimensions.height), imageModelSupportedAspectRatios(node.data.model));
 }
 
-function imageModelAutoAspectInputUrls(incoming = {}) {
-  return ["imagePromptIn", "cameraIn", "transferIn"]
+function imageModelAutoAspectInputUrls(incoming = {}, model = "") {
+  const portIds = isZImageImageModel(model) ? ["imagePromptIn"] : ["imagePromptIn", "cameraIn", "transferIn"];
+  return portIds
     .flatMap((portId) => incoming[portId] || [])
     .map(({ source, edge }) => {
+      if (isZImageImageModel(model) && zImageUnsupportedSourceTypes.has(source?.type)) return "";
       if (!source?.data?.resultUrl) return "";
       return previewMediaType(source, edge) === "image" ? source.data.resultUrl : "";
     })
@@ -8691,7 +8748,7 @@ function normalizeModel3DData(data = {}) {
 }
 
 function normalizeImageModelData(data = {}) {
-  const model = data.model || imageModelNames.nanoBananaPro;
+  const model = data.model || imageModelNames.zImage;
   return {
     ...data,
     title: data.title || "Image Model",
@@ -8873,9 +8930,7 @@ function splitLegacyDirectionNode(node) {
           title: "Camera",
           shotPreset: data.shotPreset || "None",
           lensPreset: data.lensPreset || "None",
-          typePreset: data.typePreset || "None",
-          qwenCameraOpen: false,
-          ...qwenCameraDefaults
+          typePreset: data.typePreset || "None"
         }
       }
     : null;
@@ -8967,14 +9022,9 @@ function normalizeEdgeForCurrentGraph(edge, nodeMap) {
   }
 
   if (source.type === "camera") {
-    if (isCameraImageEdge(nextEdge, target)) {
-      nextEdge.from.port = "imageOut";
-      nextEdge.color = portColors.image;
-    } else {
-      if (!hasCameraPreset(source)) return null;
-      nextEdge.from.port = "cameraOut";
-      nextEdge.color = portColors.camera;
-    }
+    if (!hasCameraPreset(source)) return null;
+    nextEdge.from.port = "cameraOut";
+    nextEdge.color = portColors.camera;
   }
 
   if (source.type === "style") {
@@ -9016,19 +9066,6 @@ function normalizeEdgeForCurrentGraph(edge, nodeMap) {
   if (!outputPortIdsForNode(source).includes(nextEdge.from.port)) return null;
 
   return nextEdge;
-}
-
-function isCameraImageEdge(edge, target) {
-  if (edge.from.port === "imageOut") return true;
-  if (edge.to.port === "sourceIn") return true;
-  if (target?.type === "text" && edge.to.port === "imageIn") return true;
-  if (target?.type === "camera" && edge.to.port === "imageIn") return true;
-  if (target?.type === "composer" && edge.to.port === "imageIn") return true;
-  if (target?.type === "model3d" && isModel3DImageInputPort(edge.to.port)) return true;
-  if (target?.type === "imageModel" && ["imagePromptIn", "transferIn"].includes(edge.to.port)) return true;
-  if (target?.type === "videoModel" && ["startFrameIn", "endFrameIn", "referenceImageIn"].includes(edge.to.port)) return true;
-  if (target?.type === "utility" && ["imageIn", "referenceImageIn"].includes(edge.to.port)) return true;
-  return false;
 }
 
 function transferTitleFromLegacy(title) {
