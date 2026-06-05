@@ -12,8 +12,7 @@ export const nodeTypeDefinitions = [
   { type: "audio", label: "Audio" },
   { type: "model3d", label: "3D" },
   { type: "imageModel", label: "Image Model" },
-  { type: "videoModel", label: "Video Model" },
-  { type: "text", label: "Text Model" }
+  { type: "videoModel", label: "Video Model" }
 ];
 
 const nodeTypeMap = new Map(nodeTypeDefinitions.map((definition) => [definition.type, definition]));

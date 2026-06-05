@@ -1166,29 +1166,13 @@
   position: relative;
 }
 
-.text-node-body .port-row,
-.text-node-body .run-node-button {
+.text-node-body .port-row {
   margin-bottom: 0;
 }
 
-.text-input-port-stack {
-  position: absolute;
-  top: 58px;
-  left: -9px;
-  z-index: 5;
+.text-single-panel {
   display: grid;
   gap: 10px;
-}
-
-.text-single-panel,
-.text-split-panel {
-  display: grid;
-  gap: 10px;
-}
-
-.text-split-panel {
-  align-items: start;
-  grid-template-rows: auto auto;
 }
 
 .text-field-group {
@@ -1207,11 +1191,6 @@
 .text-field-group textarea {
   align-self: start;
   min-height: 112px;
-}
-
-.text-split-panel .text-field-group textarea {
-  min-height: 112px;
-  resize: vertical;
 }
 
 .text-node-body small {

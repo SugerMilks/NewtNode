@@ -191,10 +191,6 @@ export const nodeApi = {
     return fetchJsonApi("/api/node/composer-frame", jsonBody(body), label);
   },
 
-  processText(body, label = "Text processing") {
-    return fetchJsonApi("/api/node/process-text", jsonBody(body), label);
-  },
-
   qwenCameraEdit(body, label = "Camera edit") {
     return fetchJsonApi("/api/node/qwen-camera-edit", jsonBody(body), label);
   },

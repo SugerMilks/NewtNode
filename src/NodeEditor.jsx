@@ -46,7 +46,7 @@ import {
   useNewtNodeImageFallback,
   useNewtNodeVideoFallback
 } from "./components/MediaViews.jsx";
-import { ComposerNodeBody, MediaAssetNodeBody, PlainTextNodeBody, TextModelNodeBody } from "./components/NodeBodies.jsx";
+import { ComposerNodeBody, MediaAssetNodeBody, PlainTextNodeBody } from "./components/NodeBodies.jsx";
 import { NodeRow, OutputPortRow, PortHandle } from "./components/NodePorts.jsx";
 import { StyleCollage } from "./components/StyleCollage.jsx";
 import { canvasToBlob, createTransferCollageBlob, loadCanvasImage } from "./canvasMedia.js";
@@ -188,7 +188,6 @@ import {
   settleSequential
 } from "./nodeRunner.js";
 import { run3DModelGeneration, runCharacterSheetGeneration, runImageModelGeneration } from "./nodeRunners/mediaModels.js";
-import { runTextNodeProcessing } from "./nodeRunners/textModels.js";
 import {
   buildUtilityVideoRequest,
   buildVideoGenerationRequest,
@@ -2466,14 +2465,12 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const outputKind = autoConnectionOutputKind(source, from);
     const inputs = {
       prompt: {
-        text: ["textIn"],
         imageModel: ["promptIn"],
         videoModel: ["promptIn"],
         utility: ["promptIn"]
       },
       image: {
         preview: ["sourceIn"],
-        text: ["imageIn"],
         camera: ["imageIn"],
         composer: ["imageIn"],
         model3d: ["frontImageIn"],
@@ -2483,7 +2480,6 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       },
       video: {
         preview: ["sourceIn"],
-        text: ["videoIn"],
         videoModel: ["referenceVideoIn"],
         utility: ["referenceVideoIn", "maskVideoIn"]
       },
@@ -2494,8 +2490,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         imageModel: ["cameraIn"]
       },
       style: {
-        imageModel: ["styleIn"],
-        text: ["styleIn"]
+        imageModel: ["styleIn"]
       },
       transfer: {
         imageModel: ["transferIn"],
@@ -2550,7 +2545,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
     if (source?.type === "style") {
       if ((source.data.stylePreset || "None") === "None") return "Choose a Style preset before connecting";
-      if ((target.type === "imageModel" || target.type === "text") && to.port === "styleIn") return "";
+      if (target.type === "imageModel" && to.port === "styleIn") return "";
       return "Style presets connect to Style inputs";
     }
 
@@ -2588,14 +2583,12 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (source.type === "utility") {
       if (utilityOutputType(source) === "video") {
         if (target.type === "preview" && to.port === "sourceIn") return "";
-        if (target.type === "text" && to.port === "videoIn") return "";
         if (target.type === "videoModel" && to.port === "referenceVideoIn") return "";
         if (target.type === "utility" && ["referenceVideoIn", "maskVideoIn"].includes(to.port)) return "";
         return "Utility video output connects to video inputs";
       }
 
       if (target.type === "preview" && to.port === "sourceIn") return "";
-      if (target.type === "text" && to.port === "imageIn") return "";
       if (target.type === "composer" && to.port === "imageIn") return "";
       if (target.type === "model3d" && isModel3DImageInputPort(to.port)) return "";
       if (target.type === "imageModel" && ["imagePromptIn", "transferIn"].includes(to.port)) return "";
@@ -2637,7 +2630,6 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (source?.type === "composer") {
       if (from.port === "imageOut") {
         if (target.type === "preview" && to.port === "sourceIn") return "";
-        if (target.type === "text" && to.port === "imageIn") return "";
         if (target.type === "composer" && to.port === "imageIn") return "";
         if (target.type === "model3d" && isModel3DImageInputPort(to.port)) return "";
         if (target.type === "imageModel" && ["imagePromptIn", "transferIn"].includes(to.port)) return "";
@@ -2657,30 +2649,6 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (target?.type === "preview") {
       if (["image", "video", "imageModel", "videoModel", "utility", "transfer", "composer", "model3d"].includes(source?.type)) return "";
       return "Preview accepts image, video, and 3D sources";
-    }
-
-    if (target?.type === "text") {
-      if (to.port === "textIn") {
-        if (["plainText", "text", "imageModel", "videoModel"].includes(source.type)) return "";
-        return "Text Model input accepts text outputs";
-      }
-
-      if (to.port === "imageIn") {
-        if (["image", "imageModel", "transfer"].includes(source.type)) return "";
-        return "Image input accepts image outputs";
-      }
-
-      if (to.port === "videoIn") {
-        if (["video", "videoModel"].includes(source.type)) return "";
-        return "Video input accepts video outputs";
-      }
-
-      if (to.port === "styleIn") {
-        if (source.type === "style") return "";
-        return "Style input accepts style outputs";
-      }
-      if (["image", "video", "imageModel", "videoModel", "utility", "transfer", "character"].includes(source?.type)) return "";
-      return "Preview accepts image and video sources";
     }
 
     return "";
@@ -2865,28 +2833,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const requestContext = workflowRequestContext();
 
     try {
-      const runningPatch =
-        currentNode.type === "text"
-          ? { status: "running", error: "" }
-          : { status: "running", error: "" };
-      updateNode(currentNode.id, runningPatch);
-
-      if (currentNode.type === "text") {
-        const processed = await runTextNodeProcessing({
-          node: currentNode,
-          incoming,
-          workflowContext: requestContext,
-          sourceLabel,
-          promptPiecesForSource
-        });
-        updateNode(currentNode.id, {
-          status: "complete",
-          error: "",
-          resultText: processed.text,
-          lastRunModel: processed.model
-        });
-        return { status: "complete" };
-      }
+      updateNode(currentNode.id, { status: "running", error: "" });
 
       if (currentNode.type === "utility") {
         if (utilityMode(currentNode) === "image") {
@@ -4512,23 +4459,6 @@ function NodeBody({
         node={node}
         outputPort={outputPort}
         onUpdate={onUpdate}
-        onConnectStart={onConnectStart}
-        onDisconnectInput={onDisconnectInput}
-        connectedPortKeys={connectedPortKeys}
-      />
-    );
-  }
-
-  if (node.type === "text") {
-    return (
-      <TextModelNodeBody
-        node={node}
-        config={config}
-        outputPort={outputPort}
-        incoming={incoming}
-        onUpdate={onUpdate}
-        onRun={onRun}
-        running={running}
         onConnectStart={onConnectStart}
         onDisconnectInput={onDisconnectInput}
         connectedPortKeys={connectedPortKeys}
@@ -6745,16 +6675,6 @@ function getNodeConfig(type) {
       input: [],
       output: [{ id: "promptOut", label: "Prompt", color: portColors.prompt }]
     },
-    text: {
-      icon: Type,
-      input: [
-        { id: "textIn", label: "Text", color: portColors.prompt },
-        { id: "imageIn", label: "Image", color: portColors.image },
-        { id: "videoIn", label: "Video", color: portColors.video },
-        { id: "styleIn", label: "Style", color: portColors.style }
-      ],
-      output: [{ id: "promptOut", label: "Prompt", color: portColors.prompt }]
-    },
     image: {
       icon: FileImage,
       input: [],
@@ -7556,8 +7476,7 @@ function buildInactiveEdgeIds(nodes, edges) {
 function connectedText(items = []) {
   return items
     .map(({ source }) => {
-      if (source.type === "plainText") return source.data.text;
-      if (source.type === "text") return source.data.resultText || source.data.text;
+      if (source.type === "plainText" || source.type === "text") return source.data.text;
       if (source.type === "imageModel" || source.type === "videoModel" || source.type === "utility") return source.data.resultText;
       return source.data.title;
     })
@@ -8642,11 +8561,11 @@ function normalizeCurrentNode(node) {
   if (nextNode.type === "text") {
     return {
       ...nextNode,
+      type: "plainText",
       data: {
         ...data,
-        title: textModelTitleFromLegacy(data.title),
-        text: data.text || "",
-        resultText: data.resultText || ""
+        title: textTitleFromLegacy(data.title),
+        text: data.resultText || data.text || ""
       }
     };
   }
@@ -8727,11 +8646,10 @@ function normalizeCurrentNode(node) {
   return nextNode;
 }
 
-function textModelTitleFromLegacy(title) {
+function textTitleFromLegacy(title) {
   const value = String(title || "").trim();
-  if (!value) return "Text Model";
-  const match = value.match(/^Text( \d+)?$/);
-  return match ? `Text Model${match[1] || ""}` : value;
+  if (!value) return "Text";
+  return value.replace(/^Text Model\b/, "Text");
 }
 
 function normalizeModel3DData(data = {}) {

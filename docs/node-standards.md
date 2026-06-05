@@ -41,7 +41,7 @@ Use this quick pass before implementing a feature, and again before committing i
 | Model and utility options | `src/modelOptions.js` | Model names, preset names/prompts, aspect ratios, duration/resolution lists, utility descriptions, and model-control option lists live here. Keep labels stable because saved workflows and UI normalization rely on them. |
 | Canvas chrome | `src/components/CanvasChrome.jsx` | Memoized edge paths, selection marquee/action bar, and workflow prompt live here. Keep hot SVG/UI chrome out of `NodeEditor.jsx`. |
 | Preview/result UI | `src/components/MediaViews.jsx`, `src/components/Model3DViewer.jsx` | Shared previews, result panes, project output drawer, output lightbox, lazy output-rail media loading, and the lazy 3D viewer wrapper live in `MediaViews.jsx`. The actual GLB renderer lives in `Model3DViewer.jsx`. |
-| Small node bodies | `src/components/NodeBodies.jsx` | Plain Text, Text Model, upload media, and Composer summary bodies live here. Preserve their prop-driven behavior and class names when extending them. |
+| Small node bodies | `src/components/NodeBodies.jsx` | Plain Text, upload media, and Composer summary bodies live here. Preserve their prop-driven behavior and class names when extending them. |
 | Composer/camera 3D UI | `src/components/ComposerViewport.jsx`, `src/components/CameraControlViewport.jsx`, `src/composerState.js`, `src/composerRender.js` | Interactive Three.js viewport shells for Composer and Camera live in the component files. Composer defaults, normalization, saved pose fields, and image plane helpers live in `composerState.js`; Composer Three.js rendering and mannequin asset loading live in `composerRender.js`. Composer pose preset API wrappers live in `src/api/newtApi.js`; backend pose-library persistence lives in `server/routes/composerPoses.js`. |
 | Node port rows and transfer collage | `src/components/NodePorts.jsx`, `src/components/StyleCollage.jsx` | Reusable port handles/rows and the transfer mood-board collage live here. Keep class names and drag/drop behavior stable because many node bodies depend on them. |
 | Project output rail data | `src/projectOutputs.js` | Build and filter project output rail items here; keep filesystem/history filtering out of render code. |
@@ -121,8 +121,8 @@ If a new media type is added, update this table, `portColors`, preview logic, st
 ## Text Node Roles
 
 - `Text` is the simple prompt node. It should stay lightweight: one plain textarea, one prompt output, no run button, no backend call.
-- `Text Model` is the AI text-processing node. It can accept text, image, video, and style inputs, calls the local text-processing route, and records text model history/cost.
-- Existing saved `text` nodes represent `Text Model`; keep that compatibility unless a migration explicitly changes it.
+- Legacy saved `text` nodes are migrated into simple `plainText` nodes on load, preserving the best available prompt text.
+- Do not reintroduce Text Model / LLM processing without a deliberate product decision and matching backend, stats, and privacy review.
 
 ## Node Definition Checklist
 

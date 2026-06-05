@@ -37,11 +37,6 @@ const defaultPricing = {
     baseCost: 0.375,
     addOnCost: 0.15
   },
-  textProcessing: {
-    falRequestCost: 0.001,
-    falVisionUnitCost: 0.01,
-    falVideoUnitCost: 0.01
-  },
   utility: {
     wanFunControl: {
       costPerSecond: 0.1
@@ -511,20 +506,6 @@ function estimateItemCost(item, mediaType, pricing) {
     return null;
   }
 
-  if (mediaType === "text") {
-    const textPricing = pricing.textProcessing || defaultPricing.textProcessing;
-    if (String(item.provider || settings.provider || "").toLowerCase() !== "fal") return null;
-
-    const usageAmount = usageCost(item.usage);
-    if (usageAmount !== null) return usageAmount;
-
-    return (
-      textPricing.falRequestCost +
-      (Number(settings.imageInputCount || 0) > 0 ? textPricing.falVisionUnitCost : 0) +
-      (Number(settings.videoInputCount || 0) > 0 ? textPricing.falVideoUnitCost : 0)
-    );
-  }
-
   if (mediaType === "model3d") {
     if (modelKey.includes("hunyuan") || modelKey.includes("3d")) {
       return estimateHunyuan3DStatsCost(settings, pricing);
@@ -577,27 +558,6 @@ function numericCostAmount(cost) {
   if (!cost || cost.amountUsd === null || cost.amountUsd === undefined || cost.amountUsd === "") return null;
   const amount = Number(cost.amountUsd);
   return Number.isFinite(amount) ? amount : null;
-}
-
-function usageCost(usage) {
-  if (!usage) return null;
-
-  if (Array.isArray(usage)) {
-    const amounts = usage.map(usageCost).filter((amount) => amount !== null);
-    return amounts.length ? amounts.reduce((sum, amount) => sum + amount, 0) : null;
-  }
-
-  if (typeof usage === "object") {
-    const nestedAmounts = [usage.request, ...(Array.isArray(usage.helpers) ? usage.helpers : [])].map(usageCost).filter((amount) => amount !== null);
-    if (nestedAmounts.length) return nestedAmounts.reduce((sum, amount) => sum + amount, 0);
-
-    for (const key of ["cost", "amountUsd", "amount_usd", "totalCost", "total_cost"]) {
-      const amount = Number(usage[key]);
-      if (usage[key] !== null && usage[key] !== undefined && Number.isFinite(amount)) return amount;
-    }
-  }
-
-  return null;
 }
 
 function estimateMegapixelCost(image, unitRateUsd) {
