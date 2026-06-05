@@ -117,6 +117,7 @@ import {
   firstEnabledImageModel,
   firstEnabledVideoModel,
   imageModelNames,
+  imageModelOptions,
   imageModelAutoAspectRatio,
   imageResolutionOptions,
   lensPresetNames,
@@ -148,6 +149,7 @@ import {
   utilityImageModelNames,
   utilityModelDescriptions,
   utilityVideoModelNames,
+  videoModelOptions,
   videoModelNames,
   voidVideoFrameOptions,
   wan27ReferenceAspectRatioOptions,
@@ -552,7 +554,7 @@ const zImageUnsupportedSourceTypes = new Set(["camera", "style", "transfer", "ch
 const groupPadding = { x: 42, top: 62, bottom: 42 };
 const groupSizeFloor = 1;
 const imageRunStaggerMs = 850;
-export default function NodeEditor({ active = true, onStatusChange, modelPreferences } = {}) {
+export default function NodeEditor({ active = true, onStatusChange, modelPreferences, modelPreferencesReady = true } = {}) {
   const canvasRef = React.useRef(null);
   const fileMenuRef = React.useRef(null);
   const projectMenuRef = React.useRef(null);
@@ -592,8 +594,14 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const incomingByNode = React.useMemo(() => buildIncomingByNode(nodes, edges), [nodes, edges]);
   const connectedPortKeys = React.useMemo(() => buildConnectedPortKeys(edges), [edges]);
   const selectedNodeSet = React.useMemo(() => new Set(selectedNodeIds), [selectedNodeIds]);
-  const enabledImageModels = React.useMemo(() => enabledImageModelOptions(modelPreferences), [modelPreferences]);
-  const enabledVideoModels = React.useMemo(() => enabledVideoModelOptions(modelPreferences), [modelPreferences]);
+  const enabledImageModels = React.useMemo(
+    () => (modelPreferencesReady ? enabledImageModelOptions(modelPreferences) : imageModelOptions),
+    [modelPreferences, modelPreferencesReady]
+  );
+  const enabledVideoModels = React.useMemo(
+    () => (modelPreferencesReady ? enabledVideoModelOptions(modelPreferences) : videoModelOptions),
+    [modelPreferences, modelPreferencesReady]
+  );
   const activeEdgeIds = React.useMemo(() => buildActiveEdgeIds(nodes, edges), [nodes, edges]);
   const inactiveEdgeIds = React.useMemo(() => buildInactiveEdgeIds(nodes, edges), [nodes, edges]);
   const referenceTagHighlights = React.useMemo(() => buildReferenceTagHighlights(nodes, incomingByNode), [nodes, incomingByNode]);
@@ -684,6 +692,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }, [edges]);
 
   React.useEffect(() => {
+    if (!modelPreferencesReady) return;
     const fallbackImageModel = firstEnabledImageModel(modelPreferences);
     const fallbackVideoModel = firstEnabledVideoModel(modelPreferences);
     setNodes((current) =>
@@ -697,7 +706,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         return node;
       })
     );
-  }, [enabledImageModels, enabledVideoModels, modelPreferences]);
+  }, [enabledImageModels, enabledVideoModels, modelPreferences, modelPreferencesReady]);
 
   React.useEffect(() => {
     setEdges((current) => {
@@ -965,7 +974,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       type,
       x: nodePosition.x,
       y: nodePosition.y,
-      data: createDefaultNodeData(type, spec?.label || "Node", count)
+      data: createNodeData(type, spec?.label || "Node", count)
     };
     const graphNodes = [...nodesRef.current, nextNode];
     const pendingConnection = options.pendingConnection || null;
@@ -992,6 +1001,25 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     }
     if (pendingConnection) setDraftEdge(null);
     setContextMenu(null);
+  }
+
+  function createNodeData(type, label, count) {
+    const data = createDefaultNodeData(type, label, count);
+    if (type === "imageModel") {
+      const model = enabledImageModels[0] || imageModelNames.zImage;
+      return {
+        ...data,
+        ...imageModelSelectionPatch(data, model)
+      };
+    }
+    if (type === "videoModel") {
+      const model = enabledVideoModels[0] || videoModelNames.seedance;
+      return {
+        ...data,
+        ...videoModelSelectionPatch(data, model)
+      };
+    }
+    return data;
   }
 
   function defaultNodePosition(count) {
