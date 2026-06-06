@@ -4296,7 +4296,13 @@ function localWorkflowAssetDirName(body = {}) {
 async function moveUploadedFile(sourcePath, targetPath) {
   await mkdir(path.dirname(targetPath), { recursive: true });
   await rm(targetPath, { force: true }).catch(() => {});
-  await rename(sourcePath, targetPath);
+  try {
+    await rename(sourcePath, targetPath);
+  } catch (error) {
+    if (error?.code !== "EXDEV") throw error;
+    await copyFile(sourcePath, targetPath);
+    await rm(sourcePath, { force: true });
+  }
 }
 
 async function hydrateWorkflowPackage(workflow) {
