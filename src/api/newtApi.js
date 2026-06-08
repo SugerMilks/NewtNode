@@ -211,6 +211,18 @@ export const nodeApi = {
     return fetchJsonApi("/api/node/generate-image", jsonBody(body), label);
   },
 
+  planStoryboard(body, label = "Storyboard planning") {
+    return fetchJsonApi("/api/node/storyboard-plan", jsonBody(body), label);
+  },
+
+  exportStoryboardFrame(body, label = "Storyboard frame export") {
+    return fetchJsonApi("/api/node/storyboard-export-frame", jsonBody(body), label);
+  },
+
+  exportStoryboardBoard(body, label = "Storyboard board export") {
+    return fetchJsonApi("/api/node/storyboard-export-board", jsonBody(body), label);
+  },
+
   generate3d(body, label = "3D generation") {
     return fetchJsonApi("/api/node/generate-3d", jsonBody(body), label);
   },

@@ -17,11 +17,11 @@ export PORT="$API_PORT"
 export VITE_API_PORT="$API_PORT"
 export VITE_CLIENT_PORT="$CLIENT_PORT"
 
-if ! lsof -ti tcp:$API_PORT >/dev/null 2>&1; then
+if ! curl -fsS "$API_HEALTH_URL" >/dev/null 2>&1; then
   nohup node server/index.js > "$LOG_DIR/server.log" 2>&1 &
 fi
 
-if ! lsof -ti tcp:$CLIENT_PORT >/dev/null 2>&1; then
+if ! curl -fsS "$URL" >/dev/null 2>&1; then
   nohup npm run client > "$LOG_DIR/client.log" 2>&1 &
 fi
 

@@ -360,6 +360,36 @@ export function useWorkflowPersistence({
     }
   }
 
+  async function openWorkflowPackageFolderFromSystemPicker() {
+    try {
+      if (!(await guardUnsavedWorkflowChange("open another workflow package"))) return;
+      const defaultPath = workflowPickerDefaultPath(projectPackagePath);
+      setSaveStatus("Opening workflow package...");
+      const { response, data } = await systemApi.openWorkflowFile(
+        {
+          title: "Open NewtNode workflow package folder",
+          defaultPath,
+          mode: "folder"
+        },
+        "Open workflow package"
+      );
+
+      if (!response.ok) {
+        if (data.canceled) {
+          setSaveStatus("Open canceled");
+          return;
+        }
+        throw new Error(data.error || "Could not open workflow package.");
+      }
+
+      applyWorkflow(data, "Opened");
+      rememberOpenedWorkflowPath(data);
+      await loadProjects();
+    } catch (error) {
+      setSaveStatus(error.message || "Could not open workflow package.");
+    }
+  }
+
   async function importWorkflowFromSystemPicker() {
     try {
       const defaultPath = workflowPickerDefaultPath(projectPackagePath);
@@ -385,6 +415,35 @@ export function useWorkflowPersistence({
       await loadProjects();
     } catch (error) {
       setSaveStatus(error.message || "Could not import workflow.");
+    }
+  }
+
+  async function importWorkflowPackageFolderFromSystemPicker() {
+    try {
+      const defaultPath = workflowPickerDefaultPath(projectPackagePath);
+      setSaveStatus("Importing workflow package...");
+      const { response, data } = await systemApi.openWorkflowFile(
+        {
+          title: "Import NewtNode workflow package folder",
+          defaultPath,
+          mode: "folder"
+        },
+        "Import workflow package"
+      );
+
+      if (!response.ok) {
+        if (data.canceled) {
+          setSaveStatus("Import canceled");
+          return;
+        }
+        throw new Error(data.error || "Could not import workflow package.");
+      }
+
+      importWorkflow(data);
+      rememberOpenedWorkflowPath(data);
+      await loadProjects();
+    } catch (error) {
+      setSaveStatus(error.message || "Could not import workflow package.");
     }
   }
 
@@ -460,7 +519,9 @@ export function useWorkflowPersistence({
     saveProjectAsLocalFile,
     openWorkflowFile,
     openWorkflowFromSystemPicker,
+    openWorkflowPackageFolderFromSystemPicker,
     importWorkflowFromSystemPicker,
+    importWorkflowPackageFolderFromSystemPicker,
     loadProject,
     deleteProject
   };
