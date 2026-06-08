@@ -3050,6 +3050,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (isImageModelUnsupportedInput(target, to.port)) return imageModelUnsupportedInputMessage(target.data?.model);
     if (isImageModelUnsupportedSource(target, source)) return imageModelUnsupportedInputMessage(target.data?.model);
     if (isVideoModelUnsupportedCharacterInput(target, to.port)) return videoModelUnsupportedCharacterMessage(target.data?.model);
+    const compatibilityError = getPortCompatibilityError(source, from.port, target, to.port);
+    if (compatibilityError) return compatibilityError;
 
     if (source.type === "storyboard") {
       const frame = storyboardFrameForOutputPort(source, from.port);
@@ -3273,6 +3275,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         })
       };
     });
+    const pastedNodeMap = new Map(pastedNodes.map((node) => [node.id, node]));
     const pastedEdges = clipboard.edges
       .filter((edge) => idMap.has(edge.from.nodeId) && idMap.has(edge.to.nodeId))
       .map((edge, index) => ({
@@ -3286,7 +3289,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           ...edge.to,
           nodeId: idMap.get(edge.to.nodeId)
         }
-      }));
+      }))
+      .map((edge) => normalizeEdgeForCurrentGraph(edge, pastedNodeMap))
+      .filter(Boolean);
 
     setNodes((current) => [...current, ...pastedNodes]);
     setEdges((current) => [...current, ...pastedEdges]);
@@ -8356,9 +8361,20 @@ function visiblePortIdsForNode(node) {
   return [...inputPortIdsForNode(node), ...outputPortIdsForNode(node)];
 }
 
+function inputPortDefinitionsForNode(node) {
+  const basePorts = getNodeConfig(node?.type)?.input || [];
+  return node?.type === "composer" ? [...basePorts, ...composerCharacterInputPortsForNode(node)] : basePorts;
+}
+
+function outputPortDefinitionsForNode(node) {
+  const basePorts = getNodeConfig(node?.type)?.output || [];
+  if (node?.type === "storyboard") return [...basePorts, ...storyboardFrameOutputPortsForNode(node)];
+  if (node?.type === "text") return [{ id: "promptOut", label: "Prompt", color: portColors.prompt }];
+  return basePorts;
+}
+
 function inputPortIdsForNode(node) {
-  const basePorts = (getNodeConfig(node?.type)?.input || []).map((port) => port.id);
-  return node?.type === "composer" ? [...basePorts, ...composerCharacterInputPortIdsForNode(node)] : basePorts;
+  return inputPortDefinitionsForNode(node).map((port) => port.id);
 }
 
 function activeInputPortIdsForNode(node) {
@@ -8382,8 +8398,62 @@ function activeInputPortIdsForNode(node) {
 }
 
 function outputPortIdsForNode(node) {
-  const basePorts = (getNodeConfig(node?.type)?.output || []).map((port) => port.id);
-  return node?.type === "storyboard" ? [...basePorts, ...storyboardFrameOutputPortsForNode(node).map((port) => port.id)] : basePorts;
+  return outputPortDefinitionsForNode(node).map((port) => port.id);
+}
+
+function portDefinitionForNode(node, portId, role) {
+  const ports = role === "input" ? inputPortDefinitionsForNode(node) : outputPortDefinitionsForNode(node);
+  return ports.find((port) => port.id === portId) || null;
+}
+
+function portKindFromColor(color) {
+  return Object.entries(portColors).find(([, value]) => value === color)?.[0] || "";
+}
+
+function portKindForNodePort(node, portId, role) {
+  if (!node || !portId) return "";
+  if (role === "input" && node.type === "preview" && portId === "sourceIn") return "preview";
+  if (role === "input" && isComposerCharacterInputPort(portId, node)) return "character";
+  if (role === "output" && node.type === "storyboard" && storyboardFrameIdFromOutputPort(portId)) return "image";
+  if (role === "output" && node.type === "utility" && portId === "utilityOut") return utilityOutputType(node) === "video" ? "video" : "image";
+  if (role === "output" && node.type === "text" && portId === "promptOut") return "prompt";
+  return portKindFromColor(portDefinitionForNode(node, portId, role)?.color);
+}
+
+function acceptedInputPortKinds(node, portId) {
+  const inputKind = portKindForNodePort(node, portId, "input");
+  if (inputKind === "preview") return ["image", "video", "model3d", "transfer", "character"];
+  return inputKind ? [inputKind] : [];
+}
+
+function portsAreCompatible(source, fromPort, target, toPort) {
+  const outputKind = portKindForNodePort(source, fromPort, "output");
+  const acceptedKinds = acceptedInputPortKinds(target, toPort);
+  return Boolean(outputKind && acceptedKinds.includes(outputKind));
+}
+
+function getPortCompatibilityError(source, fromPort, target, toPort) {
+  if (portsAreCompatible(source, fromPort, target, toPort)) return "";
+  const outputKind = portKindForNodePort(source, fromPort, "output");
+  const inputKind = portKindForNodePort(target, toPort, "input");
+  if (inputKind === "preview") return "Preview accepts image, video, 3D, Mood Board, or Character outputs";
+  if (!outputKind || !inputKind) return "Choose a valid connection";
+  return `Connect matching port colors only: ${humanPortKindLabel(inputKind)} inputs do not accept ${humanPortKindLabel(outputKind)} outputs`;
+}
+
+function humanPortKindLabel(kind) {
+  return {
+    prompt: "Prompt",
+    image: "Image",
+    camera: "Camera",
+    style: "Style",
+    transfer: "Mood Board",
+    character: "Character",
+    video: "Video",
+    audio: "Audio",
+    model3d: "3D",
+    preview: "Preview"
+  }[kind] || "matching";
 }
 
 function storyboardFrameOutputPortsForNode(node) {
@@ -10611,6 +10681,7 @@ function normalizeEdgeForCurrentGraph(edge, nodeMap) {
   if (isImageModelUnsupportedInput(target, nextEdge.to.port)) return null;
   if (isImageModelUnsupportedSource(target, source)) return null;
   if (isVideoModelUnsupportedCharacterInput(target, nextEdge.to.port)) return null;
+  if (!portsAreCompatible(source, nextEdge.from.port, target, nextEdge.to.port)) return null;
 
   return nextEdge;
 }
