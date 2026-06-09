@@ -492,6 +492,7 @@ const storyboardDefaultResolution = "1K";
 const storyboardHighResolution = "4K";
 const storyboardFixedModel = imageModelNames.openAiImage2;
 const storyboardPreviousFrameLabel = "PREVIOUS_FRAME.png";
+const storyboardSpatialAnchorLabel = "SPATIAL_ANCHOR.png";
 const storyboardBaseInstruction =
   "Create a single clean film storyboard frame. Use black and white line drawing with minimalistic grayscale shading, cinematic composition, production-planning clarity, simple tonal blocking, and clear visual storytelling. No color. No text, numbers, frame borders, speech bubbles, captions, watermarks, or UI overlays unless explicitly described.";
 const storyboardContinuityInstruction =
@@ -2366,7 +2367,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       try {
         patchStoryboardFrame(currentNode.id, frame.id, { status: "running", error: "" });
         const latestStoryboardNode = storyboardNodeWithMostPreparedCharacters(currentNode, nodesRef.current.find((item) => item.id === currentNode.id));
-        const imagePromptItems = storyboardImagePromptItemsForFrame(baseImagePromptItems, latestStoryboardNode, frame);
+        const continuityReferenceItems = storyboardContinuityReferenceItems(latestStoryboardNode, frame);
+        const imagePromptItems = storyboardImagePromptItemsForFrame(baseImagePromptItems, continuityReferenceItems);
         const missingCharacterTags = storyboardMissingRequiredCharacterTags(latestStoryboardNode, incoming.characterIn || [], currentIncomingByNode, [
           frame.prompt,
           frame.beat,
@@ -2377,7 +2379,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           throw new Error(`Character sheet missing for ${missingCharacterTags.map((tag) => `@${tag}`).join(", ")}. Regenerate or re-upload that Storyboard character before running this frame.`);
         }
         const prompt = buildStoryboardFramePrompt(currentNode, frame, sceneDescription, incoming, currentIncomingByNode, {
-          hasPreviousFrameReference: imagePromptItems.some((item) => item.label === storyboardPreviousFrameLabel)
+          hasPreviousFrameReference: continuityReferenceItems.some((item) => item.label === storyboardPreviousFrameLabel),
+          hasSpatialAnchorReference: continuityReferenceItems.some((item) => item.label === storyboardSpatialAnchorLabel)
         });
         const generated = await runImageModelGeneration({
           node: {
@@ -10254,22 +10257,61 @@ function uniqueStoryboardImagePromptItems(items = []) {
   return [...uniqueItems.values()];
 }
 
-function storyboardPreviousFrameReferenceItem(node, frame) {
-  const frames = normalizedStoryboardFrames(node?.data?.storyboardFrames);
-  const frameIndex = frames.findIndex((item) => item.id === frame.id);
-  if (frameIndex <= 0) return null;
-  const previousFrame = [...frames.slice(0, frameIndex)].reverse().find((item) => item.exportUrl || item.resultUrl);
-  if (!previousFrame) return null;
-  return {
-    url: previousFrame.exportUrl || previousFrame.resultUrl,
-    label: storyboardPreviousFrameLabel
-  };
+function storyboardFrameReferenceUrl(frame = {}) {
+  return frame.exportUrl || frame.resultUrl || "";
 }
 
-function storyboardImagePromptItemsForFrame(baseItems = [], node, frame) {
+function storyboardFrameContinuityText(frame = {}) {
+  return [frame.beat, frame.prompt, frame.notes, frame.shot, frame.angle]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+function isStoryboardInsertFrame(frame = {}) {
+  const text = storyboardFrameContinuityText(frame);
+  if (!text) return false;
+  return /\b(insert|cutaway|detail|prop|object|macro|still life|phone screen|screen close|message|muffin)\b/.test(text)
+    || /\b(close[-\s]?up|closeup|extreme close[-\s]?up)\b/.test(text);
+}
+
+function isStoryboardSpatialAnchorFrame(frame = {}) {
+  if (!storyboardFrameReferenceUrl(frame) || isStoryboardInsertFrame(frame)) return false;
+  const shot = String(frame.shot || "").toUpperCase();
+  if (shot === "CU" || shot === "ECU") return false;
+  return true;
+}
+
+function storyboardContinuityReferenceItems(node, frame) {
+  const frames = normalizedStoryboardFrames(node?.data?.storyboardFrames);
+  const frameIndex = frames.findIndex((item) => item.id === frame.id);
+  if (frameIndex <= 0) return [];
+  const previousFrames = [...frames.slice(0, frameIndex)].reverse();
+  const previousFrame = previousFrames.find((item) => storyboardFrameReferenceUrl(item));
+  if (!previousFrame) return [];
+
+  const references = [{
+    url: storyboardFrameReferenceUrl(previousFrame),
+    label: storyboardPreviousFrameLabel
+  }];
+  const previousFrameIsSpatialAnchor = isStoryboardSpatialAnchorFrame(previousFrame);
+  if (!previousFrameIsSpatialAnchor) {
+    const spatialAnchorFrame = previousFrames.find((item) => isStoryboardSpatialAnchorFrame(item));
+    const spatialAnchorUrl = storyboardFrameReferenceUrl(spatialAnchorFrame);
+    if (spatialAnchorUrl && spatialAnchorUrl !== storyboardFrameReferenceUrl(previousFrame)) {
+      references.push({
+        url: spatialAnchorUrl,
+        label: storyboardSpatialAnchorLabel
+      });
+    }
+  }
+  return references;
+}
+
+function storyboardImagePromptItemsForFrame(baseItems = [], continuityReferenceItems = []) {
   return uniqueStoryboardImagePromptItems([
     ...baseItems,
-    storyboardPreviousFrameReferenceItem(node, frame)
+    ...continuityReferenceItems
   ]);
 }
 
@@ -10339,7 +10381,10 @@ function buildStoryboardFramePrompt(node, frame, sceneDescription = "", incoming
       ? `Scene continuity bible: ${resolvedSceneDescription}. Preserve the same environment, lighting source and direction, recurring objects, wardrobe, and spatial geography across the sequence. Use the current frame prompt for the exact camera angle and story moment.`
       : "",
     options.hasPreviousFrameReference
-      ? `If an uploaded image labeled ${storyboardPreviousFrameLabel} is present, use it only as continuity reference for lighting, environment, object placement, screen direction, character design, and wardrobe from the immediately preceding frame. Do not copy its exact composition, action, or camera angle unless this frame prompt asks for it.`
+      ? `If an uploaded image labeled ${storyboardPreviousFrameLabel} is present, use it as editorial continuity for the immediately preceding story beat, lighting, character design, wardrobe, and recurring objects. Do not let an insert, cutaway, object close-up, or detail shot redefine the room geography, character screen position, or 180 degree line.`
+      : "",
+    options.hasSpatialAnchorReference
+      ? `If an uploaded image labeled ${storyboardSpatialAnchorLabel} is present, use it as the primary spatial anchor for room layout, character side of frame, screen direction, eyelines, blocking, lighting direction, and object placement. The current frame prompt still controls the new shot size, camera angle, and story moment; do not copy the anchor's exact composition unless requested.`
       : ""
   ].filter(Boolean);
   const frameHeader = [
