@@ -235,6 +235,7 @@ const nodeIcons = {
   model3d: Box,
   imageModel: ImagePlus,
   videoModel: Film,
+  storyboard: Clapperboard,
   text: Type
 };
 
