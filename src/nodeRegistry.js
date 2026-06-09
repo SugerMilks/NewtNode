@@ -3,6 +3,7 @@ export const nodeTypeDefinitions = [
   { type: "image", label: "Image" },
   { type: "video", label: "Video" },
   { type: "preview", label: "Preview" },
+  { type: "storyboard", label: "Storyboard" },
   { type: "character", label: "Character" },
   { type: "camera", label: "Camera" },
   { type: "composer", label: "Composer" },
@@ -12,8 +13,7 @@ export const nodeTypeDefinitions = [
   { type: "audio", label: "Audio" },
   { type: "model3d", label: "3D" },
   { type: "imageModel", label: "Image Model" },
-  { type: "videoModel", label: "Video Model" },
-  { type: "text", label: "Text Model" }
+  { type: "videoModel", label: "Video Model" }
 ];
 
 const nodeTypeMap = new Map(nodeTypeDefinitions.map((definition) => [definition.type, definition]));

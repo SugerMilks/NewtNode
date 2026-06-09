@@ -11,7 +11,7 @@ import {
 test("runRunnableNodesByDependencyOrder respects dependency order and stage priority", async () => {
   const nodes = [
     { id: "video", type: "videoModel", data: {} },
-    { id: "text", type: "text", data: { title: "Text" } },
+    { id: "text", type: "plainText", data: { title: "Text" } },
     { id: "image", type: "imageModel", data: { title: "Image" } }
   ];
   const edges = [
@@ -31,7 +31,7 @@ test("runRunnableNodesByDependencyOrder respects dependency order and stage prio
 
   assert.deepEqual(order, ["text", "image", "video"]);
   assert.deepEqual(result, { completed: 3, failed: 0, skipped: 0 });
-  assert.equal(statuses[0], "Running 1 text model node...");
+  assert.equal(statuses[0], "Running 1 text node...");
 });
 
 test("runRunnableNodesByDependencyOrder skips dependents after failure", async () => {

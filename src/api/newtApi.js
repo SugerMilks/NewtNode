@@ -191,10 +191,6 @@ export const nodeApi = {
     return fetchJsonApi("/api/node/composer-frame", jsonBody(body), label);
   },
 
-  processText(body, label = "Text processing") {
-    return fetchJsonApi("/api/node/process-text", jsonBody(body), label);
-  },
-
   qwenCameraEdit(body, label = "Camera edit") {
     return fetchJsonApi("/api/node/qwen-camera-edit", jsonBody(body), label);
   },
@@ -213,6 +209,18 @@ export const nodeApi = {
 
   generateImage(body, label = "Image generation") {
     return fetchJsonApi("/api/node/generate-image", jsonBody(body), label);
+  },
+
+  planStoryboard(body, label = "Storyboard planning") {
+    return fetchJsonApi("/api/node/storyboard-plan", jsonBody(body), label);
+  },
+
+  exportStoryboardFrame(body, label = "Storyboard frame export") {
+    return fetchJsonApi("/api/node/storyboard-export-frame", jsonBody(body), label);
+  },
+
+  exportStoryboardBoard(body, label = "Storyboard board export") {
+    return fetchJsonApi("/api/node/storyboard-export-board", jsonBody(body), label);
   },
 
   generate3d(body, label = "3D generation") {

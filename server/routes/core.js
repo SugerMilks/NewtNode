@@ -7,6 +7,7 @@ export function registerCoreRoutes(
     selectFolderWithDialog,
     selectWorkflowFileWithDialog,
     readWorkflowFromFilePath,
+    readWorkflowFromPath,
     buildHealthPayload,
     timedApi,
     buildStorageDiagnostics,
@@ -46,11 +47,17 @@ export function registerCoreRoutes(
 
   app.post("/api/system/open-workflow-file", async (req, res) => {
     try {
-      const selectedPath = await selectWorkflowFileWithDialog({
-        title: String(req.body.title || "Open NewtNode workflow"),
-        defaultPath: String(req.body.defaultPath || "")
-      });
-      const workflow = await readWorkflowFromFilePath(selectedPath);
+      const useFolderPicker = req.body.mode === "folder";
+      const selectedPath = useFolderPicker
+        ? await selectFolderWithDialog({
+          title: String(req.body.title || "Open NewtNode workflow package folder"),
+          defaultPath: String(req.body.defaultPath || "")
+        })
+        : await selectWorkflowFileWithDialog({
+          title: String(req.body.title || "Open NewtNode workflow"),
+          defaultPath: String(req.body.defaultPath || "")
+        });
+      const workflow = await (readWorkflowFromPath || readWorkflowFromFilePath)(selectedPath);
       res.json(workflow);
     } catch (error) {
       const status = error.code === "DIALOG_CANCELED" ? 499 : 500;

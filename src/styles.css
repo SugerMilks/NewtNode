@@ -63,6 +63,12 @@ button {
   align-items: center;
   justify-content: flex-start;
   gap: 14px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.app-shell.node-app-shell .topbar {
+  width: min(1280px, calc(100vw - 32px));
 }
 
 .topbar-status {
@@ -1396,6 +1402,10 @@ textarea::placeholder {
     align-items: stretch;
     flex-direction: column;
     gap: 10px;
+  }
+
+  .app-shell.node-app-shell .topbar {
+    width: 100%;
   }
 
   .topbar-status {

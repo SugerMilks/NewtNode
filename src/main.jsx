@@ -79,6 +79,7 @@ function App() {
   const [generateAudio, setGenerateAudio] = React.useState(true);
   const [videoModel, setVideoModel] = React.useState(videoModelNames.seedance);
   const [modelPreferences, setModelPreferences] = React.useState(defaultModelPreferences);
+  const [modelPreferencesLoaded, setModelPreferencesLoaded] = React.useState(false);
   const [loopVideo, setLoopVideo] = React.useState(false);
   const [seed, setSeed] = React.useState("");
   const [status, setStatus] = React.useState("idle");
@@ -112,6 +113,7 @@ function App() {
     function handleModelSettingsUpdated(event) {
       const nextPreferences = normalizeModelPreferences(event.detail);
       setModelPreferences(nextPreferences);
+      setModelPreferencesLoaded(true);
     }
 
     window.addEventListener("newtnode:model-settings-updated", handleModelSettingsUpdated);
@@ -140,16 +142,18 @@ function App() {
   const supportsVideoLoop = isLumaVideoModel(videoModel);
 
   React.useEffect(() => {
+    if (!modelPreferencesLoaded) return;
     if (!enabledImageOptions.includes(imageModel)) {
       setImageModel(firstEnabledImageModel(modelPreferences));
     }
-  }, [enabledImageOptions, imageModel, modelPreferences]);
+  }, [enabledImageOptions, imageModel, modelPreferences, modelPreferencesLoaded]);
 
   React.useEffect(() => {
+    if (!modelPreferencesLoaded) return;
     if (!enabledVideoWorkspaceOptions.includes(videoModel)) {
       setVideoModel(firstEnabledVideoModel(modelPreferences, { workspaceOnly: true }));
     }
-  }, [enabledVideoWorkspaceOptions, modelPreferences, videoModel]);
+  }, [enabledVideoWorkspaceOptions, modelPreferences, modelPreferencesLoaded, videoModel]);
 
   React.useEffect(() => {
     if (!activeImageAspectRatios.includes(imageAspectRatio)) {
@@ -186,6 +190,8 @@ function App() {
       setModelPreferences(normalizeModelPreferences(data.modelPreferences));
     } catch {
       setModelPreferences(defaultModelPreferences);
+    } finally {
+      setModelPreferencesLoaded(true);
     }
   }
 
@@ -689,7 +695,7 @@ function App() {
       {nodeWorkspaceLoaded && (
         <div className={`nodes-tab-keepalive ${workspaceMode === "nodes" ? "active" : ""}`} aria-hidden={workspaceMode !== "nodes"}>
           <React.Suspense fallback={<WorkspaceFallback label="Loading nodes" />}>
-            <NodeEditor active={workspaceMode === "nodes"} onStatusChange={setNodeStatus} modelPreferences={modelPreferences} />
+            <NodeEditor active={workspaceMode === "nodes"} onStatusChange={setNodeStatus} modelPreferences={modelPreferences} modelPreferencesReady={modelPreferencesLoaded} />
           </React.Suspense>
         </div>
       )}
