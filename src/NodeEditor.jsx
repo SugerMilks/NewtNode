@@ -494,7 +494,9 @@ const storyboardFixedModel = imageModelNames.openAiImage2;
 const storyboardPreviousFrameLabel = "PREVIOUS_FRAME.png";
 const storyboardSpatialAnchorLabel = "SPATIAL_ANCHOR.png";
 const storyboardBaseInstruction =
-  "Create a single clean film storyboard frame. Use black and white line drawing with minimalistic grayscale shading, cinematic composition, production-planning clarity, simple tonal blocking, and clear visual storytelling. No color. No text, numbers, frame borders, speech bubbles, captions, watermarks, or UI overlays unless explicitly described.";
+  "STORYBOARD STYLE LOCK: Create a single clean hand-drawn film storyboard frame. Use black ink linework, minimal grayscale shading, loose but intentional drawing, simple tonal blocking, readable silhouettes, and production-planning clarity. This is not a realistic black-and-white photograph, not photorealistic grayscale, not a 3D render, and not photographic concept art. Avoid photographic skin texture, realistic camera lighting, glossy realism, and fully rendered photo detail. No color. No text, numbers, frame borders, speech bubbles, captions, watermarks, or UI overlays unless explicitly described.";
+const storyboardReferenceStyleGuard =
+  "FINAL STYLE PRIORITY: The hand-drawn storyboard line-art style overrides every uploaded image reference. Use references only for identity, wardrobe, continuity, screen geography, object placement, and story information. Do not copy photorealistic rendering, realistic grayscale photography, photo lighting, lens blur, skin texture, or polished photo detail from any reference image.";
 const storyboardContinuityInstruction =
   "Follow professional storyboard continuity. Maintain the 180 degree rule, screen direction, blocking, eyeline, silhouette, and editorial sequencing. Characters should not look at camera unless explicitly stated. Describe only this one frame.";
 const storyboardCharacterSheetStyleInstruction =
@@ -10381,10 +10383,10 @@ function buildStoryboardFramePrompt(node, frame, sceneDescription = "", incoming
       ? `Scene continuity bible: ${resolvedSceneDescription}. Preserve the same environment, lighting source and direction, recurring objects, wardrobe, and spatial geography across the sequence. Use the current frame prompt for the exact camera angle and story moment.`
       : "",
     options.hasPreviousFrameReference
-      ? `If an uploaded image labeled ${storyboardPreviousFrameLabel} is present, use it as editorial continuity for the immediately preceding story beat, lighting, character design, wardrobe, and recurring objects. Do not let an insert, cutaway, object close-up, or detail shot redefine the room geography, character screen position, or 180 degree line.`
+      ? `If an uploaded image labeled ${storyboardPreviousFrameLabel} is present, use it as editorial continuity for the immediately preceding story beat, lighting direction, character identity, wardrobe, and recurring objects. Do not copy its rendering style if it looks photographic or overly realistic. Do not let an insert, cutaway, object close-up, or detail shot redefine the room geography, character screen position, or 180 degree line.`
       : "",
     options.hasSpatialAnchorReference
-      ? `If an uploaded image labeled ${storyboardSpatialAnchorLabel} is present, use it as the primary spatial anchor for room layout, character side of frame, screen direction, eyelines, blocking, lighting direction, and object placement. The current frame prompt still controls the new shot size, camera angle, and story moment; do not copy the anchor's exact composition unless requested.`
+      ? `If an uploaded image labeled ${storyboardSpatialAnchorLabel} is present, use it as the primary spatial anchor for room layout, character side of frame, screen direction, eyelines, blocking, lighting direction, and object placement. Use the anchor for geography only, not rendering style. The current frame prompt still controls the new shot size, camera angle, and story moment; do not copy the anchor's exact composition unless requested.`
       : ""
   ].filter(Boolean);
   const frameHeader = [
@@ -10407,6 +10409,7 @@ function buildStoryboardFramePrompt(node, frame, sceneDescription = "", incoming
     ...stylePieces,
     ...moodBoardPieces,
     ...characterPieces,
+    storyboardStyleEnabled ? storyboardReferenceStyleGuard : "",
     "Output only the image. Do not include captions, labels, panel borders, numbering, or text unless specifically requested in the frame prompt."
   ].filter(Boolean).join("\n\n");
 }
