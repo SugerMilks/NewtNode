@@ -25,6 +25,7 @@ const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, "..");
 const uploadsDir = path.join(rootDir, "uploads");
 const outputsDir = path.join(rootDir, "outputs");
+const storyboardAssetsDir = path.join(rootDir, "public", "storyboard");
 const savedWorkflowsDir = path.join(rootDir, "saved_workflows");
 const workflowAssetsPrefix = "/workflow-assets";
 const workflowPackageInputDirName = "inputs";
@@ -9240,7 +9241,12 @@ function isLocalOutputUrl(value) {
 }
 
 function isLocalAssetUrl(value) {
-  return typeof value === "string" && (value.startsWith("/outputs/") || value.startsWith("/uploads/") || value.startsWith(`${workflowAssetsPrefix}/`));
+  return typeof value === "string" && (
+    value.startsWith("/outputs/") ||
+    value.startsWith("/uploads/") ||
+    value.startsWith("/storyboard/") ||
+    value.startsWith(`${workflowAssetsPrefix}/`)
+  );
 }
 
 async function uploadLocalOutputToFal(publicPath) {
@@ -9279,7 +9285,7 @@ function localPublicPathFromUrl(value) {
     // Fall through to the clear validation error below.
   }
 
-  throw new Error("This action can only read local NewtNode assets from uploads, outputs, or workflow packages.");
+  throw new Error("This action can only read local NewtNode assets from uploads, outputs, bundled storyboard assets, or workflow packages.");
 }
 
 async function resolveLocalAssetPath(publicPath) {
@@ -9323,10 +9329,11 @@ async function resolveLocalAssetPath(publicPath) {
 function localAssetFilePath(publicPath) {
   const isUpload = String(publicPath || "").startsWith("/uploads/");
   const isOutput = String(publicPath || "").startsWith("/outputs/");
-  if (!isUpload && !isOutput) return "";
+  const isStoryboardAsset = String(publicPath || "").startsWith("/storyboard/");
+  if (!isUpload && !isOutput && !isStoryboardAsset) return "";
 
-  const prefix = isUpload ? "/uploads/" : "/outputs/";
-  const root = isUpload ? uploadsDir : outputsDir;
+  const prefix = isUpload ? "/uploads/" : isOutput ? "/outputs/" : "/storyboard/";
+  const root = isUpload ? uploadsDir : isOutput ? outputsDir : storyboardAssetsDir;
   const relativePath = safeRelativeAssetPath(decodeURIComponent(String(publicPath || "").slice(prefix.length)));
   return relativePath ? path.join(root, relativePath) : "";
 }
