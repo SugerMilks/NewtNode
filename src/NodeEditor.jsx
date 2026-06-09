@@ -2155,6 +2155,29 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     }
   }
 
+  function importStoryboardCharacter(node, outputItem) {
+    if (!outputItem?.url || outputItem.type !== "image") return;
+    const characters = normalizedStoryboardCharacters(node.data.storyboardCharacters);
+    if (characters.length >= storyboardMaxCharacters) {
+      updateNode(node.id, { error: `Storyboard accepts up to ${storyboardMaxCharacters} internal characters.` });
+      return;
+    }
+
+    pushUndoSnapshot();
+    const asset = assetFromOutputItem(outputItem);
+    const character = createStoryboardCharacter({
+      name: storyboardCharacterNameFromFile(outputItem.fileName || outputItem.label || asset.fileName, characters.length + 1),
+      portrait: asset,
+      status: "ready"
+    });
+    updateNode(node.id, {
+      storyboardCharacters: [...characters, character],
+      useInternalStoryboardCharacters: true,
+      status: "ready",
+      error: ""
+    });
+  }
+
   function removeStoryboardCharacter(nodeId, characterId) {
     const node = nodesRef.current.find((item) => item.id === nodeId);
     if (!node) return;
@@ -3807,6 +3830,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
               onStoryboardGenerateFrame={generateStoryboardFrame}
               onStoryboardExport={exportStoryboardBoard}
               onStoryboardCharacterUpload={uploadStoryboardCharacter}
+              onStoryboardCharacterImport={importStoryboardCharacter}
               onStoryboardCharacterUpdate={updateStoryboardCharacter}
               onStoryboardCharacterRemove={removeStoryboardCharacter}
               onPreviewResizeStart={startPreviewResize}
@@ -4013,6 +4037,7 @@ function NodeCard({
   onStoryboardGenerateFrame,
   onStoryboardExport,
   onStoryboardCharacterUpload,
+  onStoryboardCharacterImport,
   onStoryboardCharacterUpdate,
   onStoryboardCharacterRemove,
   onPreviewResizeStart,
@@ -4145,6 +4170,7 @@ function NodeCard({
         onStoryboardGenerateFrame={onStoryboardGenerateFrame}
         onStoryboardExport={onStoryboardExport}
         onStoryboardCharacterUpload={onStoryboardCharacterUpload}
+        onStoryboardCharacterImport={onStoryboardCharacterImport}
         onStoryboardCharacterUpdate={onStoryboardCharacterUpdate}
         onStoryboardCharacterRemove={onStoryboardCharacterRemove}
         onPreviewResizeStart={onPreviewResizeStart}
@@ -5021,6 +5047,7 @@ function NodeBody({
   onStoryboardGenerateFrame,
   onStoryboardExport,
   onStoryboardCharacterUpload,
+  onStoryboardCharacterImport,
   onStoryboardCharacterUpdate,
   onStoryboardCharacterRemove,
   onPreviewResizeStart,
@@ -5399,6 +5426,11 @@ function NodeBody({
     function handleCharacterDrop(event) {
       allowFileDrop(event);
       if (storyboardLocked || !internalCharactersEnabled) return;
+      const outputItem = outputItemFromDataTransfer(event.dataTransfer);
+      if (outputItem?.type === "image") {
+        onStoryboardCharacterImport?.(node, outputItem);
+        return;
+      }
       const file = firstAcceptedFile(event.dataTransfer.files, "image");
       if (file) onStoryboardCharacterUpload?.(node, file);
     }
