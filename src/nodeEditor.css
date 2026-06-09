@@ -4342,6 +4342,30 @@ video.newtnode-video-fallback {
   display: none;
 }
 
+.tagged-prompt-editor.storyboard-tagged-editor textarea {
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  font: inherit;
+  letter-spacing: 0;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+.tagged-prompt-editor.storyboard-tagged-editor textarea::selection {
+  color: transparent;
+  background: rgba(221, 198, 49, 0.26);
+  -webkit-text-fill-color: transparent;
+}
+
+.tagged-prompt-editor.storyboard-tagged-editor .tagged-prompt-highlighter {
+  font: inherit;
+  letter-spacing: 0;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
 .prompt-tag-mark {
   padding: 0;
   border-radius: 4px;
