@@ -150,7 +150,7 @@ const falUtilityImageTimeoutMs = Math.max(30000, Number(process.env.FAL_UTILITY_
 const openAiTextModel = process.env.OPENAI_TEXT_MODEL || "gpt-5.5";
 const openAiTextApiKey = process.env.OPENAI_TEXT_API_KEY || process.env.OPENAI_API_KEY;
 const textLlmProvider = String(process.env.TEXT_LLM_PROVIDER || "fal").toLowerCase();
-const falTextModel = process.env.FAL_TEXT_MODEL || "openai/gpt-4o";
+const falTextModel = process.env.FAL_TEXT_MODEL || "google/gemini-2.5-flash";
 const falVisionTextModel = process.env.FAL_VISION_TEXT_MODEL || "google/gemini-2.5-flash";
 const falVisionTextFallbackModel = process.env.FAL_VISION_TEXT_FALLBACK_MODEL || "google/gemini-2.5-flash";
 const falVideoTextModel = process.env.FAL_VIDEO_TEXT_MODEL || "google/gemini-2.5-flash";
@@ -7534,7 +7534,7 @@ function estimateTextProcessingCost({ provider, usage = null, helperUsages = [],
       units: 1 + helperUsageCosts.length,
       unit: "reported request",
       mediaType: "text",
-      pricingBasis: "fal.ai reported OpenRouter token usage plus any-llm base request fallback when needed",
+      pricingBasis: "fal.ai reported OpenRouter token usage plus base request fallback when needed",
       pricingSource: "fal-usage-response"
     };
   }
@@ -7564,7 +7564,7 @@ function estimateTextProcessingCost({ provider, usage = null, helperUsages = [],
     units: 1,
     unit: "request",
     mediaType: "text",
-    pricingBasis: normalizedProvider === "fal" ? "fal.ai any-llm request estimate plus media helper calls" : "No local token estimate for OpenAI text",
+    pricingBasis: normalizedProvider === "fal" ? "fal.ai OpenRouter request estimate plus media helper calls" : "No local token estimate for OpenAI text",
     pricingSource: "configured-pricing-v1"
   };
 }
@@ -7717,10 +7717,11 @@ async function processTextWithFal({ text, textInputs, imageInputs, videoInputs }
   const imageContext = await describeImageInputs(imageInputs);
   const videoContext = await describeVideoInputs(videoInputs);
   const prompt = buildTextProcessingPrompt({ text, textInputs, imageDescriptions: imageContext.descriptions, videoDescriptions: videoContext.descriptions });
-  const data = await subscribeFal("fal-ai/any-llm", {
+  const data = await subscribeFal("openrouter/router", {
     input: {
       model,
-      prompt
+      prompt,
+      system_prompt: textProcessingInstructions()
     },
     logs: true
   });
@@ -7734,7 +7735,7 @@ async function processTextWithFal({ text, textInputs, imageInputs, videoInputs }
     text: outputText,
     model,
     provider: "fal",
-    endpoint: "fal-ai/any-llm",
+    endpoint: "openrouter/router",
     submittedPrompt: prompt,
     usage: falResultUsage(data),
     helperUsages: [...imageContext.usages, ...videoContext.usages]
