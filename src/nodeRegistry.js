@@ -3,6 +3,7 @@ export const nodeTypeDefinitions = [
   { type: "image", label: "Image" },
   { type: "video", label: "Video" },
   { type: "preview", label: "Preview" },
+  { type: "storyboard", label: "Storyboard" },
   { type: "character", label: "Character" },
   { type: "camera", label: "Camera" },
   { type: "composer", label: "Composer" },

@@ -11,6 +11,7 @@ import { File } from "node:buffer";
 import { randomUUID } from "node:crypto";
 import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
+import { deflateSync, inflateSync } from "node:zlib";
 import { fal } from "@fal-ai/client";
 import ffmpegStaticPath from "ffmpeg-static";
 import ffprobeStatic from "ffprobe-static";
@@ -24,11 +25,13 @@ const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, "..");
 const uploadsDir = path.join(rootDir, "uploads");
 const outputsDir = path.join(rootDir, "outputs");
+const storyboardAssetsDir = path.join(rootDir, "public", "storyboard");
 const savedWorkflowsDir = path.join(rootDir, "saved_workflows");
 const workflowAssetsPrefix = "/workflow-assets";
 const workflowPackageInputDirName = "inputs";
 const workflowPackageOutputDirName = "outputs";
 const workflowPackageDependencyDirName = "dependencies";
+const workflowPackageStoryboardDirName = "storyboards";
 const workflowPackageMetadataDirName = ".newtnode";
 const workflowPackageManifestFileName = "manifest.json";
 const composerPosesDir = path.join(rootDir, "public", "models", "poses");
@@ -74,6 +77,7 @@ const hunyuan3DProBaseCost = Number(process.env.HUNYUAN_3D_PRO_BASE_COST || 0.37
 const hunyuan3DProAddOnCost = Number(process.env.HUNYUAN_3D_PRO_ADD_ON_COST || 0.15);
 const nanoImageAspectRatios = ["21:9", "16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3", "4:5", "5:4"];
 const openAiImageAspectRatios = nanoImageAspectRatios;
+const storyboardAspectRatioOptions = ["16:9", "21:9", "9:16", "1:1"];
 const lumaImageAspectRatios = ["21:9", "16:9", "9:16", "1:1", "4:3", "3:4", "9:21"];
 const lumaVideoAspectRatios = ["16:9", "9:16", "4:3", "3:4", "21:9", "9:21"];
 const imageModelNames = {
@@ -277,6 +281,7 @@ registerCoreRoutes(app, {
   selectFolderWithDialog,
   selectWorkflowFileWithDialog,
   readWorkflowFromFilePath,
+  readWorkflowFromPath,
   buildHealthPayload,
   timedApi,
   buildStorageDiagnostics,
@@ -1651,6 +1656,181 @@ app.post("/api/node/generate-image", async (req, res) => {
 
     console.error(error);
     res.status(500).json({ error: error.message || "Image generation failed." });
+  }
+});
+
+app.post("/api/node/storyboard-plan", async (req, res) => {
+  try {
+    const sceneDescription = String(req.body.sceneDescription || req.body.prompt || "").trim();
+    if (!sceneDescription) {
+      return res.status(400).json({ error: "Scene description is required." });
+    }
+
+    const requestedFrameCount = normalizeStoryboardFrameCount(req.body.frameCount);
+    const plan = process.env.GOOGLE_API_KEY
+      ? await generateStoryboardPlanWithGemini({
+        sceneDescription,
+        frameCount: requestedFrameCount,
+        characters: Array.isArray(req.body.characters) ? req.body.characters : [],
+        notes: String(req.body.notes || "").trim()
+      })
+      : fallbackStoryboardPlan(sceneDescription, requestedFrameCount);
+
+    res.json({ plan: normalizeStoryboardPlan(plan, sceneDescription, requestedFrameCount) });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      error: error.message || "Storyboard planning failed.",
+      plan: fallbackStoryboardPlan(String(req.body.sceneDescription || req.body.prompt || ""), normalizeStoryboardFrameCount(req.body.frameCount))
+    });
+  }
+});
+
+app.post("/api/node/storyboard-export-frame", async (req, res) => {
+  try {
+    const sourceUrl = String(req.body.sourceUrl || "").trim();
+    if (!sourceUrl) {
+      return res.status(400).json({ error: "Source frame URL is required." });
+    }
+
+    const source = await resolveLocalAssetPath(sourceUrl);
+    const sceneName = safePathSegment(req.body.sceneName || "Scene 1");
+    const frameNumber = Math.max(1, Number.parseInt(req.body.frameNumber, 10) || 1);
+    const extension = path.extname(source.fileName || "") || ".png";
+    const fileName = `Frame_${String(frameNumber).padStart(3, "0")}${extension}`;
+    const workflowContext = workflowPackageContextFromBody(req.body);
+    let targetPath;
+    let publicPath;
+
+    if (workflowContext?.packagePath) {
+      await ensureWorkflowPackageDirs(workflowContext.packagePath);
+      const relativePath = path.join(workflowPackageStoryboardDirName, sceneName, fileName);
+      targetPath = path.join(workflowContext.packagePath, relativePath);
+      publicPath = workflowPackagePublicPath(workflowContext.id, relativePath);
+    } else {
+      const projectName = safePathSegment(req.body.projectName || "Untitled-node-project");
+      const relativePath = path.join(workflowPackageStoryboardDirName, projectName, sceneName, fileName);
+      targetPath = path.join(outputsDir, relativePath);
+      publicPath = `/outputs/${relativePath.split(path.sep).map(encodeURIComponent).join("/")}`;
+    }
+
+    await mkdir(path.dirname(targetPath), { recursive: true });
+    await copyFile(source.filePath, targetPath);
+
+    res.json({
+      frame: {
+        localUrl: publicPath,
+        fileName,
+        storedFileName: publicPath,
+        mimeType: mimeTypeForExtension(extension),
+        mediaType: "image"
+      }
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: error.message || "Storyboard frame export failed." });
+  }
+});
+
+app.post("/api/node/storyboard-export-board", async (req, res) => {
+  try {
+    const rawFrames = Array.isArray(req.body.frames) ? req.body.frames : [];
+    const frames = rawFrames
+      .map((frame, index) => ({
+        number: Math.max(1, Number.parseInt(frame.number, 10) || index + 1),
+        sourceUrl: String(frame.sourceUrl || frame.exportUrl || frame.resultUrl || "").trim(),
+        prompt: String(frame.prompt || "").trim(),
+        beat: String(frame.beat || "").trim(),
+        notes: String(frame.notes || "").trim(),
+        shot: String(frame.shot || "").trim(),
+        lens: String(frame.lens || "").trim(),
+        angle: String(frame.angle || "").trim()
+      }))
+      .filter((frame) => frame.sourceUrl);
+
+    if (!frames.length) {
+      return res.status(400).json({ error: "No completed storyboard frames to export." });
+    }
+
+    const sceneName = safePathSegment(req.body.sceneName || "Scene 1");
+    const exportFolderName = `final_boards_${timestampForFileName()}`;
+    const workflowContext = workflowPackageContextFromBody(req.body);
+    const descriptions = await storyboardExportDescriptions({
+      sceneName,
+      sceneDescription: String(req.body.sceneDescription || "").trim(),
+      frames
+    });
+    let targetDir;
+    let publicBasePath;
+    const exportDestinationPath = normalizeWorkflowPackagePath(req.body.exportDestinationPath);
+
+    if (exportDestinationPath) {
+      targetDir = path.join(exportDestinationPath, exportFolderName);
+      publicBasePath = "";
+    } else if (workflowContext?.packagePath) {
+      await ensureWorkflowPackageDirs(workflowContext.packagePath);
+      const relativePath = path.join(workflowPackageStoryboardDirName, sceneName, exportFolderName);
+      targetDir = path.join(workflowContext.packagePath, relativePath);
+      publicBasePath = workflowPackagePublicPath(workflowContext.id, relativePath);
+    } else {
+      const projectName = safePathSegment(req.body.projectName || "Untitled-node-project");
+      const relativePath = path.join(workflowPackageStoryboardDirName, projectName, sceneName, exportFolderName);
+      targetDir = path.join(outputsDir, relativePath);
+      publicBasePath = `/outputs/${relativePath.split(path.sep).map(encodeURIComponent).join("/")}`;
+    }
+
+    await mkdir(targetDir, { recursive: true });
+
+    const exportedFrames = [];
+    for (const [index, frame] of frames.entries()) {
+      const source = await resolveLocalAssetPath(frame.sourceUrl);
+      const extension = storyboardExportFrameExtension(source.fileName);
+      const fileName = `frame_${index + 1}${extension}`;
+      const targetPath = path.join(targetDir, fileName);
+      await copyFile(source.filePath, targetPath);
+      exportedFrames.push({
+        ...frame,
+        number: index + 1,
+        sourceNumber: frame.number,
+        fileName,
+        filePath: targetPath,
+        localPath: targetPath,
+        localUrl: publicBasePath ? `${publicBasePath}/${encodeURIComponent(fileName)}` : "",
+        description: descriptions[index] || storyboardFrameDescriptionFallback(frame)
+      });
+    }
+
+    let pdf = null;
+    if (req.body.includePdf !== false) {
+      const pdfFileName = "storyboard_boards.pdf";
+      const pdfPath = path.join(targetDir, pdfFileName);
+      await writeFile(pdfPath, await createStoryboardPdf({
+        title: req.body.sceneName || "Storyboard",
+        sceneDescription: String(req.body.sceneDescription || "").trim(),
+        aspectRatio: normalizeStoryboardAspectRatio(req.body.aspectRatio),
+        frames: exportedFrames
+      }));
+      pdf = {
+        fileName: pdfFileName,
+        localPath: pdfPath,
+        localUrl: publicBasePath ? `${publicBasePath}/${encodeURIComponent(pdfFileName)}` : "",
+        mimeType: "application/pdf"
+      };
+    }
+
+    res.json({
+      export: {
+        folderName: exportFolderName,
+        folderPath: targetDir,
+        publicPath: publicBasePath,
+        frameCount: exportedFrames.length,
+        frames: exportedFrames.map(({ filePath: _filePath, ...frame }) => frame),
+        pdf
+      }
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: error.message || "Storyboard board export failed." });
   }
 });
 
@@ -4163,6 +4343,10 @@ function safePathSegment(value) {
     .slice(0, 80) || "mood-board";
 }
 
+function timestampForFileName(date = new Date()) {
+  return date.toISOString().replace(/[:.]/g, "-");
+}
+
 function safeWorkflowFileName(value) {
   const fileName = path.basename(String(value || ""));
   if (!fileName.toLowerCase().endsWith(".json")) return "";
@@ -4650,6 +4834,68 @@ async function readWorkflowFromFilePath(filePath) {
   );
 }
 
+async function readWorkflowFromPath(selectedPath) {
+  const normalizedPath = normalizeWorkflowPackagePath(selectedPath);
+  if (!normalizedPath || !existsSync(normalizedPath)) {
+    throw new Error("Workflow path is not accessible.");
+  }
+
+  const metadata = await stat(normalizedPath);
+  return metadata.isDirectory()
+    ? readWorkflowFromPackagePath(normalizedPath)
+    : readWorkflowFromFilePath(normalizedPath);
+}
+
+async function readWorkflowFromPackagePath(packagePath) {
+  const normalizedPath = normalizeWorkflowPackagePath(packagePath);
+  if (!normalizedPath || !existsSync(normalizedPath) || !statSync(normalizedPath).isDirectory()) {
+    throw new Error("Workflow package folder is not accessible.");
+  }
+
+  const workflowFileName = await workflowFileNameFromPackageManifest(normalizedPath) || await findWorkflowJsonFileName(normalizedPath);
+  if (!workflowFileName) {
+    throw new Error("That folder does not contain a NewtNode workflow JSON.");
+  }
+
+  return readWorkflowFromFilePath(path.join(normalizedPath, workflowFileName));
+}
+
+async function workflowFileNameFromPackageManifest(packagePath) {
+  const manifestPaths = [workflowPackageManifestPath(packagePath), legacyWorkflowPackageManifestPath(packagePath)];
+
+  for (const manifestPath of manifestPaths) {
+    try {
+      const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+      const workflowFileName = safeWorkflowFileName(manifest.workflowFileName);
+      if (workflowFileName && existsSync(path.join(packagePath, workflowFileName))) return workflowFileName;
+    } catch {
+      // Ignore missing or invalid package metadata and fall back to scanning.
+    }
+  }
+
+  return "";
+}
+
+async function findWorkflowJsonFileName(packagePath) {
+  const entries = await readdir(packagePath, { withFileTypes: true });
+  const jsonFiles = entries
+    .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".json"))
+    .map((entry) => entry.name);
+
+  for (const fileName of jsonFiles) {
+    try {
+      const workflow = JSON.parse(await readFile(path.join(packagePath, fileName), "utf8"));
+      if (workflow?.graph && Array.isArray(workflow.graph.nodes) && Array.isArray(workflow.graph.edges)) {
+        return fileName;
+      }
+    } catch {
+      // Keep scanning for a valid workflow JSON.
+    }
+  }
+
+  return "";
+}
+
 function workflowShouldRegisterOpenedPackage(workflow, packagePath) {
   if (!packagePath) return false;
   if (workflow.packagePath || workflow.package?.rootPath || workflow.package?.workflowFileName) return true;
@@ -4890,9 +5136,11 @@ async function selectFolderWithLinuxDialog({ title, defaultPath }) {
 async function selectWorkflowFileWithMacDialog({ title, defaultPath }) {
   const selectedFile = existingFilePath(defaultPath);
   const selectedDirectory = selectedFile ? path.dirname(selectedFile) : existingDirectoryPath(defaultPath);
+  // Let NewtNode validate the selected JSON after the dialog. AppleScript's
+  // file type filter can gray out valid .json files depending on the Mac's UTI metadata.
   const script = selectedDirectory
-    ? `POSIX path of (choose file with prompt ${JSON.stringify(title)} of type {"json"} default location POSIX file ${JSON.stringify(selectedDirectory)})`
-    : `POSIX path of (choose file with prompt ${JSON.stringify(title)} of type {"json"})`;
+    ? `POSIX path of (choose file with prompt ${JSON.stringify(title)} default location POSIX file ${JSON.stringify(selectedDirectory)})`
+    : `POSIX path of (choose file with prompt ${JSON.stringify(title)})`;
   return runFileDialogCommand("osascript", ["-e", script]);
 }
 
@@ -8207,6 +8455,639 @@ function normalizeGeminiImageSize(value) {
   return normalizeChoice(normalized, ["1K", "2K", "4K"], "2K");
 }
 
+function normalizeStoryboardFrameCount(value) {
+  const normalized = String(value || "Auto").trim();
+  if (/^auto$/i.test(normalized)) return 6;
+  const parsed = Number.parseInt(normalized, 10);
+  return Math.min(24, Math.max(1, Number.isFinite(parsed) ? parsed : 6));
+}
+
+async function generateStoryboardPlanWithGemini({ sceneDescription, frameCount, characters = [], notes = "" }) {
+  const model = process.env.STORYBOARD_TEXT_MODEL || "gemini-2.5-flash";
+  const characterSummary = characters
+    .map((character, index) => `Character ${index + 1}: ${character.name || character.tag || "Unnamed"}${character.tag ? ` (@${character.tag})` : ""}`)
+    .join("\n") || "No character references supplied.";
+  const prompt = `You are not an image prompt writer first. You are a professional storyboard artist and director's visual planner.
+
+Create a film storyboard shot plan as strict JSON only. Do not include markdown fences.
+
+Scene brief:
+${sceneDescription}
+
+Known characters:
+${characterSummary}
+
+Additional notes:
+${notes || "None"}
+
+Rules:
+1. Follow industry standard film storyboard practices.
+2. Maintain screen direction and follow the 180 degree rule.
+3. Characters should never look at camera unless specifically stated.
+4. Over-the-Shoulder shots must follow the 180 degree rule.
+5. Use inserts only when they reveal new story information.
+6. Prioritize blocking, eyeline, silhouette, and continuity.
+7. Do not invent props, characters, locations, or action not in the scene brief.
+8. Generate prompts that describe one frame only, not the whole scene.
+9. Follow editorial sequencing principles where each frame builds on the previous frame.
+10. When a known character appears or is implied in a frame prompt, refer to them with their exact @tag from Known characters. Do not replace @tags with generic character descriptions.
+11. Maintain a compact continuity bible for the scene: fixed environment, lighting source and direction, key recurring objects, wardrobe, and screen geography.
+12. Include the relevant continuity bible details inside each frame prompt so image generations preserve the same world while changing only the shot, action, or discovery.
+13. If the scene brief includes multiple @tagged characters, keep those identities separate in the shot plan and include each relevant @tag in every frame where that character appears.
+
+Return this exact JSON shape:
+{
+  "sceneTitle": "short title",
+  "analysis": "one concise sentence about screen direction and visual continuity",
+  "frames": [
+    {
+      "number": 1,
+      "shot": "CU, MS, WS, ECU, or EWS",
+      "lens": "None, 18mm, 35mm, 50mm, 85mm, 120mm, or Macro",
+      "angle": "None, Low Angle, High Angle, Extreme High, Extreme Low, Portrait, or Profile",
+      "beat": "story beat in one sentence",
+      "prompt": "single-frame image prompt, concise but visually complete, including stable environment, lighting, recurring objects, wardrobe, and screen geography details where relevant",
+      "notes": "continuity note in one short phrase"
+    }
+  ]
+}
+
+Create ${frameCount} frames unless the scene absolutely requires fewer or more, with a hard limit of 24 frames.`;
+
+  const text = await generateGeminiText({
+    model,
+    prompt,
+    responseMimeType: "application/json"
+  });
+
+  return parseStoryboardPlanJson(text);
+}
+
+async function generateGeminiText({ model, prompt, responseMimeType = "text/plain" }) {
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-goog-api-key": process.env.GOOGLE_API_KEY
+    },
+    body: JSON.stringify({
+      contents: [
+        {
+          parts: [{ text: prompt }]
+        }
+      ],
+      generationConfig: {
+        temperature: 0.45,
+        responseMimeType
+      }
+    })
+  });
+
+  const data = await response.json();
+  if (!response.ok) {
+    throw httpError(response.status, data?.error?.message || "Storyboard planning failed.", { raw: data });
+  }
+
+  const parsed = extractGeminiImageData(data);
+  return parsed.text || "";
+}
+
+function parseStoryboardPlanJson(text) {
+  const raw = String(text || "").trim();
+  if (!raw) throw new Error("Storyboard planner returned no text.");
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1];
+  const candidate = fenced || raw;
+  const firstBrace = candidate.indexOf("{");
+  const lastBrace = candidate.lastIndexOf("}");
+  const jsonText = firstBrace >= 0 && lastBrace > firstBrace ? candidate.slice(firstBrace, lastBrace + 1) : candidate;
+  return JSON.parse(jsonText);
+}
+
+function normalizeStoryboardPlan(plan = {}, sceneDescription = "", requestedFrameCount = 6) {
+  const fallback = fallbackStoryboardPlan(sceneDescription, requestedFrameCount);
+  const frames = Array.isArray(plan.frames) ? plan.frames : [];
+  const normalizedFrames = frames
+    .slice(0, 24)
+    .map((frame, index) => normalizeStoryboardPlanFrame(frame, index))
+    .filter((frame) => frame.prompt);
+
+  return {
+    sceneTitle: String(plan.sceneTitle || fallback.sceneTitle || "Scene 1").trim().slice(0, 80),
+    analysis: String(plan.analysis || fallback.analysis || "").trim().slice(0, 240),
+    frames: normalizedFrames.length ? normalizedFrames : fallback.frames
+  };
+}
+
+function normalizeStoryboardPlanFrame(frame = {}, index = 0) {
+  return {
+    number: Math.max(1, Number.parseInt(frame.number, 10) || index + 1),
+    shot: normalizeChoice(String(frame.shot || "None"), ["None", "CU", "MS", "WS", "ECU", "EWS"], "None"),
+    lens: normalizeChoice(String(frame.lens || "None"), ["None", "18mm", "35mm", "50mm", "85mm", "120mm", "Macro"], "None"),
+    angle: normalizeChoice(String(frame.angle || "None"), ["None", "Low Angle", "High Angle", "Extreme High", "Extreme Low", "Portrait", "Profile"], "None"),
+    beat: String(frame.beat || "").trim().slice(0, 240),
+    prompt: String(frame.prompt || "").trim().slice(0, 1400),
+    notes: String(frame.notes || "").trim().slice(0, 240)
+  };
+}
+
+function fallbackStoryboardPlan(sceneDescription = "", frameCount = 6) {
+  const cleanScene = String(sceneDescription || "A clear cinematic scene").trim();
+  const shots = ["WS", "MS", "CU", "MS", "CU", "WS", "OTS", "ECU", "EWS"];
+  const beats = [
+    "Establish the location, subjects, and screen direction.",
+    "Move closer to show the main action and blocking.",
+    "Isolate the key emotional or story detail.",
+    "Show the response or next action while preserving eyelines.",
+    "Use an insert only if it reveals new information.",
+    "Resolve the moment with a wider contextual frame."
+  ];
+  return {
+    sceneTitle: "Scene 1",
+    analysis: "A simple continuity-safe sequence with clear screen direction and escalating visual information.",
+    frames: Array.from({ length: Math.max(1, frameCount) }, (_item, index) => ({
+      number: index + 1,
+      shot: shots[index % shots.length] === "OTS" ? "MS" : shots[index % shots.length],
+      lens: index === 0 ? "35mm" : "None",
+      angle: "None",
+      beat: beats[index % beats.length],
+      prompt: `${beats[index % beats.length]} Single storyboard frame for: ${cleanScene}. Keep characters off-camera gaze unless explicitly described. Preserve screen direction, blocking, silhouette, eyeline, and continuity.`,
+      notes: "Continuity-safe fallback frame"
+    }))
+  };
+}
+
+function storyboardExportFrameExtension(fileName = "") {
+  const extension = path.extname(fileName).toLowerCase();
+  if ([".png", ".jpg", ".jpeg"].includes(extension)) return extension === ".jpeg" ? ".jpg" : extension;
+  return extension || ".png";
+}
+
+async function storyboardExportDescriptions({ sceneName = "Storyboard", sceneDescription = "", frames = [] } = {}) {
+  const fallback = frames.map(storyboardFrameDescriptionFallback);
+  if (!process.env.GOOGLE_API_KEY) return fallback;
+
+  try {
+    const frameText = frames.map((frame, index) => [
+      `Frame ${index + 1}`,
+      frame.beat ? `Beat: ${frame.beat}` : "",
+      frame.prompt ? `Prompt: ${frame.prompt}` : "",
+      frame.notes ? `Continuity note: ${frame.notes}` : "",
+      [frame.shot, frame.lens, frame.angle].filter(Boolean).join(", ")
+    ].filter(Boolean).join("\n")).join("\n\n");
+    const text = await generateGeminiText({
+      model: process.env.STORYBOARD_TEXT_MODEL || "gemini-2.5-flash",
+      responseMimeType: "application/json",
+      prompt: `Create concise production-board descriptions as strict JSON only. Do not include markdown fences.
+
+Scene: ${sceneName}
+Scene brief: ${sceneDescription || "None"}
+
+Frames:
+${frameText}
+
+Return this exact JSON shape:
+{
+  "descriptions": [
+    "one short visual description for frame 1, 10 to 24 words, no camera metadata unless visually useful"
+  ]
+}
+
+Descriptions must be in the same order as the frames. Keep them clear, readable, and useful below a storyboard panel.`
+    });
+    const parsed = parseStoryboardPlanJson(text);
+    const descriptions = Array.isArray(parsed.descriptions) ? parsed.descriptions : [];
+    return frames.map((frame, index) => cleanStoryboardDescription(descriptions[index]) || fallback[index] || storyboardFrameDescriptionFallback(frame));
+  } catch (error) {
+    console.warn("Storyboard PDF descriptions used fallback:", error.message);
+    return fallback;
+  }
+}
+
+function storyboardFrameDescriptionFallback(frame = {}) {
+  return cleanStoryboardDescription(frame.beat || frame.prompt || frame.notes || "Storyboard frame.");
+}
+
+function cleanStoryboardDescription(value = "") {
+  const text = String(value || "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text) return "";
+  return text.length > 160 ? `${text.slice(0, 157).trim()}...` : text;
+}
+
+async function createStoryboardPdf({ title = "Storyboard", sceneDescription = "", aspectRatio = "16:9", frames = [] } = {}) {
+  const pdf = new SimplePdfDocument();
+  const normalizedAspectRatio = normalizeStoryboardAspectRatio(aspectRatio);
+  const layout = storyboardPdfLayoutForAspect(normalizedAspectRatio);
+  const pageWidth = 1152;
+  const pageHeight = 648;
+  const marginX = 46;
+  const contentTop = pageHeight - 116;
+  const contentBottom = 38;
+  const panelLayout = storyboardPdfPanelLayout({
+    pageWidth,
+    pageHeight,
+    marginX,
+    contentTop,
+    contentBottom,
+    aspectRatio: normalizedAspectRatio,
+    layout
+  });
+  const framesPerPage = layout.rows * layout.cols;
+  const pdfImages = await Promise.all(frames.map(async (frame) => {
+    try {
+      return await readPdfImage(frame.filePath);
+    } catch (error) {
+      console.warn(`Storyboard PDF skipped image ${frame.fileName}:`, error.message);
+      return null;
+    }
+  }));
+
+  for (let pageStart = 0; pageStart < frames.length; pageStart += framesPerPage) {
+    const pageFrames = frames.slice(pageStart, pageStart + framesPerPage);
+    const pageImages = pdfImages.slice(pageStart, pageStart + framesPerPage);
+    const ops = [];
+    const xobjects = {};
+    const pageNumber = Math.floor(pageStart / framesPerPage) + 1;
+    addPdfRect(ops, 0, 0, pageWidth, pageHeight, { fill: [0.93, 0.93, 0.93] });
+    addPdfText(ops, marginX, pageHeight - 84, "STORYBOARDS", 34, true);
+    addPdfLine(ops, marginX + 318, pageHeight - 73, pageWidth - marginX, pageHeight - 73, { width: 2.2 });
+    const metadata = [title && title !== "Storyboard" ? title : "", normalizedAspectRatio].filter(Boolean).join("  /  ");
+    if (metadata) addPdfText(ops, marginX, pageHeight - 103, metadata, 9, true, [0.18, 0.18, 0.18]);
+
+    pageFrames.forEach((frame, index) => {
+      const row = Math.floor(index / layout.cols);
+      const col = index % layout.cols;
+      const x = panelLayout.startX + col * (panelLayout.panelWidth + layout.gapX);
+      const imageTop = panelLayout.startTop - row * (panelLayout.panelHeight + layout.captionHeight + layout.rowGap);
+      const imageY = imageTop - panelLayout.panelHeight;
+      const image = pageImages[index];
+
+      if (image) {
+        const imageName = `Im${pageStart + index + 1}`;
+        const imageObjectId = pdf.addImage(image);
+        xobjects[imageName] = imageObjectId;
+        const fit = fitPdfRect(image.width, image.height, panelLayout.panelWidth, panelLayout.panelHeight);
+        const drawX = x + (panelLayout.panelWidth - fit.width) / 2;
+        const drawY = imageY + (panelLayout.panelHeight - fit.height) / 2;
+        addPdfRect(ops, x, imageY, panelLayout.panelWidth, panelLayout.panelHeight, { fill: [1, 1, 1] });
+        ops.push(`q ${formatPdfNumber(fit.width)} 0 0 ${formatPdfNumber(fit.height)} ${formatPdfNumber(drawX)} ${formatPdfNumber(drawY)} cm /${imageName} Do Q`);
+      } else {
+        addPdfRect(ops, x, imageY, panelLayout.panelWidth, panelLayout.panelHeight, { fill: [1, 1, 1] });
+        addPdfText(ops, x + 16, imageY + panelLayout.panelHeight / 2, "Image unavailable", 10);
+      }
+
+      addPdfRect(ops, x, imageY, panelLayout.panelWidth, panelLayout.panelHeight, { stroke: [0, 0, 0], width: 2 });
+      const badgeWidth = Math.max(17, String(frame.number).length * 8 + 8);
+      addPdfRect(ops, x, imageTop - 17, badgeWidth, 17, { fill: [0, 0, 0] });
+      addPdfText(ops, x + 3.2, imageTop - 14, String(frame.number), 11, true, [1, 1, 1]);
+
+      const descriptionY = imageY - 16;
+      const captionLines = Math.max(2, Math.floor((layout.captionHeight - 7) / 12));
+      const captionWidth = Math.max(20, Math.floor(panelLayout.panelWidth / 6.9));
+      wrapPdfText(frame.description || storyboardFrameDescriptionFallback(frame), captionWidth).slice(0, captionLines).forEach((line, lineIndex) => {
+        addPdfText(ops, x + 9, descriptionY - lineIndex * 12, line, 10.5, false);
+      });
+    });
+
+    addPdfText(ops, pageWidth - marginX - 18, 13, String(pageNumber), 14, false, [0.32, 0.32, 0.32]);
+    pdf.addPage({ width: pageWidth, height: pageHeight, content: ops.join("\n"), xobjects });
+  }
+
+  return pdf.render();
+}
+
+function normalizeStoryboardAspectRatio(value) {
+  const ratio = String(value || "16:9").match(/\d+:\d+/)?.[0] || "16:9";
+  return normalizeChoice(ratio, storyboardAspectRatioOptions, "16:9");
+}
+
+function storyboardPdfLayoutForAspect(aspectRatio) {
+  switch (normalizeStoryboardAspectRatio(aspectRatio)) {
+    case "21:9":
+      return { cols: 2, rows: 2, gapX: 12, rowGap: 24, captionHeight: 38 };
+    case "9:16":
+      return { cols: 6, rows: 1, gapX: 8, rowGap: 0, captionHeight: 48 };
+    case "1:1":
+      return { cols: 4, rows: 2, gapX: 8, rowGap: 24, captionHeight: 38 };
+    case "16:9":
+    default:
+      return { cols: 3, rows: 2, gapX: 0, rowGap: 24, captionHeight: 38 };
+  }
+}
+
+function storyboardPdfPanelLayout({ pageWidth, pageHeight, marginX, contentTop, contentBottom, aspectRatio, layout }) {
+  const availableWidth = pageWidth - marginX * 2;
+  const availableHeight = contentTop - contentBottom;
+  const ratio = aspectRatioNumber(aspectRatio);
+  const widthByColumns = (availableWidth - layout.gapX * (layout.cols - 1)) / layout.cols;
+  const heightByRows = (availableHeight - layout.rowGap * (layout.rows - 1) - layout.captionHeight * layout.rows) / layout.rows;
+  const panelWidth = Math.max(1, Math.min(widthByColumns, heightByRows * ratio));
+  const panelHeight = Math.max(1, panelWidth / ratio);
+  const gridWidth = panelWidth * layout.cols + layout.gapX * (layout.cols - 1);
+  const gridHeight = panelHeight * layout.rows + layout.captionHeight * layout.rows + layout.rowGap * (layout.rows - 1);
+
+  return {
+    panelWidth,
+    panelHeight,
+    startX: marginX + Math.max(0, (availableWidth - gridWidth) / 2),
+    startTop: contentTop - Math.max(0, (availableHeight - gridHeight) / 2)
+  };
+}
+
+function fitPdfRect(width, height, maxWidth, maxHeight) {
+  const scale = Math.min(maxWidth / Math.max(1, width), maxHeight / Math.max(1, height));
+  return {
+    width: width * scale,
+    height: height * scale
+  };
+}
+
+function addPdfText(ops, x, y, text, size = 10, bold = false, color = [0, 0, 0]) {
+  addPdfTextColor(ops, x, y, text, size, bold, color);
+}
+
+function addPdfTextColor(ops, x, y, text, size = 10, bold = false, color = [0, 0, 0]) {
+  const font = bold ? "/F2" : "/F1";
+  ops.push(`${formatPdfColor(color)} rg`);
+  ops.push(`BT ${font} ${formatPdfNumber(size)} Tf ${formatPdfNumber(x)} ${formatPdfNumber(y)} Td (${escapePdfText(text)}) Tj ET`);
+}
+
+function addPdfRect(ops, x, y, width, height, { fill = null, stroke = null, lineWidth = 1, width: strokeWidth = null } = {}) {
+  if (fill) ops.push(`${formatPdfColor(fill)} rg`);
+  if (stroke) ops.push(`${formatPdfColor(stroke)} RG ${formatPdfNumber(strokeWidth || lineWidth)} w`);
+  ops.push(`${formatPdfNumber(x)} ${formatPdfNumber(y)} ${formatPdfNumber(width)} ${formatPdfNumber(height)} re ${fill && stroke ? "B" : fill ? "f" : "S"}`);
+}
+
+function addPdfLine(ops, x1, y1, x2, y2, { color = [0, 0, 0], width = 1 } = {}) {
+  ops.push(`${formatPdfColor(color)} RG ${formatPdfNumber(width)} w`);
+  ops.push(`${formatPdfNumber(x1)} ${formatPdfNumber(y1)} m ${formatPdfNumber(x2)} ${formatPdfNumber(y2)} l S`);
+}
+
+function wrapPdfText(text = "", maxChars = 64) {
+  const words = String(text || "").split(/\s+/).filter(Boolean);
+  const lines = [];
+  let line = "";
+  for (const word of words) {
+    const next = line ? `${line} ${word}` : word;
+    if (next.length > maxChars && line) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = next;
+    }
+  }
+  if (line) lines.push(line);
+  return lines.length ? lines : [""];
+}
+
+function escapePdfText(value = "") {
+  return String(value || "")
+    .normalize("NFKD")
+    .replace(/[^\x20-\x7E]/g, "")
+    .replace(/\\/g, "\\\\")
+    .replace(/\(/g, "\\(")
+    .replace(/\)/g, "\\)");
+}
+
+function formatPdfNumber(value) {
+  return Number(value).toFixed(2).replace(/\.?0+$/, "");
+}
+
+function formatPdfColor(color = [0, 0, 0]) {
+  return color.map((channel) => formatPdfNumber(Math.max(0, Math.min(1, Number(channel) || 0)))).join(" ");
+}
+
+class SimplePdfDocument {
+  constructor() {
+    this.objects = [];
+    this.catalogId = this.reserveObject();
+    this.pagesId = this.reserveObject();
+    this.fontId = this.addObject("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    this.boldFontId = this.addObject("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>");
+    this.pageIds = [];
+  }
+
+  reserveObject() {
+    this.objects.push(null);
+    return this.objects.length;
+  }
+
+  addObject(content) {
+    this.objects.push(Buffer.isBuffer(content) ? content : Buffer.from(String(content)));
+    return this.objects.length;
+  }
+
+  setObject(id, content) {
+    this.objects[id - 1] = Buffer.isBuffer(content) ? content : Buffer.from(String(content));
+  }
+
+  addImage(image) {
+    const stream = Buffer.concat([
+      Buffer.from(`<< /Type /XObject /Subtype /Image /Width ${image.width} /Height ${image.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /${image.filter} /Length ${image.data.length} >>\nstream\n`),
+      image.data,
+      Buffer.from("\nendstream")
+    ]);
+    return this.addObject(stream);
+  }
+
+  addPage({ width, height, content, xobjects = {} }) {
+    const contentBuffer = Buffer.from(content);
+    const contentId = this.addObject(Buffer.concat([
+      Buffer.from(`<< /Length ${contentBuffer.length} >>\nstream\n`),
+      contentBuffer,
+      Buffer.from("\nendstream")
+    ]));
+    const xobjectEntries = Object.entries(xobjects).map(([name, id]) => `/${name} ${id} 0 R`).join(" ");
+    const pageId = this.addObject(`<< /Type /Page /Parent ${this.pagesId} 0 R /MediaBox [0 0 ${width} ${height}] /Resources << /Font << /F1 ${this.fontId} 0 R /F2 ${this.boldFontId} 0 R >> ${xobjectEntries ? `/XObject << ${xobjectEntries} >>` : ""} >> /Contents ${contentId} 0 R >>`);
+    this.pageIds.push(pageId);
+    return pageId;
+  }
+
+  render() {
+    this.setObject(this.pagesId, `<< /Type /Pages /Kids [${this.pageIds.map((id) => `${id} 0 R`).join(" ")}] /Count ${this.pageIds.length} >>`);
+    this.setObject(this.catalogId, `<< /Type /Catalog /Pages ${this.pagesId} 0 R >>`);
+    const chunks = [Buffer.from("%PDF-1.4\n%\xE2\xE3\xCF\xD3\n", "binary")];
+    const offsets = [0];
+    this.objects.forEach((content, index) => {
+      offsets.push(Buffer.concat(chunks).length);
+      chunks.push(Buffer.from(`${index + 1} 0 obj\n`));
+      chunks.push(content || Buffer.from(""));
+      chunks.push(Buffer.from("\nendobj\n"));
+    });
+    const xrefOffset = Buffer.concat(chunks).length;
+    chunks.push(Buffer.from(`xref\n0 ${this.objects.length + 1}\n0000000000 65535 f \n`));
+    offsets.slice(1).forEach((offset) => {
+      chunks.push(Buffer.from(`${String(offset).padStart(10, "0")} 00000 n \n`));
+    });
+    chunks.push(Buffer.from(`trailer\n<< /Size ${this.objects.length + 1} /Root ${this.catalogId} 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`));
+    return Buffer.concat(chunks);
+  }
+}
+
+async function readPdfImage(filePath) {
+  const buffer = await readFile(filePath);
+  if (isJpegBuffer(buffer)) {
+    const size = jpegSize(buffer);
+    return {
+      width: size.width,
+      height: size.height,
+      filter: "DCTDecode",
+      data: buffer
+    };
+  }
+
+  if (isPngBuffer(buffer)) {
+    const image = pngToRgb(buffer);
+    return {
+      width: image.width,
+      height: image.height,
+      filter: "FlateDecode",
+      data: deflateSync(image.rgb)
+    };
+  }
+
+  throw new Error("Only PNG and JPEG frames are supported in the PDF export.");
+}
+
+function isJpegBuffer(buffer) {
+  return buffer[0] === 0xff && buffer[1] === 0xd8;
+}
+
+function jpegSize(buffer) {
+  let offset = 2;
+  while (offset < buffer.length) {
+    if (buffer[offset] !== 0xff) break;
+    const marker = buffer[offset + 1];
+    const length = buffer.readUInt16BE(offset + 2);
+    if (marker >= 0xc0 && marker <= 0xc3) {
+      return {
+        height: buffer.readUInt16BE(offset + 5),
+        width: buffer.readUInt16BE(offset + 7)
+      };
+    }
+    offset += 2 + length;
+  }
+  throw new Error("Could not read JPEG size.");
+}
+
+function isPngBuffer(buffer) {
+  return buffer.slice(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+}
+
+function pngToRgb(buffer) {
+  let offset = 8;
+  let width = 0;
+  let height = 0;
+  let bitDepth = 0;
+  let colorType = 0;
+  let palette = null;
+  const idat = [];
+
+  while (offset < buffer.length) {
+    const length = buffer.readUInt32BE(offset);
+    const type = buffer.slice(offset + 4, offset + 8).toString("ascii");
+    const data = buffer.slice(offset + 8, offset + 8 + length);
+    if (type === "IHDR") {
+      width = data.readUInt32BE(0);
+      height = data.readUInt32BE(4);
+      bitDepth = data[8];
+      colorType = data[9];
+    } else if (type === "PLTE") {
+      palette = data;
+    } else if (type === "IDAT") {
+      idat.push(data);
+    } else if (type === "IEND") {
+      break;
+    }
+    offset += 12 + length;
+  }
+
+  if (bitDepth !== 8) throw new Error("Only 8-bit PNG frames are supported in the PDF export.");
+  const channels = pngChannelsForColorType(colorType);
+  const inflated = inflateSync(Buffer.concat(idat));
+  const rows = unfilterPngRows(inflated, width, height, channels);
+  const rgb = Buffer.alloc(width * height * 3);
+  let target = 0;
+
+  for (let i = 0; i < rows.length; i += channels) {
+    if (colorType === 0) {
+      const gray = rows[i];
+      rgb[target++] = gray;
+      rgb[target++] = gray;
+      rgb[target++] = gray;
+    } else if (colorType === 2) {
+      rgb[target++] = rows[i];
+      rgb[target++] = rows[i + 1];
+      rgb[target++] = rows[i + 2];
+    } else if (colorType === 3) {
+      if (!palette) throw new Error("Indexed PNG frame is missing a palette.");
+      const paletteIndex = rows[i] * 3;
+      rgb[target++] = palette[paletteIndex] ?? 255;
+      rgb[target++] = palette[paletteIndex + 1] ?? 255;
+      rgb[target++] = palette[paletteIndex + 2] ?? 255;
+    } else if (colorType === 4) {
+      const alpha = rows[i + 1] / 255;
+      const gray = Math.round(rows[i] * alpha + 255 * (1 - alpha));
+      rgb[target++] = gray;
+      rgb[target++] = gray;
+      rgb[target++] = gray;
+    } else if (colorType === 6) {
+      const alpha = rows[i + 3] / 255;
+      rgb[target++] = Math.round(rows[i] * alpha + 255 * (1 - alpha));
+      rgb[target++] = Math.round(rows[i + 1] * alpha + 255 * (1 - alpha));
+      rgb[target++] = Math.round(rows[i + 2] * alpha + 255 * (1 - alpha));
+    }
+  }
+
+  return { width, height, rgb };
+}
+
+function pngChannelsForColorType(colorType) {
+  if (colorType === 0) return 1;
+  if (colorType === 2) return 3;
+  if (colorType === 3) return 1;
+  if (colorType === 4) return 2;
+  if (colorType === 6) return 4;
+  throw new Error("Unsupported PNG color type.");
+}
+
+function unfilterPngRows(data, width, height, channels) {
+  const rowLength = width * channels;
+  const output = Buffer.alloc(rowLength * height);
+  let inputOffset = 0;
+
+  for (let row = 0; row < height; row += 1) {
+    const filter = data[inputOffset++];
+    const rowStart = row * rowLength;
+    for (let col = 0; col < rowLength; col += 1) {
+      const raw = data[inputOffset++];
+      const left = col >= channels ? output[rowStart + col - channels] : 0;
+      const up = row > 0 ? output[rowStart - rowLength + col] : 0;
+      const upLeft = row > 0 && col >= channels ? output[rowStart - rowLength + col - channels] : 0;
+      let value = raw;
+      if (filter === 1) value = raw + left;
+      else if (filter === 2) value = raw + up;
+      else if (filter === 3) value = raw + Math.floor((left + up) / 2);
+      else if (filter === 4) value = raw + paethPredictor(left, up, upLeft);
+      else if (filter !== 0) throw new Error("Unsupported PNG filter.");
+      output[rowStart + col] = value & 0xff;
+    }
+  }
+
+  return output;
+}
+
+function paethPredictor(left, up, upLeft) {
+  const p = left + up - upLeft;
+  const pa = Math.abs(p - left);
+  const pb = Math.abs(p - up);
+  const pc = Math.abs(p - upLeft);
+  if (pa <= pb && pa <= pc) return left;
+  if (pb <= pc) return up;
+  return upLeft;
+}
+
 async function generateGeminiImageWithRetries({ model, parts, imageConfig }) {
   const maxAttempts = 3;
   let lastText = "";
@@ -8581,6 +9462,17 @@ function extensionForMime(mimeType) {
   return ".png";
 }
 
+function mimeTypeForExtension(extension) {
+  const normalized = String(extension || "").toLowerCase();
+  if (normalized === ".jpg" || normalized === ".jpeg") return "image/jpeg";
+  if (normalized === ".webp") return "image/webp";
+  if (normalized === ".gif") return "image/gif";
+  if (normalized === ".mp4") return "video/mp4";
+  if (normalized === ".webm") return "video/webm";
+  if (normalized === ".mov") return "video/quicktime";
+  return "image/png";
+}
+
 function normalizeDuration(value) {
   const match = String(value || "15").match(/\d+/);
   return normalizeChoice(match?.[0], ["4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15"], "15");
@@ -8718,7 +9610,12 @@ function isLocalOutputUrl(value) {
 }
 
 function isLocalAssetUrl(value) {
-  return typeof value === "string" && (value.startsWith("/outputs/") || value.startsWith("/uploads/") || value.startsWith(`${workflowAssetsPrefix}/`));
+  return typeof value === "string" && (
+    value.startsWith("/outputs/") ||
+    value.startsWith("/uploads/") ||
+    value.startsWith("/storyboard/") ||
+    value.startsWith(`${workflowAssetsPrefix}/`)
+  );
 }
 
 async function uploadLocalOutputToFal(publicPath) {
@@ -8757,7 +9654,7 @@ function localPublicPathFromUrl(value) {
     // Fall through to the clear validation error below.
   }
 
-  throw new Error("This action can only read local NewtNode assets from uploads, outputs, or workflow packages.");
+  throw new Error("This action can only read local NewtNode assets from uploads, outputs, bundled storyboard assets, or workflow packages.");
 }
 
 async function resolveLocalAssetPath(publicPath) {
@@ -8801,10 +9698,11 @@ async function resolveLocalAssetPath(publicPath) {
 function localAssetFilePath(publicPath) {
   const isUpload = String(publicPath || "").startsWith("/uploads/");
   const isOutput = String(publicPath || "").startsWith("/outputs/");
-  if (!isUpload && !isOutput) return "";
+  const isStoryboardAsset = String(publicPath || "").startsWith("/storyboard/");
+  if (!isUpload && !isOutput && !isStoryboardAsset) return "";
 
-  const prefix = isUpload ? "/uploads/" : "/outputs/";
-  const root = isUpload ? uploadsDir : outputsDir;
+  const prefix = isUpload ? "/uploads/" : isOutput ? "/outputs/" : "/storyboard/";
+  const root = isUpload ? uploadsDir : isOutput ? outputsDir : storyboardAssetsDir;
   const relativePath = safeRelativeAssetPath(decodeURIComponent(String(publicPath || "").slice(prefix.length)));
   return relativePath ? path.join(root, relativePath) : "";
 }

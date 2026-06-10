@@ -5,6 +5,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Clapperboard,
   Compass,
   Download,
   FileAudio,
@@ -13,6 +14,7 @@ import {
   FolderOpen,
   MonitorPlay,
   ImagePlus,
+  Loader2,
   Lock,
   Maximize2,
   Minus,
@@ -23,6 +25,7 @@ import {
   Pause,
   Play,
   Plus,
+  GripVertical,
   Save,
   Trash2,
   Type,
@@ -34,7 +37,7 @@ import {
   Wrench,
   X
 } from "lucide-react";
-import { composerApi, historyApi, nodeApi } from "./api/newtApi.js";
+import { composerApi, historyApi, nodeApi, systemApi } from "./api/newtApi.js";
 import { CameraControlViewport } from "./components/CameraControlViewport.jsx";
 import { EdgePath, SelectionActionBar, SelectionMarquee, UnsavedWorkflowPrompt } from "./components/CanvasChrome.jsx";
 import { ComposerViewport } from "./components/ComposerViewport.jsx";
@@ -117,6 +120,7 @@ import {
   firstEnabledImageModel,
   firstEnabledVideoModel,
   imageModelNames,
+  imageModelOptions,
   imageModelAutoAspectRatio,
   imageResolutionOptions,
   lensPresetNames,
@@ -148,6 +152,7 @@ import {
   utilityImageModelNames,
   utilityModelDescriptions,
   utilityVideoModelNames,
+  videoModelOptions,
   videoModelNames,
   voidVideoFrameOptions,
   wan27ReferenceAspectRatioOptions,
@@ -231,6 +236,7 @@ const nodeIcons = {
   model3d: Box,
   imageModel: ImagePlus,
   videoModel: Film,
+  storyboard: Clapperboard,
   text: Type
 };
 
@@ -476,6 +482,38 @@ Generate the final image as a fully rendered interpretation of the written promp
 };
 const transferPromptSuffix =
   "Only use the uploaded image labeled MOOD_BOARD.png as a reference for overall style, color grading and image qualities. The generated image should NOT take any elements, subjects, or compositional framing of the content from MOOD_BOARD.png directly; only use MOOD_BOARD.png as a visual guide to transfer the style to the generation.";
+const storyboardDefaultFrameCount = 6;
+const storyboardFrameCountOptions = ["Auto", "3", "6", "9", "12", "18", "24"];
+const storyboardMoodBoardLabel = moodBoardOutputFileName;
+const storyboardDefaultMoodBoardUrl = "/storyboard/MOOD_BOARD.png";
+const storyboardMaxCharacters = 4;
+const storyboardCharacterSheetVersion = 2;
+const storyboardDefaultAspectRatio = "16:9";
+const storyboardAspectRatioOptions = ["16:9", "21:9", "9:16", "1:1"];
+const storyboardDefaultResolution = "1K";
+const storyboardHighResolution = "4K";
+const storyboardFixedModel = imageModelNames.openAiImage2;
+const storyboardPreviousFrameLabel = "PREVIOUS_FRAME.png";
+const storyboardSpatialAnchorLabel = "SPATIAL_ANCHOR.png";
+const storyboardBaseInstruction =
+  "STORYBOARD STYLE LOCK: Create a single clean hand-drawn film storyboard frame. Use black ink linework, minimal grayscale shading, loose but intentional drawing, simple tonal blocking, readable silhouettes, and production-planning clarity. This is not a realistic black-and-white photograph, not photorealistic grayscale, not a 3D render, and not photographic concept art. Avoid photographic skin texture, realistic camera lighting, glossy realism, and fully rendered photo detail. No color. No text, numbers, frame borders, speech bubbles, captions, watermarks, or UI overlays unless explicitly described.";
+const storyboardReferenceStyleGuard =
+  "FINAL STYLE PRIORITY: The hand-drawn storyboard line-art style overrides every uploaded image reference. Use references only for identity, wardrobe, continuity, screen geography, object placement, and story information. Do not copy photorealistic rendering, realistic grayscale photography, photo lighting, lens blur, skin texture, or polished photo detail from any reference image.";
+const storyboardContinuityInstruction =
+  "Follow professional storyboard continuity. Maintain the 180 degree rule, screen direction, blocking, eyeline, silhouette, and editorial sequencing. Characters should not look at camera unless explicitly stated. Describe only this one frame.";
+const storyboardCharacterSheetStyleInstruction =
+  "STORYBOARD STYLE OVERRIDE: Convert the character sheet into the exact same clean storyboard style used for the final boards. Use hand-drawn digital storyboard line art, black ink linework, minimal grayscale shading, cinematic production-planning clarity, simple tonal blocking, and clear readable silhouettes. Do not create a realistic grayscale photograph, realistic black-and-white portrait, 3D render, fashion photo, photographic skin texture, photo lighting, or realistic camera render. No color, no labels, no numbers, no frame borders, no captions, and no decorative borders. This style override is more important than preserving the uploaded image's photographic style.";
+const storyboardCharacterWardrobeFromPortraitPrompt =
+  "Wardrobe rule: use exactly one outfit across all six views. Use the exact visible wardrobe from the uploaded character reference image consistently in every panel. Do not switch to a plain black outfit, alternate clothing, or a wardrobe comparison. No nudity; editorial fashion styling only.";
+const storyboardCharacterSheetBasePrompt = characterSheetPrompt
+  .replace(
+    "Study the reference image of the character and preserve the person's identity, physical features, proportions, image quality, and visual style as closely as possible.",
+    "Study the reference image of the character and preserve the person's identity, physical features, proportions, and recognizable details as closely as possible while converting the final sheet into storyboard line art."
+  )
+  .replace(
+    "Create one high-resolution horizontal character photo sheet on a clean white background.",
+    "Create one high-resolution horizontal character storyboard reference sheet on a clean white background."
+  );
 const initialNodes = [
   {
     id: "text-1",
@@ -550,10 +588,13 @@ const nodeColorPalette = [{ label: "Neutral", color: "" }, ...namedColorPalette]
 const referenceTagPalette = ["#4d8dff", "#ff4fb3", "#9b5cff", "#58ce63", "#ff8b35", "#f0c83b"];
 const zImageUnsupportedInputPorts = new Set(["cameraIn", "styleIn", "transferIn", "characterIn"]);
 const zImageUnsupportedSourceTypes = new Set(["camera", "style", "transfer", "character"]);
+const lumaImageUnsupportedInputPorts = new Set(["cameraIn", "transferIn", "characterIn"]);
+const lumaImageUnsupportedSourceTypes = new Set(["camera", "transfer", "character"]);
+const emptyPortSet = new Set();
 const groupPadding = { x: 42, top: 62, bottom: 42 };
 const groupSizeFloor = 1;
 const imageRunStaggerMs = 850;
-export default function NodeEditor({ active = true, onStatusChange, modelPreferences } = {}) {
+export default function NodeEditor({ active = true, onStatusChange, modelPreferences, modelPreferencesReady = true } = {}) {
   const canvasRef = React.useRef(null);
   const fileMenuRef = React.useRef(null);
   const projectMenuRef = React.useRef(null);
@@ -593,8 +634,14 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const incomingByNode = React.useMemo(() => buildIncomingByNode(nodes, edges), [nodes, edges]);
   const connectedPortKeys = React.useMemo(() => buildConnectedPortKeys(edges), [edges]);
   const selectedNodeSet = React.useMemo(() => new Set(selectedNodeIds), [selectedNodeIds]);
-  const enabledImageModels = React.useMemo(() => enabledImageModelOptions(modelPreferences), [modelPreferences]);
-  const enabledVideoModels = React.useMemo(() => enabledVideoModelOptions(modelPreferences), [modelPreferences]);
+  const enabledImageModels = React.useMemo(
+    () => (modelPreferencesReady ? enabledImageModelOptions(modelPreferences) : imageModelOptions),
+    [modelPreferences, modelPreferencesReady]
+  );
+  const enabledVideoModels = React.useMemo(
+    () => (modelPreferencesReady ? enabledVideoModelOptions(modelPreferences) : videoModelOptions),
+    [modelPreferences, modelPreferencesReady]
+  );
   const activeEdgeIds = React.useMemo(() => buildActiveEdgeIds(nodes, edges), [nodes, edges]);
   const inactiveEdgeIds = React.useMemo(() => buildInactiveEdgeIds(nodes, edges), [nodes, edges]);
   const referenceTagHighlights = React.useMemo(() => buildReferenceTagHighlights(nodes, incomingByNode), [nodes, incomingByNode]);
@@ -622,7 +669,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     saveProjectAsLocalFile,
     openWorkflowFile,
     openWorkflowFromSystemPicker,
+    openWorkflowPackageFolderFromSystemPicker,
     importWorkflowFromSystemPicker,
+    importWorkflowPackageFolderFromSystemPicker,
     loadProject,
     deleteProject
   } = useWorkflowPersistence({
@@ -685,6 +734,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }, [edges]);
 
   React.useEffect(() => {
+    if (!modelPreferencesReady) return;
     const fallbackImageModel = firstEnabledImageModel(modelPreferences);
     const fallbackVideoModel = firstEnabledVideoModel(modelPreferences);
     setNodes((current) =>
@@ -698,7 +748,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         return node;
       })
     );
-  }, [enabledImageModels, enabledVideoModels, modelPreferences]);
+  }, [enabledImageModels, enabledVideoModels, modelPreferences, modelPreferencesReady]);
 
   React.useEffect(() => {
     setEdges((current) => {
@@ -966,7 +1016,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       type,
       x: nodePosition.x,
       y: nodePosition.y,
-      data: createDefaultNodeData(type, spec?.label || "Node", count)
+      data: createNodeData(type, spec?.label || "Node", count)
     };
     const graphNodes = [...nodesRef.current, nextNode];
     const pendingConnection = options.pendingConnection || null;
@@ -993,6 +1043,25 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     }
     if (pendingConnection) setDraftEdge(null);
     setContextMenu(null);
+  }
+
+  function createNodeData(type, label, count) {
+    const data = createDefaultNodeData(type, label, count);
+    if (type === "imageModel") {
+      const model = enabledImageModels[0] || imageModelNames.zImage;
+      return {
+        ...data,
+        ...imageModelSelectionPatch(data, model)
+      };
+    }
+    if (type === "videoModel") {
+      const model = enabledVideoModels[0] || videoModelNames.seedance;
+      return {
+        ...data,
+        ...videoModelSelectionPatch(data, model)
+      };
+    }
+    return data;
   }
 
   function defaultNodePosition(count) {
@@ -1998,8 +2067,466 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     });
   }
 
+  function updateStoryboardNodeFrames(nodeId, updater, patch = {}) {
+    const node = nodesRef.current.find((item) => item.id === nodeId);
+    if (!node) return;
+    const frames = normalizedStoryboardFrames(node.data.storyboardFrames);
+    const nextFrames = normalizedStoryboardFrames(typeof updater === "function" ? updater(frames) : updater);
+    const selectedFrameId = patch.selectedFrameId || node.data.selectedFrameId || nextFrames.find((frame) => frame.resultUrl)?.id || nextFrames[0]?.id || "";
+    const selectedFrame = nextFrames.find((frame) => frame.id === selectedFrameId) || nextFrames.find((frame) => frame.resultUrl);
+    const dataPatch = {
+      ...patch,
+      storyboardFrames: nextFrames,
+      selectedFrameId,
+      resultUrl: selectedFrame?.resultUrl || "",
+      resultItems: storyboardResultItems(nextFrames),
+      selectedResultIndex: Math.max(0, nextFrames.filter((frame) => frame.resultUrl).findIndex((frame) => frame.id === selectedFrameId))
+    };
+    const nextNodes = nodesRef.current.map((item) => (
+      item.id === nodeId
+        ? {
+            ...item,
+            data: {
+              ...item.data,
+              ...dataPatch
+            }
+          }
+        : item
+    ));
+    const updatedNodes = dataPatch.resultItems?.some((item) => item?.url)
+      ? syncConnectedPreviewNodes(nextNodes, nodeId, edgesRef.current)
+      : nextNodes;
+    nodesRef.current = updatedNodes;
+    setNodes(updatedNodes);
+  }
+
+  function patchStoryboardFrame(nodeId, frameId, patch) {
+    updateStoryboardNodeFrames(nodeId, (frames) => frames.map((frame) => (frame.id === frameId ? { ...frame, ...patch } : frame)), { selectedFrameId: frameId });
+  }
+
+  function syncStoryboardPreparedCharacters(nodeId, characters) {
+    const nextCharacters = normalizedStoryboardCharacters(characters);
+    const nextNodes = nodesRef.current.map((item) => (
+      item.id === nodeId
+        ? {
+            ...item,
+            data: {
+              ...item.data,
+              storyboardCharacters: nextCharacters
+            }
+          }
+        : item
+    ));
+    nodesRef.current = nextNodes;
+    setNodes(nextNodes);
+    return nextNodes.find((item) => item.id === nodeId);
+  }
+
+  function updateStoryboardCharacter(nodeId, characterId, patch) {
+    const node = nodesRef.current.find((item) => item.id === nodeId);
+    if (!node) return;
+    const characters = normalizedStoryboardCharacters(node.data.storyboardCharacters).map((character) => (
+      character.id === characterId ? { ...character, ...patch } : character
+    ));
+    updateNode(nodeId, { storyboardCharacters: characters, error: "" });
+  }
+
+  async function uploadStoryboardCharacter(node, file) {
+    if (!file || !file.type.startsWith("image/")) return;
+    const characters = normalizedStoryboardCharacters(node.data.storyboardCharacters);
+    if (characters.length >= storyboardMaxCharacters) {
+      updateNode(node.id, { error: `Storyboard accepts up to ${storyboardMaxCharacters} internal characters.` });
+      return;
+    }
+
+    pushUndoSnapshot();
+    updateNode(node.id, { status: "uploading", error: "" });
+
+    try {
+      const asset = await uploadNodeAsset(file, "storyboard-character");
+      const character = createStoryboardCharacter({
+        name: storyboardCharacterNameFromFile(file.name, characters.length + 1),
+        portrait: asset,
+        status: "ready"
+      });
+      updateNode(node.id, {
+        storyboardCharacters: [...characters, character],
+        useInternalStoryboardCharacters: true,
+        status: "ready",
+        error: ""
+      });
+    } catch (error) {
+      updateNode(node.id, { status: "error", error: error.message });
+    }
+  }
+
+  function importStoryboardCharacter(node, outputItem) {
+    if (!outputItem?.url || outputItem.type !== "image") return;
+    const characters = normalizedStoryboardCharacters(node.data.storyboardCharacters);
+    if (characters.length >= storyboardMaxCharacters) {
+      updateNode(node.id, { error: `Storyboard accepts up to ${storyboardMaxCharacters} internal characters.` });
+      return;
+    }
+
+    pushUndoSnapshot();
+    const asset = assetFromOutputItem(outputItem);
+    const character = createStoryboardCharacter({
+      name: storyboardCharacterNameFromFile(outputItem.fileName || outputItem.label || asset.fileName, characters.length + 1),
+      portrait: asset,
+      status: "ready"
+    });
+    updateNode(node.id, {
+      storyboardCharacters: [...characters, character],
+      useInternalStoryboardCharacters: true,
+      status: "ready",
+      error: ""
+    });
+  }
+
+  function removeStoryboardCharacter(nodeId, characterId) {
+    const node = nodesRef.current.find((item) => item.id === nodeId);
+    if (!node) return;
+    pushUndoSnapshot();
+    updateNode(nodeId, {
+      storyboardCharacters: normalizedStoryboardCharacters(node.data.storyboardCharacters).filter((character) => character.id !== characterId),
+      error: ""
+    });
+  }
+
+  async function ensureStoryboardCharactersReady(node) {
+    const currentNode = nodesRef.current.find((item) => item.id === node.id) || node;
+    if (!storyboardUsesInternalCharacters(currentNode)) return currentNode;
+    const characters = normalizedStoryboardCharacters(currentNode.data.storyboardCharacters);
+    let preparedNode = currentNode;
+    const unnamedCharacters = characters.filter((character) => character.portrait?.localUrl && !String(character.name || "").trim());
+    if (unnamedCharacters.length) {
+      const nextCharacters = characters.map((character) => (
+        unnamedCharacters.some((item) => item.id === character.id)
+          ? { ...character, status: "error", error: "Add a name tag before generating." }
+          : character
+      ));
+      updateNode(currentNode.id, {
+        storyboardCharacters: nextCharacters,
+        status: "ready",
+        error: "Add name tags for all Storyboard characters before generating."
+      });
+      throw new Error("Add name tags for all Storyboard characters before generating.");
+    }
+    const pendingCharacters = characters.filter((character) =>
+      character.portrait?.localUrl &&
+      storyboardCharacterTag(character) &&
+      (!character.sheetUrl || finiteNumber(character.sheetVersion, 0) < storyboardCharacterSheetVersion)
+    );
+    if (!pendingCharacters.length) return currentNode;
+
+    updateNode(currentNode.id, { status: "compiling-characters", storyboardTab: "view", error: "" });
+    let latestCharacters = characters;
+    for (const character of pendingCharacters) {
+      updateStoryboardCharacter(currentNode.id, character.id, { status: "compiling", error: "" });
+      try {
+        const generationNode = {
+          ...currentNode,
+          data: {
+            ...currentNode.data,
+            title: `${currentNode.data.title || "Storyboard"} ${character.name || "Character"}`
+          }
+        };
+        const generated = await runCharacterSheetGeneration({
+          node: generationNode,
+          prompt: storyboardCharacterSheetPromptForNode(currentNode),
+          portrait: character.portrait,
+          wardrobe: null,
+          workflowContext: workflowRequestContext(),
+          characterTag: storyboardCharacterTag(character)
+        });
+        latestCharacters = normalizedStoryboardCharacters(nodesRef.current.find((item) => item.id === currentNode.id)?.data.storyboardCharacters || latestCharacters).map((item) => (
+          item.id === character.id
+            ? {
+                ...item,
+                sheetUrl: generated.url,
+                sheetFileName: generated.fileName || "",
+                sheetVersion: storyboardCharacterSheetVersion,
+                status: "ready",
+                error: ""
+              }
+            : item
+        ));
+        preparedNode = {
+          ...preparedNode,
+          data: {
+            ...preparedNode.data,
+            storyboardCharacters: latestCharacters
+          }
+        };
+        preparedNode = syncStoryboardPreparedCharacters(currentNode.id, latestCharacters) || preparedNode;
+        updateNode(currentNode.id, { error: "" });
+      } catch (error) {
+        latestCharacters = normalizedStoryboardCharacters(nodesRef.current.find((item) => item.id === currentNode.id)?.data.storyboardCharacters || latestCharacters).map((item) => (
+          item.id === character.id ? { ...item, status: "error", error: error.message || "Character sheet failed." } : item
+        ));
+        updateNode(currentNode.id, { storyboardCharacters: latestCharacters, error: error.message || "Character sheet failed." });
+      }
+    }
+
+    updateNode(currentNode.id, { status: "ready" });
+    return preparedNode;
+  }
+
+  async function planStoryboardNode(node) {
+    const currentNode = nodesRef.current.find((item) => item.id === node.id) || node;
+    const currentIncomingByNode = buildIncomingByNode(nodesRef.current, edgesRef.current);
+    const incoming = currentIncomingByNode[currentNode.id] || {};
+    const sceneDescription = currentNode.data.sceneDescription || "";
+    if (!sceneDescription.trim()) {
+      updateNode(currentNode.id, { error: "Add a scene description before planning frames." });
+      return null;
+    }
+
+    try {
+      updateNode(currentNode.id, { status: "planning", error: "" });
+      const { response, data } = await nodeApi.planStoryboard({
+        sceneDescription,
+        frameCount: currentNode.data.frameCount,
+        notes: currentNode.data.storyboardNotes || "",
+        characters: storyboardCharacterSummariesForNode(currentNode, incoming.characterIn, currentIncomingByNode)
+      }, "Storyboard planning");
+      const plan = data.plan || fallbackStoryboardPlanForClient(sceneDescription, storyboardFrameCountForNode(currentNode));
+      const plannedFrames = storyboardFramesFromPlan(plan.frames);
+      if (!response.ok && !plannedFrames.length) throw new Error(data.error || "Storyboard planning failed.");
+
+      pushUndoSnapshot();
+      updateStoryboardNodeFrames(currentNode.id, plannedFrames.length ? plannedFrames : defaultStoryboardFrames(storyboardFrameCountForNode(currentNode)), {
+        storyboardAnalysis: plan.analysis || "",
+        storyboardPlanSceneDescription: sceneDescription,
+        sceneName: plan.sceneTitle || currentNode.data.sceneName || "Scene 1",
+        storyboardTab: "view",
+        status: "ready",
+        error: response.ok ? "" : data.error || ""
+      });
+      return plannedFrames;
+    } catch (error) {
+      const fallbackFrames = defaultStoryboardFrames(storyboardFrameCountForNode(currentNode)).map((frame, index) => ({
+        ...frame,
+        prompt: `${storyboardFallbackBeat(index)} Single storyboard frame for: ${sceneDescription}. Keep screen direction, blocking, silhouette, eyeline, and continuity clear.`,
+        beat: storyboardFallbackBeat(index)
+      }));
+      updateStoryboardNodeFrames(currentNode.id, fallbackFrames, {
+        storyboardPlanSceneDescription: sceneDescription,
+        storyboardTab: "view",
+        status: "ready",
+        error: `Planner fallback used. ${error.message || ""}`.trim()
+      });
+      return fallbackFrames;
+    }
+  }
+
+  async function generateStoryboardFrame(node, frameId) {
+    return generateStoryboardNode(node, [frameId]);
+  }
+
+  async function generateStoryboardNode(node, frameIds = null) {
+    let currentNode = nodesRef.current.find((item) => item.id === node.id) || node;
+    let currentIncomingByNode = buildIncomingByNode(nodesRef.current, edgesRef.current);
+    let incoming = currentIncomingByNode[currentNode.id] || {};
+    let frames = normalizedStoryboardFrames(currentNode.data.storyboardFrames);
+    const sceneDescription = currentNode.data.sceneDescription || "";
+
+    if (!storyboardPlanIsCurrent(currentNode)) {
+      updateNode(currentNode.id, {
+        status: "ready",
+        error: "Plan the storyboard again after changing the scene description."
+      });
+      return { status: "error", error: new Error("Plan the storyboard again after changing the scene description.") };
+    }
+
+    const targetIds = new Set(frameIds?.length ? frameIds : frames.map((frame) => frame.id));
+    const targetFrames = frames.filter((frame) => targetIds.has(frame.id));
+    if (!targetFrames.length) {
+      updateNode(currentNode.id, { error: "No storyboard frames selected to generate." });
+      return { status: "error", error: new Error("No storyboard frames selected to generate.") };
+    }
+
+    const workflowContext = workflowRequestContext();
+    try {
+      currentNode = await ensureStoryboardCharactersReady(currentNode);
+    } catch (error) {
+      return { status: "error", error };
+    }
+    currentNode = storyboardNodeWithMostPreparedCharacters(currentNode, nodesRef.current.find((item) => item.id === currentNode.id));
+    currentIncomingByNode = buildIncomingByNode(nodesRef.current, edgesRef.current);
+    incoming = currentIncomingByNode[currentNode.id] || {};
+    const baseImagePromptItems = storyboardImagePromptItems(currentNode, incoming, currentIncomingByNode);
+    const aspectRatio = storyboardAspectRatioForNode(currentNode);
+    const resolution = storyboardResolutionForNode(currentNode);
+    const successes = [];
+    const failures = [];
+
+    updateNode(currentNode.id, { status: "running", storyboardTab: "view", error: "" });
+    const queuedVersion = Date.now();
+    for (const frame of targetFrames) {
+      patchStoryboardFrame(currentNode.id, frame.id, { status: "queued", error: "", resultVersion: queuedVersion });
+    }
+
+    for (const frame of targetFrames) {
+      try {
+        patchStoryboardFrame(currentNode.id, frame.id, { status: "running", error: "" });
+        const latestStoryboardNode = storyboardNodeWithMostPreparedCharacters(currentNode, nodesRef.current.find((item) => item.id === currentNode.id));
+        const continuityReferenceItems = storyboardContinuityReferenceItems(latestStoryboardNode, frame);
+        const imagePromptItems = storyboardImagePromptItemsForFrame(baseImagePromptItems, continuityReferenceItems);
+        const missingCharacterTags = storyboardMissingRequiredCharacterTags(latestStoryboardNode, incoming.characterIn || [], currentIncomingByNode, [
+          frame.prompt,
+          frame.beat,
+          frame.notes,
+          sceneDescription
+        ].filter(Boolean).join("\n"));
+        if (missingCharacterTags.length) {
+          throw new Error(`Character sheet missing for ${missingCharacterTags.map((tag) => `@${tag}`).join(", ")}. Regenerate or re-upload that Storyboard character before running this frame.`);
+        }
+        const prompt = buildStoryboardFramePrompt(currentNode, frame, sceneDescription, incoming, currentIncomingByNode, {
+          hasPreviousFrameReference: continuityReferenceItems.some((item) => item.label === storyboardPreviousFrameLabel),
+          hasSpatialAnchorReference: continuityReferenceItems.some((item) => item.label === storyboardSpatialAnchorLabel)
+        });
+        const generated = await runImageModelGeneration({
+          node: {
+            ...currentNode,
+            data: {
+              ...currentNode.data,
+              title: `${currentNode.data.title || "Storyboard"} Frame ${String(frame.number).padStart(3, "0")}`,
+              model: storyboardFixedModel,
+              aspectRatio,
+              resolution
+            }
+          },
+          prompt,
+          aspectRatio,
+          imagePromptItems,
+          workflowContext,
+          index: frame.number - 1
+        });
+        const exported = await exportStoryboardFrameResult({
+          node: currentNode,
+          frame,
+          generated,
+          workflowContext
+        });
+        const nextFrame = {
+          resultUrl: generated.url,
+          exportUrl: exported.url,
+          resultFallbackUrl: exported.url && exported.url !== generated.url ? exported.url : "",
+          resultVersion: Date.now(),
+          fileName: exported.fileName || generated.fileName || "",
+          status: "complete",
+          error: ""
+        };
+        patchStoryboardFrame(currentNode.id, frame.id, nextFrame);
+        successes.push({ ...generated, url: exported.url, label: `Frame ${String(frame.number).padStart(3, "0")}` });
+      } catch (error) {
+        patchStoryboardFrame(currentNode.id, frame.id, { status: "error", error: error.message || "Frame generation failed." });
+        failures.push(error);
+      }
+    }
+
+    const latestNode = nodesRef.current.find((item) => item.id === currentNode.id) || currentNode;
+    updateStoryboardNodeFrames(currentNode.id, normalizedStoryboardFrames(latestNode.data.storyboardFrames), {
+      status: successes.length ? "complete" : "error",
+      storyboardTab: "view",
+      error: failures.length ? `${failures.length} frame${failures.length === 1 ? "" : "s"} failed. ${failures[0]?.message || ""}`.trim() : "",
+      resultText: successes.map((item) => item.text).filter(Boolean).join("\n\n")
+    });
+    loadOutputHistory();
+    return successes.length ? { status: "complete" } : { status: "error", error: failures[0] || new Error("Storyboard generation failed.") };
+  }
+
+  async function exportStoryboardFrameResult({ node, frame, generated, workflowContext }) {
+    const { response, data } = await nodeApi.exportStoryboardFrame({
+      sourceUrl: generated.url,
+      sceneName: node.data.sceneName || "Scene 1",
+      frameNumber: frame.number,
+      ...workflowContextPayload(workflowContext),
+      nodeId: node.id,
+      nodeTitle: node.data.title
+    });
+
+    if (!response.ok) {
+      return { url: generated.url, fileName: "" };
+    }
+
+    return {
+      url: data.frame.localUrl,
+      fileName: data.frame.fileName
+    };
+  }
+
+  async function exportStoryboardBoard(node) {
+    const currentNode = nodesRef.current.find((item) => item.id === node.id) || node;
+    const frames = normalizedStoryboardFrames(currentNode.data.storyboardFrames)
+      .filter((frame) => frame.exportUrl || frame.resultUrl)
+      .map((frame) => ({
+        number: frame.number,
+        sourceUrl: frame.exportUrl || frame.resultUrl,
+        prompt: frame.prompt || "",
+        beat: frame.beat || "",
+        notes: frame.notes || "",
+        shot: frame.shot || "None",
+        lens: frame.lens || "None",
+        angle: frame.angle || "None"
+      }));
+
+    if (!frames.length) {
+      updateNode(currentNode.id, { error: "Generate at least one storyboard frame before exporting boards." });
+      return;
+    }
+
+    updateNode(currentNode.id, { status: "exporting", storyboardTab: "view", error: "" });
+
+    try {
+      const folderSelection = await systemApi.selectFolder({
+        title: "Choose where to save final storyboard boards",
+        defaultPath: projectPackagePath || ""
+      });
+      if (!folderSelection.response.ok) {
+        if (folderSelection.data?.canceled) {
+          updateNode(currentNode.id, { status: "complete", error: "" });
+          return;
+        }
+        throw new Error(folderSelection.data?.error || "Could not choose an export folder.");
+      }
+      const exportDestinationPath = folderSelection.data?.path || "";
+      if (!exportDestinationPath) {
+        updateNode(currentNode.id, { status: "complete", error: "" });
+        return;
+      }
+
+      const { response, data } = await nodeApi.exportStoryboardBoard({
+        sceneName: currentNode.data.sceneName || "Scene 1",
+        sceneDescription: currentNode.data.sceneDescription || "",
+        aspectRatio: storyboardAspectRatioForNode(currentNode),
+        exportDestinationPath,
+        frames,
+        includePdf: true,
+        ...workflowContextPayload(workflowRequestContext()),
+        nodeId: currentNode.id,
+        nodeTitle: currentNode.data.title
+      });
+
+      if (!response.ok) throw new Error(data.error || "Storyboard export failed.");
+
+      updateNode(currentNode.id, {
+        status: "complete",
+        error: "",
+        storyboardTab: "view",
+        storyboardExport: data.export
+      });
+    } catch (error) {
+      updateNode(currentNode.id, {
+        status: "error",
+        error: error.message || "Storyboard export failed."
+      });
+    }
+  }
+
   function startNodeDrag(event, node) {
-    if (event.target.closest("input, textarea, select, button, label, summary, details, .preview-resize-handle")) return;
+    if (event.target.closest("input, textarea, select, button, label, summary, details, .preview-resize-handle, .storyboard-frame-card")) return;
     event.stopPropagation();
     const selectedIds = selectNodeForDrag(node.id, event.shiftKey);
     pushUndoSnapshot();
@@ -2252,6 +2779,16 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         characterScroller.scrollTop += event.deltaY || event.deltaX;
         return;
       }
+
+      const storyboardScroller = event.target.closest(".storyboard-view");
+      const storyboardInteractive = event.target.closest("input, textarea, select, button");
+      if (storyboardScroller && !storyboardInteractive) {
+        event.preventDefault();
+        event.stopPropagation();
+        storyboardScroller.scrollTop += event.deltaY || 0;
+        storyboardScroller.scrollLeft += event.deltaX || 0;
+        return;
+      }
     }
 
     const isInteractiveControl = event.target.closest("input, textarea, select");
@@ -2495,10 +3032,12 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       },
       style: {
         imageModel: ["styleIn"],
-        text: ["styleIn"]
+        text: ["styleIn"],
+        storyboard: ["styleIn"]
       },
       transfer: {
         imageModel: ["transferIn"],
+        storyboard: ["transferIn"],
         composer: ["imageIn"],
         model3d: ["frontImageIn"],
         utility: ["imageIn", "referenceImageIn"],
@@ -2507,6 +3046,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       character: {
         imageModel: ["characterIn"],
         videoModel: ["characterIn"],
+        storyboard: ["characterIn"],
         composer: composerCharacterInputPortIdsForNode(target),
         preview: ["sourceIn"]
       },
@@ -2519,6 +3059,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }
 
   function autoConnectionOutputKind(source, from) {
+    if (source.type === "storyboard") return storyboardFrameForOutputPort(source, from.port)?.resultUrl ? "image" : "";
     if (source.type === "camera") return "camera";
     if (source.type === "composer") return "image";
     if (source.type === "utility") return utilityOutputType(source);
@@ -2540,7 +3081,23 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (!source || !target) return "Choose a valid connection";
     if (!outputPortIdsForNode(source).includes(from.port)) return "Choose a valid output";
     if (!inputPortIdsForNode(target).includes(to.port)) return "Choose a valid input";
-    if (isZImageUnsupportedInput(target, to.port)) return zImageUnsupportedInputMessage();
+    if (isImageModelUnsupportedInput(target, to.port)) return imageModelUnsupportedInputMessage(target.data?.model);
+    if (isImageModelUnsupportedSource(target, source)) return imageModelUnsupportedInputMessage(target.data?.model);
+    if (isVideoModelUnsupportedCharacterInput(target, to.port)) return videoModelUnsupportedCharacterMessage(target.data?.model);
+    const compatibilityError = getPortCompatibilityError(source, from.port, target, to.port);
+    if (compatibilityError) return compatibilityError;
+
+    if (source.type === "storyboard") {
+      const frame = storyboardFrameForOutputPort(source, from.port);
+      if (!frame?.resultUrl) return "Generate this Storyboard frame before connecting it";
+      if (target.type === "preview" && to.port === "sourceIn") return "";
+      if (target.type === "composer" && to.port === "imageIn") return "";
+      if (target.type === "model3d" && isModel3DImageInputPort(to.port)) return "";
+      if (target.type === "imageModel" && ["imagePromptIn", "transferIn"].includes(to.port)) return "";
+      if (target.type === "videoModel" && ["startFrameIn", "endFrameIn", "referenceImageIn"].includes(to.port)) return "";
+      if (target.type === "utility" && ["imageIn", "referenceImageIn"].includes(to.port)) return "";
+      return "Storyboard frames connect to image inputs or previews";
+    }
 
     if (source.type === "camera") {
       if (!hasCameraPreset(source)) return "Choose a Camera preset before connecting";
@@ -2551,6 +3108,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (source?.type === "style") {
       if ((source.data.stylePreset || "None") === "None") return "Choose a Style preset before connecting";
       if ((target.type === "imageModel" || target.type === "text") && to.port === "styleIn") return "";
+      if (target.type === "storyboard" && to.port === "styleIn") {
+        if (target.data.useStoryboardStyle !== false) return "Disable Storyboard Style before connecting a custom Style";
+        return "";
+      }
       return "Style presets connect to Style inputs";
     }
 
@@ -2558,12 +3119,14 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       if (!source.data.activated || !source.data.resultUrl) return `Lock Mood Board to enable ${moodBoardOutputFileName} output`;
       if (
         (target.type === "imageModel" && to.port === "transferIn") ||
+        (target.type === "storyboard" && to.port === "transferIn" && target.data.useStoryboardStyle === false) ||
         (target.type === "composer" && to.port === "imageIn") ||
         (target.type === "model3d" && isModel3DImageInputPort(to.port)) ||
         (target.type === "utility" && ["imageIn", "referenceImageIn"].includes(to.port)) ||
         (target.type === "preview" && to.port === "sourceIn")
       )
         return "";
+      if (target.type === "storyboard" && to.port === "transferIn") return "Disable Storyboard Style before connecting a custom Mood Board";
       return "Mood Board connects to the Image Model mood board input or previews";
     }
 
@@ -2574,6 +3137,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         if (target.type === "videoModel" && to.port === "referenceAudioIn") return "";
         return "Character voice connects to a Video Model audio input";
       }
+      if (target.type === "storyboard" && to.port === "characterIn") {
+        if (target.data.useStoryboardStyle !== false) return "Disable Storyboard Style before connecting custom characters";
+        return "";
+      }
       if (target.type === "imageModel" && to.port === "characterIn") return "";
       if (target.type === "videoModel" && to.port === "characterIn") return "";
       if (target.type === "composer" && isComposerCharacterInputPort(to.port, target)) return "";
@@ -2581,7 +3148,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       return "Character connects to Character inputs or previews";
     }
 
-    if (["imageModel", "videoModel"].includes(target.type) && to.port === "characterIn") {
+    if ((["imageModel", "videoModel"].includes(target.type) || target.type === "storyboard") && to.port === "characterIn") {
       return "Character inputs accept locked Character nodes";
     }
 
@@ -2769,6 +3336,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         })
       };
     });
+    const pastedNodeMap = new Map(pastedNodes.map((node) => [node.id, node]));
     const pastedEdges = clipboard.edges
       .filter((edge) => idMap.has(edge.from.nodeId) && idMap.has(edge.to.nodeId))
       .map((edge, index) => ({
@@ -2782,7 +3350,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           ...edge.to,
           nodeId: idMap.get(edge.to.nodeId)
         }
-      }));
+      }))
+      .map((edge) => normalizeEdgeForCurrentGraph(edge, pastedNodeMap))
+      .filter(Boolean);
 
     setNodes((current) => [...current, ...pastedNodes]);
     setEdges((current) => [...current, ...pastedEdges]);
@@ -2945,10 +3515,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         const isSegmentation = isSam3ImageModel(currentNode.data.model);
         const isZImage = isZImageImageModel(currentNode.data.model);
         const aspectRatio = isSegmentation ? currentNode.data.aspectRatio : await resolveImageModelAspectRatio(currentNode, incoming);
+        const imageInstructionSources = imageInstructionSourcesForModel(currentNode.data.model, incoming);
         const imagePromptItems = connectedImagePromptItems(
-          isSegmentation || isZImage
-            ? zImageSupportedReferenceConnections(incoming.imagePromptIn || [])
-            : [...(incoming.imagePromptIn || []), ...(incoming.transferIn || []), ...(incoming.characterIn || [])],
+          isSegmentation ? zImageSupportedReferenceConnections(incoming.imagePromptIn || []) : imageReferenceConnectionsForModel(currentNode.data.model, incoming),
           currentIncomingByNode,
           { includeComposerCharacterBindings: !isZImage }
         );
@@ -2956,7 +3525,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           ? basePrompt
           : isZImage
             ? basePrompt
-          : buildEffectiveImagePrompt(basePrompt, [...(incoming.imagePromptIn || []), ...(incoming.cameraIn || []), ...(incoming.styleIn || []), ...(incoming.transferIn || []), ...(incoming.characterIn || [])], aspectRatio, currentIncomingByNode);
+          : buildEffectiveImagePrompt(basePrompt, imageInstructionSources, aspectRatio, currentIncomingByNode);
         const runIndexes = nodeRunIndexes(batchCount);
         const settled = await settleSequential(runIndexes, (index) =>
           runImageModelGeneration({
@@ -3009,12 +3578,15 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         return { status: "complete" };
       }
 
-      const prompt = buildEffectiveVideoPrompt(basePrompt, incoming);
+      const videoIncoming = videoModelSupportsCharacterInput(currentNode.data.model)
+        ? incoming
+        : { ...incoming, characterIn: [] };
+      const prompt = buildEffectiveVideoPrompt(basePrompt, videoIncoming);
       const runs = nodeRunIndexes(batchCount).map((index) =>
         runVideoModelGeneration({
           node: currentNode,
           prompt,
-          incoming,
+          incoming: videoIncoming,
           workflowContext: requestContext,
           index
         })
@@ -3169,9 +3741,17 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
                   <FolderOpen size={15} />
                   <span>Open</span>
                 </button>
+                <button onClick={() => { setFileMenuOpen(false); openWorkflowPackageFolderFromSystemPicker(); }} title="Open a portable workflow package folder">
+                  <FolderOpen size={15} />
+                  <span>Open Folder</span>
+                </button>
                 <button onClick={() => { setFileMenuOpen(false); importWorkflowFromSystemPicker(); }} title="Import workflow into this canvas">
                   <Download size={15} />
                   <span>Import</span>
+                </button>
+                <button onClick={() => { setFileMenuOpen(false); importWorkflowPackageFolderFromSystemPicker(); }} title="Import a portable workflow package folder into this canvas">
+                  <Download size={15} />
+                  <span>Import Folder</span>
                 </button>
               </div>
             )}
@@ -3304,6 +3884,14 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
               onCharacterVoiceRemove={removeCharacterVoice}
               onCharacterActivate={activateCharacterNode}
               onCharacterUnlock={unlockCharacterNode}
+              onStoryboardPlan={planStoryboardNode}
+              onStoryboardGenerateAll={generateStoryboardNode}
+              onStoryboardGenerateFrame={generateStoryboardFrame}
+              onStoryboardExport={exportStoryboardBoard}
+              onStoryboardCharacterUpload={uploadStoryboardCharacter}
+              onStoryboardCharacterImport={importStoryboardCharacter}
+              onStoryboardCharacterUpdate={updateStoryboardCharacter}
+              onStoryboardCharacterRemove={removeStoryboardCharacter}
               onPreviewResizeStart={startPreviewResize}
               onOpenComposer={setComposerEditorNodeId}
               running={node.data.status === "running"}
@@ -3503,6 +4091,14 @@ function NodeCard({
   onCharacterVoiceRemove,
   onCharacterActivate,
   onCharacterUnlock,
+  onStoryboardPlan,
+  onStoryboardGenerateAll,
+  onStoryboardGenerateFrame,
+  onStoryboardExport,
+  onStoryboardCharacterUpload,
+  onStoryboardCharacterImport,
+  onStoryboardCharacterUpdate,
+  onStoryboardCharacterRemove,
   onPreviewResizeStart,
   onOpenComposer,
   running,
@@ -3537,15 +4133,17 @@ function NodeCard({
   }
 
   const moodBoardScalable = node.type === "transfer" && node.data.locked && node.data.activated && node.data.resultUrl;
+  const storyboardScalable = node.type === "storyboard";
 
   return (
     <article
-      className={`node-card ${node.type === "composer" ? "node-type-composer" : `${node.type} node-type-${node.type}`} ${nodeColor ? "has-node-color" : ""} ${selected ? "selected" : ""} ${tagHighlight ? "reference-tag-highlighted" : ""} ${moodBoardScalable ? "mood-board-scalable" : ""}`}
+      className={`node-card ${node.type === "composer" ? "node-type-composer" : `${node.type} node-type-${node.type}`} ${nodeColor ? "has-node-color" : ""} ${selected ? "selected" : ""} ${tagHighlight ? "reference-tag-highlighted" : ""} ${moodBoardScalable ? "mood-board-scalable" : ""} ${storyboardScalable ? "storyboard-scalable" : ""}`}
       style={{
         transform: `translate(${node.x}px, ${node.y}px)`,
         "--preview-scale": node.data.previewScale || 1,
         "--node-color": nodeColor || "transparent",
         "--mood-board-scale": moodBoardScalable ? node.data.moodBoardScale || 1 : 1,
+        "--storyboard-scale": storyboardScalable ? node.data.storyboardScale || 1 : 1,
         "--reference-tag-color": tagHighlight?.color || "#4d8dff"
       }}
       data-node-card-id={node.id}
@@ -3626,6 +4224,14 @@ function NodeCard({
         onCharacterVoiceRemove={onCharacterVoiceRemove}
         onCharacterActivate={onCharacterActivate}
         onCharacterUnlock={onCharacterUnlock}
+        onStoryboardPlan={onStoryboardPlan}
+        onStoryboardGenerateAll={onStoryboardGenerateAll}
+        onStoryboardGenerateFrame={onStoryboardGenerateFrame}
+        onStoryboardExport={onStoryboardExport}
+        onStoryboardCharacterUpload={onStoryboardCharacterUpload}
+        onStoryboardCharacterImport={onStoryboardCharacterImport}
+        onStoryboardCharacterUpdate={onStoryboardCharacterUpdate}
+        onStoryboardCharacterRemove={onStoryboardCharacterRemove}
         onPreviewResizeStart={onPreviewResizeStart}
         onOpenComposer={onOpenComposer}
         transferCompiling={transferCompiling}
@@ -4495,6 +5101,14 @@ function NodeBody({
   onCharacterVoiceRemove,
   onCharacterActivate,
   onCharacterUnlock,
+  onStoryboardPlan,
+  onStoryboardGenerateAll,
+  onStoryboardGenerateFrame,
+  onStoryboardExport,
+  onStoryboardCharacterUpload,
+  onStoryboardCharacterImport,
+  onStoryboardCharacterUpdate,
+  onStoryboardCharacterRemove,
   onPreviewResizeStart,
   onOpenComposer,
   incomingByNode,
@@ -4809,6 +5423,378 @@ function NodeBody({
           </section>
         )}
         {node.data.error && <small className="upload-error">{node.data.error}</small>}
+      </div>
+    );
+  }
+
+  if (node.type === "storyboard") {
+    const frames = normalizedStoryboardFrames(node.data.storyboardFrames);
+    const storedStoryboardTab = ["setup", "view", "advanced"].includes(node.data.storyboardTab) ? node.data.storyboardTab : "setup";
+    const selectedFrame = frames.find((frame) => frame.id === node.data.selectedFrameId) || frames[0];
+    const preparingCharacters = node.data.status === "compiling-characters";
+    const runningStoryboard = node.data.status === "running" || preparingCharacters;
+    const planningStoryboard = node.data.status === "planning";
+    const exportingStoryboard = node.data.status === "exporting";
+    const storyboardLocked = planningStoryboard || runningStoryboard || exportingStoryboard;
+    const activeTab = runningStoryboard || exportingStoryboard ? "view" : storedStoryboardTab;
+    const completedStoryboardFrameCount = frames.filter((frame) => frame.exportUrl || frame.resultUrl).length;
+    const stylePort = config.input.find((port) => port.id === "styleIn");
+    const transferPort = config.input.find((port) => port.id === "transferIn");
+    const characterPort = config.input.find((port) => port.id === "characterIn");
+    const sceneDescription = node.data.sceneDescription || "";
+    const storyboardPlanCurrent = storyboardPlanIsCurrent(node);
+    const storyboardCharacters = normalizedStoryboardCharacters(node.data.storyboardCharacters);
+    const storyboardStyleEnabled = node.data.useStoryboardStyle !== false;
+    const internalCharactersEnabled = storyboardUsesInternalCharacters(node);
+    const sceneCharacterTagMatches = storyboardCharacterTagMatches(sceneDescription, node, incoming.characterIn || [], incomingByNode);
+    const customInputReason = "Disable Storyboard Style to connect custom nodes";
+    const customInputDisabled = storyboardLocked || storyboardStyleEnabled;
+    const customInputDisabledReason = storyboardLocked ? "Storyboard is generating" : customInputReason;
+    const customStylePort = stylePort ? { ...stylePort, disabled: customInputDisabled, disabledReason: customInputDisabledReason } : null;
+    const customTransferPort = transferPort ? { ...transferPort, disabled: customInputDisabled, disabledReason: customInputDisabledReason } : null;
+    const customCharacterPort = characterPort ? { ...characterPort, disabled: customInputDisabled, disabledReason: customInputDisabledReason } : null;
+    const storyboardAspectRatio = storyboardAspectRatioForNode(node);
+    const storyboardAspectKey = storyboardAspectRatio.replace(":", "x");
+    const storyboardFrameAspectStyle = { "--storyboard-frame-aspect": storyboardCssAspectRatio(storyboardAspectRatio) };
+
+    function updateFrame(frameId, patch) {
+      if (storyboardLocked) return;
+      const nextFrames = frames.map((frame) => (frame.id === frameId ? { ...frame, ...patch } : frame));
+      onUpdate(node.id, {
+        storyboardFrames: nextFrames,
+        selectedFrameId: frameId,
+        resultItems: storyboardResultItems(nextFrames),
+        resultUrl: nextFrames.find((frame) => frame.id === frameId)?.resultUrl || node.data.resultUrl || ""
+      });
+    }
+
+    function addFrame() {
+      if (storyboardLocked) return;
+      if (frames.length >= 24) return;
+      const nextFrames = [...frames, createStoryboardFrame(frames.length + 1)];
+      onUpdate(node.id, { storyboardFrames: nextFrames, selectedFrameId: nextFrames.at(-1).id, storyboardTab: "view" });
+    }
+
+    function removeFrame(frameId) {
+      if (storyboardLocked) return;
+      if (frames.length <= 1) return;
+      const nextFrames = normalizedStoryboardFrames(frames.filter((frame) => frame.id !== frameId));
+      onUpdate(node.id, {
+        storyboardFrames: nextFrames,
+        selectedFrameId: nextFrames[0]?.id || "",
+        resultItems: storyboardResultItems(nextFrames),
+        resultUrl: nextFrames.find((frame) => frame.resultUrl)?.resultUrl || ""
+      });
+    }
+
+    function moveFrame(fromId, toId) {
+      if (storyboardLocked) return;
+      if (!fromId || !toId || fromId === toId) return;
+      const fromIndex = frames.findIndex((frame) => frame.id === fromId);
+      const toIndex = frames.findIndex((frame) => frame.id === toId);
+      if (fromIndex < 0 || toIndex < 0) return;
+      const nextFrames = [...frames];
+      const [moved] = nextFrames.splice(fromIndex, 1);
+      nextFrames.splice(toIndex, 0, moved);
+      onUpdate(node.id, { storyboardFrames: normalizedStoryboardFrames(nextFrames), selectedFrameId: fromId });
+    }
+
+    function handleCharacterDrop(event) {
+      allowFileDrop(event);
+      if (storyboardLocked || !internalCharactersEnabled) return;
+      const outputItem = outputItemFromDataTransfer(event.dataTransfer);
+      if (outputItem?.type === "image") {
+        onStoryboardCharacterImport?.(node, outputItem);
+        return;
+      }
+      const file = firstAcceptedFile(event.dataTransfer.files, "image");
+      if (file) onStoryboardCharacterUpload?.(node, file);
+    }
+
+    return (
+      <div className={`node-body storyboard-node-body ${storyboardLocked ? "is-rendering" : ""}`}>
+        <div className="storyboard-topbar">
+          <div className="character-tabs" role="tablist" aria-label="Storyboard views">
+            <button type="button" role="tab" aria-selected={activeTab === "setup"} className={activeTab === "setup" ? "active" : ""} disabled={storyboardLocked} onClick={() => onUpdate(node.id, { storyboardTab: "setup" })}>
+              Storyboard Setup
+            </button>
+            <button type="button" role="tab" aria-selected={activeTab === "view"} className={activeTab === "view" ? "active" : ""} disabled={storyboardLocked} onClick={() => onUpdate(node.id, { storyboardTab: "view" })}>
+              Storyboard View
+            </button>
+            <button type="button" role="tab" aria-selected={activeTab === "advanced"} className={activeTab === "advanced" ? "active" : ""} disabled={storyboardLocked} onClick={() => onUpdate(node.id, { storyboardTab: "advanced" })}>
+              Advanced
+            </button>
+          </div>
+          <div className="storyboard-actions">
+            <button type="button" onClick={() => onStoryboardPlan?.(node)} disabled={planningStoryboard || runningStoryboard || !sceneDescription.trim()}>
+              {planningStoryboard ? "Planning..." : "Plan"}
+            </button>
+            {(preparingCharacters || exportingStoryboard) && (
+              <span className="storyboard-action-busy" title={preparingCharacters ? "Generating character sheets" : "Exporting storyboard boards"}>
+                <Loader2 size={15} />
+              </span>
+            )}
+            <button type="button" className="primary" onClick={() => onStoryboardGenerateAll?.(node)} disabled={runningStoryboard || planningStoryboard || !sceneDescription.trim() || !storyboardPlanCurrent} title={!storyboardPlanCurrent && sceneDescription.trim() ? "Plan frames after changing the scene description" : "Generate storyboard frames"}>
+              {preparingCharacters ? "Preparing..." : runningStoryboard ? "Generating..." : "Generate"}
+            </button>
+            {activeTab === "view" && (
+              <>
+                <button type="button" onClick={() => onStoryboardExport?.(node)} disabled={storyboardLocked || !completedStoryboardFrameCount} title="Export ordered storyboard frames and PDF">
+                  {exportingStoryboard ? "Exporting..." : "Export Boards"}
+                </button>
+                <button type="button" className="icon-only" onClick={addFrame} disabled={storyboardLocked || frames.length >= 24} title="Add frame">
+                  <Plus size={15} />
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+
+        {activeTab === "setup" ? (
+          <section className="storyboard-setup">
+            <div className="storyboard-setup-grid">
+              <label className="storyboard-scene-field">
+                <span>Scene Description</span>
+                <TaggedPromptTextarea
+                  className="storyboard-tagged-editor"
+                  value={sceneDescription}
+                  placeholder="Describe the scene, action, location, and story beat."
+                  tagMatches={sceneCharacterTagMatches}
+                  readOnly={storyboardLocked}
+                  onChange={(event) => onUpdate(node.id, {
+                    sceneDescription: event.target.value,
+                    storyboardPlanSceneDescription: "",
+                    storyboardAnalysis: ""
+                  })}
+                />
+              </label>
+              <div className="storyboard-settings-grid">
+                <NodeRow label="Scene">
+                  <input value={node.data.sceneName || ""} placeholder="Scene 1" disabled={storyboardLocked} onChange={(event) => onUpdate(node.id, { sceneName: event.target.value })} />
+                </NodeRow>
+                <NodeRow label="Frames">
+                  <select value={node.data.frameCount || "Auto"} disabled={storyboardLocked} onChange={(event) => onUpdate(node.id, { frameCount: event.target.value })}>
+                    {storyboardFrameCountOptions.map((option) => (
+                      <option key={option}>{option}</option>
+                    ))}
+                  </select>
+                </NodeRow>
+              </div>
+            </div>
+            <section className={`storyboard-character-zone ${internalCharactersEnabled ? "" : "disabled"}`} onDragOver={allowFileDrop} onDrop={handleCharacterDrop}>
+              <div className="storyboard-character-head">
+                <span>Characters</span>
+                {internalCharactersEnabled && !storyboardLocked && storyboardCharacters.length < storyboardMaxCharacters && (
+                  <label className="storyboard-add-character" title="Upload character image">
+                    <Plus size={14} />
+                    <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => onStoryboardCharacterUpload?.(node, event.target.files?.[0])} />
+                  </label>
+                )}
+              </div>
+              <div className="storyboard-character-strip">
+                {internalCharactersEnabled ? (
+                  storyboardCharacters.length ? storyboardCharacters.map((character) => (
+                    <div className={`storyboard-character-card ${character.sheetUrl ? "ready" : ""} ${character.status === "error" ? "error" : ""}`} key={character.id}>
+                      <div className="storyboard-character-thumb">
+                        {character.portrait?.localUrl ? <img src={character.portrait.localUrl} alt={character.name || "Storyboard character"} /> : <UserRound size={20} />}
+                      </div>
+                      <div className="storyboard-character-name-row">
+                        <input value={character.name || ""} placeholder="Name becomes @Name" disabled={storyboardLocked} onChange={(event) => onStoryboardCharacterUpdate?.(node.id, character.id, { name: event.target.value, error: "", status: character.status === "error" ? "ready" : character.status })} />
+                        <div className="storyboard-character-meta-row">
+                          {character.name ? <span className="storyboard-character-tag-preview">@{storyboardCharacterTag(character)}</span> : <span className="storyboard-character-tag-example">Example: @Researcher</span>}
+                          {character.sheetUrl && <span className="storyboard-character-ready">Sheet ready</span>}
+                        </div>
+                      </div>
+                      <button type="button" className="storyboard-character-remove" onClick={() => onStoryboardCharacterRemove?.(node.id, character.id)} disabled={storyboardLocked} title="Remove character">
+                        <X size={12} />
+                      </button>
+                      {character.status === "compiling" && !character.sheetUrl && <small>Building sheet...</small>}
+                      {character.error && <small className="upload-error">{character.error}</small>}
+                    </div>
+                  )) : (
+                    <div className="storyboard-character-empty">Drag to upload a headshot of any character consistency needed in the scene</div>
+                  )
+                ) : (
+                  <div className="storyboard-character-empty">Internal characters disabled in Advanced</div>
+                )}
+              </div>
+            </section>
+            <div className="storyboard-mood-row compact">
+              <label className="storyboard-notes-field">
+                <span>Planning Notes</span>
+                <textarea value={node.data.storyboardNotes || ""} placeholder="Optional scene rules" disabled={storyboardLocked} onChange={(event) => onUpdate(node.id, { storyboardNotes: event.target.value })} />
+              </label>
+            </div>
+            {node.data.storyboardAnalysis && <p className="storyboard-analysis">{node.data.storyboardAnalysis}</p>}
+          </section>
+        ) : activeTab === "advanced" ? (
+          <section className="storyboard-advanced">
+            <div className="storyboard-advanced-panel">
+              <div className="storyboard-advanced-controls">
+                <div className="storyboard-style-master-row">
+                  <span>Storyboard Style</span>
+                  <button
+                    type="button"
+                    className={`storyboard-master-toggle ${storyboardStyleEnabled ? "enabled" : ""}`}
+                    disabled={storyboardLocked}
+                    onClick={() => {
+                      const nextEnabled = !storyboardStyleEnabled;
+                      onUpdate(node.id, {
+                        useStoryboardStyle: nextEnabled,
+                        useMoodBoard: nextEnabled,
+                        useInternalStoryboardCharacters: nextEnabled
+                      });
+                    }}
+                    aria-pressed={storyboardStyleEnabled}
+                    title={storyboardStyleEnabled ? "Storyboard Style enabled" : "Storyboard Style disabled"}
+                  >
+                    <span />
+                  </button>
+                  <small>Disable Storyboard Style for access to custom node inputs for style, mood board and character.</small>
+                </div>
+                <NodeRow label="Resolution">
+                  <select value={storyboardResolutionForNode(node)} disabled={storyboardLocked} onChange={(event) => onUpdate(node.id, { resolution: event.target.value })}>
+                    {imageResolutionOptions.map((option) => (
+                      <option key={option}>{option}</option>
+                    ))}
+                  </select>
+                </NodeRow>
+                <NodeRow label="Aspect Ratio">
+                  <select value={storyboardAspectRatioForNode(node)} disabled={storyboardLocked} onChange={(event) => onUpdate(node.id, { aspectRatio: event.target.value })}>
+                    {storyboardAspectRatioOptions.map((ratio) => (
+                      <option key={ratio}>{ratio}</option>
+                    ))}
+                  </select>
+                </NodeRow>
+              </div>
+              <div className={`storyboard-custom-inputs ${storyboardStyleEnabled ? "disabled" : ""}`}>
+                <NodeRow label="Style" inputPort={customStylePort} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+                  <button type="button" className={incoming.styleIn?.length ? "connected-field" : ""} disabled={storyboardLocked || storyboardStyleEnabled}>
+                    {connectedSummary(incoming.styleIn, "Add style")}
+                  </button>
+                </NodeRow>
+                <NodeRow label="Mood Board" inputPort={customTransferPort} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+                  <button type="button" className={incoming.transferIn?.length ? "connected-field" : ""} disabled={storyboardLocked || storyboardStyleEnabled}>
+                    {connectedSummary(incoming.transferIn, "Add mood board")}
+                  </button>
+                </NodeRow>
+                <NodeRow label="Character" inputPort={customCharacterPort} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+                  <button type="button" className={incoming.characterIn?.length ? "connected-field" : ""} disabled={storyboardLocked || storyboardStyleEnabled}>
+                    {connectedSummary(incoming.characterIn, "Add character")}
+                  </button>
+                </NodeRow>
+              </div>
+            </div>
+          </section>
+        ) : (
+          <section className="storyboard-view" style={storyboardFrameAspectStyle}>
+            <div className="storyboard-frame-grid" data-storyboard-aspect={storyboardAspectKey}>
+              {frames.map((frame) => {
+                const selected = frame.id === selectedFrame?.id;
+                const frameBusy = frame.status === "running" || frame.status === "queued";
+                const frameCharacterTagMatches = storyboardCharacterTagMatches(frame.prompt || "", node, incoming.characterIn || [], incomingByNode);
+                return (
+                  <article
+                    key={frame.id}
+                    className={`storyboard-frame-card ${selected ? "selected" : ""} ${frame.resultUrl ? "has-result" : ""} ${frameBusy ? "is-busy" : ""}`}
+                    draggable={!storyboardLocked}
+                    onDragStart={(event) => {
+                      if (storyboardLocked) {
+                        event.preventDefault();
+                        return;
+                      }
+                      event.stopPropagation();
+                      event.dataTransfer.setData("application/x-storyboard-frame-id", frame.id);
+                    }}
+                    onDragOver={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                    }}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      if (storyboardLocked) return;
+                      moveFrame(event.dataTransfer.getData("application/x-storyboard-frame-id"), frame.id);
+                    }}
+                    onClick={() => {
+                      if (storyboardLocked) return;
+                      onUpdate(node.id, { selectedFrameId: frame.id, resultUrl: frame.resultUrl || node.data.resultUrl });
+                    }}
+                  >
+                    <div className="storyboard-frame-media">
+                      {frame.resultUrl ? (
+                        <img
+                          src={storyboardFrameImageSrc(frame)}
+                          alt={`Storyboard frame ${frame.number}`}
+                          onError={(event) => {
+                            const fallbackSrc = storyboardFrameFallbackSrc(frame);
+                            if (fallbackSrc && event.currentTarget.src !== new URL(fallbackSrc, window.location.href).href) {
+                              event.currentTarget.src = fallbackSrc;
+                            }
+                          }}
+                        />
+                      ) : (
+                        <div className="storyboard-frame-empty">
+                          <Clapperboard size={22} />
+                          <span>Frame {String(frame.number).padStart(2, "0")}</span>
+                        </div>
+                      )}
+                      {frameBusy && (
+                        <div className="storyboard-frame-rendering">
+                          <Loader2 size={18} />
+                          <span>{frame.status === "queued" ? "Queued" : "Rendering"}</span>
+                        </div>
+                      )}
+                      <div className="storyboard-frame-number">
+                        <GripVertical size={12} />
+                        <span>{String(frame.number).padStart(2, "0")}</span>
+                      </div>
+                    </div>
+                    <div className="storyboard-frame-controls">
+                      <select value={frame.shot || "None"} disabled={storyboardLocked} onChange={(event) => updateFrame(frame.id, { shot: event.target.value })}>
+                        {shotPresetNames.map((option) => <option key={option}>{option}</option>)}
+                      </select>
+                      <select value={frame.lens || "None"} disabled={storyboardLocked} onChange={(event) => updateFrame(frame.id, { lens: event.target.value })}>
+                        {lensPresetNames.map((option) => <option key={option}>{option}</option>)}
+                      </select>
+                      <select value={frame.angle || "None"} disabled={storyboardLocked} onChange={(event) => updateFrame(frame.id, { angle: event.target.value })}>
+                        {typePresetNames.map((option) => <option key={option}>{option}</option>)}
+                      </select>
+                    </div>
+                    <TaggedPromptTextarea
+                      className="storyboard-tagged-editor"
+                      value={frame.prompt || ""}
+                      placeholder="Frame prompt"
+                      tagMatches={frameCharacterTagMatches}
+                      readOnly={storyboardLocked}
+                      onChange={(event) => updateFrame(frame.id, { prompt: event.target.value })}
+                    />
+                    <div className="storyboard-frame-actions">
+                      <button type="button" onClick={(event) => { event.stopPropagation(); onStoryboardGenerateFrame?.(node, frame.id); }} disabled={storyboardLocked || !sceneDescription.trim() || !storyboardPlanCurrent} title={!storyboardPlanCurrent && sceneDescription.trim() ? "Plan frames after changing the scene description" : "Generate this frame"}>
+                        {frame.status === "queued" ? "Queued..." : frame.status === "running" ? "Running..." : "Run"}
+                      </button>
+                      <button type="button" className="icon-only" onClick={(event) => { event.stopPropagation(); removeFrame(frame.id); }} disabled={frames.length <= 1 || storyboardLocked}>
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                    {frame.error && <small className="upload-error">{frame.error}</small>}
+                  </article>
+                );
+              })}
+            </div>
+            {node.data.storyboardExport && (
+              <div className="storyboard-export-status">
+                <Download size={13} />
+                <span>
+                  Exported {node.data.storyboardExport.frameCount || 0} board{node.data.storyboardExport.frameCount === 1 ? "" : "s"}
+                  {node.data.storyboardExport.pdf ? " + PDF" : ""} to {node.data.storyboardExport.folderPath || node.data.storyboardExport.folderName || "final boards"}
+                </span>
+              </div>
+            )}
+          </section>
+        )}
+        {node.data.error && <small className="upload-error storyboard-error">{node.data.error}</small>}
+        <button className="preview-resize-handle storyboard-resize-handle" onPointerDown={(event) => onPreviewResizeStart(event, node, "storyboardScale")} title="Resize storyboard" />
       </div>
     );
   }
@@ -5855,12 +6841,12 @@ function NodeBody({
     const promptConnected = Boolean(resolvedPromptText(incoming.promptIn));
     const isSam3Image = isSam3ImageModel(node.data.model);
     const isZImage = isZImageImageModel(node.data.model);
-    const imageInstructionSources = [...(incoming.imagePromptIn || []), ...(incoming.cameraIn || []), ...(incoming.styleIn || []), ...(incoming.transferIn || []), ...(incoming.characterIn || [])];
+    const imageInstructionSources = imageInstructionSourcesForModel(node.data.model, incoming);
     const effectivePromptValue = isSam3Image || isZImage ? promptValue : buildEffectiveImagePrompt(promptValue, imageInstructionSources, node.data.aspectRatio, incomingByNode);
     const promptHasGeneratedAdditions = effectivePromptValue !== promptValue;
     const appliedInstructionLabels = activeImageInstructionLabels(imageInstructionSources, incomingByNode);
-    const characterTagMatches = isSam3Image || isZImage ? [] : imageModelCharacterTagMatches(promptValue, imageInstructionSources, incomingByNode);
-    const imagePromptConnections = isZImage ? zImageSupportedReferenceConnections(incoming.imagePromptIn || []) : incoming.imagePromptIn;
+    const characterTagMatches = isSam3Image || isImageModelUnsupportedInput(node, "characterIn") ? [] : imageModelCharacterTagMatches(promptValue, imageInstructionSources, incomingByNode);
+    const imagePromptConnections = imagePromptInputConnectionsForModel(node.data.model, incoming);
     const imagePromptLabel = connectedSummary(imagePromptConnections, "Add file");
     const cameraPromptLabel = connectedSummary(incoming.cameraIn, "Add camera");
     const stylePromptLabel = connectedSummary(incoming.styleIn, "Add style");
@@ -5872,12 +6858,22 @@ function NodeBody({
     const stylePort = config.input.find((port) => port.id === "styleIn");
     const transferPort = config.input.find((port) => port.id === "transferIn");
     const characterPort = config.input.find((port) => port.id === "characterIn");
-    const disabledCameraPort = imageModelInputPortForModel(node, cameraPort);
-    const disabledStylePort = imageModelInputPortForModel(node, stylePort);
-    const disabledTransferPort = imageModelInputPortForModel(node, transferPort);
-    const disabledCharacterPort = imageModelInputPortForModel(node, characterPort);
-    const settingsOpen = Boolean(node.data.settingsOpen);
-    const collapsedPorts = isSam3Image ? [promptPort, imagePromptPort] : [promptPort, imagePromptPort, disabledCameraPort, disabledStylePort, disabledTransferPort, disabledCharacterPort];
+    const cameraInputUnsupported = isImageModelUnsupportedInput(node, "cameraIn");
+    const styleInputUnsupported = isImageModelUnsupportedInput(node, "styleIn");
+    const transferInputUnsupported = isImageModelUnsupportedInput(node, "transferIn");
+    const characterInputUnsupported = isImageModelUnsupportedInput(node, "characterIn");
+    const settingsOpen = node.data.settingsOpen !== false;
+    const collapsedPorts = isSam3Image
+      ? [promptPort, imagePromptPort]
+      : [
+          promptPort,
+          imagePromptPort,
+          cameraInputUnsupported ? null : cameraPort,
+          styleInputUnsupported ? null : stylePort,
+          transferInputUnsupported ? null : transferPort,
+          characterInputUnsupported ? null : characterPort
+        ];
+    const imageModelLimitationMessage = imageModelUnsupportedInputMessage(node.data.model);
     return (
       <div className="node-body model-node-body image-model-body">
         <ResultPane
@@ -5942,23 +6938,23 @@ function NodeBody({
               {sam3SegmentationModelsEnabled && <option>SAM 3 Image</option>}
             </select>
           </NodeRow>
-          {isZImage && <small className="model-limitation-note">{zImageUnsupportedInputMessage()}</small>}
+          {imageModelLimitationMessage && <small className="model-limitation-note">{imageModelLimitationMessage}</small>}
           <NodeRow label={isSam3Image ? "Image" : "Image Prompt"} inputPort={settingsOpen ? imagePromptPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
             <button className={imagePromptLabel !== "Add file" ? "connected-field" : ""}>{imagePromptLabel}</button>
           </NodeRow>
           {!isSam3Image && (
             <>
-              <NodeRow label="Camera" inputPort={settingsOpen ? disabledCameraPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-                <button disabled={isZImage} className={cameraPromptLabel !== "Add camera" ? "connected-field" : ""}>{isZImage ? "Not supported" : cameraPromptLabel}</button>
+              <NodeRow label="Camera" inputPort={settingsOpen && !cameraInputUnsupported ? cameraPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+                <button disabled={cameraInputUnsupported} className={cameraPromptLabel !== "Add camera" ? "connected-field" : ""}>{cameraInputUnsupported ? "Not supported" : cameraPromptLabel}</button>
               </NodeRow>
-              <NodeRow label="Style" inputPort={settingsOpen ? disabledStylePort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-                <button disabled={isZImage} className={stylePromptLabel !== "Add style" ? "connected-field" : ""}>{isZImage ? "Not supported" : stylePromptLabel}</button>
+              <NodeRow label="Style" inputPort={settingsOpen && !styleInputUnsupported ? stylePort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+                <button disabled={styleInputUnsupported} className={stylePromptLabel !== "Add style" ? "connected-field" : ""}>{styleInputUnsupported ? "Not supported" : stylePromptLabel}</button>
               </NodeRow>
-              <NodeRow label="Mood Board" inputPort={settingsOpen ? disabledTransferPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-                <button disabled={isZImage} className={transferPromptLabel !== "Add mood board" ? "connected-field" : ""}>{isZImage ? "Not supported" : transferPromptLabel}</button>
+              <NodeRow label="Mood Board" inputPort={settingsOpen && !transferInputUnsupported ? transferPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+                <button disabled={transferInputUnsupported} className={transferPromptLabel !== "Add mood board" ? "connected-field" : ""}>{transferInputUnsupported ? "Not supported" : transferPromptLabel}</button>
               </NodeRow>
-              <NodeRow label="Character" inputPort={settingsOpen ? disabledCharacterPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-                <button disabled={isZImage} className={characterPromptLabel !== "Add character" ? "connected-field" : ""}>{isZImage ? "Not supported" : characterPromptLabel}</button>
+              <NodeRow label="Character" inputPort={settingsOpen && !characterInputUnsupported ? characterPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+                <button disabled={characterInputUnsupported} className={characterPromptLabel !== "Add character" ? "connected-field" : ""}>{characterInputUnsupported ? "Not supported" : characterPromptLabel}</button>
               </NodeRow>
               <NodeRow label="Generations">
                 <select value={node.data.batchCount || "1"} onChange={(event) => onUpdate(node.id, { batchCount: event.target.value })}>
@@ -6020,19 +7016,20 @@ function NodeBody({
   const happyHorseReferenceImageCount = Math.min(incoming.referenceImageIn?.length || 0, 9);
   const wan27ReferenceImageCount = incoming.referenceImageIn?.length || 0;
   const wan27ReferenceVideoCount = incoming.referenceVideoIn?.length || 0;
+  const supportsCharacterInput = videoModelSupportsCharacterInput(node.data.model);
   const tagMatches = isWanFunControl || isAurora || isLumaVideo || isSam3Video ? [] : videoModelReferenceTagMatches(promptValue, incoming);
-  const characterConnected = Boolean(incoming.characterIn?.length);
-  const settingsOpen = Boolean(node.data.settingsOpen);
+  const characterConnected = supportsCharacterInput && Boolean(incoming.characterIn?.length);
+  const settingsOpen = node.data.settingsOpen !== false;
   const collapsedPorts = isWanFunControl
     ? [promptPort, referenceVideoPort, referenceImagePort, characterPort]
     : isWan27Reference
       ? [promptPort, referenceImagePort, referenceVideoPort, characterPort]
     : isAurora
-      ? [promptPort, referenceImagePort, referenceAudioPort, characterPort]
+      ? [promptPort, referenceImagePort, referenceAudioPort]
       : isHappyHorse
         ? [promptPort, referenceImagePort, characterPort]
     : isLumaVideo
-      ? [promptPort, startFramePort, endFramePort, referenceImagePort, characterPort]
+      ? [promptPort, startFramePort, endFramePort, referenceImagePort]
     : isSam3Video
       ? [promptPort, referenceVideoPort]
       : [promptPort, startFramePort, endFramePort, referenceImagePort, referenceVideoPort, referenceAudioPort, characterPort];
@@ -6216,9 +7213,6 @@ function NodeBody({
             <NodeRow label="Audio" inputPort={settingsOpen ? referenceAudioPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
               <button className={incoming.referenceAudioIn?.length ? "connected-field" : ""}>{connectedSummary(incoming.referenceAudioIn, "Add audio")}</button>
             </NodeRow>
-            <NodeRow label="Character" inputPort={settingsOpen ? characterPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-              <button className={incoming.characterIn?.length ? "connected-field" : ""}>{connectedSummary(incoming.characterIn, "Add character")}</button>
-            </NodeRow>
             <NodeRow label="Resolution">
               <select value={node.data.resolution} onChange={(event) => onUpdate(node.id, { resolution: event.target.value })}>
                 <option>720p</option>
@@ -6272,9 +7266,6 @@ function NodeBody({
             </NodeRow>
             <NodeRow label="Reference Image" inputPort={settingsOpen ? referenceImagePort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
               <button className={incoming.referenceImageIn?.length ? "connected-field" : ""}>{connectedSummary(incoming.referenceImageIn, "Optional start")}</button>
-            </NodeRow>
-            <NodeRow label="Character" inputPort={settingsOpen ? characterPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-              <button className={incoming.characterIn?.length ? "connected-field" : ""}>{connectedSummary(incoming.characterIn, "Optional character")}</button>
             </NodeRow>
             <NodeRow label="Duration">
               <select value={lumaDuration} onChange={(event) => onUpdate(node.id, { duration: event.target.value })}>
@@ -6367,7 +7358,7 @@ function NodeBody({
   );
 }
 
-function TaggedPromptTextarea({ value, onChange, readOnly, className = "", tagMatches = [] }) {
+function TaggedPromptTextarea({ value, onChange, readOnly, className = "", tagMatches = [], placeholder = "" }) {
   const highlighterRef = React.useRef(null);
   const parts = React.useMemo(() => promptHighlightParts(value, tagMatches), [value, tagMatches]);
 
@@ -6391,7 +7382,7 @@ function TaggedPromptTextarea({ value, onChange, readOnly, className = "", tagMa
         )}
         {String(value || "").endsWith("\n") ? "\u00a0" : null}
       </div>
-      <textarea value={value} readOnly={readOnly} onChange={onChange} onScroll={syncScroll} />
+      <textarea value={value} readOnly={readOnly} placeholder={placeholder} onChange={onChange} onScroll={syncScroll} />
     </div>
   );
 }
@@ -6814,6 +7805,15 @@ function getNodeConfig(type) {
       input: [{ id: "sourceIn", label: "Source", color: portColors.preview }],
       output: []
     },
+    storyboard: {
+      icon: Clapperboard,
+      input: [
+        { id: "styleIn", label: "Style", color: portColors.style },
+        { id: "transferIn", label: "Mood Board", color: portColors.transfer },
+        { id: "characterIn", label: "Character", color: portColors.character }
+      ],
+      output: []
+    },
     model3d: {
       icon: Box,
       input: model3DViewInputs.map((input) => ({ id: input.id, label: input.label, color: portColors.image })),
@@ -6856,6 +7856,32 @@ function createDefaultNodeData(type, label, count) {
   if (type === "text") return { title, text: "" };
   if (type === "image" || type === "video" || type === "audio") return { title };
   if (type === "preview") return { title, previewScale: 1, previewItemIndex: 0 };
+  if (type === "storyboard") {
+    return {
+      title,
+      storyboardTab: "setup",
+      sceneName: "Scene 1",
+      sceneDescription: "",
+      storyboardNotes: "",
+      frameCount: "Auto",
+      model: storyboardFixedModel,
+      aspectRatio: storyboardDefaultAspectRatio,
+      resolution: storyboardDefaultResolution,
+      useStoryboardStyle: true,
+      useMoodBoard: true,
+      useInternalStoryboardCharacters: true,
+      storyboardStylePreset: "None",
+      storyboardMoodBoardUrl: storyboardDefaultMoodBoardUrl,
+      storyboardMoodBoardFileName: storyboardMoodBoardLabel,
+      storyboardCharacters: [],
+      storyboardAnalysis: "",
+      storyboardPlanSceneDescription: "",
+      storyboardFrames: defaultStoryboardFrames(storyboardDefaultFrameCount),
+      selectedFrameId: "",
+      storyboardScale: 1,
+      settingsOpen: true
+    };
+  }
   if (type === "model3d") {
     return {
       title,
@@ -7011,7 +8037,8 @@ function createDefaultNodeData(type, label, count) {
       prompt: "",
       aspectRatio: "16:9",
       resolution: "2K",
-      batchCount: "1"
+      batchCount: "1",
+      settingsOpen: true
     };
   }
 
@@ -7028,7 +8055,8 @@ function createDefaultNodeData(type, label, count) {
     multiShots: false,
     enableSafetyChecker: true,
     seed: "",
-    batchCount: "1"
+    batchCount: "1",
+    settingsOpen: true
   };
 }
 
@@ -7090,12 +8118,34 @@ function zImageUnsupportedInputMessage() {
   return "Z-Image supports Prompt and Image Prompt only; Camera, Style, Mood Board, and Character inputs are not supported.";
 }
 
-function isZImageUnsupportedInput(node, portId) {
-  return node?.type === "imageModel" && isZImageImageModel(node.data?.model) && zImageUnsupportedInputPorts.has(portId);
+function lumaImageUnsupportedInputMessage() {
+  return "Luma Dream Machine supports Prompt, Image Prompt, and Style inputs only; Camera, Mood Board, and Character inputs are not supported.";
 }
 
-function isZImageUnsupportedSource(target, source) {
-  return target?.type === "imageModel" && isZImageImageModel(target.data?.model) && zImageUnsupportedSourceTypes.has(source?.type);
+function imageModelUnsupportedInputMessage(model) {
+  if (isZImageImageModel(model)) return zImageUnsupportedInputMessage();
+  if (isLumaImageModel(model)) return lumaImageUnsupportedInputMessage();
+  return "";
+}
+
+function imageModelUnsupportedInputPorts(model) {
+  if (isZImageImageModel(model)) return zImageUnsupportedInputPorts;
+  if (isLumaImageModel(model)) return lumaImageUnsupportedInputPorts;
+  return emptyPortSet;
+}
+
+function imageModelUnsupportedSourceTypes(model) {
+  if (isZImageImageModel(model)) return zImageUnsupportedSourceTypes;
+  if (isLumaImageModel(model)) return lumaImageUnsupportedSourceTypes;
+  return emptyPortSet;
+}
+
+function isImageModelUnsupportedInput(node, portId) {
+  return node?.type === "imageModel" && imageModelUnsupportedInputPorts(node.data?.model).has(portId);
+}
+
+function isImageModelUnsupportedSource(target, source) {
+  return target?.type === "imageModel" && imageModelUnsupportedSourceTypes(target.data?.model).has(source?.type);
 }
 
 function zImageSupportedReferenceConnections(items = []) {
@@ -7105,13 +8155,30 @@ function zImageSupportedReferenceConnections(items = []) {
   });
 }
 
-function imageModelInputPortForModel(node, port) {
-  if (!port || !isZImageUnsupportedInput(node, port.id)) return port;
-  return {
-    ...port,
-    disabled: true,
-    disabledReason: zImageUnsupportedInputMessage()
-  };
+function imagePromptInputConnectionsForModel(model, incoming = {}) {
+  if (isZImageImageModel(model)) return zImageSupportedReferenceConnections(incoming.imagePromptIn || []);
+  return incoming.imagePromptIn || [];
+}
+
+function imageInstructionSourcesForModel(model, incoming = {}) {
+  const unsupportedPorts = imageModelUnsupportedInputPorts(model);
+  return [
+    ...(incoming.imagePromptIn || []),
+    ...(!unsupportedPorts.has("cameraIn") ? incoming.cameraIn || [] : []),
+    ...(!unsupportedPorts.has("styleIn") ? incoming.styleIn || [] : []),
+    ...(!unsupportedPorts.has("transferIn") ? incoming.transferIn || [] : []),
+    ...(!unsupportedPorts.has("characterIn") ? incoming.characterIn || [] : [])
+  ];
+}
+
+function imageReferenceConnectionsForModel(model, incoming = {}) {
+  const unsupportedPorts = imageModelUnsupportedInputPorts(model);
+  if (isZImageImageModel(model)) return zImageSupportedReferenceConnections(incoming.imagePromptIn || []);
+  return [
+    ...(incoming.imagePromptIn || []),
+    ...(!unsupportedPorts.has("transferIn") ? incoming.transferIn || [] : []),
+    ...(!unsupportedPorts.has("characterIn") ? incoming.characterIn || [] : [])
+  ];
 }
 
 function isLumaImageModel(model) {
@@ -7142,6 +8209,20 @@ function isHappyHorseModel(model) {
 function isLumaVideoModel(model) {
   const normalized = String(model || "").toLowerCase();
   return normalized.includes("luma") || normalized.includes("dream") || normalized.includes("ray2") || normalized.includes("ray 2");
+}
+
+function videoModelSupportsCharacterInput(model) {
+  return !isAuroraModel(model) && !isLumaVideoModel(model) && !isSam3VideoModel(model);
+}
+
+function isVideoModelUnsupportedCharacterInput(node, portId) {
+  return node?.type === "videoModel" && portId === "characterIn" && !videoModelSupportsCharacterInput(node.data?.model);
+}
+
+function videoModelUnsupportedCharacterMessage(model) {
+  if (isAuroraModel(model)) return "Creative Aurora does not support Character inputs.";
+  if (isLumaVideoModel(model)) return "Luma Dream Machine video does not support Character inputs.";
+  return "This video model does not support Character inputs.";
 }
 
 function videoModelSelectionPatch(data = {}, model) {
@@ -7398,9 +8479,20 @@ function visiblePortIdsForNode(node) {
   return [...inputPortIdsForNode(node), ...outputPortIdsForNode(node)];
 }
 
+function inputPortDefinitionsForNode(node) {
+  const basePorts = getNodeConfig(node?.type)?.input || [];
+  return node?.type === "composer" ? [...basePorts, ...composerCharacterInputPortsForNode(node)] : basePorts;
+}
+
+function outputPortDefinitionsForNode(node) {
+  const basePorts = getNodeConfig(node?.type)?.output || [];
+  if (node?.type === "storyboard") return [...basePorts, ...storyboardFrameOutputPortsForNode(node)];
+  if (node?.type === "text") return [{ id: "promptOut", label: "Prompt", color: portColors.prompt }];
+  return basePorts;
+}
+
 function inputPortIdsForNode(node) {
-  const basePorts = (getNodeConfig(node?.type)?.input || []).map((port) => port.id);
-  return node?.type === "composer" ? [...basePorts, ...composerCharacterInputPortIdsForNode(node)] : basePorts;
+  return inputPortDefinitionsForNode(node).map((port) => port.id);
 }
 
 function activeInputPortIdsForNode(node) {
@@ -7408,11 +8500,104 @@ function activeInputPortIdsForNode(node) {
     return utilityInputPortIds(node.data?.utilityMode, node.data?.utilityImageModel, node.data?.utilityVideoModel);
   }
 
+  if (node?.type === "storyboard") {
+    return node.data?.useStoryboardStyle === false ? ["styleIn", "transferIn", "characterIn"] : [];
+  }
+
+  if (node?.type === "imageModel") {
+    return inputPortIdsForNode(node).filter((portId) => !isImageModelUnsupportedInput(node, portId));
+  }
+
+  if (node?.type === "videoModel") {
+    return inputPortIdsForNode(node).filter((portId) => !isVideoModelUnsupportedCharacterInput(node, portId));
+  }
+
   return inputPortIdsForNode(node);
 }
 
 function outputPortIdsForNode(node) {
-  return (getNodeConfig(node?.type)?.output || []).map((port) => port.id);
+  return outputPortDefinitionsForNode(node).map((port) => port.id);
+}
+
+function portDefinitionForNode(node, portId, role) {
+  const ports = role === "input" ? inputPortDefinitionsForNode(node) : outputPortDefinitionsForNode(node);
+  return ports.find((port) => port.id === portId) || null;
+}
+
+function portKindFromColor(color) {
+  return Object.entries(portColors).find(([, value]) => value === color)?.[0] || "";
+}
+
+function portKindForNodePort(node, portId, role) {
+  if (!node || !portId) return "";
+  if (role === "input" && node.type === "preview" && portId === "sourceIn") return "preview";
+  if (role === "input" && isComposerCharacterInputPort(portId, node)) return "character";
+  if (role === "output" && node.type === "storyboard" && storyboardFrameIdFromOutputPort(portId)) return "image";
+  if (role === "output" && node.type === "utility" && portId === "utilityOut") return utilityOutputType(node) === "video" ? "video" : "image";
+  if (role === "output" && node.type === "text" && portId === "promptOut") return "prompt";
+  return portKindFromColor(portDefinitionForNode(node, portId, role)?.color);
+}
+
+function acceptedInputPortKinds(node, portId) {
+  const inputKind = portKindForNodePort(node, portId, "input");
+  if (inputKind === "preview") return ["image", "video", "model3d", "transfer", "character"];
+  return inputKind ? [inputKind] : [];
+}
+
+function portsAreCompatible(source, fromPort, target, toPort) {
+  const outputKind = portKindForNodePort(source, fromPort, "output");
+  const acceptedKinds = acceptedInputPortKinds(target, toPort);
+  return Boolean(outputKind && acceptedKinds.includes(outputKind));
+}
+
+function getPortCompatibilityError(source, fromPort, target, toPort) {
+  if (portsAreCompatible(source, fromPort, target, toPort)) return "";
+  const outputKind = portKindForNodePort(source, fromPort, "output");
+  const inputKind = portKindForNodePort(target, toPort, "input");
+  if (inputKind === "preview") return "Preview accepts image, video, 3D, Mood Board, or Character outputs";
+  if (!outputKind || !inputKind) return "Choose a valid connection";
+  return `Connect matching port colors only: ${humanPortKindLabel(inputKind)} inputs do not accept ${humanPortKindLabel(outputKind)} outputs`;
+}
+
+function humanPortKindLabel(kind) {
+  return {
+    prompt: "Prompt",
+    image: "Image",
+    camera: "Camera",
+    style: "Style",
+    transfer: "Mood Board",
+    character: "Character",
+    video: "Video",
+    audio: "Audio",
+    model3d: "3D",
+    preview: "Preview"
+  }[kind] || "matching";
+}
+
+function storyboardFrameOutputPortsForNode(node) {
+  if (node?.type !== "storyboard") return [];
+  return normalizedStoryboardFrames(node.data?.storyboardFrames).map((frame, index) => ({
+    id: storyboardFrameOutputPortId(frame.id),
+    label: `Frame ${String(index + 1).padStart(2, "0")}`,
+    color: portColors.image,
+    disabled: !frame.resultUrl,
+    disabledReason: "Generate this storyboard frame before connecting it"
+  }));
+}
+
+function storyboardFrameOutputPortId(frameId) {
+  return `frameOut:${frameId}`;
+}
+
+function storyboardFrameIdFromOutputPort(portId) {
+  const value = String(portId || "");
+  return value.startsWith("frameOut:") ? value.slice("frameOut:".length) : "";
+}
+
+function storyboardFrameForOutputPort(node, portId) {
+  const frameId = storyboardFrameIdFromOutputPort(portId);
+  if (!frameId) return null;
+  return normalizedStoryboardFrames(node?.data?.storyboardFrames).find((frame) => frame.id === frameId) || null;
 }
 
 function composerCharacterInputPortIdsForNode(node) {
@@ -7458,7 +8643,7 @@ function nodeResultMediaType(node) {
   if (node.type === "utility") return utilityResultType(node);
   if (node.type === "image" || node.type === "video" || node.type === "audio" || node.type === "model3d") return node.type;
   if (node.type === "videoModel") return "video";
-  if (node.type === "imageModel" || node.type === "camera" || node.type === "composer" || node.type === "character") return "image";
+  if (node.type === "imageModel" || node.type === "camera" || node.type === "composer" || node.type === "character" || node.type === "storyboard") return "image";
   return "";
 }
 
@@ -7488,12 +8673,19 @@ function buildReferenceTagHighlights(nodes, incomingByNode) {
 
   nodes.forEach((node) => {
     const incoming = incomingByNode[node.id] || {};
-    const prompt = connectedText(incoming.promptIn) || node.data.prompt || "";
-    const matches = node.type === "imageModel" && !isSam3ImageModel(node.data.model) && !isZImageImageModel(node.data.model)
+    const prompt = node.type === "storyboard"
+      ? [
+          node.data.sceneDescription || "",
+          ...normalizedStoryboardFrames(node.data.storyboardFrames).map((frame) => frame.prompt || "")
+        ].join("\n")
+      : connectedText(incoming.promptIn) || node.data.prompt || "";
+    const matches = node.type === "imageModel" && !isSam3ImageModel(node.data.model) && !isImageModelUnsupportedInput(node, "characterIn")
       ? imageModelCharacterTagMatches(prompt, incoming.characterIn)
-      : node.type === "videoModel" && !isWanFunControlModel(node.data.model) && !isAuroraModel(node.data.model) && !isSam3VideoModel(node.data.model)
+      : node.type === "videoModel" && !isWanFunControlModel(node.data.model) && videoModelSupportsCharacterInput(node.data.model)
         ? videoModelReferenceTagMatches(prompt, incoming)
-        : [];
+        : node.type === "storyboard"
+          ? storyboardCharacterTagMatches(prompt, node, incoming.characterIn, incomingByNode)
+          : [];
 
     matches.forEach((match) => {
       if (!highlights.has(match.nodeId)) {
@@ -7542,8 +8734,9 @@ function buildInactiveEdgeIds(nodes, edges) {
       .filter((edge) => {
         const source = nodeMap.get(edge.from.nodeId);
         const target = nodeMap.get(edge.to.nodeId);
-        if (isZImageUnsupportedInput(target, edge.to.port)) return true;
-        if (isZImageUnsupportedSource(target, source)) return true;
+        if (isImageModelUnsupportedInput(target, edge.to.port)) return true;
+        if (isImageModelUnsupportedSource(target, source)) return true;
+        if (isVideoModelUnsupportedCharacterInput(target, edge.to.port)) return true;
         return (
           (source?.type === "transfer" || source?.type === "character") &&
           (!source.data?.locked || !source.data?.activated || !source.data?.resultUrl)
@@ -7565,19 +8758,36 @@ function connectedText(items = []) {
     .join("\n");
 }
 
+function connectedOutputItem(source, edge) {
+  if (source?.type === "storyboard") return storyboardFrameOutputItem(source, edge);
+  const url = source?.data?.resultUrl || "";
+  if (!url) return null;
+  return {
+    url,
+    type: previewMediaType(source, edge || { from: { port: "" }, to: { port: "" } }),
+    label: sourceLabel(source),
+    text: source?.data?.resultText || ""
+  };
+}
+
+function connectedOutputUrl(source, edge) {
+  return connectedOutputItem(source, edge)?.url || "";
+}
+
 function connectedAssetUrls(items = []) {
-  return items.map(({ source }) => source.data.resultUrl).filter(Boolean);
+  return items.map(({ source, edge }) => connectedOutputUrl(source, edge)).filter(Boolean);
 }
 
 function connectedAssetItems(items = []) {
   return items
-    .map(({ source }) => {
-      const url = source.data.resultUrl;
+    .map(({ source, edge }) => {
+      const outputItem = connectedOutputItem(source, edge);
+      const url = outputItem?.url || connectedOutputUrl(source, edge);
       if (!url) return null;
       return {
         url,
-        type: previewMediaType(source, { from: { port: "" }, to: { port: "" } }),
-        label: sourceLabel(source)
+        type: outputItem?.type || previewMediaType(source, edge || { from: { port: "" }, to: { port: "" } }),
+        label: outputItem?.label || sourceLabel(source)
       };
     })
     .filter(Boolean);
@@ -7585,8 +8795,8 @@ function connectedAssetItems(items = []) {
 
 function connectedAssetLabels(items = []) {
   return items
-    .filter(({ source }) => source.data.resultUrl)
-    .map(({ source }) => source.data.title || sourceLabel(source));
+    .filter(({ source, edge }) => connectedOutputUrl(source, edge))
+    .map(({ source, edge }) => connectedOutputItem(source, edge)?.label || source.data.title || sourceLabel(source));
 }
 
 function connectedCharacterReferences(items = []) {
@@ -7629,6 +8839,35 @@ function imageModelCharacterTagMatches(prompt, items = [], incomingByNode = null
       type: "character"
     }))
     .filter((match) => promptHasTag(text, match.tag));
+}
+
+function storyboardCharacterTagMatches(prompt, node, externalItems = [], incomingByNode = null) {
+  const text = String(prompt || "");
+  const internalCandidates = storyboardUsesInternalCharacters(node)
+    ? normalizedStoryboardCharacters(node.data?.storyboardCharacters)
+        .filter((character) => character.name || character.portrait?.localUrl)
+        .map((character, index) => ({
+          nodeId: `${node.id}:${character.id}`,
+          tag: storyboardCharacterTag(character),
+          color: referenceTagPalette[index % referenceTagPalette.length],
+          type: "character"
+        }))
+    : [];
+  const externalCandidates = activeConnectedCharacterSources(externalItems, incomingByNode)
+    .map((source, index) => ({
+      nodeId: source.id,
+      tag: characterTag(source),
+      color: referenceTagPalette[(internalCandidates.length + index) % referenceTagPalette.length],
+      type: "character"
+    }));
+  const uniqueCandidates = new Map();
+
+  [...internalCandidates, ...externalCandidates].forEach((candidate) => {
+    if (!candidate.tag) return;
+    uniqueCandidates.set(candidate.tag.toLowerCase(), candidate);
+  });
+
+  return [...uniqueCandidates.values()].filter((match) => promptHasTag(text, match.tag));
 }
 
 function referenceTagCandidates(items = [], colorOffset = 0, fallbackPrefix = "Image") {
@@ -7956,8 +9195,9 @@ function connected3DViewUrls(incoming = {}) {
 }
 
 async function runVideoModelGeneration({ node, prompt, incoming, projectId, projectName, workflowContext, index }) {
-  const characterReferences = connectedCharacterReferences(incoming.characterIn);
-  const characterVoices = connectedCharacterVoiceUrls(incoming.characterIn);
+  const characterConnections = videoModelSupportsCharacterInput(node.data.model) ? incoming.characterIn : [];
+  const characterReferences = connectedCharacterReferences(characterConnections);
+  const characterVoices = connectedCharacterVoiceUrls(characterConnections);
   const { response, data } = await nodeApi.generateVideo(buildVideoGenerationRequest({
     node,
     prompt,
@@ -8024,9 +9264,10 @@ function connectedPreviewSources(items = []) {
   return items
     .map(({ source, edge }) => {
       const sourceType = previewMediaType(source, edge);
-      const resultItems = normalizedResultItems(source.data.resultItems, source.data.resultUrl, sourceType);
+      const outputItem = storyboardFrameOutputItem(source, edge);
+      const resultItems = outputItem ? [outputItem] : normalizedResultItems(source.data.resultItems, source.data.resultUrl, sourceType);
       if (!resultItems.length) return null;
-      const sourceName = sourceLabel(source);
+      const sourceName = outputItem?.label || sourceLabel(source);
       const selectedResultIndex = Math.trunc(Number(source.data.selectedResultIndex));
       return {
         id: `${source.id}:${edge.from.port}`,
@@ -8081,6 +9322,7 @@ function selectedPreviewSource(sources = [], selectedId) {
 }
 
 function previewMediaType(source, edge) {
+  if (source.type === "storyboard" && storyboardFrameOutputItem(source, edge)) return "image";
   if (source.type === "utility") return utilityResultType(source);
   if (source.type === "model3d") return "model3d";
   if (source.type === "video" || source.type === "videoModel") return "video";
@@ -8095,17 +9337,19 @@ function connectedImagePromptItems(items = [], incomingByNode = null, options = 
   const uniqueItems = new Map();
 
   items
-    .flatMap(({ source }) => {
-      if (!source.data.resultUrl) return null;
+    .flatMap(({ source, edge }) => {
+      const outputItem = connectedOutputItem(source, edge);
+      const outputUrl = outputItem?.url || connectedOutputUrl(source, edge);
+      if (!outputUrl) return null;
       if (source.type === "character") {
-        return { url: source.data.resultUrl, label: characterReferenceLabel(source, namedCharacterReferences) };
+        return { url: outputUrl, label: characterReferenceLabel(source, namedCharacterReferences) };
       }
       if (source.type === "composer") {
         if (!includeComposerCharacterBindings) {
-          return { url: source.data.resultUrl, label: sourceLabel(source) };
+          return { url: outputUrl, label: sourceLabel(source) };
         }
         return [
-          { url: source.data.resultUrl, label: "Input guide image" },
+          { url: outputUrl, label: "Input guide image" },
           ...composerCharacterBindingsForSource(source, incomingByNode).map((binding) => ({
             url: binding.source.data.resultUrl,
             label: composerCharacterReferenceLabel(binding, namedCharacterReferences)
@@ -8113,8 +9357,8 @@ function connectedImagePromptItems(items = [], incomingByNode = null, options = 
         ];
       }
       return {
-        url: source.data.resultUrl,
-        label: source.type === "transfer" ? moodBoardOutputFileName : sourceLabel(source)
+        url: outputUrl,
+        label: source.type === "transfer" ? moodBoardOutputFileName : outputItem?.label || sourceLabel(source)
       };
     })
     .filter(Boolean)
@@ -8221,13 +9465,20 @@ async function resolveImageModelAspectRatio(node, incoming = {}) {
 }
 
 function imageModelAutoAspectInputUrls(incoming = {}, model = "") {
-  const portIds = isZImageImageModel(model) ? ["imagePromptIn"] : ["imagePromptIn", "cameraIn", "transferIn"];
+  const unsupportedPorts = imageModelUnsupportedInputPorts(model);
+  const unsupportedSources = imageModelUnsupportedSourceTypes(model);
+  const portIds = [
+    "imagePromptIn",
+    ...(!unsupportedPorts.has("cameraIn") ? ["cameraIn"] : []),
+    ...(!unsupportedPorts.has("transferIn") ? ["transferIn"] : [])
+  ];
   return portIds
     .flatMap((portId) => incoming[portId] || [])
     .map(({ source, edge }) => {
-      if (isZImageImageModel(model) && zImageUnsupportedSourceTypes.has(source?.type)) return "";
-      if (!source?.data?.resultUrl) return "";
-      return previewMediaType(source, edge) === "image" ? source.data.resultUrl : "";
+      if (unsupportedSources.has(source?.type)) return "";
+      const url = connectedOutputUrl(source, edge);
+      if (!url) return "";
+      return previewMediaType(source, edge) === "image" ? url : "";
     })
     .filter(Boolean);
 }
@@ -8363,7 +9614,7 @@ function buildEffectiveVideoPrompt(prompt, incoming = {}) {
 function characterImagePromptPieces(source, namedCharacterReferences = false) {
   const sheetLabel = characterReferenceLabel(source, namedCharacterReferences);
   return [
-    `CHARACTER REFERENCE: Use "${sheetLabel}" as the only identity, selected wardrobe, and body-proportion authority for the character. Render this same recognizable character in the requested scene and keep the selected outfit consistent.`,
+    `CHARACTER REFERENCE: The image reference labeled "${sheetLabel}" is mandatory. Use it as the only source for the character's identity, face, hair, body proportions, selected wardrobe, and recognizable details. Render this same character in the requested scene without inventing a replacement character.`,
     characterGenerationPhysicalDetailsPrompt(source.data),
     characterTraitPrompt(source.data)
   ].filter(Boolean);
@@ -8456,7 +9707,7 @@ function activeConnectedCharacterSources(items = [], incomingByNode = null) {
 function resolveImageCharacterMentions(prompt, characterSources = [], namedCharacterReferences = false) {
   return characterSources.reduce((value, source) => {
     const replacement = namedCharacterReferences
-      ? `the character in the reference sheet labeled "${characterReferenceLabel(source, true)}"`
+      ? `the character from the image reference labeled "${characterReferenceLabel(source, true)}"`
       : "the character in the connected character sheet";
     return replacePromptTag(value, characterTag(source), replacement);
   }, String(prompt || ""));
@@ -8472,7 +9723,7 @@ function replacePromptTag(prompt, tag, replacement) {
 }
 
 function characterReferenceLabel(node, namedCharacterReferences = false) {
-  return namedCharacterReferences ? `${characterTag(node)} character identity sheet` : "The Character identity sheet";
+  return namedCharacterReferences ? `${characterTag(node)} Character Sheet` : "The Character identity sheet";
 }
 
 function cameraPromptPieces(source) {
@@ -8510,6 +9761,7 @@ function connectedSummary(items = [], fallback) {
 function sourceLabel(source) {
   if (source.type === "camera") return cameraLabel(source);
   if (source.type === "composer") return source.data.title || "Composer";
+  if (source.type === "storyboard") return source.data.title || "Storyboard";
   if (source.type === "model3d" && source.data.resultUrl) return source.data.title || "3D model";
   if (source.type === "transfer" && source.data.resultUrl) return "TRANSFER.png";
   if (source.type === "character" && source.data.resultUrl) return `@${characterTag(source)}`;
@@ -8662,6 +9914,13 @@ function normalizeCurrentNode(node) {
     };
   }
 
+  if (nextNode.type === "storyboard") {
+    return {
+      ...nextNode,
+      data: normalizeStoryboardData(data)
+    };
+  }
+
   if (nextNode.type === "composer") {
     return {
       ...nextNode,
@@ -8734,6 +9993,523 @@ function textModelTitleFromLegacy(title) {
   return match ? `Text Model${match[1] || ""}` : value;
 }
 
+function defaultStoryboardFrames(count = storyboardDefaultFrameCount) {
+  return Array.from({ length: Math.max(1, count) }, (_item, index) => createStoryboardFrame(index + 1));
+}
+
+function createStoryboardFrame(number = 1, patch = {}) {
+  const { id: patchId, ...framePatch } = patch;
+  const id = patchId || createNodeId("frame", number);
+  return {
+    id,
+    number,
+    shot: "None",
+    lens: "None",
+    angle: "None",
+    beat: "",
+    prompt: "",
+    notes: "",
+    resultUrl: "",
+    exportUrl: "",
+    resultFallbackUrl: "",
+    resultVersion: 0,
+    fileName: "",
+    status: "",
+    error: "",
+    ...framePatch
+  };
+}
+
+function normalizeStoryboardData(data = {}) {
+  const frames = normalizedStoryboardFrames(data.storyboardFrames);
+  const selectedFrameId = frames.some((frame) => frame.id === data.selectedFrameId)
+    ? data.selectedFrameId
+    : frames.find((frame) => frame.resultUrl)?.id || frames[0]?.id || "";
+  const selectedFrame = frames.find((frame) => frame.id === selectedFrameId) || frames.find((frame) => frame.resultUrl);
+  const legacyResolution = data.useHighResolution ? storyboardHighResolution : storyboardDefaultResolution;
+  const inferredPlanSceneDescription = typeof data.storyboardPlanSceneDescription === "string"
+    ? data.storyboardPlanSceneDescription
+    : data.storyboardAnalysis && frames.some((frame) => String(frame.prompt || "").trim())
+      ? data.sceneDescription || ""
+      : "";
+  return {
+    ...createDefaultNodeData("storyboard", data.title || "Storyboard", 1),
+    ...data,
+    storyboardTab: ["setup", "view", "advanced"].includes(data.storyboardTab) ? data.storyboardTab : "setup",
+    sceneName: data.sceneName || "Scene 1",
+    frameCount: storyboardFrameCountOptions.includes(String(data.frameCount || "")) ? String(data.frameCount) : data.frameCount || "Auto",
+    model: storyboardFixedModel,
+    aspectRatio: normalizeChoice(data.aspectRatio || storyboardDefaultAspectRatio, storyboardAspectRatioOptions, storyboardDefaultAspectRatio),
+    resolution: normalizeChoice(data.resolution || legacyResolution, imageResolutionOptions, storyboardDefaultResolution),
+    useStoryboardStyle: data.useStoryboardStyle !== false,
+    useMoodBoard: data.useMoodBoard !== false,
+    useInternalStoryboardCharacters: data.useInternalStoryboardCharacters !== false,
+    useHighResolution: Boolean(data.useHighResolution),
+    storyboardStylePreset: normalizeChoice(data.storyboardStylePreset || "None", stylePresetNames, "None"),
+    storyboardMoodBoardUrl: data.storyboardMoodBoardUrl || storyboardDefaultMoodBoardUrl,
+    storyboardMoodBoardFileName: data.storyboardMoodBoardFileName || storyboardMoodBoardLabel,
+    storyboardCharacters: normalizedStoryboardCharacters(data.storyboardCharacters),
+    storyboardPlanSceneDescription: inferredPlanSceneDescription,
+    storyboardScale: Math.max(1, finiteNumber(data.storyboardScale, 1)),
+    storyboardFrames: frames,
+    selectedFrameId,
+    resultUrl: selectedFrame?.resultUrl || data.resultUrl || "",
+    resultItems: storyboardResultItems(frames),
+    selectedResultIndex: Math.max(0, frames.filter((frame) => frame.resultUrl).findIndex((frame) => frame.id === selectedFrameId))
+  };
+}
+
+function normalizedStoryboardFrames(frames = []) {
+  const sourceFrames = Array.isArray(frames) && frames.length ? frames : defaultStoryboardFrames(storyboardDefaultFrameCount);
+  return sourceFrames.slice(0, 24).map((frame, index) =>
+    createStoryboardFrame(index + 1, {
+      ...frame,
+      id: frame.id || createNodeId("frame", index + 1),
+      number: index + 1,
+      shot: normalizeChoice(frame.shot || "None", shotPresetNames, "None"),
+      lens: normalizeChoice(frame.lens || "None", lensPresetNames, "None"),
+      angle: normalizeChoice(frame.angle || "None", typePresetNames, "None"),
+      prompt: String(frame.prompt || ""),
+      beat: String(frame.beat || ""),
+      notes: String(frame.notes || ""),
+      resultUrl: frame.resultUrl || frame.url || "",
+      exportUrl: frame.exportUrl || "",
+      resultFallbackUrl: frame.resultFallbackUrl || "",
+      resultVersion: finiteNumber(frame.resultVersion, 0),
+      fileName: frame.fileName || "",
+      status: frame.status || "",
+      error: frame.error || ""
+    })
+  );
+}
+
+function normalizedStoryboardCharacters(characters = []) {
+  return Array.isArray(characters)
+    ? characters.filter(Boolean).slice(0, storyboardMaxCharacters).map((character, index) => {
+        const sheetUrl = character.sheetUrl || character.resultUrl || "";
+        const status = sheetUrl && character.status === "compiling" ? "ready" : character.status || "";
+        return createStoryboardCharacter({
+          ...character,
+          id: character.id || createNodeId("storyboard-character", index + 1),
+          name: String(character.name || ""),
+          portrait: character.portrait?.localUrl ? character.portrait : null,
+          sheetUrl,
+          sheetFileName: character.sheetFileName || character.fileName || "",
+          sheetVersion: finiteNumber(character.sheetVersion, 0),
+          status,
+          error: character.error || ""
+        });
+      })
+    : [];
+}
+
+function createStoryboardCharacter(patch = {}) {
+  return {
+    id: patch.id || createNodeId("storyboard-character", 1),
+    name: "",
+    portrait: null,
+    sheetUrl: "",
+    sheetFileName: "",
+    sheetVersion: 0,
+    status: "",
+    error: "",
+    ...patch
+  };
+}
+
+function storyboardCharacterNameFromFile(fileName = "", index = 1) {
+  const baseName = String(fileName || "")
+    .replace(/\.[^.]+$/, "")
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return baseName || `Character ${index}`;
+}
+
+function storyboardCharacterTag(character = {}) {
+  return cleanPromptTag(character.name || "Character") || "Character";
+}
+
+function storyboardUsesInternalCharacters(node) {
+  return node?.data?.useStoryboardStyle !== false && node?.data?.useInternalStoryboardCharacters !== false;
+}
+
+function storyboardResolutionForNode(node) {
+  const fallbackResolution = node?.data?.useHighResolution ? storyboardHighResolution : storyboardDefaultResolution;
+  return normalizeChoice(node?.data?.resolution || fallbackResolution, imageResolutionOptions, storyboardDefaultResolution);
+}
+
+function storyboardAspectRatioForNode(node) {
+  return normalizeChoice(node?.data?.aspectRatio || storyboardDefaultAspectRatio, storyboardAspectRatioOptions, storyboardDefaultAspectRatio);
+}
+
+function storyboardCssAspectRatio(value) {
+  const ratio = storyboardAspectRatioForNode({ data: { aspectRatio: value } });
+  return ratio.replace(":", " / ");
+}
+
+function storyboardPlanIsCurrent(node) {
+  const sceneDescription = String(node?.data?.sceneDescription || "").trim();
+  if (!sceneDescription) return false;
+  return String(node?.data?.storyboardPlanSceneDescription || "").trim() === sceneDescription;
+}
+
+function storyboardCharacterSheetPromptForNode(node) {
+  return [
+    storyboardCharacterSheetBasePrompt,
+    node?.data?.useStoryboardStyle !== false ? storyboardCharacterSheetStyleInstruction : "",
+    storyboardCharacterWardrobeFromPortraitPrompt
+  ].filter(Boolean).join("\n\n");
+}
+
+function storyboardResultItems(frames = []) {
+  return frames
+    .filter((frame) => frame.exportUrl || frame.resultUrl)
+    .map((frame, index) => ({
+      url: frame.exportUrl || frame.resultUrl,
+      type: "image",
+      label: `Frame ${String(frame.number || index + 1).padStart(3, "0")}`,
+      text: frame.prompt || "",
+      fileName: frame.fileName || ""
+    }));
+}
+
+function cacheBustedAssetUrl(url, version = 0) {
+  const value = String(url || "").trim();
+  if (!value) return "";
+  const token = finiteNumber(version, 0);
+  if (!token) return value;
+  return `${value}${value.includes("?") ? "&" : "?"}v=${encodeURIComponent(token)}`;
+}
+
+function storyboardFrameImageSrc(frame = {}) {
+  return cacheBustedAssetUrl(frame.resultUrl, frame.resultVersion);
+}
+
+function storyboardFrameFallbackSrc(frame = {}) {
+  return cacheBustedAssetUrl(frame.resultFallbackUrl, frame.resultVersion);
+}
+
+function storyboardFrameCountForNode(node) {
+  const value = String(node?.data?.frameCount || "Auto");
+  if (value === "Auto") return storyboardDefaultFrameCount;
+  const parsed = Number.parseInt(value, 10);
+  return Math.min(24, Math.max(1, Number.isFinite(parsed) ? parsed : storyboardDefaultFrameCount));
+}
+
+function storyboardFramesFromPlan(frames = []) {
+  if (!Array.isArray(frames)) return [];
+  return frames.slice(0, 24).map((frame, index) =>
+    createStoryboardFrame(index + 1, {
+      shot: normalizeChoice(frame.shot || "None", shotPresetNames, "None"),
+      lens: normalizeChoice(frame.lens || "None", lensPresetNames, "None"),
+      angle: normalizeChoice(frame.angle || "None", typePresetNames, "None"),
+      beat: frame.beat || "",
+      prompt: frame.prompt || "",
+      notes: frame.notes || ""
+    })
+  );
+}
+
+function fallbackStoryboardPlanForClient(sceneDescription = "", frameCount = storyboardDefaultFrameCount) {
+  return {
+    sceneTitle: "Scene 1",
+    analysis: "Fallback shot plan with clear screen direction and simple editorial progression.",
+    frames: defaultStoryboardFrames(frameCount).map((frame, index) => ({
+      ...frame,
+      shot: ["WS", "MS", "CU", "MS", "CU", "WS"][index % 6],
+      lens: index === 0 ? "35mm" : "None",
+      beat: storyboardFallbackBeat(index),
+      prompt: `${storyboardFallbackBeat(index)} Single storyboard frame for: ${sceneDescription || "the described scene"}. Preserve screen direction, blocking, eyeline, silhouette, and continuity.`
+    }))
+  };
+}
+
+function storyboardFallbackBeat(index) {
+  return [
+    "Establish the scene geography and main subjects.",
+    "Move closer to clarify action and blocking.",
+    "Show the key emotional or story detail.",
+    "Show the reaction or next action while preserving eyelines.",
+    "Use a story-relevant insert or tighter detail.",
+    "Resolve the beat in a wider contextual frame."
+  ][index % 6];
+}
+
+function storyboardCharacterSummariesForNode(node, externalItems = [], incomingByNode = null) {
+  if (storyboardUsesInternalCharacters(node)) {
+    return normalizedStoryboardCharacters(node.data?.storyboardCharacters)
+      .filter((character) => character.name || character.portrait?.localUrl)
+      .map((character) => ({
+        name: character.name || "Character",
+        tag: storyboardCharacterTag(character)
+      }));
+  }
+
+  return storyboardCharacterSourcesForNode(node, externalItems, incomingByNode).map((source) => ({
+    name: source.data.characterName || source.data.title || "Character",
+    tag: characterTag(source)
+  }));
+}
+
+function storyboardMissingRequiredCharacterTags(node, externalItems = [], incomingByNode = null, text = "") {
+  const knownTags = storyboardCharacterSummariesForNode(node, externalItems, incomingByNode)
+    .map((character) => character.tag)
+    .filter(Boolean);
+  if (!knownTags.length) return [];
+
+  const availableTags = new Set(
+    storyboardCharacterSourcesForNode(node, externalItems, incomingByNode)
+      .map((source) => characterTag(source).toLowerCase())
+      .filter(Boolean)
+  );
+
+  return knownTags
+    .filter((tag) => promptHasTag(text, tag))
+    .filter((tag) => !availableTags.has(tag.toLowerCase()));
+}
+
+function storyboardPreparedCharacterCount(node) {
+  return normalizedStoryboardCharacters(node?.data?.storyboardCharacters)
+    .filter((character) => character.sheetUrl && storyboardCharacterTag(character))
+    .length;
+}
+
+function storyboardNodeWithMostPreparedCharacters(preparedNode, stateNode) {
+  if (!stateNode || preparedNode?.type !== "storyboard" || stateNode.type !== "storyboard") return preparedNode || stateNode;
+  if (storyboardPreparedCharacterCount(stateNode) >= storyboardPreparedCharacterCount(preparedNode)) return stateNode;
+  return {
+    ...stateNode,
+    data: {
+      ...stateNode.data,
+      storyboardCharacters: normalizedStoryboardCharacters(preparedNode.data?.storyboardCharacters)
+    }
+  };
+}
+
+function storyboardCharacterSourcesForNode(node, externalItems = [], incomingByNode = null) {
+  if (!storyboardUsesInternalCharacters(node)) {
+    return activeConnectedCharacterSources(externalItems, incomingByNode);
+  }
+
+  return normalizedStoryboardCharacters(node.data?.storyboardCharacters)
+    .filter((character) => character.sheetUrl && storyboardCharacterTag(character))
+    .map((character) => ({
+      id: `${node.id}:${character.id}`,
+      type: "character",
+      data: {
+        title: character.name || "Character",
+        characterName: character.name || "Character",
+        locked: true,
+        activated: true,
+        resultUrl: character.sheetUrl,
+        resultItems: [{
+          url: character.sheetUrl,
+          type: "image",
+          label: `@${storyboardCharacterTag(character)} Character Sheet`,
+          fileName: character.sheetFileName || ""
+        }],
+        characterPhysicalDetails: "",
+        characterTraits: [],
+        customCharacterTraits: "",
+        compiledTraitPrompt: ""
+      }
+    }));
+}
+
+function storyboardCharacterReferenceItems(node, externalItems = [], incomingByNode = null) {
+  return storyboardCharacterSourcesForNode(node, externalItems, incomingByNode).map((source) => ({
+    url: source.data.resultUrl,
+    label: characterReferenceLabel(source, true)
+  }));
+}
+
+function storyboardImagePromptItems(node, incoming = {}, incomingByNode = null) {
+  const storyboardStyleEnabled = node.data.useStoryboardStyle !== false;
+  const characterItems = storyboardCharacterReferenceItems(node, incoming.characterIn || [], incomingByNode);
+  const directMoodBoard = storyboardStyleEnabled && node.data.useMoodBoard !== false && node.data.storyboardMoodBoardUrl
+    ? [{ url: node.data.storyboardMoodBoardUrl, label: storyboardMoodBoardLabel }]
+    : [];
+  const connectedMoodBoard = storyboardStyleEnabled ? [] : connectedImagePromptItems(incoming.transferIn || [], incomingByNode, { includeComposerCharacterBindings: false });
+  return uniqueStoryboardImagePromptItems([...characterItems, ...directMoodBoard, ...connectedMoodBoard]);
+}
+
+function uniqueStoryboardImagePromptItems(items = []) {
+  const uniqueItems = new Map();
+  items.forEach((item) => {
+    if (item?.url) uniqueItems.set(`${item.url}|${item.label || ""}`, item);
+  });
+  return [...uniqueItems.values()];
+}
+
+function storyboardFrameReferenceUrl(frame = {}) {
+  return frame.exportUrl || frame.resultUrl || "";
+}
+
+function storyboardFrameContinuityText(frame = {}) {
+  return [frame.beat, frame.prompt, frame.notes, frame.shot, frame.angle]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+function isStoryboardInsertFrame(frame = {}) {
+  const text = storyboardFrameContinuityText(frame);
+  if (!text) return false;
+  return /\b(insert|cutaway|detail|prop|object|macro|still life|phone screen|screen close|message|muffin)\b/.test(text)
+    || /\b(close[-\s]?up|closeup|extreme close[-\s]?up)\b/.test(text);
+}
+
+function isStoryboardSpatialAnchorFrame(frame = {}) {
+  if (!storyboardFrameReferenceUrl(frame) || isStoryboardInsertFrame(frame)) return false;
+  const shot = String(frame.shot || "").toUpperCase();
+  if (shot === "CU" || shot === "ECU") return false;
+  return true;
+}
+
+function storyboardContinuityReferenceItems(node, frame) {
+  const frames = normalizedStoryboardFrames(node?.data?.storyboardFrames);
+  const frameIndex = frames.findIndex((item) => item.id === frame.id);
+  if (frameIndex <= 0) return [];
+  const previousFrames = [...frames.slice(0, frameIndex)].reverse();
+  const previousFrame = previousFrames.find((item) => storyboardFrameReferenceUrl(item));
+  if (!previousFrame) return [];
+
+  const references = [{
+    url: storyboardFrameReferenceUrl(previousFrame),
+    label: storyboardPreviousFrameLabel
+  }];
+  const previousFrameIsSpatialAnchor = isStoryboardSpatialAnchorFrame(previousFrame);
+  if (!previousFrameIsSpatialAnchor) {
+    const spatialAnchorFrame = previousFrames.find((item) => isStoryboardSpatialAnchorFrame(item));
+    const spatialAnchorUrl = storyboardFrameReferenceUrl(spatialAnchorFrame);
+    if (spatialAnchorUrl && spatialAnchorUrl !== storyboardFrameReferenceUrl(previousFrame)) {
+      references.push({
+        url: spatialAnchorUrl,
+        label: storyboardSpatialAnchorLabel
+      });
+    }
+  }
+  return references;
+}
+
+function storyboardImagePromptItemsForFrame(baseItems = [], continuityReferenceItems = []) {
+  return uniqueStoryboardImagePromptItems([
+    ...baseItems,
+    ...continuityReferenceItems
+  ]);
+}
+
+function storyboardCharacterReferenceMapPrompt(characterSources = []) {
+  if (!characterSources.length) return "";
+  const mappings = characterSources
+    .map((source) => `@${characterTag(source)} = uploaded image reference labeled "${characterReferenceLabel(source, true)}"`)
+    .join("; ");
+  return `Character reference map: ${mappings}. When a scene or frame mentions one of these @tags, use the matching character sheet exactly for that character's face, hair, body proportions, selected wardrobe, and recognizable details. Keep each named character visually distinct and do not substitute one character sheet for another.`;
+}
+
+function storyboardCharacterSourcesTaggedInText(characterSources = [], text = "") {
+  const uniqueSources = new Map();
+  characterSources.forEach((source) => {
+    const tag = characterTag(source);
+    if (tag && promptHasTag(text, tag)) uniqueSources.set(tag.toLowerCase(), source);
+  });
+  return [...uniqueSources.values()];
+}
+
+function storyboardRequiredCastPrompt(requiredSources = []) {
+  if (!requiredSources.length) return "";
+  const cast = requiredSources
+    .map((source) => `@${characterTag(source)} must use "${characterReferenceLabel(source, true)}"`)
+    .join("; ");
+  return `Required character cast for this frame: ${cast}. Every @tag named in this frame must be represented by its own matching character sheet. Do not omit, merge, swap, gender-shift, age-shift, or replace these tagged characters. If a tagged character is described as off-screen, keep them off-screen but preserve the correct eyeline and screen direction.`;
+}
+
+function resolveStoryboardCharacterMentions(prompt, characterSources = []) {
+  return characterSources.reduce((value, source) => {
+    const tag = characterTag(source);
+    const replacement = `@${tag} (the character from uploaded reference "${characterReferenceLabel(source, true)}")`;
+    return replacePromptTag(value, tag, replacement);
+  }, String(prompt || ""));
+}
+
+function buildStoryboardFramePrompt(node, frame, sceneDescription = "", incoming = {}, incomingByNode = null, options = {}) {
+  const characterSources = storyboardCharacterSourcesForNode(node, incoming.characterIn || [], incomingByNode);
+  const namedCharacterReferences = characterSources.length > 0;
+  const framePrompt = frame.prompt || frame.beat || sceneDescription || "Storyboard frame";
+  const aspectRatio = storyboardAspectRatioForNode(node);
+  const scenePlanningNote = String(node.data.storyboardNotes || "").trim();
+  const frameTagText = [framePrompt, frame.beat, frame.notes].filter(Boolean).join("\n");
+  const frameTaggedCharacterSources = storyboardCharacterSourcesTaggedInText(characterSources, frameTagText);
+  const sceneTaggedCharacterSources = storyboardCharacterSourcesTaggedInText(characterSources, sceneDescription);
+  const requiredCharacterSources = frameTaggedCharacterSources.length ? frameTaggedCharacterSources : sceneTaggedCharacterSources;
+  const resolvedPrompt = resolveStoryboardCharacterMentions(framePrompt, characterSources);
+  const resolvedSceneDescription = resolveStoryboardCharacterMentions(sceneDescription, characterSources);
+  const characterReferenceMap = storyboardCharacterReferenceMapPrompt(characterSources);
+  const requiredCastPrompt = storyboardRequiredCastPrompt(requiredCharacterSources);
+  const cameraPieces = [
+    shotPresetPrompts[frame.shot] || "",
+    lensPresetPrompts[frame.lens] || "",
+    typePresetPrompts[frame.angle] || ""
+  ].filter(Boolean);
+  const characterPieces = (requiredCharacterSources.length ? requiredCharacterSources : characterSources).flatMap((source) => characterImagePromptPieces(source, namedCharacterReferences));
+  const storyboardStyleEnabled = node.data.useStoryboardStyle !== false;
+  const moodBoardConnected = Boolean(storyboardStyleEnabled && node.data.useMoodBoard !== false && node.data.storyboardMoodBoardUrl);
+  const stylePieces = storyboardStyleEnabled
+    ? [stylePresetPrompts.Storyboard, storyboardBaseInstruction]
+    : (incoming.styleIn || []).flatMap(({ source }) => promptPiecesForSource(source));
+  const moodBoardPieces = storyboardStyleEnabled
+    ? (moodBoardConnected ? [transferPromptSuffix] : [])
+    : (incoming.transferIn || []).flatMap(({ source }) => promptPiecesForSource(source));
+  const sceneContinuityPieces = [
+    resolvedSceneDescription
+      ? `Scene continuity bible: ${resolvedSceneDescription}. Preserve the same environment, lighting source and direction, recurring objects, wardrobe, and spatial geography across the sequence. Use the current frame prompt for the exact camera angle and story moment.`
+      : "",
+    options.hasPreviousFrameReference
+      ? `If an uploaded image labeled ${storyboardPreviousFrameLabel} is present, use it as editorial continuity for the immediately preceding story beat, lighting direction, character identity, wardrobe, and recurring objects. Do not copy its rendering style if it looks photographic or overly realistic. Do not let an insert, cutaway, object close-up, or detail shot redefine the room geography, character screen position, or 180 degree line.`
+      : "",
+    options.hasSpatialAnchorReference
+      ? `If an uploaded image labeled ${storyboardSpatialAnchorLabel} is present, use it as the primary spatial anchor for room layout, character side of frame, screen direction, eyelines, blocking, lighting direction, and object placement. Use the anchor for geography only, not rendering style. The current frame prompt still controls the new shot size, camera angle, and story moment; do not copy the anchor's exact composition unless requested.`
+      : ""
+  ].filter(Boolean);
+  const frameHeader = [
+    `Scene: ${node.data.sceneName || "Scene 1"}.`,
+    `Frame ${String(frame.number || 1).padStart(3, "0")}.`,
+    `Native frame aspect ratio: ${aspectRatio}. Compose specifically for ${aspectRatio}; do not crop, letterbox, pillarbox, add borders, or force this image into any other aspect ratio.`,
+    frame.beat ? `Story beat: ${frame.beat}` : "",
+    scenePlanningNote ? `Scene-level planning note: ${scenePlanningNote}` : "",
+    frame.notes ? `Continuity note: ${frame.notes}` : ""
+  ].filter(Boolean).join(" ");
+
+  return [
+    frameHeader,
+    resolvedPrompt,
+    ...cameraPieces,
+    storyboardContinuityInstruction,
+    characterReferenceMap,
+    requiredCastPrompt,
+    ...sceneContinuityPieces,
+    ...stylePieces,
+    ...moodBoardPieces,
+    ...characterPieces,
+    storyboardStyleEnabled ? storyboardReferenceStyleGuard : "",
+    "Output only the image. Do not include captions, labels, panel borders, numbering, or text unless specifically requested in the frame prompt."
+  ].filter(Boolean).join("\n\n");
+}
+
+function storyboardFrameOutputItem(source, edge) {
+  if (source?.type !== "storyboard") return null;
+  const frame = storyboardFrameForOutputPort(source, edge?.from?.port);
+  if (!frame?.resultUrl) return null;
+  return {
+    url: frame.exportUrl || frame.resultUrl,
+    type: "image",
+    label: `Frame ${String(frame.number || 1).padStart(3, "0")}`,
+    text: frame.prompt || "",
+    fileName: frame.fileName || ""
+  };
+}
+
 function normalizeModel3DData(data = {}) {
   return {
     ...data,
@@ -8756,7 +10532,8 @@ function normalizeImageModelData(data = {}) {
     prompt: data.prompt || "",
     aspectRatio: normalizeImageModelAspectRatio(data.aspectRatio, model),
     resolution: normalizeImageModelResolution(data.resolution),
-    batchCount: data.batchCount || "1"
+    batchCount: data.batchCount || "1",
+    settingsOpen: data.settingsOpen !== false
   };
 }
 
@@ -9064,6 +10841,10 @@ function normalizeEdgeForCurrentGraph(edge, nodeMap) {
 
   if (!inputPortIdsForNode(target).includes(nextEdge.to.port)) return null;
   if (!outputPortIdsForNode(source).includes(nextEdge.from.port)) return null;
+  if (isImageModelUnsupportedInput(target, nextEdge.to.port)) return null;
+  if (isImageModelUnsupportedSource(target, source)) return null;
+  if (isVideoModelUnsupportedCharacterInput(target, nextEdge.to.port)) return null;
+  if (!portsAreCompatible(source, nextEdge.from.port, target, nextEdge.to.port)) return null;
 
   return nextEdge;
 }

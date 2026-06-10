@@ -6,10 +6,9 @@ import { OutputPortRow, PortHandle } from "./NodePorts.jsx";
 export function PlainTextNodeBody({ node, outputPort, onUpdate, onConnectStart, onDisconnectInput, connectedPortKeys }) {
   return (
     <div className="node-body text-node-body plain-text-node-body">
-      <OutputPortRow node={node} port={outputPort} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
+      <OutputPortRow node={node} port={outputPort} label="" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
       <div className="text-single-panel">
         <label className="text-field-group">
-          <span>Prompt</span>
           <textarea aria-label="Text prompt" value={node.data.text || ""} onChange={(event) => onUpdate(node.id, { text: event.target.value })} />
         </label>
       </div>

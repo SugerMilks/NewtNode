@@ -31,7 +31,7 @@ export function PortHandle({ node, port, side, onConnectStart, onDisconnectInput
 export function OutputPortRow({ node, port, onConnectStart, onDisconnectInput, connectedPortKeys, label = port.label }) {
   return (
     <div className="port-row output-row">
-      <span>{label}</span>
+      {label ? <span>{label}</span> : <span aria-hidden="true" />}
       <PortHandle
         node={node}
         port={port}
