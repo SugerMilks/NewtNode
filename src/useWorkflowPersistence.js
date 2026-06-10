@@ -297,6 +297,36 @@ export function useWorkflowPersistence({
     setSaveStatus(displayPath ? `${sourceLabel} ${displayPath}` : sourceLabel);
   }
 
+  async function createNewWorkflow() {
+    if (!(await guardUnsavedWorkflowChange("start a new workflow"))) return;
+
+    const nextProjectName = "Untitled node project";
+    const nextViewport = { x: 0, y: 0, scale: 1 };
+    localWorkflowHandleRef.current = null;
+    setLocalWorkflowFileName("");
+    setProjectId(null);
+    setProjectName(nextProjectName);
+    setSavedProjectName(null);
+    setProjectPackagePath("");
+    setWorkflowFilePath("");
+    setNodes([]);
+    setEdges([]);
+    setGroups([]);
+    setViewport(nextViewport);
+    setSelectedNodeIds([]);
+    setSelectedEdgeId(null);
+    setProjectMenuOpen(false);
+    setFileMenuOpen(false);
+    markWorkflowClean({
+      nodes: [],
+      edges: [],
+      groups: [],
+      projectName: nextProjectName,
+      projectPackagePath: ""
+    });
+    setSaveStatus("New blank workflow");
+  }
+
   async function openWorkflowFile(file) {
     if (!file) return;
 
@@ -515,6 +545,7 @@ export function useWorkflowPersistence({
     workflowRequestContext,
     appendWorkflowContextToForm,
     loadProjects,
+    createNewWorkflow,
     saveProject,
     saveProjectAsLocalFile,
     openWorkflowFile,

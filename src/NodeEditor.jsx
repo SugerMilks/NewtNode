@@ -665,6 +665,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     workflowRequestContext,
     appendWorkflowContextToForm,
     loadProjects,
+    createNewWorkflow,
     saveProject,
     saveProjectAsLocalFile,
     openWorkflowFile,
@@ -3729,6 +3730,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
             </button>
             {fileMenuOpen && (
               <div className="file-menu-list">
+                <button onClick={() => { setFileMenuOpen(false); createNewWorkflow(); }} title="Start a new blank workflow">
+                  <Plus size={15} />
+                  <span>New</span>
+                </button>
                 <button onClick={() => { setFileMenuOpen(false); saveProject(); }} title="Save project">
                   <Save size={15} />
                   <span>Save</span>
