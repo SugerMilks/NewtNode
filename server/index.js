@@ -10,6 +10,7 @@ import { existsSync, statSync } from "node:fs";
 import { File } from "node:buffer";
 import { randomUUID } from "node:crypto";
 import { execFile as execFileCallback } from "node:child_process";
+import { createRequire } from "node:module";
 import { promisify } from "node:util";
 import { deflateSync, inflateSync } from "node:zlib";
 import { fal } from "@fal-ai/client";
@@ -22,6 +23,8 @@ import "./restart-marker.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const require = createRequire(import.meta.url);
+const packageMetadata = require("../package.json");
 const rootDir = path.resolve(__dirname, "..");
 const uploadsDir = path.join(rootDir, "uploads");
 const outputsDir = path.join(rootDir, "outputs");
@@ -45,6 +48,7 @@ const recentWorkflowsPath = path.join(dataDir, "recent-workflows.json");
 const legacyHiddenWorkflowsPath = path.join(dataDir, "hidden-workflows.json");
 const runtimeSettingsPath = path.join(dataDir, "runtime-settings.json");
 const envFilePath = path.join(rootDir, ".env");
+const appVersion = String(packageMetadata.version || "").trim();
 const moodBoardOutputFileName = "MOOD_BOARD.png";
 const maxHistoryItems = 500;
 let historyWriteQueue = Promise.resolve();
@@ -303,6 +307,7 @@ function buildHealthPayload() {
   const apiKeysFound = Boolean(process.env.FAL_KEY || process.env.GOOGLE_API_KEY);
   return {
     ok: true,
+    version: appVersion,
     routes: {
       utilityImage: true,
       utilityVideo: true,
@@ -357,6 +362,7 @@ async function readRuntimeSettings({ includeSecrets = false } = {}) {
   const apiKeysFound = Boolean(process.env.FAL_KEY || process.env.GOOGLE_API_KEY);
 
   const payload = {
+    version: appVersion,
     falKeyConfigured: Boolean(process.env.FAL_KEY),
     googleApiKeyConfigured: Boolean(process.env.GOOGLE_API_KEY),
     apiKeysFound,

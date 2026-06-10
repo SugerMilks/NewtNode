@@ -365,8 +365,17 @@ function branchMetricValue(settings) {
 }
 
 function branchMetricDetail(settings) {
-  if (!settings?.branchStatus) return settings?.updateInProgress ? "Updating" : "Ready";
-  return settings.branchStatus.detail || settings.branch || "Ready";
+  const branchDetail = settings?.branchStatus
+    ? settings.branchStatus.detail || settings.branch || "Ready"
+    : settings?.updateInProgress ? "Updating" : "Ready";
+  const version = versionLabel(settings?.version);
+  return version ? `${branchDetail} / ${version}` : branchDetail;
+}
+
+function versionLabel(version) {
+  const value = String(version || "").trim();
+  if (!value) return "";
+  return value.startsWith("v") ? value : `v${value}`;
 }
 
 function SettingsPanelTitle({ title, aside }) {
