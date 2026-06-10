@@ -7,6 +7,13 @@ export function isLocalOutputUrl(value) {
   return value.startsWith("/outputs/") || /^\/workflow-assets\/[^/]+\/outputs\//.test(value);
 }
 
+export function isLocalDraggableMediaUrl(value) {
+  if (typeof value !== "string") return false;
+  return value.startsWith("/uploads/")
+    || value.startsWith("/outputs/")
+    || /^\/workflow-assets\/[^/]+\//.test(value);
+}
+
 export function outputMediaTypeForUrl(url, fallbackType) {
   const extension = fileNameFromLocalUrl(url).toLowerCase();
   if (/\.(glb|gltf)$/.test(extension)) return "model3d";
@@ -26,7 +33,7 @@ export function outputItemFromDataTransfer(dataTransfer) {
   if (raw) {
     try {
       const item = JSON.parse(raw);
-      if (item?.url && item?.type && isLocalOutputUrl(item.url)) return item;
+      if (item?.url && item?.type && isLocalDraggableMediaUrl(item.url)) return item;
     } catch {
       // Fall through to URL payloads below.
     }
@@ -66,11 +73,11 @@ export function localOutputUrlFromDataTransfer(dataTransfer) {
 
 export function normalizeDroppedLocalOutputUrl(value) {
   const candidate = String(value || "").trim();
-  if (isLocalOutputUrl(candidate)) return candidate;
+  if (isLocalDraggableMediaUrl(candidate)) return candidate;
 
   try {
     const parsed = new URL(candidate, window.location.origin);
-    if (parsed.origin === window.location.origin && isLocalOutputUrl(parsed.pathname)) {
+    if (parsed.origin === window.location.origin && isLocalDraggableMediaUrl(parsed.pathname)) {
       return parsed.pathname;
     }
   } catch {
