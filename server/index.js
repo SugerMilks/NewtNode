@@ -10,6 +10,7 @@ import { existsSync, statSync } from "node:fs";
 import { File } from "node:buffer";
 import { randomUUID } from "node:crypto";
 import { execFile as execFileCallback } from "node:child_process";
+import { createRequire } from "node:module";
 import { promisify } from "node:util";
 import { deflateSync, inflateSync } from "node:zlib";
 import { fal } from "@fal-ai/client";
@@ -22,6 +23,8 @@ import "./restart-marker.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const require = createRequire(import.meta.url);
+const packageMetadata = require("../package.json");
 const rootDir = path.resolve(__dirname, "..");
 const uploadsDir = path.join(rootDir, "uploads");
 const outputsDir = path.join(rootDir, "outputs");
@@ -45,6 +48,7 @@ const recentWorkflowsPath = path.join(dataDir, "recent-workflows.json");
 const legacyHiddenWorkflowsPath = path.join(dataDir, "hidden-workflows.json");
 const runtimeSettingsPath = path.join(dataDir, "runtime-settings.json");
 const envFilePath = path.join(rootDir, ".env");
+const appVersion = String(packageMetadata.version || "").trim();
 const moodBoardOutputFileName = "MOOD_BOARD.png";
 const maxHistoryItems = 500;
 let historyWriteQueue = Promise.resolve();
@@ -144,6 +148,16 @@ const dwposeCostPerComputeSecond = 0.0006;
 const patinaBaseCost = 0.01;
 const patinaMapCostPerMegapixel = 0.01;
 const falUtilityImageTimeoutMs = Math.max(30000, Number(process.env.FAL_UTILITY_IMAGE_TIMEOUT_MS) || 180000);
+const falTextRequestCost = Number(process.env.FAL_TEXT_REQUEST_COST || 0.001);
+const falVisionTextUnitCost = Number(process.env.FAL_VISION_TEXT_UNIT_COST || 0.01);
+const falVideoTextUnitCost = Number(process.env.FAL_VIDEO_TEXT_UNIT_COST || 0.01);
+const openAiTextModel = process.env.OPENAI_TEXT_MODEL || "gpt-5.5";
+const openAiTextApiKey = process.env.OPENAI_TEXT_API_KEY || process.env.OPENAI_API_KEY;
+const textLlmProvider = String(process.env.TEXT_LLM_PROVIDER || "fal").toLowerCase();
+const falTextModel = process.env.FAL_TEXT_MODEL || "google/gemini-2.5-flash";
+const falVisionTextModel = process.env.FAL_VISION_TEXT_MODEL || "google/gemini-2.5-flash";
+const falVisionTextFallbackModel = process.env.FAL_VISION_TEXT_FALLBACK_MODEL || "google/gemini-2.5-flash";
+const falVideoTextModel = process.env.FAL_VIDEO_TEXT_MODEL || "google/gemini-2.5-flash";
 const sam3SegmentationModelsEnabled = false; // Flip back to true when revisiting SAM 3 segmentation.
 const birefnetModelOptions = ["General Use (Light)", "General Use (Light 2K)", "General Use (Heavy)", "Matting", "Portrait", "General Use (Dynamic)"];
 const birefnetResolutionOptions = ["1024x1024", "2048x2048", "2304x2304"];
@@ -293,6 +307,7 @@ function buildHealthPayload() {
   const apiKeysFound = Boolean(process.env.FAL_KEY || process.env.GOOGLE_API_KEY);
   return {
     ok: true,
+    version: appVersion,
     routes: {
       utilityImage: true,
       utilityVideo: true,
@@ -307,6 +322,7 @@ function buildHealthPayload() {
       voidFrameValidation: true,
       sam3VideoMaskOutput: true,
       extractVideoFrame: true,
+      processText: true,
       generate3d: true,
       settings: true
     },
@@ -319,9 +335,15 @@ function buildHealthPayload() {
     },
     falKeyConfigured: Boolean(process.env.FAL_KEY),
     googleApiKeyConfigured: Boolean(process.env.GOOGLE_API_KEY),
+    openAiKeyConfigured: Boolean(process.env.OPENAI_API_KEY || openAiTextApiKey),
+    openAiTextKeyConfigured: Boolean(openAiTextApiKey),
     apiKeysFound,
     apiKeyStatus: apiKeysFound ? "API keys configured" : "No API keys found",
     googleImageModelsUseGoogleDirect: Boolean(process.env.GOOGLE_API_KEY),
+    textLlmProvider,
+    falTextModel,
+    falVisionTextModel,
+    falVideoTextModel,
     falZImageEndpoint,
     falNanoBananaProEndpoint,
     falLumaPhotonEndpoint,
@@ -341,6 +363,7 @@ async function readRuntimeSettings({ includeSecrets = false } = {}) {
   const apiKeysFound = Boolean(process.env.FAL_KEY || process.env.GOOGLE_API_KEY);
 
   const payload = {
+    version: appVersion,
     falKeyConfigured: Boolean(process.env.FAL_KEY),
     googleApiKeyConfigured: Boolean(process.env.GOOGLE_API_KEY),
     apiKeysFound,
@@ -1213,6 +1236,59 @@ app.post("/api/node/extract-video-frame", async (req, res) => {
   } catch (error) {
     console.error(error);
     sendApiError(res, error, "Extract frame failed.");
+  }
+});
+
+app.post("/api/node/process-text", async (req, res) => {
+  try {
+    const text = String(req.body.text || "").trim();
+    const textInputs = normalizedTextInputs(req.body.textInputs);
+    const imageInputs = normalizedMediaInputs(req.body.imageInputs, "image");
+    const videoInputs = normalizedMediaInputs(req.body.videoInputs, "video");
+    if (!text && !textInputs.length && !imageInputs.length && !videoInputs.length) {
+      return res.status(400).json({ error: "Text is required." });
+    }
+
+    const result = textLlmProvider === "openai"
+      ? await processTextWithOpenAi({ text, textInputs, imageInputs, videoInputs })
+      : await processTextWithFal({ text, textInputs, imageInputs, videoInputs });
+    const cost = estimateTextProcessingCost({ provider: result.provider, usage: result.usage, helperUsages: result.helperUsages, imageInputs, videoInputs });
+    const usageRecord = result.usage || result.helperUsages?.length ? { request: result.usage || null, helpers: result.helperUsages || [] } : null;
+
+    await appendHistory({
+      id: randomUUID(),
+      createdAt: new Date().toISOString(),
+      mediaType: "text",
+      provider: result.provider,
+      modelName: result.model,
+      endpoint: result.endpoint,
+      mode: "Text processing",
+      prompt: text || textInputs.map((item) => item.text).join("\n\n"),
+      submittedPrompt: result.submittedPrompt || text,
+      project: projectFromBody(req.body),
+      node: nodeFromBody(req.body),
+      settings: {
+        model: result.model,
+        provider: result.provider,
+        textInputCount: textInputs.length,
+        imageInputCount: imageInputs.length,
+        videoInputCount: videoInputs.length
+      },
+      cost,
+      text: result.text,
+      usage: usageRecord
+    });
+
+    res.json({
+      text: result.text,
+      model: result.model,
+      provider: result.provider,
+      cost,
+      usage: usageRecord
+    });
+  } catch (error) {
+    console.error(error);
+    sendApiError(res, error, "Text processing failed.");
   }
 });
 
@@ -4407,7 +4483,13 @@ function localWorkflowAssetDirName(body = {}) {
 async function moveUploadedFile(sourcePath, targetPath) {
   await mkdir(path.dirname(targetPath), { recursive: true });
   await rm(targetPath, { force: true }).catch(() => {});
-  await rename(sourcePath, targetPath);
+  try {
+    await rename(sourcePath, targetPath);
+  } catch (error) {
+    if (error?.code !== "EXDEV") throw error;
+    await copyFile(sourcePath, targetPath);
+    await rm(sourcePath, { force: true });
+  }
 }
 
 async function hydrateWorkflowPackage(workflow) {
@@ -7439,6 +7521,78 @@ function estimateOpenAiImage2Cost({ resolution, size, quality }) {
   };
 }
 
+function estimateTextProcessingCost({ provider, usage = null, helperUsages = [], imageInputs = [], videoInputs = [] }) {
+  const normalizedProvider = String(provider || "").toLowerCase();
+  const requestUsageCost = usageCost(usage);
+  const helperUsageCosts = (Array.isArray(helperUsages) ? helperUsages : []).map(usageCost).filter((amount) => amount !== null);
+
+  if (normalizedProvider === "fal" && (requestUsageCost !== null || helperUsageCosts.length)) {
+    const fallbackRequestCost = requestUsageCost === null ? falTextRequestCost : 0;
+    const amountUsd = roundCurrency((requestUsageCost || 0) + fallbackRequestCost + helperUsageCosts.reduce((sum, amount) => sum + amount, 0));
+
+    return {
+      amountUsd,
+      currency: "USD",
+      unitRateUsd: null,
+      units: 1 + helperUsageCosts.length,
+      unit: "reported request",
+      mediaType: "text",
+      pricingBasis: "fal.ai reported OpenRouter token usage plus base request fallback when needed",
+      pricingSource: "fal-usage-response"
+    };
+  }
+
+  if (normalizedProvider !== "fal") {
+    return {
+      amountUsd: null,
+      currency: "USD",
+      unitRateUsd: null,
+      units: 1,
+      unit: "request",
+      mediaType: "text",
+      pricingBasis: "OpenAI text usage recorded, but local token-to-price estimate is not configured",
+      pricingSource: "usage-no-local-pricing"
+    };
+  }
+
+  const textRequestCost = falTextRequestCost;
+  const imageHelperCost = imageInputs.length ? falVisionTextUnitCost : 0;
+  const videoHelperCost = videoInputs.length ? falVideoTextUnitCost : 0;
+  const amountUsd = roundCurrency(textRequestCost + imageHelperCost + videoHelperCost);
+
+  return {
+    amountUsd,
+    currency: "USD",
+    unitRateUsd: textRequestCost,
+    units: 1,
+    unit: "request",
+    mediaType: "text",
+    pricingBasis: "fal.ai OpenRouter request estimate plus media helper calls",
+    pricingSource: "configured-pricing-v1"
+  };
+}
+
+function usageCost(usage) {
+  if (!usage) return null;
+
+  if (Array.isArray(usage)) {
+    const amounts = usage.map(usageCost).filter((amount) => amount !== null);
+    return amounts.length ? amounts.reduce((sum, amount) => sum + amount, 0) : null;
+  }
+
+  if (typeof usage === "object") {
+    const nestedAmounts = [usage.request, ...(Array.isArray(usage.helpers) ? usage.helpers : [])].map(usageCost).filter((amount) => amount !== null);
+    if (nestedAmounts.length) return nestedAmounts.reduce((sum, amount) => sum + amount, 0);
+
+    for (const key of ["cost", "amountUsd", "amount_usd", "totalCost", "total_cost"]) {
+      const amount = Number(usage[key]);
+      if (usage[key] !== null && usage[key] !== undefined && Number.isFinite(amount)) return amount;
+    }
+  }
+
+  return null;
+}
+
 function falTimingSeconds(result) {
   const timings = result?.data?.timings || result?.timings;
   if (!timings || typeof timings !== "object") return null;
@@ -7517,6 +7671,185 @@ function nodeFromBody(body) {
   return { id, title };
 }
 
+function normalizedTextInputs(items) {
+  if (!Array.isArray(items)) return [];
+  return items
+    .map((item) => ({
+      label: String(item?.label || "Text input").trim(),
+      text: String(item?.text || "").trim()
+    }))
+    .filter((item) => item.text)
+    .slice(0, 8);
+}
+
+function normalizedMediaInputs(items, mediaType) {
+  if (!Array.isArray(items)) return [];
+  return items
+    .map((item) => ({
+      label: String(item?.label || `${mediaType} input`).trim(),
+      url: String(item?.url || "").trim(),
+      type: mediaType
+    }))
+    .filter((item) => isLocalAssetUrl(item.url))
+    .slice(0, 6);
+}
+
+function textInputContext(textInputs) {
+  return textInputs.map((item, index) => `Text input ${index + 1} (${item.label}):\n${item.text}`).join("\n\n");
+}
+
+function buildTextProcessingPrompt({ text, textInputs, imageDescriptions = [], videoDescriptions = [] }) {
+  return [
+    textProcessingInstructions(),
+    text ? `Original prompt:\n${text}` : "",
+    textInputContext(textInputs),
+    imageDescriptions.length ? `Image context:\n${imageDescriptions.join("\n\n")}` : "",
+    videoDescriptions.length ? `Video context:\n${videoDescriptions.join("\n\n")}` : "",
+    "Return only the final processed prompt text."
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+async function processTextWithFal({ text, textInputs, imageInputs, videoInputs }) {
+  if (!process.env.FAL_KEY) {
+    throw new Error("Missing FAL_KEY in .env.");
+  }
+
+  const model = falTextModel;
+  const imageContext = await describeImageInputs(imageInputs);
+  const videoContext = await describeVideoInputs(videoInputs);
+  const prompt = buildTextProcessingPrompt({ text, textInputs, imageDescriptions: imageContext.descriptions, videoDescriptions: videoContext.descriptions });
+  const data = await subscribeFal("openrouter/router", {
+    input: {
+      model,
+      prompt,
+      system_prompt: textProcessingInstructions()
+    },
+    logs: true
+  });
+  const outputText = extractFalText(data).trim();
+
+  if (!outputText) {
+    throw new Error("fal returned no text.");
+  }
+
+  return {
+    text: outputText,
+    model,
+    provider: "fal",
+    endpoint: "openrouter/router",
+    submittedPrompt: prompt,
+    usage: falResultUsage(data),
+    helperUsages: [...imageContext.usages, ...videoContext.usages]
+  };
+}
+
+async function processTextWithOpenAi({ text, textInputs, imageInputs, videoInputs }) {
+  if (!openAiTextApiKey) {
+    throw new Error("Missing OPENAI_TEXT_API_KEY in .env.");
+  }
+
+  const model = openAiTextModel;
+  const prompt = buildTextProcessingPrompt({
+    text,
+    textInputs,
+    imageDescriptions: imageInputs.map((item, index) => `Image ${index + 1} (${item.label}): ${item.url}`),
+    videoDescriptions: videoInputs.map((item, index) => `Video ${index + 1} (${item.label}): ${item.url}`)
+  });
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${openAiTextApiKey}`
+    },
+    body: JSON.stringify({
+      model,
+      instructions: textProcessingInstructions(),
+      input: prompt
+    })
+  });
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data?.error?.message || "Text processing failed.");
+  }
+
+  const outputText = extractOpenAiResponseText(data).trim();
+  if (!outputText) {
+    throw new Error("OpenAI returned no text.");
+  }
+
+  return {
+    text: outputText,
+    model,
+    provider: "OpenAI",
+    endpoint: model,
+    submittedPrompt: prompt,
+    usage: data.usage || null,
+    helperUsages: []
+  };
+}
+
+function textProcessingInstructions() {
+  return "Process the available text, image, and video context for use in a creative node workflow. Improve clarity, specificity, and usefulness while preserving the user's intent.";
+}
+
+async function describeImageInputs(imageInputs) {
+  if (!imageInputs.length) return { descriptions: [], usages: [] };
+
+  const imageUrls = await Promise.all(imageInputs.map((item) => localAssetToFalUrl(item.url)));
+  const data = await describeImagesWithFalVision(imageUrls, falVisionTextModel);
+  const description = extractFalText(data).trim();
+  return {
+    descriptions: description ? [`Connected images: ${description}`] : [],
+    usages: [falResultUsage(data)].filter(Boolean)
+  };
+}
+
+async function describeImagesWithFalVision(imageUrls, model) {
+  const input = {
+    image_urls: imageUrls,
+    prompt: "Describe these images as concise visual prompt context. Focus on subject, setting, composition, camera, lighting, palette, mood, materials, and any important details.",
+    system_prompt: "Return only useful prompt context. Do not use markdown.",
+    model
+  };
+
+  try {
+    return await subscribeFal("openrouter/router/vision", { input, logs: true });
+  } catch (error) {
+    if (!falVisionTextFallbackModel || falVisionTextFallbackModel === model) throw error;
+    console.warn(`Fal vision model ${model} failed; retrying with ${falVisionTextFallbackModel}.`, error?.message || error);
+    return subscribeFal("openrouter/router/vision", {
+      input: {
+        ...input,
+        model: falVisionTextFallbackModel
+      },
+      logs: true
+    });
+  }
+}
+
+async function describeVideoInputs(videoInputs) {
+  if (!videoInputs.length) return { descriptions: [], usages: [] };
+
+  const videoUrls = await Promise.all(videoInputs.map((item) => localAssetToFalUrl(item.url)));
+  const data = await subscribeFal("openrouter/router/video", {
+    input: {
+      video_urls: videoUrls,
+      prompt: "Describe these videos as concise visual prompt context. Focus on subjects, actions, setting, camera movement, lighting, style, mood, and any useful continuity details.",
+      system_prompt: "Return only useful prompt context. Do not use markdown.",
+      model: falVideoTextModel
+    },
+    logs: true
+  });
+  const description = extractFalText(data).trim();
+  return {
+    descriptions: description ? [`Connected videos: ${description}`] : [],
+    usages: [falResultUsage(data)].filter(Boolean)
+  };
+}
+
 async function localAssetToFalUrl(publicPath) {
   const asset = await readLocalAsset(publicPath);
   return fal.storage.upload(
@@ -7524,6 +7857,46 @@ async function localAssetToFalUrl(publicPath) {
       type: asset.mimeType || "application/octet-stream"
     })
   );
+}
+
+function extractOpenAiResponseText(response) {
+  if (typeof response?.output_text === "string") return response.output_text;
+
+  return (response?.output || [])
+    .flatMap((item) => item?.content || [])
+    .map((content) => content?.text || "")
+    .filter(Boolean)
+    .join("\n");
+}
+
+function extractFalText(data) {
+  if (typeof data === "string") return data;
+  if (typeof data?.data?.output === "string") return data.data.output;
+  if (typeof data?.data?.text === "string") return data.data.text;
+  if (typeof data?.data?.response === "string") return data.data.response;
+  if (typeof data?.data?.content === "string") return data.data.content;
+  if (typeof data?.data?.message?.content === "string") return data.data.message.content;
+  if (typeof data?.data?.choices?.[0]?.message?.content === "string") return data.data.choices[0].message.content;
+  if (typeof data?.data?.choices?.[0]?.text === "string") return data.data.choices[0].text;
+  if (typeof data?.output === "string") return data.output;
+  if (typeof data?.text === "string") return data.text;
+  if (typeof data?.response === "string") return data.response;
+  if (typeof data?.content === "string") return data.content;
+  if (typeof data?.message?.content === "string") return data.message.content;
+  if (typeof data?.choices?.[0]?.message?.content === "string") return data.choices[0].message.content;
+  if (typeof data?.choices?.[0]?.text === "string") return data.choices[0].text;
+
+  const content = data?.output?.[0]?.content?.[0];
+  if (typeof content?.text === "string") return content.text;
+
+  const nestedContent = data?.data?.output?.[0]?.content?.[0];
+  if (typeof nestedContent?.text === "string") return nestedContent.text;
+
+  return "";
+}
+
+function falResultUsage(result) {
+  return result?.data?.usage || result?.usage || result?.data?.metrics || result?.metrics || null;
 }
 
 function routeKindLabel(routeKind, speed) {

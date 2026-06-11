@@ -1,5 +1,6 @@
 export const nodeTypeDefinitions = [
   { type: "plainText", label: "Text" },
+  { type: "text", label: "Text Model" },
   { type: "image", label: "Image" },
   { type: "video", label: "Video" },
   { type: "preview", label: "Preview" },

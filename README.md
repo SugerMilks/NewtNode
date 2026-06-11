@@ -10,7 +10,7 @@
 
 NewtNode is a desktop-friendly browser app for building repeatable creative pipelines with connected nodes. It can generate, preview, save, import, and remix images, video, audio, 3D assets, text, character references, style references, camera instructions, and Composer guide frames while keeping API keys and workflow files on your machine.
 
-Current release: `v2.0.0-beta.1`
+Current release: `v2.0.0-beta.2`
 
 ## What It Does
 

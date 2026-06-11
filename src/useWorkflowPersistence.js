@@ -35,9 +35,14 @@ export function useWorkflowPersistence({
   setSelectedEdgeId,
   setProjectMenuOpen,
   setFileMenuOpen,
+  newProjectNodes = [],
+  newProjectEdges = [],
+  newProjectGroups = [],
+  newProjectViewport = { x: 0, y: 0, scale: 1 },
   normalizeEditorGraph,
   dedupeEdges,
   pushUndoSnapshot,
+  clearUndoStack,
   importOffsetForNodes,
   onStatusChange
 }) {
@@ -267,6 +272,42 @@ export function useWorkflowPersistence({
     }
   }
 
+  async function startNewProject() {
+    try {
+      if (!(await guardUnsavedWorkflowChange("start a new project"))) return false;
+
+      const graph = normalizeEditorGraph(newProjectNodes, newProjectEdges, newProjectGroups);
+      localWorkflowHandleRef.current = null;
+      setLocalWorkflowFileName("");
+      setProjectId(null);
+      setProjectName("Untitled node project");
+      setSavedProjectName(null);
+      setProjectPackagePath("");
+      setWorkflowFilePath("");
+      setNodes(graph.nodes);
+      setEdges(graph.edges);
+      setGroups(graph.groups);
+      setViewport(newProjectViewport);
+      setSelectedNodeIds([]);
+      setSelectedEdgeId(null);
+      clearUndoStack?.();
+      setProjectMenuOpen(false);
+      setFileMenuOpen(false);
+      markWorkflowClean({
+        nodes: graph.nodes,
+        edges: graph.edges,
+        groups: graph.groups,
+        projectName: "Untitled node project",
+        projectPackagePath: ""
+      });
+      setSaveStatus("New project ready");
+      return true;
+    } catch (error) {
+      setSaveStatus(error.message || "Could not start a new project.");
+      return false;
+    }
+  }
+
   function applyWorkflow(project, sourceLabel = "Loaded") {
     const graph = normalizeEditorGraph(project.graph?.nodes || [], project.graph?.edges || [], project.graph?.groups || []);
     const nextProjectName = project.name || "Untitled node project";
@@ -286,6 +327,7 @@ export function useWorkflowPersistence({
     setViewport(nextViewport);
     setSelectedNodeIds([]);
     setSelectedEdgeId(null);
+    clearUndoStack?.();
     setProjectMenuOpen(false);
     markWorkflowClean({
       nodes: graph.nodes,
@@ -516,6 +558,7 @@ export function useWorkflowPersistence({
     appendWorkflowContextToForm,
     loadProjects,
     saveProject,
+    startNewProject,
     saveProjectAsLocalFile,
     openWorkflowFile,
     openWorkflowFromSystemPicker,

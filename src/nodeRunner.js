@@ -56,7 +56,7 @@ export function ensureRunSuccesses(successes, failures, fallbackMessage) {
 }
 
 export function isRunnableNode(node) {
-  return ["imageModel", "videoModel", "utility", "model3d", "storyboard"].includes(node.type);
+  return ["text", "imageModel", "videoModel", "utility", "model3d", "storyboard"].includes(node.type);
 }
 
 export function buildSelectedRunnableDependencies(nodes, edges) {
@@ -81,7 +81,8 @@ export function nodeRunPriority(node) {
 }
 
 export function runStageLabel(type) {
-  if (type === "text" || type === "plainText") return "text";
+  if (type === "text") return "text model";
+  if (type === "plainText") return "text";
   if (type === "imageModel") return "image";
   if (type === "storyboard") return "storyboard";
   if (type === "model3d") return "3D";

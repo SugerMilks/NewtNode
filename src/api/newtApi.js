@@ -97,6 +97,7 @@ function localApiRouteKey(path) {
   if (path.includes("composer-frame")) return "composerFrame";
   if (path.includes("composer-poses")) return "composerPoses";
   if (path.includes("generate-3d")) return "generate3d";
+  if (path.includes("process-text")) return "processText";
   if (path.includes("settings")) return "settings";
   return "";
 }
@@ -193,6 +194,10 @@ export const nodeApi = {
 
   qwenCameraEdit(body, label = "Camera edit") {
     return fetchJsonApi("/api/node/qwen-camera-edit", jsonBody(body), label);
+  },
+
+  processText(body, label = "Text processing") {
+    return fetchJsonApi("/api/node/process-text", jsonBody(body), label);
   },
 
   utilityImage(body, label = "Utility image generation") {

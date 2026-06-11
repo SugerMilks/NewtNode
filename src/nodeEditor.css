@@ -111,6 +111,18 @@
   display: none;
 }
 
+.node-toolbar .new-project-button {
+  grid-template-columns: 16px minmax(0, 1fr);
+  width: 100%;
+  min-height: 34px;
+  color: #121212;
+  background: #ddc631;
+}
+
+.node-toolbar .new-project-button:hover {
+  background: #ecd940;
+}
+
 .file-menu {
   position: relative;
 }
@@ -1171,13 +1183,29 @@
   position: relative;
 }
 
-.text-node-body .port-row {
+.text-node-body .port-row,
+.text-node-body .run-node-button {
   margin-bottom: 0;
 }
 
-.text-single-panel {
+.text-input-port-stack {
+  position: absolute;
+  top: 58px;
+  left: -9px;
+  display: grid;
+  gap: 12px;
+  z-index: 4;
+}
+
+.text-single-panel,
+.text-split-panel {
   display: grid;
   gap: 10px;
+}
+
+.text-split-panel {
+  align-items: start;
+  grid-template-rows: auto auto;
 }
 
 .text-field-group {
@@ -1196,6 +1224,11 @@
 .text-field-group textarea {
   align-self: start;
   min-height: 112px;
+}
+
+.text-split-panel .text-field-group textarea {
+  min-height: 112px;
+  resize: vertical;
 }
 
 .text-node-body small {
