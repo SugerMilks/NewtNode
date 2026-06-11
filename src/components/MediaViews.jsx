@@ -15,24 +15,39 @@ export function MediaPreview({ node }) {
     );
   }
 
+  const dragItem = {
+    id: `${node.id}:${node.data.resultUrl}`,
+    url: node.data.resultUrl,
+    type: node.type,
+    label: node.data.fileName || capitalizeMediaType(node.type),
+    fileName: node.data.fileName || "",
+    mimeType: node.data.mimeType || ""
+  };
+  function startPreviewDrag(event) {
+    event.dataTransfer.effectAllowed = "copy";
+    event.dataTransfer.setData(defaultOutputDragMime, JSON.stringify(dragItem));
+    event.dataTransfer.setData("text/plain", dragItem.url);
+    event.dataTransfer.setData("text/uri-list", dragItem.url);
+  }
+
   if (node.type === "image") {
     return (
-      <div className="media-preview">
-        <img src={node.data.resultUrl} alt={node.data.fileName || "Uploaded image"} onError={useNewtNodeImageFallback} />
+      <div className="media-preview" draggable onDragStart={startPreviewDrag} title="Drag image into another node">
+        <img src={node.data.resultUrl} alt={node.data.fileName || "Uploaded image"} draggable={false} onError={useNewtNodeImageFallback} />
       </div>
     );
   }
 
   if (node.type === "video") {
     return (
-      <div className="media-preview">
-        <video src={node.data.resultUrl} controls muted loop onError={useNewtNodeVideoFallback} />
+      <div className="media-preview" draggable onDragStart={startPreviewDrag} title="Drag video into another node">
+        <video src={node.data.resultUrl} controls muted loop draggable={false} onError={useNewtNodeVideoFallback} />
       </div>
     );
   }
 
   return (
-    <div className="media-preview audio">
+    <div className="media-preview audio" draggable onDragStart={startPreviewDrag} title="Drag audio into another node">
       <FileAudio size={28} />
       <audio src={node.data.resultUrl} controls />
     </div>
