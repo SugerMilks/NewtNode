@@ -18,7 +18,7 @@ export VITE_API_PORT="$API_PORT"
 export VITE_CLIENT_PORT="$CLIENT_PORT"
 
 if ! curl -fsS "$API_HEALTH_URL" >/dev/null 2>&1; then
-  nohup node server/index.js > "$LOG_DIR/server.log" 2>&1 &
+  nohup node scripts/localServerSupervisor.mjs > "$LOG_DIR/server.log" 2>&1 &
 fi
 
 if ! curl -fsS "$URL" >/dev/null 2>&1; then

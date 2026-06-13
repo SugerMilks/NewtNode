@@ -23,6 +23,7 @@ import {
   PanelRightOpen,
   Palette,
   Pause,
+  Pipette,
   Play,
   Plus,
   GripVertical,
@@ -52,7 +53,7 @@ import {
 import { ComposerNodeBody, MediaAssetNodeBody, PlainTextNodeBody, TextModelNodeBody } from "./components/NodeBodies.jsx";
 import { NodeRow, OutputPortRow, PortHandle } from "./components/NodePorts.jsx";
 import { StyleCollage } from "./components/StyleCollage.jsx";
-import { canvasToBlob, createTransferCollageBlob, loadCanvasImage } from "./canvasMedia.js";
+import { canvasToBlob, createTransferCollageBlob, drawImageCover, loadCanvasImage } from "./canvasMedia.js";
 import { renderComposerViewport } from "./composerRender.js";
 import {
   composerAspectRatioNumber,
@@ -192,7 +193,7 @@ import {
   runRunnableNodesByDependencyOrder,
   settleSequential
 } from "./nodeRunner.js";
-import { run3DModelGeneration, runCharacterSheetGeneration, runImageModelGeneration } from "./nodeRunners/mediaModels.js";
+import { run3DModelGeneration, runAutoAspectGeneration, runCharacterSheetGeneration, runImageModelGeneration } from "./nodeRunners/mediaModels.js";
 import { runTextNodeProcessing } from "./nodeRunners/textModels.js";
 import {
   buildUtilityVideoRequest,
@@ -234,6 +235,7 @@ const nodeIcons = {
   utility: Wrench,
   audio: FileAudio,
   model3d: Box,
+  autoAspect: Maximize2,
   imageModel: ImagePlus,
   videoModel: Film,
   storyboard: Clapperboard,
@@ -260,6 +262,8 @@ const portColors = {
 
 const maxTransferImages = 6;
 const moodBoardOutputFileName = "MOOD_BOARD.png";
+const autoAspectDefaultRatios = [];
+const autoAspectModelOptions = [imageModelNames.openAiImage2, imageModelNames.nanoBananaPro];
 const composerCharacterPortPrefix = "characterIn:";
 const maxCharacterWardrobes = 8;
 const maxCharacterVoices = 8;
@@ -1287,7 +1291,14 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (!edgeIds.length) return;
     pushUndoSnapshot();
     const ids = new Set(edgeIds);
+    const autoAspectInputsRemoved = new Set(
+      edgesRef.current
+        .filter((edge) => ids.has(edge.id))
+        .filter((edge) => edge.to.port === "imageIn" && nodesRef.current.find((node) => node.id === edge.to.nodeId)?.type === "autoAspect")
+        .map((edge) => edge.to.nodeId)
+    );
     setEdges((current) => current.filter((edge) => !ids.has(edge.id)));
+    autoAspectInputsRemoved.forEach((nodeId) => updateNode(nodeId, resetAutoAspectOutputPatch()));
     setSelectedEdgeId(null);
     setSaveStatus(`${edgeIds.length} connection${edgeIds.length === 1 ? "" : "s"} deleted`);
   }
@@ -1384,7 +1395,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   function updateNode(nodeId, patch) {
     let nextUtilityData = null;
     let nextCameraData = null;
+    let nextStyleData = null;
     const cameraPresetChanged = ["shotPreset", "lensPreset", "typePreset"].some((key) => Object.prototype.hasOwnProperty.call(patch, key));
+    const styleOutputMaybeChanged = ["stylePreset", "customPaletteRgbText", "customPaletteColors", "customPalettePreviewUrl"].some((key) => Object.prototype.hasOwnProperty.call(patch, key));
     setNodes((current) => {
       const shouldUpdateConnectedPreviews = Array.isArray(patch.resultItems) && patch.resultItems.some((item) => item?.url);
       const nextNodes = current.map((node) =>
@@ -1396,6 +1409,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
               };
               if (node.type === "utility") nextUtilityData = data;
               if (node.type === "camera") nextCameraData = data;
+              if (node.type === "style") nextStyleData = data;
               return {
                 ...node,
                 data
@@ -1417,6 +1431,14 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           return !staleOutput && !inactiveInput;
         })
       );
+    }
+
+    if (nextStyleData && styleOutputMaybeChanged && !styleOutputEnabled(nextStyleData)) {
+      setEdges((current) => current.filter((edge) => !(edge.from.nodeId === nodeId && edge.from.port === "styleOut")));
+      setSelectedEdgeId((current) => {
+        const selectedEdge = edgesRef.current.find((edge) => edge.id === current);
+        return selectedEdge?.from.nodeId === nodeId && selectedEdge?.from.port === "styleOut" ? null : current;
+      });
     }
 
     if (nextCameraData && cameraPresetChanged && !hasCameraPreset({ data: nextCameraData })) {
@@ -2743,6 +2765,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     event.stopPropagation();
     pushUndoSnapshot();
     setEdges((current) => current.filter((edge) => !(edge.to.nodeId === nodeId && edge.to.port === port)));
+    const targetNode = nodesRef.current.find((node) => node.id === nodeId);
+    if (targetNode?.type === "autoAspect" && port === "imageIn") {
+      updateNode(nodeId, resetAutoAspectOutputPatch());
+    }
     setSelectedEdgeId(null);
     setDraftEdge(null);
     setSaveStatus("Disconnected input");
@@ -2945,11 +2971,14 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         }
 
         pushUndoSnapshot();
+        const targetNodeForConnection = nodesRef.current.find((node) => node.id === to.nodeId);
+        const shouldResetAutoAspectOutput = targetNodeForConnection?.type === "autoAspect" && to.port === "imageIn";
         setEdges((current) => {
-          const targetNode = nodesRef.current.find((node) => node.id === to.nodeId);
-          const replacesSingleComposerCharacterInput = isComposerCharacterInputPort(to.port, targetNode);
+          const replacesSingleComposerCharacterInput = isComposerCharacterInputPort(to.port, targetNodeForConnection);
+          const replacesSingleAutoAspectInput = targetNodeForConnection?.type === "autoAspect" && to.port === "imageIn";
           let nextEdges = current.filter((edge) => {
             if (replacesSingleComposerCharacterInput && edge.to.nodeId === to.nodeId && edge.to.port === to.port) return false;
+            if (replacesSingleAutoAspectInput && edge.to.nodeId === to.nodeId && edge.to.port === to.port) return false;
             return !(edge.from.nodeId === draftEdge.from.nodeId && edge.from.port === draftEdge.from.port && edge.to.nodeId === to.nodeId && edge.to.port === to.port);
           });
 
@@ -2963,6 +2992,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
             }
           ];
         });
+        if (shouldResetAutoAspectOutput) updateNode(to.nodeId, resetAutoAspectOutputPatch());
       }
     } else {
       event.preventDefault();
@@ -3012,6 +3042,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       },
       image: {
         preview: ["sourceIn"],
+        autoAspect: ["imageIn"],
         camera: ["imageIn"],
         composer: ["imageIn"],
         model3d: ["frontImageIn"],
@@ -3062,6 +3093,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
   function autoConnectionOutputKind(source, from) {
     if (source.type === "storyboard") return storyboardFrameForOutputPort(source, from.port)?.resultUrl ? "image" : "";
+    if (source.type === "autoAspect") return autoAspectOutputItem(source, { from })?.url ? "image" : "";
     if (source.type === "camera") return "camera";
     if (source.type === "composer") return "image";
     if (source.type === "utility") return utilityOutputType(source);
@@ -3093,12 +3125,27 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       const frame = storyboardFrameForOutputPort(source, from.port);
       if (!frame?.resultUrl) return "Generate this Storyboard frame before connecting it";
       if (target.type === "preview" && to.port === "sourceIn") return "";
+      if (target.type === "autoAspect" && to.port === "imageIn") return "";
       if (target.type === "composer" && to.port === "imageIn") return "";
       if (target.type === "model3d" && isModel3DImageInputPort(to.port)) return "";
       if (target.type === "imageModel" && ["imagePromptIn", "transferIn"].includes(to.port)) return "";
       if (target.type === "videoModel" && ["startFrameIn", "endFrameIn", "referenceImageIn"].includes(to.port)) return "";
       if (target.type === "utility" && ["imageIn", "referenceImageIn"].includes(to.port)) return "";
       return "Storyboard frames connect to image inputs or previews";
+    }
+
+    if (source.type === "autoAspect") {
+      const outputItem = autoAspectOutputItem(source, { from });
+      if (!outputItem?.url) return "Generate this Auto Aspect output before connecting it";
+      if (target.type === "preview" && to.port === "sourceIn") return "";
+      if (target.type === "autoAspect" && to.port === "imageIn") return "";
+      if (target.type === "composer" && to.port === "imageIn") return "";
+      if (target.type === "model3d" && isModel3DImageInputPort(to.port)) return "";
+      if (target.type === "imageModel" && ["imagePromptIn", "transferIn"].includes(to.port)) return "";
+      if (target.type === "videoModel" && ["startFrameIn", "endFrameIn", "referenceImageIn"].includes(to.port)) return "";
+      if (target.type === "utility" && ["imageIn", "referenceImageIn"].includes(to.port)) return "";
+      if (target.type === "text" && to.port === "imageIn") return "";
+      return "Auto Aspect outputs connect to image inputs or previews";
     }
 
     if (source.type === "camera") {
@@ -3109,6 +3156,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
     if (source?.type === "style") {
       if ((source.data.stylePreset || "None") === "None") return "Choose a Style preset before connecting";
+      if ((source.data.stylePreset || "None") === "Custom Palette" && !customPalettePromptPiece(source.data)) return "Add palette colors before connecting";
       if (target.type === "imageModel" && to.port === "styleIn") return "";
       if (target.type === "text" && to.port === "styleIn") return "";
       if (target.type === "storyboard" && to.port === "styleIn") {
@@ -3165,6 +3213,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       }
 
       if (target.type === "preview" && to.port === "sourceIn") return "";
+      if (target.type === "autoAspect" && to.port === "imageIn") return "";
       if (target.type === "composer" && to.port === "imageIn") return "";
       if (target.type === "model3d" && isModel3DImageInputPort(to.port)) return "";
       if (target.type === "imageModel" && ["imagePromptIn", "transferIn"].includes(to.port)) return "";
@@ -3204,9 +3253,21 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       }
     }
 
+    if (target?.type === "autoAspect") {
+      if (to.port === "imageIn") {
+        if (source.type === "composer") return from.port === "imageOut" ? "" : "Auto Aspect accepts image outputs";
+        if (source.type === "utility") return utilityOutputType(source) === "image" ? "" : "Auto Aspect accepts image outputs";
+        if (source.type === "storyboard") return storyboardFrameOutputItem(source, { from })?.url ? "" : "Generate this Storyboard frame before connecting it";
+        if (source.type === "autoAspect") return autoAspectOutputItem(source, { from })?.url ? "" : "Generate this Auto Aspect output before connecting it";
+        if (["image", "imageModel"].includes(source.type)) return "";
+        return "Auto Aspect accepts image outputs";
+      }
+    }
+
     if (source?.type === "composer") {
       if (from.port === "imageOut") {
         if (target.type === "preview" && to.port === "sourceIn") return "";
+        if (target.type === "autoAspect" && to.port === "imageIn") return "";
         if (target.type === "composer" && to.port === "imageIn") return "";
         if (target.type === "model3d" && isModel3DImageInputPort(to.port)) return "";
         if (target.type === "imageModel" && ["imagePromptIn", "transferIn"].includes(to.port)) return "";
@@ -3458,6 +3519,50 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           resultText: processed.text,
           lastRunModel: processed.model
         });
+        return { status: "complete" };
+      }
+
+      if (currentNode.type === "autoAspect") {
+        const sourceImageUrl = connectedAssetUrls(incoming.imageIn).at(-1);
+        if (!sourceImageUrl) throw new Error("Connect an image to Auto Aspect.");
+        const autoAspectTargets = autoAspectTargetsForData(currentNode.data);
+        if (!autoAspectTargets.length) throw new Error("Select at least one aspect ratio.");
+
+        const settled = await settleSequential(
+          autoAspectTargets,
+          (target, index) => runAutoAspectGeneration({
+            node: currentNode,
+            sourceImageUrl,
+            aspectRatio: target.aspectRatio,
+            workflowContext: requestContext,
+            index
+          }),
+          imageRunStaggerMs
+        );
+        const successes = fulfilledRunValues(settled);
+        const failures = rejectedRunResults(settled);
+        ensureRunSuccesses(successes, failures, "Auto Aspect generation failed.");
+        const autoAspectResults = successes.map((item) => ({
+          key: item.key || autoAspectTargetKey(item),
+          aspectRatio: item.aspectRatio,
+          url: item.url,
+          label: item.label,
+          text: item.text || "",
+          cost: item.cost ?? null,
+          sourceUrl: item.sourceUrl || ""
+        }));
+        const resultItems = autoAspectResultItems({ autoAspectResults });
+
+        updateNode(currentNode.id, {
+          status: "complete",
+          resultUrl: resultItems[0]?.url || autoAspectResults[0]?.url || "",
+          resultItems,
+          selectedResultIndex: 0,
+          autoAspectResults,
+          resultText: resultTextFromItems(autoAspectResults),
+          error: batchRunError("image", autoAspectTargets.length, successes, failures)
+        });
+        loadOutputHistory();
         return { status: "complete" };
       }
 
@@ -5897,7 +6002,141 @@ function NodeBody({
 
   if (node.type === "style") {
     const selectedPreset = node.data.stylePreset || "None";
-    const styleSelected = selectedPreset !== "None";
+    const customPaletteSelected = selectedPreset === "Custom Palette";
+    const paletteColors = normalizedCustomPaletteColors(node.data);
+    const styleSelected = styleOutputEnabled(node.data);
+
+    async function handlePaletteImageUpload(files) {
+      const file = firstAcceptedFile(files, "image");
+      if (!file) return;
+      onUndoSnapshot?.();
+      onUpdate(node.id, {
+        customPaletteStatus: "extracting",
+        customPaletteError: "",
+        customPaletteSourceName: file.name,
+        customPalettePreviewUrl: "",
+        customPaletteColors: [],
+        customPaletteRgbText: ""
+      });
+      try {
+        const extracted = await extractCustomPaletteFromFile(file);
+        const firstExtractedColor = extracted.colors?.[0]?.hex;
+        onUpdate(node.id, {
+          customPaletteStatus: "",
+          customPaletteError: "",
+          customPaletteSourceName: file.name,
+          customPalettePreviewUrl: extracted.previewUrl,
+          customPaletteColors: extracted.colors,
+          customPaletteRgbText: "",
+          customPalettePicker: firstExtractedColor || node.data.customPalettePicker || "#ddc631"
+        });
+      } catch (error) {
+        onUpdate(node.id, {
+          customPaletteStatus: "",
+          customPaletteError: error.message || "Could not extract palette from image."
+        });
+      }
+    }
+
+    function handlePaletteDrop(event) {
+      allowFileDrop(event);
+      handlePaletteImageUpload(event.dataTransfer.files);
+    }
+
+    function addPickerColor() {
+      const pickerColor = node.data.customPalettePicker || "#ddc631";
+      const nextColors = uniqueCustomPaletteColors([...paletteColors, customPaletteColorFromHex(pickerColor)]).slice(0, 10);
+      const colorAlreadyApplied = nextColors.length === paletteColors.length && nextColors.every((color, index) => color.hex === paletteColors[index]?.hex);
+      if (colorAlreadyApplied) return;
+      onUndoSnapshot?.();
+      onUpdate(node.id, {
+        customPaletteColors: nextColors,
+        customPaletteRgbText: "",
+        customPalettePicker: pickerColor,
+        customPaletteError: ""
+      });
+    }
+
+    async function pickScreenColor() {
+      if (typeof window === "undefined" || !window.EyeDropper) {
+        onUpdate(node.id, {
+          customPaletteError: "Eye dropper is not available in this browser."
+        });
+        return;
+      }
+      try {
+        const result = await new window.EyeDropper().open();
+        const color = customPaletteColorFromHex(result.sRGBHex);
+        onUpdate(node.id, {
+          customPalettePicker: color.hex,
+          customPaletteError: ""
+        });
+      } catch (error) {
+        if (error?.name === "AbortError") return;
+        onUpdate(node.id, {
+          customPaletteError: "Could not pick that color."
+        });
+      }
+    }
+
+    function clearCustomPalette() {
+      onUndoSnapshot?.();
+      onUpdate(node.id, {
+        customPaletteRgbText: "",
+        customPaletteColors: [],
+        customPalettePreviewUrl: "",
+        customPaletteSourceName: "",
+        customPaletteStatus: "",
+        customPaletteError: ""
+      });
+    }
+
+    function updateInlinePicker(event) {
+      const rect = event.currentTarget.getBoundingClientRect();
+      const x = clamp((event.clientX - rect.left) / Math.max(1, rect.width), 0, 1);
+      const y = clamp((event.clientY - rect.top) / Math.max(1, rect.height), 0, 1);
+      const saturation = Math.round(x * 100);
+      const value = Math.round((1 - y) * 100);
+      const color = customPaletteColorFromHsv(pickerColor.hue, saturation, value);
+      onUpdate(node.id, {
+        customPalettePicker: color.hex,
+        customPaletteError: ""
+      });
+    }
+
+    function startInlinePicker(event) {
+      event.preventDefault();
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+      updateInlinePicker(event);
+    }
+
+    function updateHuePicker(event) {
+      const rect = event.currentTarget.getBoundingClientRect();
+      const y = clamp((event.clientY - rect.top) / Math.max(1, rect.height), 0, 1);
+      const hue = Math.round(y * 360);
+      const color = customPaletteColorFromHsv(hue, pickerColor.saturation, pickerColor.value);
+      onUpdate(node.id, {
+        customPalettePicker: color.hex,
+        customPaletteError: ""
+      });
+    }
+
+    function startHuePicker(event) {
+      event.preventDefault();
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+      updateHuePicker(event);
+    }
+
+    const pickerColor = customPaletteColorFromHex(node.data.customPalettePicker || "#ddc631");
+    const hasImagePalette = Boolean(node.data.customPalettePreviewUrl);
+    const pickerHueColor = customPaletteColorFromHsv(pickerColor.hue, 100, 100);
+    const pickerMarkerStyle = {
+      "--picker-color": pickerColor.hex,
+      "--picker-hue-color": pickerHueColor.hex,
+      "--picker-x": `${pickerColor.saturation}%`,
+      "--picker-y": `${100 - pickerColor.value}%`,
+      "--picker-hue-y": `${pickerColor.hue / 3.6}%`
+    };
 
     return (
       <div className="node-body style-only-node-body">
@@ -5911,17 +6150,100 @@ function NodeBody({
             connectedPortKeys={connectedPortKeys}
           />
         ) : (
-          <div className="style-output-placeholder">Choose style to enable output</div>
+          <div className="style-output-placeholder">{customPaletteSelected ? "Add palette colors to enable output" : "Choose style to enable output"}</div>
         )}
 
         <div className="style-preset-row">
           <span>Style</span>
-          <select value={selectedPreset} onChange={(event) => onUpdate(node.id, { stylePreset: event.target.value })}>
+          <select value={selectedPreset} onChange={(event) => onUpdate(node.id, { stylePreset: event.target.value, customPaletteError: "" })}>
             {stylePresetNames.map((presetName) => (
               <option key={presetName}>{presetName}</option>
             ))}
           </select>
         </div>
+
+        {customPaletteSelected && (
+          <section className="custom-palette-panel" onDragOver={allowFileDrop} onDrop={handlePaletteDrop}>
+            <div className={`custom-palette-image-wrap ${hasImagePalette ? "has-preview" : ""}`}>
+              <label className={`custom-palette-image-drop ${node.data.customPalettePreviewUrl ? "has-preview" : ""}`} title={node.data.customPalettePreviewUrl ? "Replace palette image" : "Extract palette from image"}>
+                {node.data.customPalettePreviewUrl ? (
+                  <img className="custom-palette-preview" src={node.data.customPalettePreviewUrl} alt="Extracted custom palette" />
+                ) : (
+                  <span className="custom-palette-empty">
+                    <FileImage size={18} />
+                    <span>Drop image or click to extract palette</span>
+                  </span>
+                )}
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  onChange={(event) => {
+                    handlePaletteImageUpload(event.currentTarget.files);
+                    event.currentTarget.value = "";
+                  }}
+                />
+              </label>
+              {hasImagePalette && (
+                <button type="button" className="custom-palette-image-clear" onClick={clearCustomPalette} title="Clear extracted palette">
+                  <Trash2 size={15} />
+                </button>
+              )}
+            </div>
+
+            {!hasImagePalette && (
+              <>
+                <div className="custom-palette-inline-picker">
+                  <div className="custom-palette-spectrum-wrap" style={pickerMarkerStyle}>
+                    <button
+                      type="button"
+                      className="custom-palette-spectrum"
+                      onPointerDown={startInlinePicker}
+                      onPointerMove={(event) => {
+                        if (event.buttons === 1) updateInlinePicker(event);
+                      }}
+                      title="Pick a palette color"
+                    >
+                      <span className="custom-palette-marker" />
+                    </button>
+                    <button
+                      type="button"
+                      className="custom-palette-hue-rail"
+                      onPointerDown={startHuePicker}
+                      onPointerMove={(event) => {
+                        if (event.buttons === 1) updateHuePicker(event);
+                      }}
+                      title="Choose hue"
+                    >
+                      <span className="custom-palette-hue-thumb" />
+                    </button>
+                  </div>
+                  <div className="custom-palette-tool-rail">
+                    <button type="button" className="custom-palette-tool" onClick={addPickerColor} title="Add selected color">
+                      <Plus size={16} />
+                      <span>Add</span>
+                    </button>
+                    <button type="button" className="custom-palette-tool" onClick={pickScreenColor} title="Use eye dropper">
+                      <Pipette size={16} />
+                      <span>Pick</span>
+                    </button>
+                    <button type="button" className="custom-palette-tool muted" onClick={clearCustomPalette} title="Clear palette colors">
+                      <Trash2 size={16} />
+                      <span>Clear</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="custom-palette-swatches" aria-label="Custom palette colors">
+                  {paletteColors.map((color) => (
+                    <span key={`${color.hex}-${color.hue}-${color.value}`} title={`${color.hex} RGB(${color.r}, ${color.g}, ${color.b}) H${color.hue} V${color.value}%`} style={{ "--swatch-color": color.hex }} />
+                  ))}
+                </div>
+              </>
+            )}
+            {node.data.customPaletteStatus === "extracting" && <small className="custom-palette-status">Extracting...</small>}
+            {node.data.customPaletteError && <small className="upload-error">{node.data.customPaletteError}</small>}
+          </section>
+        )}
       </div>
     );
   }
@@ -6029,6 +6351,173 @@ function NodeBody({
           </div>
         )}
         <button className="preview-resize-handle" onPointerDown={(event) => onPreviewResizeStart(event, node)} title="Resize preview" />
+      </div>
+    );
+  }
+
+  if (node.type === "autoAspect") {
+    const imagePort = config.input.find((port) => port.id === "imageIn");
+    const selectedAspectRatios = normalizedAutoAspectRatios(node.data);
+    const results = normalizedAutoAspectResults(node.data);
+    const sourceConnected = Boolean(incoming.imageIn?.length);
+    const sourceSummary = autoAspectSourceSummary(incoming.imageIn, "Connect image");
+    const advancedOpen = Boolean(node.data.advancedOpen);
+    const model = normalizeAutoAspectModel(node.data.model);
+    const resolution = normalizeImageModelResolution(node.data.resolution || "2K");
+    const removeTextGraphics = Boolean(node.data.removeTextGraphics);
+    const resultItems = autoAspectResultItems({ autoAspectResults: results });
+    const outputPorts = new Map(autoAspectOutputPortsForNode(node).map((port) => [autoAspectTargetKeyFromOutputPort(port.id), port]));
+
+    function activeResultKeysFor(selectedRatios) {
+      return new Set(autoAspectTargetsForData({ selectedAspectRatios: selectedRatios }).map(autoAspectTargetKey));
+    }
+
+    function toggleAspectRatio(ratio) {
+      if (running) return;
+      const nextSelected = selectedAspectRatios.includes(ratio)
+        ? selectedAspectRatios.filter((item) => item !== ratio)
+        : [...selectedAspectRatios, ratio];
+      const activeKeys = activeResultKeysFor(nextSelected);
+      const nextResults = results.filter((result) => activeKeys.has(result.key));
+      const resultItems = autoAspectResultItems({ autoAspectResults: nextResults });
+      onUpdate(node.id, {
+        selectedAspectRatios: nextSelected,
+        autoAspectResults: nextResults,
+        resultItems,
+        resultUrl: resultItems[0]?.url || "",
+        selectedResultIndex: 0
+      });
+    }
+
+    function updateModel(value) {
+      if (running) return;
+      onUpdate(node.id, {
+        ...resetAutoAspectOutputPatch(),
+        model: normalizeAutoAspectModel(value)
+      });
+    }
+
+    function updateResolution(value) {
+      if (running) return;
+      onUpdate(node.id, {
+        ...resetAutoAspectOutputPatch(),
+        resolution: normalizeImageModelResolution(value)
+      });
+    }
+
+    function toggleRemoveTextGraphics() {
+      if (running) return;
+      onUpdate(node.id, {
+        ...resetAutoAspectOutputPatch(),
+        removeTextGraphics: !removeTextGraphics
+      });
+    }
+
+    return (
+      <div className="node-body model-node-body auto-aspect-node-body">
+        <ResultPane
+          label="Aspect outputs will appear here"
+          resultUrl={node.data.resultUrl}
+          resultItems={node.data.resultItems}
+          selectedIndex={node.data.selectedResultIndex}
+          type="image"
+          status={node.data.status}
+          error={node.data.error}
+          onSelectResult={(index, item) => onUpdate(node.id, { selectedResultIndex: index, resultUrl: item.url })}
+        />
+        <NodeRow label="Image" inputPort={imagePort} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+          <button type="button" className={sourceConnected ? "connected-field" : ""} title={sourceConnected ? sourceSummary : ""}>{sourceSummary}</button>
+        </NodeRow>
+        <div className="auto-aspect-list" aria-label="Auto Aspect outputs">
+          {openAiImageAspectRatios.map((ratio) => {
+            const selected = selectedAspectRatios.includes(ratio);
+            const targets = autoAspectTargetsForRatio(ratio);
+            const targetResults = targets.map((target) => autoAspectResultForTarget(node, target)).filter(Boolean);
+            const readyCount = targetResults.filter((result) => result?.url).length;
+            const result = targetResults[0] || null;
+            const statusText = !selected
+              ? "Select"
+              : readyCount === targets.length
+                ? targets.length > 1 ? `${readyCount} ready` : "Ready"
+                : targets.length > 1 ? `${targets.length} outputs` : "Will generate";
+            return (
+              <div key={ratio} className={`auto-aspect-row ${selected ? "selected" : ""} ${result?.url ? "ready" : ""}`}>
+                <button type="button" disabled={running} onClick={() => toggleAspectRatio(ratio)} title={selected ? `Remove ${ratio}` : `Add ${ratio}`}>
+                  <span className="auto-aspect-check" />
+                  <span>{ratio}</span>
+                  <small>{statusText}</small>
+                </button>
+                {selected && (
+                  <div className="auto-aspect-output-stack" aria-label={`${ratio} outputs`}>
+                    {targets.map((target) => {
+                      const targetKey = autoAspectTargetKey(target);
+                      const port = outputPorts.get(targetKey) || {
+                        id: autoAspectOutputPortId(target),
+                        label: ratio,
+                        color: portColors.image,
+                        disabled: true
+                      };
+                      return (
+                        <OutputPortRow
+                          key={targetKey}
+                          node={node}
+                          port={port}
+                          label=""
+                          onConnectStart={onConnectStart}
+                          onDisconnectInput={onDisconnectInput}
+                          connectedPortKeys={connectedPortKeys}
+                        />
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        <div className={`auto-aspect-advanced ${advancedOpen ? "open" : ""}`}>
+          <button
+            type="button"
+            className="auto-aspect-advanced-toggle"
+            disabled={running}
+            onClick={() => onUpdate(node.id, { advancedOpen: !advancedOpen })}
+            aria-expanded={advancedOpen}
+          >
+            <ChevronDown size={14} />
+            <span>Advanced</span>
+          </button>
+          {advancedOpen && (
+            <div className="auto-aspect-advanced-content">
+              <NodeRow label="Model">
+                <select value={model} disabled={running} onChange={(event) => updateModel(event.target.value)}>
+                  {autoAspectModelOptions.map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+              </NodeRow>
+              <NodeRow label="Resolution">
+                <select value={resolution} disabled={running} onChange={(event) => updateResolution(event.target.value)}>
+                  {imageResolutionOptions.map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+              </NodeRow>
+              <button
+                type="button"
+                className={`auto-aspect-clean-toggle ${removeTextGraphics ? "active" : ""}`}
+                disabled={running}
+                onClick={toggleRemoveTextGraphics}
+                aria-pressed={removeTextGraphics}
+              >
+                <span className="auto-aspect-check" />
+                <span>Remove Graphic Overlays for Compositing</span>
+              </button>
+            </div>
+          )}
+        </div>
+        <button className="run-node-button" onClick={() => onRun(node)} disabled={running || !sourceConnected || !selectedAspectRatios.length}>
+          {running ? "Generating aspects..." : "Generate Aspects"}
+        </button>
       </div>
     );
   }
@@ -7811,6 +8300,11 @@ function getNodeConfig(type) {
       input: [{ id: "sourceIn", label: "Source", color: portColors.preview }],
       output: []
     },
+    autoAspect: {
+      icon: Maximize2,
+      input: [{ id: "imageIn", label: "Image", color: portColors.image }],
+      output: []
+    },
     storyboard: {
       icon: Clapperboard,
       input: [
@@ -7862,6 +8356,17 @@ function createDefaultNodeData(type, label, count) {
   if (type === "text") return { title, text: "" };
   if (type === "image" || type === "video" || type === "audio") return { title };
   if (type === "preview") return { title, previewScale: 1, previewItemIndex: 0 };
+  if (type === "autoAspect") {
+    return {
+      title,
+      selectedAspectRatios: autoAspectDefaultRatios,
+      autoAspectResults: [],
+      model: imageModelNames.openAiImage2,
+      resolution: "2K",
+      removeTextGraphics: false,
+      advancedOpen: false
+    };
+  }
   if (type === "storyboard") {
     return {
       title,
@@ -8035,7 +8540,19 @@ function createDefaultNodeData(type, label, count) {
       seed: ""
     };
   }
-  if (type === "style") return { title, stylePreset: "None" };
+  if (type === "style") {
+    return {
+      title,
+      stylePreset: "None",
+      customPaletteRgbText: "",
+      customPalettePicker: "#ddc631",
+      customPaletteColors: [],
+      customPalettePreviewUrl: "",
+      customPaletteSourceName: "",
+      customPaletteStatus: "",
+      customPaletteError: ""
+    };
+  }
   if (type === "imageModel") {
     return {
       title,
@@ -8279,6 +8796,10 @@ function normalizeImageModelResolution(value) {
   return imageResolutionOptions.includes(value) ? value : "2K";
 }
 
+function normalizeAutoAspectModel(value) {
+  return autoAspectModelOptions.includes(value) ? value : imageModelNames.openAiImage2;
+}
+
 function normalizedLumaVideoDurationLabel(value) {
   const seconds = String(value || "").match(/\d+/)?.[0] || "5";
   return lumaVideoDurationOptions.includes(`${seconds} seconds`) ? `${seconds} seconds` : "5 seconds";
@@ -8493,6 +9014,7 @@ function inputPortDefinitionsForNode(node) {
 function outputPortDefinitionsForNode(node) {
   const basePorts = getNodeConfig(node?.type)?.output || [];
   if (node?.type === "storyboard") return [...basePorts, ...storyboardFrameOutputPortsForNode(node)];
+  if (node?.type === "autoAspect") return [...basePorts, ...autoAspectOutputPortsForNode(node)];
   if (node?.type === "text") return [{ id: "promptOut", label: "Prompt", color: portColors.prompt }];
   return basePorts;
 }
@@ -8539,6 +9061,7 @@ function portKindForNodePort(node, portId, role) {
   if (role === "input" && node.type === "preview" && portId === "sourceIn") return "preview";
   if (role === "input" && isComposerCharacterInputPort(portId, node)) return "character";
   if (role === "output" && node.type === "storyboard" && storyboardFrameIdFromOutputPort(portId)) return "image";
+  if (role === "output" && node.type === "autoAspect" && autoAspectRatioFromOutputPort(portId)) return "image";
   if (role === "output" && node.type === "utility" && portId === "utilityOut") return utilityOutputType(node) === "video" ? "video" : "image";
   if (role === "output" && node.type === "text" && portId === "promptOut") return "prompt";
   return portKindFromColor(portDefinitionForNode(node, portId, role)?.color);
@@ -8606,6 +9129,127 @@ function storyboardFrameForOutputPort(node, portId) {
   return normalizedStoryboardFrames(node?.data?.storyboardFrames).find((frame) => frame.id === frameId) || null;
 }
 
+function autoAspectOutputPortsForNode(node) {
+  if (node?.type !== "autoAspect") return [];
+  return autoAspectTargetsForData(node.data).map((target) => {
+    const result = autoAspectResultForTarget(node, target);
+    const label = target.aspectRatio;
+    return {
+      id: autoAspectOutputPortId(target),
+      label,
+      color: portColors.image,
+      disabled: !result?.url,
+      disabledReason: `Generate ${label} before connecting it`
+    };
+  });
+}
+
+function autoAspectOutputPortId(target) {
+  return `aspectOut:${typeof target === "string" ? target : autoAspectTargetKey(target)}`;
+}
+
+function autoAspectRatioFromOutputPort(portId) {
+  const key = autoAspectTargetKeyFromOutputPort(portId);
+  return key ? key.split("|")[0] : "";
+}
+
+function autoAspectTargetKeyFromOutputPort(portId) {
+  const value = String(portId || "");
+  return value.startsWith("aspectOut:") ? value.slice("aspectOut:".length) : "";
+}
+
+function autoAspectTargetKey(target = {}) {
+  const aspectRatio = String(target?.aspectRatio || "").trim();
+  return aspectRatio;
+}
+
+function autoAspectTargetsForData(data = {}) {
+  return normalizedAutoAspectRatios(data).map((ratio) => autoAspectTargetsForRatio(ratio)[0]).filter(Boolean);
+}
+
+function autoAspectTargetsForRatio(ratio) {
+  const cleanRatio = String(ratio || "").trim();
+  if (!cleanRatio) return [];
+  return [{
+    key: cleanRatio,
+    aspectRatio: cleanRatio
+  }];
+}
+
+function normalizedAutoAspectRatios(data = {}) {
+  const source = Array.isArray(data.selectedAspectRatios) ? data.selectedAspectRatios : autoAspectDefaultRatios;
+  const ratios = [...new Set(source.map((ratio) => String(ratio || "").trim()).filter((ratio) => openAiImageAspectRatios.includes(ratio)))];
+  return ratios;
+}
+
+function normalizedAutoAspectResults(data = {}) {
+  return (Array.isArray(data.autoAspectResults) ? data.autoAspectResults : [])
+    .map((result) => {
+      const aspectRatio = String(result?.aspectRatio || "").trim();
+      const normalized = {
+        key: autoAspectTargetKey({ aspectRatio }),
+        aspectRatio,
+        url: result?.url || "",
+        label: result?.label || "",
+        text: result?.text || "",
+        cost: result?.cost ?? null,
+        sourceUrl: result?.sourceUrl || ""
+      };
+      return {
+        ...normalized,
+        key: normalized.key || autoAspectTargetKey(normalized)
+      };
+    })
+    .filter((result) => openAiImageAspectRatios.includes(result.aspectRatio) && result.url);
+}
+
+function autoAspectResultForTarget(node, target) {
+  const targetKey = typeof target === "string" ? target : autoAspectTargetKey(target);
+  return normalizedAutoAspectResults(node?.data).find((result) => result.key === targetKey) || null;
+}
+
+function autoAspectResultItems(data = {}) {
+  return normalizedAutoAspectResults(data).map((result) => ({
+    url: result.url,
+    type: "image",
+    label: result.label || `${result.aspectRatio} Auto Aspect`,
+    text: result.text || "",
+    cost: result.cost,
+    aspectRatio: result.aspectRatio,
+    key: result.key,
+    sourceUrl: result.sourceUrl
+  }));
+}
+
+function autoAspectOutputItem(source, edge) {
+  const targetKey = autoAspectTargetKeyFromOutputPort(edge?.from?.port);
+  if (!targetKey) return null;
+  const result = autoAspectResultForTarget(source, targetKey);
+  if (!result?.url) return null;
+  return {
+    url: result.url,
+    type: "image",
+    label: result.label || `${result.aspectRatio} Auto Aspect`,
+    text: result.text || "",
+    cost: result.cost,
+    aspectRatio: result.aspectRatio,
+    key: result.key,
+    sourceUrl: result.sourceUrl
+  };
+}
+
+function resetAutoAspectOutputPatch() {
+  return {
+    autoAspectResults: [],
+    resultItems: [],
+    resultUrl: "",
+    resultText: "",
+    selectedResultIndex: 0,
+    status: "",
+    error: ""
+  };
+}
+
 function composerCharacterInputPortIdsForNode(node) {
   return composerCharacterInputPortsForNode(node).map((port) => port.id);
 }
@@ -8649,7 +9293,7 @@ function nodeResultMediaType(node) {
   if (node.type === "utility") return utilityResultType(node);
   if (node.type === "image" || node.type === "video" || node.type === "audio" || node.type === "model3d") return node.type;
   if (node.type === "videoModel") return "video";
-  if (node.type === "imageModel" || node.type === "camera" || node.type === "composer" || node.type === "character" || node.type === "storyboard") return "image";
+  if (node.type === "imageModel" || node.type === "autoAspect" || node.type === "camera" || node.type === "composer" || node.type === "character" || node.type === "storyboard") return "image";
   return "";
 }
 
@@ -8743,6 +9387,7 @@ function buildInactiveEdgeIds(nodes, edges) {
         if (isImageModelUnsupportedInput(target, edge.to.port)) return true;
         if (isImageModelUnsupportedSource(target, source)) return true;
         if (isVideoModelUnsupportedCharacterInput(target, edge.to.port)) return true;
+        if (source?.type === "autoAspect" && !autoAspectOutputItem(source, edge)?.url) return true;
         return (
           (source?.type === "transfer" || source?.type === "character") &&
           (!source.data?.locked || !source.data?.activated || !source.data?.resultUrl)
@@ -8766,6 +9411,7 @@ function connectedText(items = []) {
 
 function connectedOutputItem(source, edge) {
   if (source?.type === "storyboard") return storyboardFrameOutputItem(source, edge);
+  if (source?.type === "autoAspect") return autoAspectOutputItem(source, edge);
   const url = source?.data?.resultUrl || "";
   if (!url) return null;
   return {
@@ -9270,7 +9916,7 @@ function connectedPreviewSources(items = []) {
   return items
     .map(({ source, edge }) => {
       const sourceType = previewMediaType(source, edge);
-      const outputItem = storyboardFrameOutputItem(source, edge);
+      const outputItem = source?.type === "autoAspect" ? autoAspectOutputItem(source, edge) : storyboardFrameOutputItem(source, edge);
       const resultItems = outputItem ? [outputItem] : normalizedResultItems(source.data.resultItems, source.data.resultUrl, sourceType);
       if (!resultItems.length) return null;
       const sourceName = outputItem?.label || sourceLabel(source);
@@ -9329,6 +9975,7 @@ function selectedPreviewSource(sources = [], selectedId) {
 
 function previewMediaType(source, edge) {
   if (source.type === "storyboard" && storyboardFrameOutputItem(source, edge)) return "image";
+  if (source.type === "autoAspect" && autoAspectOutputItem(source, edge)) return "image";
   if (source.type === "utility") return utilityResultType(source);
   if (source.type === "model3d") return "model3d";
   if (source.type === "video" || source.type === "videoModel") return "video";
@@ -9589,7 +10236,10 @@ function promptPiecesForSource(source, { namedCharacterReferences = false } = {}
 
   if (source.type === "style") {
     const selectedPreset = source.data.stylePreset || "None";
-    return [stylePresetPrompts[selectedPreset] || ""].filter(Boolean);
+    return [
+      stylePresetPrompts[selectedPreset] || "",
+      selectedPreset === "Custom Palette" ? customPalettePromptPiece(source.data) : ""
+    ].filter(Boolean);
   }
 
   if (source.type === "composer") {
@@ -9603,6 +10253,230 @@ function promptPiecesForSource(source, { namedCharacterReferences = false } = {}
   if (source.type !== "transfer" || !source.data.activated || !source.data.resultUrl) return [];
 
   return [source.data.hiddenPrompt || transferPromptSuffix].filter(Boolean);
+}
+
+async function extractCustomPaletteFromFile(file) {
+  const dataUrl = await fileToDataUrl(file);
+  const image = await loadCanvasImage(dataUrl);
+  const colors = extractDominantPaletteColors(image, 10);
+  if (!colors.length) throw new Error("No usable colors found in that image.");
+  return {
+    colors,
+    previewUrl: renderCustomPalettePreview(image, colors)
+  };
+}
+
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("Could not read palette image."));
+    reader.readAsDataURL(file);
+  });
+}
+
+function extractDominantPaletteColors(image, limit = 10) {
+  const sourceWidth = image.naturalWidth || image.width || 1;
+  const sourceHeight = image.naturalHeight || image.height || 1;
+  const scale = Math.min(1, 220 / Math.max(sourceWidth, sourceHeight));
+  const width = Math.max(1, Math.round(sourceWidth * scale));
+  const height = Math.max(1, Math.round(sourceHeight * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  context.drawImage(image, 0, 0, width, height);
+  const pixels = context.getImageData(0, 0, width, height).data;
+  const buckets = new Map();
+  const bucketSize = 24;
+
+  for (let index = 0; index < pixels.length; index += 4) {
+    const alpha = pixels[index + 3];
+    if (alpha < 32) continue;
+    const r = pixels[index];
+    const g = pixels[index + 1];
+    const b = pixels[index + 2];
+    const key = [
+      Math.min(255, Math.round(r / bucketSize) * bucketSize),
+      Math.min(255, Math.round(g / bucketSize) * bucketSize),
+      Math.min(255, Math.round(b / bucketSize) * bucketSize)
+    ].join(",");
+    const bucket = buckets.get(key) || { r: 0, g: 0, b: 0, count: 0 };
+    bucket.r += r;
+    bucket.g += g;
+    bucket.b += b;
+    bucket.count += 1;
+    buckets.set(key, bucket);
+  }
+
+  const total = [...buckets.values()].reduce((sum, bucket) => sum + bucket.count, 0) || 1;
+  const candidates = [...buckets.values()]
+    .map((bucket) => customPaletteColorFromRgb(
+      Math.round(bucket.r / bucket.count),
+      Math.round(bucket.g / bucket.count),
+      Math.round(bucket.b / bucket.count),
+      Math.round((bucket.count / total) * 1000) / 10
+    ))
+    .sort((first, second) => second.percent - first.percent);
+
+  const selected = [];
+  candidates.forEach((candidate) => {
+    if (selected.length >= limit) return;
+    const tooClose = selected.some((color) => colorDistance(color, candidate) < 30);
+    if (!tooClose) selected.push(candidate);
+  });
+
+  return selected.length >= limit ? selected : candidates.slice(0, limit);
+}
+
+function renderCustomPalettePreview(image, colors) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 900;
+  canvas.height = 560;
+  const context = canvas.getContext("2d");
+  context.fillStyle = "#101010";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  drawImageCover(context, image, 0, 0, canvas.width, 420);
+
+  const swatchGap = 9;
+  const swatchTop = 434;
+  const swatchHeight = 110;
+  const swatchWidth = Math.floor((canvas.width - swatchGap * (colors.length + 1)) / Math.max(1, colors.length));
+  colors.forEach((color, index) => {
+    const x = swatchGap + index * (swatchWidth + swatchGap);
+    context.fillStyle = color.hex;
+    context.fillRect(x, swatchTop, swatchWidth, swatchHeight);
+  });
+
+  return canvas.toDataURL("image/jpeg", 0.88);
+}
+
+function normalizedCustomPaletteColors(data = {}) {
+  const textColors = parseCustomPaletteText(data.customPaletteRgbText);
+  if (textColors.length) return uniqueCustomPaletteColors(textColors).slice(0, 10);
+  const savedColors = Array.isArray(data.customPaletteColors) ? data.customPaletteColors : [];
+  return uniqueCustomPaletteColors(savedColors.map((color) => customPaletteColorFromRgb(color.r, color.g, color.b, color.percent))).slice(0, 10);
+}
+
+function parseCustomPaletteText(text = "") {
+  const chunks = String(text || "").split(/[\n;]+/).map((chunk) => chunk.trim()).filter(Boolean);
+  const colors = [];
+  chunks.forEach((chunk) => {
+    const hexMatch = chunk.match(/#?([0-9a-f]{6})\b/i);
+    if (hexMatch) {
+      colors.push(customPaletteColorFromHex(hexMatch[1]));
+      return;
+    }
+    const rgbMatch = chunk.match(/(\d{1,3})\D+(\d{1,3})\D+(\d{1,3})/);
+    if (rgbMatch) {
+      colors.push(customPaletteColorFromRgb(rgbMatch[1], rgbMatch[2], rgbMatch[3]));
+    }
+  });
+  return colors;
+}
+
+function uniqueCustomPaletteColors(colors = []) {
+  const seen = new Set();
+  return colors
+    .filter((color) => Number.isFinite(color.r) && Number.isFinite(color.g) && Number.isFinite(color.b))
+    .map((color) => customPaletteColorFromRgb(color.r, color.g, color.b, color.percent))
+    .filter((color) => {
+      const key = color.hex.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function customPalettePromptPiece(data = {}) {
+  const colors = normalizedCustomPaletteColors(data);
+  if (!colors.length) return "";
+  return `Utilize the hues and values: ${colors.map((color) => `${color.hex} RGB(${color.r}, ${color.g}, ${color.b}), hue ${color.hue} degrees, value ${color.value}%`).join("; ")}.`;
+}
+
+function styleOutputEnabled(data = {}) {
+  const selectedPreset = data.stylePreset || "None";
+  if (selectedPreset === "None") return false;
+  if (selectedPreset === "Custom Palette") return Boolean(customPalettePromptPiece(data));
+  return true;
+}
+
+function customPaletteColorFromHex(value) {
+  const hex = String(value || "").replace(/^#/, "").trim();
+  if (!/^[0-9a-f]{6}$/i.test(hex)) return customPaletteColorFromRgb(0, 0, 0);
+  return customPaletteColorFromRgb(parseInt(hex.slice(0, 2), 16), parseInt(hex.slice(2, 4), 16), parseInt(hex.slice(4, 6), 16));
+}
+
+function customPaletteColorFromRgb(r, g, b, percent = null) {
+  const color = {
+    r: clamp(Math.round(Number(r) || 0), 0, 255),
+    g: clamp(Math.round(Number(g) || 0), 0, 255),
+    b: clamp(Math.round(Number(b) || 0), 0, 255),
+    percent: Number.isFinite(Number(percent)) ? Number(percent) : null
+  };
+  color.hex = rgbToHex(color);
+  const hsv = rgbToHsv(color.r, color.g, color.b);
+  color.hue = hsv.hue;
+  color.saturation = hsv.saturation;
+  color.value = hsv.value;
+  return color;
+}
+
+function customPaletteColorFromHsv(hue, saturation, value) {
+  const h = ((Number(hue) || 0) % 360 + 360) % 360;
+  const s = clamp(Number(saturation) || 0, 0, 100) / 100;
+  const v = clamp(Number(value) || 0, 0, 100) / 100;
+  const c = v * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = v - c;
+  let r = 0;
+  let g = 0;
+  let b = 0;
+
+  if (h < 60) [r, g, b] = [c, x, 0];
+  else if (h < 120) [r, g, b] = [x, c, 0];
+  else if (h < 180) [r, g, b] = [0, c, x];
+  else if (h < 240) [r, g, b] = [0, x, c];
+  else if (h < 300) [r, g, b] = [x, 0, c];
+  else [r, g, b] = [c, 0, x];
+
+  return customPaletteColorFromRgb(
+    Math.round((r + m) * 255),
+    Math.round((g + m) * 255),
+    Math.round((b + m) * 255)
+  );
+}
+
+function rgbToHsv(r, g, b) {
+  const red = r / 255;
+  const green = g / 255;
+  const blue = b / 255;
+  const max = Math.max(red, green, blue);
+  const min = Math.min(red, green, blue);
+  const delta = max - min;
+  let hue = 0;
+
+  if (delta) {
+    if (max === red) hue = ((green - blue) / delta) % 6;
+    else if (max === green) hue = (blue - red) / delta + 2;
+    else hue = (red - green) / delta + 4;
+    hue = Math.round(hue * 60);
+    if (hue < 0) hue += 360;
+  }
+
+  return {
+    hue,
+    saturation: max === 0 ? 0 : Math.round((delta / max) * 100),
+    value: Math.round(max * 100)
+  };
+}
+
+function colorDistance(first, second) {
+  return Math.sqrt(
+    (first.r - second.r) ** 2 +
+      (first.g - second.g) ** 2 +
+      (first.b - second.b) ** 2
+  );
 }
 
 function buildEffectiveVideoPrompt(prompt, incoming = {}) {
@@ -9764,10 +10638,20 @@ function connectedSummary(items = [], fallback) {
   return `${items.length} connected`;
 }
 
+function autoAspectSourceSummary(items = [], fallback) {
+  if (!items.length) return fallback;
+  if (items.length === 1) {
+    const source = items[0].source;
+    return source?.data?.title || nodeTypeLabel(source?.type) || fallback;
+  }
+  return `${items.length} connected`;
+}
+
 function sourceLabel(source) {
   if (source.type === "camera") return cameraLabel(source);
   if (source.type === "composer") return source.data.title || "Composer";
   if (source.type === "storyboard") return source.data.title || "Storyboard";
+  if (source.type === "autoAspect") return source.data.title || "Auto Aspect";
   if (source.type === "model3d" && source.data.resultUrl) return source.data.title || "3D model";
   if (source.type === "transfer" && source.data.resultUrl) return "TRANSFER.png";
   if (source.type === "character" && source.data.resultUrl) return `@${characterTag(source)}`;
@@ -9851,7 +10735,23 @@ function normalizeEditorGraph(nodes = [], edges = [], groups = []) {
 
 function normalizeEdgesForCurrentGraph(edges = [], nodes = []) {
   const nodeMap = new Map(nodes.map((node) => [node.id, node]));
-  return dedupeEdges(edges.map((edge) => normalizeEdgeForCurrentGraph(edge, nodeMap)).filter(Boolean));
+  return keepLatestAutoAspectInputs(dedupeEdges(edges.map((edge) => normalizeEdgeForCurrentGraph(edge, nodeMap)).filter(Boolean)), nodeMap);
+}
+
+function keepLatestAutoAspectInputs(edges = [], nodeMap = new Map()) {
+  const latestAutoAspectInputIndexes = new Map();
+  edges.forEach((edge, index) => {
+    const target = nodeMap.get(edge.to.nodeId);
+    if (target?.type === "autoAspect" && edge.to.port === "imageIn") {
+      latestAutoAspectInputIndexes.set(edge.to.nodeId, index);
+    }
+  });
+  if (!latestAutoAspectInputIndexes.size) return edges;
+  return edges.filter((edge, index) => {
+    const target = nodeMap.get(edge.to.nodeId);
+    if (target?.type !== "autoAspect" || edge.to.port !== "imageIn") return true;
+    return latestAutoAspectInputIndexes.get(edge.to.nodeId) === index;
+  });
 }
 
 function normalizeGroups(groups = [], nodeMap = new Map()) {
@@ -9938,6 +10838,20 @@ function normalizeCurrentNode(node) {
     return {
       ...nextNode,
       data: normalizeImageModelData(data)
+    };
+  }
+
+  if (nextNode.type === "autoAspect") {
+    return {
+      ...nextNode,
+      data: normalizeAutoAspectData(data)
+    };
+  }
+
+  if (nextNode.type === "style") {
+    return {
+      ...nextNode,
+      data: normalizeStyleData(data)
     };
   }
 
@@ -10536,6 +11450,49 @@ function normalizeImageModelData(data = {}) {
   };
 }
 
+function normalizeAutoAspectData(data = {}) {
+  const selectedAspectRatios = normalizedAutoAspectRatios(data);
+  const activeKeys = new Set(autoAspectTargetsForData({ selectedAspectRatios }).map(autoAspectTargetKey));
+  const autoAspectResults = normalizedAutoAspectResults(data).filter((result) => activeKeys.has(result.key));
+  const resultItems = autoAspectResultItems({ autoAspectResults });
+  const selectedResultIndex = Math.min(
+    Math.max(0, Math.trunc(Number(data.selectedResultIndex) || 0)),
+    Math.max(0, resultItems.length - 1)
+  );
+  return {
+    ...createDefaultNodeData("autoAspect", data.title || "Auto Aspect", 1),
+    ...data,
+    title: data.title || "Auto Aspect",
+    selectedAspectRatios,
+    autoAspectResults,
+    resultItems,
+    resultUrl: resultItems[selectedResultIndex]?.url || resultItems[0]?.url || data.resultUrl || "",
+    selectedResultIndex,
+    model: normalizeAutoAspectModel(data.model),
+    resolution: normalizeImageModelResolution(data.resolution || "2K"),
+    removeTextGraphics: Boolean(data.removeTextGraphics),
+    advancedOpen: Boolean(data.advancedOpen)
+  };
+}
+
+function normalizeStyleData(data = {}) {
+  const defaultData = createDefaultNodeData("style", data.title || "Style", 1);
+  const customPaletteColors = normalizedCustomPaletteColors(data);
+  return {
+    ...defaultData,
+    ...data,
+    title: data.title || "Style",
+    stylePreset: normalizeChoice(data.stylePreset || "None", stylePresetNames, "None"),
+    customPaletteRgbText: String(data.customPaletteRgbText || ""),
+    customPalettePicker: /^#[0-9a-f]{6}$/i.test(String(data.customPalettePicker || "")) ? data.customPalettePicker : "#ddc631",
+    customPaletteColors,
+    customPalettePreviewUrl: String(data.customPalettePreviewUrl || ""),
+    customPaletteSourceName: String(data.customPaletteSourceName || ""),
+    customPaletteStatus: "",
+    customPaletteError: ""
+  };
+}
+
 function normalizeVideoModelData(data = {}) {
   const model = data.model || videoModelNames.seedance;
   return {
@@ -10818,6 +11775,11 @@ function normalizeEdgeForCurrentGraph(edge, nodeMap) {
   if (source.type === "utility") {
     nextEdge.from.port = "utilityOut";
     nextEdge.color = utilityOutputType(source) === "video" ? portColors.video : portColors.image;
+  }
+
+  if (source.type === "autoAspect") {
+    if (!autoAspectOutputItem(source, nextEdge)) return null;
+    nextEdge.color = portColors.image;
   }
 
   if (source.type === "composer") {

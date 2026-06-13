@@ -4447,14 +4447,19 @@ async function hideWorkflowPackageMetadataDir(metadataDir) {
   }
 }
 
-async function createManagedAssetTarget(requestLike, kind, extension = "", assetGroup = workflowPackageOutputDirName) {
+async function createManagedAssetTarget(requestLike, kind, extension = "", assetGroup = workflowPackageOutputDirName, options = {}) {
   const body = requestLike?.body || {};
   const packageContext = workflowPackageContextFromBody(body);
   const inputExtension = extension || path.extname(String(kind || ""));
-  const fileName = inputExtension ? uniqueOutputFileName(kind, inputExtension) : safePackageFileName(kind || "asset");
+  const preferredBaseName = safeOutputFileBaseName(options.fileNameBase || body.outputFileNameBase);
 
   if (packageContext?.packagePath) {
     await ensureWorkflowPackageDirs(packageContext.packagePath);
+    const assetDir = path.join(packageContext.packagePath, assetGroup);
+    await mkdir(assetDir, { recursive: true });
+    const fileName = inputExtension
+      ? await uniqueManagedFileName(assetDir, preferredBaseName, kind, inputExtension)
+      : safePackageFileName(kind || "asset");
     const relativePath = path.join(assetGroup, fileName);
     return {
       fileName,
@@ -4470,6 +4475,9 @@ async function createManagedAssetTarget(requestLike, kind, extension = "", asset
   const targetDir = path.join(root, relativeRoot);
   await mkdir(targetDir, { recursive: true });
 
+  const fileName = inputExtension
+    ? await uniqueManagedFileName(targetDir, preferredBaseName, kind, inputExtension)
+    : safePackageFileName(kind || "asset");
   const relativePath = path.join(relativeRoot, fileName);
   return {
     fileName,
@@ -6506,6 +6514,34 @@ function uniqueOutputFileName(kind, extension) {
   const safeKind = String(kind || "output").replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "") || "output";
   const safeExtension = String(extension || "").startsWith(".") ? extension : `.${extension || "bin"}`;
   return `${timestamp}-${safeKind}-${randomUUID().slice(0, 8)}${safeExtension}`;
+}
+
+async function uniqueManagedFileName(targetDir, preferredBaseName, kind, extension) {
+  const safeExtension = String(extension || "").startsWith(".") ? extension : `.${extension || "bin"}`;
+  if (!preferredBaseName) return uniqueOutputFileName(kind, safeExtension);
+
+  for (let index = 0; index < 500; index += 1) {
+    const suffix = index === 0 ? "" : `-${index + 1}`;
+    const candidate = `${preferredBaseName}${suffix}${safeExtension}`;
+    try {
+      await stat(path.join(targetDir, candidate));
+    } catch (error) {
+      if (error?.code === "ENOENT") return candidate;
+      throw error;
+    }
+  }
+
+  return `${preferredBaseName}-${randomUUID().slice(0, 8)}${safeExtension}`;
+}
+
+function safeOutputFileBaseName(value) {
+  return String(value || "")
+    .trim()
+    .replace(/\.[A-Za-z0-9]{1,8}$/g, "")
+    .replace(/[^A-Za-z0-9_-]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 96);
 }
 
 function imageExtensionForUrl(url, mimeType) {
