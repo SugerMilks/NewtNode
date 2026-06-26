@@ -32,7 +32,7 @@ export function TextModelNodeBody({ node, config, outputPort, incoming, onUpdate
   return (
     <div className="node-body text-node-body">
       <OutputPortRow node={node} port={outputPort} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
-      <div className="text-input-port-stack" aria-label="Text Model node inputs">
+      <div className="text-input-port-stack" aria-label="Smart Text Model node inputs">
         {[textPort, imagePort, videoPort, stylePort].filter(Boolean).map((port) => (
           <PortHandle
             key={port.id}
@@ -48,7 +48,7 @@ export function TextModelNodeBody({ node, config, outputPort, incoming, onUpdate
       <div className={hasOutputPanel ? "text-split-panel" : "text-single-panel"}>
         <label className="text-field-group">
           <span>Original prompt</span>
-          <textarea aria-label="Text Model prompt" value={node.data.text || ""} onChange={(event) => onUpdate(node.id, { text: event.target.value })} />
+          <textarea aria-label="Smart Text Model prompt" value={node.data.text || ""} onChange={(event) => onUpdate(node.id, { text: event.target.value })} />
         </label>
         {hasOutputPanel && (
           <label className="text-field-group">
@@ -62,7 +62,7 @@ export function TextModelNodeBody({ node, config, outputPort, incoming, onUpdate
         )}
       </div>
       <button className="run-node-button" onClick={() => onRun(node)} disabled={running || !hasRunInput}>
-        {running ? "Running..." : "Run Text Model"}
+        {running ? "Running..." : "Run Smart Text Model"}
       </button>
       {node.data.lastRunModel && <small className="upload-status">Processed with {node.data.lastRunModel}</small>}
       {node.data.error && <small className="upload-error">{node.data.error}</small>}

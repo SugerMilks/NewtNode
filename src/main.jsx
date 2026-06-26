@@ -27,6 +27,8 @@ import {
   happyHorseDurationOptions,
   imageModelNames,
   imageResolutionOptions,
+  krea2AspectRatios,
+  krea2CreativityOptions,
   lumaImageAspectRatios,
   lumaVideoAspectRatioOptions,
   lumaVideoDurationOptions,
@@ -92,6 +94,7 @@ function App() {
   const [imageReferences, setImageReferences] = React.useState([]);
   const [imageResolution, setImageResolution] = React.useState("2K");
   const [imageAspectRatio, setImageAspectRatio] = React.useState("16:9");
+  const [imageKreaCreativity, setImageKreaCreativity] = React.useState("medium");
   const [imageStatus, setImageStatus] = React.useState("idle");
   const [imageMessage, setImageMessage] = React.useState("");
   const [imageResult, setImageResult] = React.useState([]);
@@ -294,6 +297,7 @@ function App() {
         model: imageModel,
         aspectRatio: imageAspectRatio,
         resolution: imageResolution,
+        kreaCreativity: imageKreaCreativity,
         imagePromptUrls,
         projectId: "image",
         projectName: "Image",
@@ -493,6 +497,10 @@ function App() {
               <div className="control-row">
                 <SelectChip icon={<Wand2 size={17} />} value={imageModel} options={enabledImageOptions} onChange={setImageModel} />
 
+                {isKrea2LargeImageModel(imageModel) && (
+                  <SelectChip value={imageKreaCreativity} options={krea2CreativityOptions} onChange={setImageKreaCreativity} formatter={formatKrea2Creativity} />
+                )}
+
                 <SelectChip icon={<Sparkles size={16} />} value={imageBatchCount} options={batchOptions} onChange={setImageBatchCount} formatter={formatBatchCount} />
 
                 <ReferenceChip count={imageReferences.length} onSelect={addImageReferences} />
@@ -509,6 +517,7 @@ function App() {
 
             <div className="route-strip">
               <span>{imageModel}</span>
+              {isKrea2LargeImageModel(imageModel) && <span>{`Creativity ${formatKrea2Creativity(imageKreaCreativity)}`}</span>}
               <span>{formatBatchCount(Number(imageBatchCount))}</span>
               <span>{imageResolution}</span>
               <span>{imageAspectRatio}</span>
@@ -930,8 +939,19 @@ function isImageWorkspaceHistory(item) {
 }
 
 function imageAspectRatiosForModel(model) {
+  if (isKrea2LargeImageModel(model)) return krea2AspectRatios;
   if (isLumaImageModel(model)) return lumaImageAspectRatios;
   return model === imageModelNames.openAiImage2 ? openAiImageAspectRatios : nanoImageAspectRatios;
+}
+
+function isKrea2LargeImageModel(model) {
+  const normalized = String(model || "").toLowerCase();
+  return normalized.includes("krea") && normalized.includes("large");
+}
+
+function formatKrea2Creativity(value) {
+  const text = krea2CreativityOptions.includes(String(value || "").toLowerCase()) ? String(value).toLowerCase() : "medium";
+  return `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
 }
 
 function videoSettingsForModel(model) {

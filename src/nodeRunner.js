@@ -1,8 +1,9 @@
 import { appendResultItems } from "./mediaResults.js";
 
-export function nodeBatchCount(node) {
+export function nodeBatchCount(node, maxCount = 4) {
   const count = Number(node.data.batchCount || 1);
-  return Math.min(4, Math.max(1, Number.isFinite(count) ? count : 1));
+  const max = Math.max(1, Number(maxCount) || 4);
+  return Math.min(max, Math.max(1, Number.isFinite(count) ? count : 1));
 }
 
 export function formatNodeBatchCount(value) {

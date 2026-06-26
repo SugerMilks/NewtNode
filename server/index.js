@@ -75,12 +75,16 @@ const nanoBananaCost1K2K = Number(process.env.NANO_BANANA_IMAGE_COST_1K_2K || 0.
 const nanoBananaCost4K = Number(process.env.NANO_BANANA_IMAGE_COST_4K || 0.3);
 const zImageCostPerMegapixel = Number(process.env.Z_IMAGE_COST_PER_MEGAPIXEL || 0.005);
 const openAiImage2MediumCost = Number(process.env.OPENAI_IMAGE_2_MEDIUM_COST || 0.053);
+const krea2LargeCost = Number(process.env.KREA_2_LARGE_IMAGE_COST || 0.06);
+const krea2LargeStyleReferenceCost = Number(process.env.KREA_2_LARGE_IMAGE_STYLE_REFERENCE_COST || 0.065);
 const lumaPhotonCostPerMegapixel = Number(process.env.LUMA_PHOTON_COST_PER_MEGAPIXEL || 0.019);
 const lumaRay2BaseCostPerFiveSeconds = Number(process.env.LUMA_RAY2_COST_PER_5_SECONDS || 0.5);
 const hunyuan3DProBaseCost = Number(process.env.HUNYUAN_3D_PRO_BASE_COST || 0.375);
 const hunyuan3DProAddOnCost = Number(process.env.HUNYUAN_3D_PRO_ADD_ON_COST || 0.15);
 const nanoImageAspectRatios = ["21:9", "16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3", "4:5", "5:4"];
 const openAiImageAspectRatios = nanoImageAspectRatios;
+const krea2AspectRatios = ["16:9", "1:1", "4:3", "3:2", "2.35:1", "4:5", "2:3", "9:16"];
+const krea2CreativityOptions = ["raw", "low", "medium", "high"];
 const storyboardAspectRatioOptions = ["16:9", "21:9", "9:16", "1:1"];
 const lumaImageAspectRatios = ["21:9", "16:9", "9:16", "1:1", "4:3", "3:4", "9:21"];
 const lumaVideoAspectRatios = ["16:9", "9:16", "4:3", "3:4", "21:9", "9:21"];
@@ -88,12 +92,14 @@ const imageModelNames = {
   zImage: "Z-Image",
   nanoBananaPro: "Nano Banana Pro",
   openAiImage2: "OpenAI Image 2",
+  krea2Large: "Krea 2 Large",
   lumaDreamMachine: "Luma Dream Machine"
 };
 const imageModelOptions = [
   imageModelNames.zImage,
   imageModelNames.nanoBananaPro,
   imageModelNames.openAiImage2,
+  imageModelNames.krea2Large,
   imageModelNames.lumaDreamMachine
 ];
 const videoModelNames = {
@@ -118,6 +124,7 @@ const defaultModelPreferences = {
 };
 const falNanoBananaProEndpoint = process.env.FAL_NANO_BANANA_PRO_ENDPOINT || "fal-ai/nano-banana-pro";
 const falZImageEndpoint = process.env.FAL_Z_IMAGE_ENDPOINT || "fal-ai/z-image/turbo";
+const falKrea2LargeEndpoint = process.env.FAL_KREA_2_LARGE_ENDPOINT || "krea/v2/large/text-to-image";
 const falLumaPhotonEndpoint = process.env.FAL_LUMA_PHOTON_ENDPOINT || "fal-ai/luma-photon";
 const falLumaRay2Endpoint = process.env.FAL_LUMA_RAY2_ENDPOINT || "fal-ai/luma-dream-machine/ray-2";
 const falTextRequestCost = Number(process.env.FAL_TEXT_REQUEST_COST || 0.001);
@@ -318,6 +325,7 @@ function buildHealthPayload() {
       wanVaceInpainting: true,
       composerFrame: true,
       composerPoses: true,
+      previewInpaint: true,
       apiJsonErrors: true,
       voidFrameValidation: true,
       sam3VideoMaskOutput: true,
@@ -812,6 +820,11 @@ app.get("/api/stats", async (_req, res) => {
       },
       openAiImage2: {
         mediumCost: openAiImage2MediumCost,
+        currency: "USD"
+      },
+      krea2Large: {
+        cost: krea2LargeCost,
+        styleReferenceCost: krea2LargeStyleReferenceCost,
         currency: "USD"
       },
       hunyuan3DPro: {
@@ -1523,6 +1536,66 @@ app.post("/api/node/generate-image", async (req, res) => {
       });
     }
 
+    if (selectedModel.provider === "fal-krea-2-large") {
+      if (!process.env.FAL_KEY) {
+        return res.status(400).json({ error: "Missing FAL_KEY in .env." });
+      }
+
+      const kreaImage = await generateFalKrea2Large({
+        prompt,
+        imagePromptUrls,
+        imagePromptLabels,
+        aspectRatio,
+        creativity: req.body.kreaCreativity
+      });
+      const output = await downloadImage(req, kreaImage.remoteImage.url, "krea-2-large", kreaImage.remoteImage.content_type || kreaImage.remoteImage.mimeType);
+      const cost = estimateKrea2LargeCost({
+        endpoint: kreaImage.endpoint,
+        creativity: kreaImage.creativity,
+        imageStyleReferenceCount: kreaImage.imageStyleReferenceCount
+      });
+
+      await appendHistory({
+        id: kreaImage.requestId || randomUUID(),
+        createdAt: new Date().toISOString(),
+        mediaType: "image",
+        provider: "fal.ai",
+        modelName: selectedModel.displayName,
+        endpoint: kreaImage.endpoint,
+        mode: kreaImage.imageStyleReferenceCount ? "Krea 2 Large generation with style references" : "Krea 2 Large generation",
+        prompt,
+        submittedPrompt: kreaImage.submittedPrompt,
+        project: projectFromBody(req.body),
+        node: nodeFromBody(req.body),
+        settings: {
+          model: req.body.model || selectedModel.displayName,
+          aspectRatio,
+          requestedAspectRatio: requestedAspectRatio || aspectRatio,
+          creativity: kreaImage.creativity,
+          imagePromptCount: imagePromptUrls.length,
+          imageStyleReferenceCount: kreaImage.imageStyleReferenceCount,
+          imagePromptLabels: cleanReferenceLabels
+        },
+        cost,
+        remoteImage: kreaImage.remoteImage,
+        localImage: output.publicPath,
+        outputFileName: output.fileName,
+        outputBytes: output.bytes,
+        text: kreaImage.resultText || ""
+      });
+
+      return res.json({
+        text: kreaImage.resultText || "",
+        cost,
+        image: {
+          ...kreaImage.remoteImage,
+          localUrl: output.publicPath,
+          fileName: output.fileName,
+          mimeType: output.mimeType
+        }
+      });
+    }
+
     if (selectedModel.provider === "fal-nano-banana-pro") {
       if (!process.env.FAL_KEY) {
         return res.status(400).json({ error: "Missing FAL_KEY in .env." });
@@ -1678,6 +1751,7 @@ app.post("/api/node/storyboard-plan", async (req, res) => {
         sceneDescription,
         frameCount: requestedFrameCount,
         characters: Array.isArray(req.body.characters) ? req.body.characters : [],
+        sceneReferences: Array.isArray(req.body.sceneReferences) ? req.body.sceneReferences : [],
         notes: String(req.body.notes || "").trim()
       })
       : fallbackStoryboardPlan(sceneDescription, requestedFrameCount);
@@ -1745,6 +1819,7 @@ app.post("/api/node/storyboard-export-board", async (req, res) => {
       .map((frame, index) => ({
         number: Math.max(1, Number.parseInt(frame.number, 10) || index + 1),
         sourceUrl: String(frame.sourceUrl || frame.exportUrl || frame.resultUrl || "").trim(),
+        description: String(frame.description || frame.caption || "").trim(),
         prompt: String(frame.prompt || "").trim(),
         beat: String(frame.beat || "").trim(),
         notes: String(frame.notes || "").trim(),
@@ -1761,11 +1836,19 @@ app.post("/api/node/storyboard-export-board", async (req, res) => {
     const sceneName = safePathSegment(req.body.sceneName || "Scene 1");
     const exportFolderName = `final_boards_${timestampForFileName()}`;
     const workflowContext = workflowPackageContextFromBody(req.body);
-    const descriptions = await storyboardExportDescriptions({
-      sceneName,
-      sceneDescription: String(req.body.sceneDescription || "").trim(),
-      frames
-    });
+    const descriptions = req.body.descriptionMode === "visual"
+      ? await storyboardExportVisualDescriptions({
+        sceneName,
+        sceneDescription: String(req.body.sceneDescription || "").trim(),
+        frames
+      })
+      : req.body.generateDescriptions === false
+      ? frames.map(storyboardFrameDescriptionFallback)
+      : await storyboardExportDescriptions({
+        sceneName,
+        sceneDescription: String(req.body.sceneDescription || "").trim(),
+        frames
+      });
     let targetDir;
     let publicBasePath;
     const exportDestinationPath = normalizeWorkflowPackagePath(req.body.exportDestinationPath);
@@ -1837,6 +1920,105 @@ app.post("/api/node/storyboard-export-board", async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: error.message || "Storyboard board export failed." });
+  }
+});
+
+app.post("/api/node/preview-inpaint", async (req, res) => {
+  try {
+    const prompt = String(req.body.prompt || "").trim();
+    const sourceUrl = String(req.body.sourceUrl || "").trim();
+    const maskDataUrl = String(req.body.maskDataUrl || "").trim();
+    if (!prompt) {
+      return res.status(400).json({ error: "Describe the edit before running inpaint." });
+    }
+    if (!isLocalAssetUrl(sourceUrl)) {
+      return res.status(400).json({ error: "A local Preview image is required for inpainting." });
+    }
+    if (!maskDataUrl) {
+      return res.status(400).json({ error: "Paint a mask before running inpaint." });
+    }
+    if (!process.env.FAL_KEY) {
+      return res.status(400).json({ error: "Missing FAL_KEY in .env." });
+    }
+
+    const source = await readLocalAsset(sourceUrl);
+    if (!source.mimeType.startsWith("image/")) {
+      return res.status(400).json({ error: "Preview inpainting only supports image assets." });
+    }
+    const mask = imageDataUrlAsset(maskDataUrl, "inpaint-mask.png");
+    const sourceDimensions = imageDimensionsFromBuffer(source.buffer, source.mimeType) || {};
+    const aspectRatio = closestAspectRatio(
+      positiveNumber(sourceDimensions.width) && positiveNumber(sourceDimensions.height)
+        ? sourceDimensions.width / sourceDimensions.height
+        : aspectRatioNumber("16:9"),
+      openAiImageAspectRatios
+    );
+    const inpaintPrompt = [
+      "Edit the original image using the provided black and white inpainting mask. Treat the black area as locked image content.",
+      "The white painted area is the only approximate region allowed to change. Preserve the black area outside the mask exactly in composition, lighting, texture, identity, camera, and style.",
+      `User edit direction: ${prompt}`,
+      "If the user asks to remove, erase, clean up, or paint out an object, fully remove the selected subject and its visible edge artifacts or shadows inside the mask, then reconstruct the hidden background with believable continuity.",
+      "Blend the edit naturally into the original image, matching lighting, perspective, texture, camera quality, style, and scale.",
+      "Do not redesign the whole image, do not change unmasked subjects, and do not add unrelated elements outside the masked region."
+    ].join(" ");
+    const openAiImage = await generateFalOpenAiImage2FromInputs({
+      prompt: inpaintPrompt,
+      imageInputs: [
+        { ...source, label: "Original image to preserve" },
+        { ...mask, label: "Inpainting mask: white area is editable, black area must remain unchanged" }
+      ],
+      aspectRatio,
+      resolution: req.body.resolution || "2K"
+    });
+    const output = await downloadImage(req, openAiImage.remoteImage.url, "preview-inpaint", openAiImage.remoteImage.content_type || openAiImage.remoteImage.mimeType);
+    const cost = estimateOpenAiImage2Cost({
+      resolution: req.body.resolution || "2K",
+      size: openAiImage.size,
+      quality: openAiImage.quality
+    });
+
+    await appendHistory({
+      id: randomUUID(),
+      createdAt: new Date().toISOString(),
+      mediaType: "image",
+      provider: "fal.ai",
+      modelName: imageModelNames.openAiImage2,
+      endpoint: openAiImage.endpoint,
+      mode: "Preview masked image edit",
+      prompt,
+      submittedPrompt: openAiImage.submittedPrompt,
+      project: projectFromBody(req.body),
+      node: nodeFromBody(req.body),
+      settings: {
+        model: imageModelNames.openAiImage2,
+        aspectRatio,
+        resolution: req.body.resolution || "2K",
+        imageSize: openAiImage.size,
+        quality: openAiImage.quality,
+        imagePromptCount: 2,
+        imagePromptLabels: ["Original image to preserve", "Inpainting mask"]
+      },
+      cost,
+      remoteImage: openAiImage.remoteImage,
+      localImage: output.publicPath,
+      outputFileName: output.fileName,
+      outputBytes: output.bytes,
+      text: openAiImage.resultText || ""
+    });
+
+    return res.json({
+      text: openAiImage.resultText || "",
+      cost,
+      image: {
+        ...openAiImage.remoteImage,
+        localUrl: output.publicPath,
+        fileName: output.fileName,
+        mimeType: output.mimeType
+      }
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(error.status || 500).json({ error: error.message || "Preview inpainting failed." });
   }
 });
 
@@ -4257,6 +4439,10 @@ function resolveRoute({ startFrame, references, speed }) {
 function normalizeChoice(value, choices, fallback) {
   const normalized = String(value || fallback);
   return choices.includes(normalized) ? normalized : fallback;
+}
+
+function normalizeKrea2Creativity(value) {
+  return normalizeChoice(String(value || "medium").toLowerCase(), krea2CreativityOptions, "medium");
 }
 
 function normalizeHunyuan3DImageViewUrls(body = {}) {
@@ -7560,6 +7746,26 @@ function estimateOpenAiImage2Cost({ resolution, size, quality }) {
   };
 }
 
+function estimateKrea2LargeCost({ endpoint, creativity, imageStyleReferenceCount = 0 }) {
+  const hasStyleReferences = Number(imageStyleReferenceCount) > 0;
+  const amountUsd = hasStyleReferences ? krea2LargeStyleReferenceCost : krea2LargeCost;
+  return {
+    amountUsd: roundCurrency(amountUsd),
+    currency: "USD",
+    unitRateUsd: amountUsd,
+    units: 1,
+    unit: "image",
+    mediaType: "image",
+    creativity,
+    imageStyleReferenceCount,
+    pricingBasis: hasStyleReferences
+      ? "Krea 2 Large fal.ai per-image estimate with image_style_references"
+      : "Krea 2 Large fal.ai text-to-image per-image estimate",
+    pricingSource: "fal-model-page-2026-06-24",
+    endpoint
+  };
+}
+
 function estimateTextProcessingCost({ provider, usage = null, helperUsages = [], imageInputs = [], videoInputs = [] }) {
   const normalizedProvider = String(provider || "").toLowerCase();
   const requestUsageCost = usageCost(usage);
@@ -8090,6 +8296,14 @@ function resolveImageModel(model) {
     };
   }
 
+  if (normalized.includes("krea") && normalized.includes("large")) {
+    return {
+      provider: "fal-krea-2-large",
+      displayName: imageModelNames.krea2Large,
+      id: falKrea2LargeEndpoint
+    };
+  }
+
   if (normalized.includes("luma") || normalized.includes("photon")) {
     return {
       provider: "fal-luma-photon",
@@ -8353,11 +8567,12 @@ async function resolveImageGenerationAspectRatio({ value, imagePromptUrls, provi
 }
 
 function normalizeImageAspectRatioForProvider(value, provider) {
-  const ratio = String(value || "16:9").match(/\d+:\d+/)?.[0] || "16:9";
+  const ratio = String(value || "16:9").match(/\d+(?:\.\d+)?:\d+(?:\.\d+)?/)?.[0] || "16:9";
   return normalizeChoice(ratio, imageAspectRatiosForProvider(provider), "16:9");
 }
 
 function imageAspectRatiosForProvider(provider) {
+  if (provider === "fal-krea-2-large") return krea2AspectRatios;
   if (provider === "fal-luma-photon") return lumaImageAspectRatios;
   return provider === "fal-openai-image-2" ? openAiImageAspectRatios : nanoImageAspectRatios;
 }
@@ -8484,7 +8699,7 @@ function closestAspectRatio(ratio, options = []) {
 }
 
 function aspectRatioNumber(value) {
-  const [width = 16, height = 9] = String(value || "").match(/\d+:\d+/)?.[0]?.split(":").map(Number) || [];
+  const [width = 16, height = 9] = String(value || "").match(/\d+(?:\.\d+)?:\d+(?:\.\d+)?/)?.[0]?.split(":").map(Number) || [];
   return width > 0 && height > 0 ? width / height : 16 / 9;
 }
 
@@ -8505,11 +8720,18 @@ function normalizeStoryboardFrameCount(value) {
   return Math.min(24, Math.max(1, Number.isFinite(parsed) ? parsed : 6));
 }
 
-async function generateStoryboardPlanWithGemini({ sceneDescription, frameCount, characters = [], notes = "" }) {
+async function generateStoryboardPlanWithGemini({ sceneDescription, frameCount, characters = [], sceneReferences = [], notes = "" }) {
   const model = process.env.STORYBOARD_TEXT_MODEL || "gemini-2.5-flash";
   const characterSummary = characters
     .map((character, index) => `Character ${index + 1}: ${character.name || character.tag || "Unnamed"}${character.tag ? ` (@${character.tag})` : ""}`)
     .join("\n") || "No character references supplied.";
+  const sceneReferenceSummary = sceneReferences
+    .map((reference, index) => {
+      const tag = cleanReferenceName(reference.tag || reference.label || `Reference${index + 1}`) || `Reference${index + 1}`;
+      const label = cleanImagePromptLabel(reference.label || tag) || tag;
+      return `Reference ${index + 1}: ${label} (@${tag})`;
+    })
+    .join("\n") || "No scene image references supplied.";
   const prompt = `You are not an image prompt writer first. You are a professional storyboard artist and director's visual planner.
 
 Create a film storyboard shot plan as strict JSON only. Do not include markdown fences.
@@ -8519,6 +8741,9 @@ ${sceneDescription}
 
 Known characters:
 ${characterSummary}
+
+Known scene image references:
+${sceneReferenceSummary}
 
 Additional notes:
 ${notes || "None"}
@@ -8537,6 +8762,8 @@ Rules:
 11. Maintain a compact continuity bible for the scene: fixed environment, lighting source and direction, key recurring objects, wardrobe, and screen geography.
 12. Include the relevant continuity bible details inside each frame prompt so image generations preserve the same world while changing only the shot, action, or discovery.
 13. If the scene brief includes multiple @tagged characters, keep those identities separate in the shot plan and include each relevant @tag in every frame where that character appears.
+14. When the scene brief references a known scene image reference @tag, preserve that exact @tag in each frame prompt where the referenced product, prop, object, location, environment, brand detail, texture, or design cue appears.
+15. Use known scene image references only for their intended referenced details. Do not turn them into characters, do not force them into unrelated frames, and preserve the final storyboard drawing style.
 
 Return this exact JSON shape:
 {
@@ -8567,6 +8794,14 @@ Create ${frameCount} frames unless the scene absolutely requires fewer or more, 
 }
 
 async function generateGeminiText({ model, prompt, responseMimeType = "text/plain" }) {
+  return generateGeminiTextFromParts({
+    model,
+    parts: [{ text: prompt }],
+    responseMimeType
+  });
+}
+
+async function generateGeminiTextFromParts({ model, parts, responseMimeType = "text/plain", temperature = 0.45 }) {
   const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
     method: "POST",
     headers: {
@@ -8576,11 +8811,11 @@ async function generateGeminiText({ model, prompt, responseMimeType = "text/plai
     body: JSON.stringify({
       contents: [
         {
-          parts: [{ text: prompt }]
+          parts
         }
       ],
       generationConfig: {
-        temperature: 0.45,
+        temperature,
         responseMimeType
       }
     })
@@ -8588,7 +8823,7 @@ async function generateGeminiText({ model, prompt, responseMimeType = "text/plai
 
   const data = await response.json();
   if (!response.ok) {
-    throw httpError(response.status, data?.error?.message || "Storyboard planning failed.", { raw: data });
+    throw httpError(response.status, data?.error?.message || "Gemini text generation failed.", { raw: data });
   }
 
   const parsed = extractGeminiImageData(data);
@@ -8672,6 +8907,7 @@ async function storyboardExportDescriptions({ sceneName = "Storyboard", sceneDes
   try {
     const frameText = frames.map((frame, index) => [
       `Frame ${index + 1}`,
+      frame.description ? `Description: ${frame.description}` : "",
       frame.beat ? `Beat: ${frame.beat}` : "",
       frame.prompt ? `Prompt: ${frame.prompt}` : "",
       frame.notes ? `Continuity note: ${frame.notes}` : "",
@@ -8691,23 +8927,102 @@ ${frameText}
 Return this exact JSON shape:
 {
   "descriptions": [
-    "one short visual description for frame 1, 10 to 24 words, no camera metadata unless visually useful"
+    "one complete production-board caption for frame 1, 6 to 10 words"
   ]
 }
 
-Descriptions must be in the same order as the frames. Keep them clear, readable, and useful below a storyboard panel.`
+Descriptions must be in the same order as the frames. Keep each caption short, complete, readable, and useful below a storyboard panel. Each caption must be a finished sentence or finished noun phrase. Never end with an article, preposition, conjunction, adjective, or unfinished phrase.`
     });
     const parsed = parseStoryboardPlanJson(text);
     const descriptions = Array.isArray(parsed.descriptions) ? parsed.descriptions : [];
-    return frames.map((frame, index) => cleanStoryboardDescription(descriptions[index]) || fallback[index] || storyboardFrameDescriptionFallback(frame));
+    return frames.map((frame, index) => {
+      const rawGenerated = String(descriptions[index] || "").trim();
+      const generated = cleanStoryboardDescription(rawGenerated);
+      if (generated && !storyboardCaptionLooksIncomplete(rawGenerated) && !storyboardCaptionLooksIncomplete(generated)) return generated;
+      return fallback[index] || storyboardFrameDescriptionFallback(frame);
+    });
   } catch (error) {
     console.warn("Storyboard PDF descriptions used fallback:", error.message);
     return fallback;
   }
 }
 
+async function storyboardExportVisualDescriptions({ sceneName = "Storyboard", sceneDescription = "", frames = [] } = {}) {
+  const fallback = frames.map(storyboardFrameDescriptionFallback);
+  if (!process.env.GOOGLE_API_KEY) return fallback;
+
+  const descriptions = [...fallback];
+  const batchSize = 4;
+
+  for (let batchStart = 0; batchStart < frames.length; batchStart += batchSize) {
+    const batch = frames.slice(batchStart, batchStart + batchSize);
+    const parts = [{
+      text: `Write concise storyboard PDF captions from the attached frame images as strict JSON only. Do not include markdown fences.
+
+Scene: ${sceneName}
+Scene brief: ${sceneDescription || "None"}
+
+Return this exact JSON shape:
+{
+  "descriptions": [
+    "one complete caption for the first attached frame, 6 to 12 words"
+  ]
+}
+
+Rules:
+- Descriptions must be in the same order as the attached frames.
+- Describe the visible action, subject, or story beat in each image.
+- Keep each caption short, complete, readable, and useful below a storyboard panel.
+- Do not mention file names, model names, image IDs, generated images, placeholders, or frame numbers.
+- Never end with an article, preposition, conjunction, adjective, or unfinished phrase.`
+    }];
+    const readableFrames = [];
+
+    for (const [offset, frame] of batch.entries()) {
+      try {
+        const asset = await readLocalAsset(frame.sourceUrl);
+        if (!String(asset.mimeType || "").startsWith("image/")) continue;
+        readableFrames.push({ frame, index: batchStart + offset });
+        parts.push({ text: `Frame ${batchStart + offset + 1}:` });
+        parts.push({
+          inlineData: {
+            mimeType: asset.mimeType || "image/png",
+            data: asset.buffer.toString("base64")
+          }
+        });
+      } catch (error) {
+        console.warn(`Storyboard visual caption skipped frame ${batchStart + offset + 1}:`, error.message);
+      }
+    }
+
+    if (!readableFrames.length) continue;
+
+    try {
+      const text = await generateGeminiTextFromParts({
+        model: process.env.STORYBOARD_VISION_TEXT_MODEL || process.env.STORYBOARD_TEXT_MODEL || "gemini-2.5-flash",
+        parts,
+        responseMimeType: "application/json",
+        temperature: 0.28
+      });
+      const parsed = parseStoryboardPlanJson(text);
+      const generatedDescriptions = Array.isArray(parsed.descriptions) ? parsed.descriptions : [];
+      readableFrames.forEach(({ index }, localIndex) => {
+        const rawGenerated = String(generatedDescriptions[localIndex] || "").trim();
+        const generated = cleanStoryboardDescription(rawGenerated);
+        if (generated && !storyboardCaptionLooksIncomplete(rawGenerated) && !storyboardCaptionLooksIncomplete(generated)) {
+          descriptions[index] = generated;
+        }
+      });
+    } catch (error) {
+      console.warn("Storyboard visual PDF descriptions used fallback:", error.message);
+    }
+  }
+
+  return descriptions;
+}
+
 function storyboardFrameDescriptionFallback(frame = {}) {
-  return cleanStoryboardDescription(frame.beat || frame.prompt || frame.notes || "Storyboard frame.");
+  return cleanStoryboardDescription(frame.description || frame.beat || frame.prompt || frame.notes || "Storyboard frame.");
 }
 
 function cleanStoryboardDescription(value = "") {
@@ -8715,7 +9030,104 @@ function cleanStoryboardDescription(value = "") {
     .replace(/\s+/g, " ")
     .trim();
   if (!text) return "";
-  return text.length > 160 ? `${text.slice(0, 157).trim()}...` : text;
+  return conciseStoryboardCaption(text);
+}
+
+function conciseStoryboardCaption(value = "", { maxWords = 20, maxChars = 145 } = {}) {
+  const words = String(value || "").split(/\s+/).filter(Boolean);
+  if (!words.length) return "";
+  const truncatedByWords = words.length > maxWords;
+  let caption = words.slice(0, maxWords).join(" ");
+  const truncatedByChars = caption.length > maxChars;
+  if (truncatedByChars) {
+    const clipped = caption.slice(0, maxChars).trim();
+    caption = clipped.includes(" ") ? clipped.slice(0, clipped.lastIndexOf(" ")).trim() : clipped;
+  }
+  if (truncatedByWords || truncatedByChars) {
+    caption = removeDanglingCaptionEnding(caption);
+    return caption ? `${caption}...` : "";
+  }
+  caption = removeDanglingCaptionEnding(caption);
+  if (!caption) return "";
+  return /[.!?…]$/.test(caption) ? caption : `${caption}.`;
+}
+
+function removeDanglingCaptionEnding(value = "") {
+  let caption = String(value || "").trim().replace(/[,:;–-]+$/g, "").trim();
+  const dangling = new Set([
+    "a",
+    "an",
+    "and",
+    "as",
+    "at",
+    "by",
+    "for",
+    "from",
+    "in",
+    "into",
+    "of",
+    "on",
+    "or",
+    "the",
+    "to",
+    "with",
+    "within",
+    "upcoming",
+    "developing",
+    "intended",
+    "energetic",
+    "complex",
+    "minimalist",
+    "overall"
+  ]);
+  let words = caption.split(/\s+/).filter(Boolean);
+  while (words.length > 1 && dangling.has(words[words.length - 1].toLowerCase().replace(/[^\w]+$/g, ""))) {
+    words = words.slice(0, -1);
+  }
+  caption = words.join(" ").trim();
+  return caption.replace(/[,:;–-]+$/g, "").trim();
+}
+
+function storyboardCaptionLooksIncomplete(value = "") {
+  const caption = String(value || "").trim();
+  if (!caption) return true;
+  if (/[.!?…]$/.test(caption)) return false;
+  const lower = caption.toLowerCase().replace(/[^\w\s-]+$/g, "");
+  const words = lower.split(/\s+/).filter(Boolean);
+  const last = words[words.length - 1] || "";
+  if (/\b(generated\s+(image|video)|unique\s+id|file\s*name|filename|placeholder)\b/.test(lower)) return true;
+  if (/^frame\s+\d+$/.test(lower)) return true;
+  const weakEndings = new Set([
+    "a",
+    "an",
+    "and",
+    "as",
+    "at",
+    "by",
+    "for",
+    "from",
+    "in",
+    "into",
+    "of",
+    "on",
+    "or",
+    "the",
+    "to",
+    "with",
+    "within",
+    "upcoming",
+    "developing",
+    "intended",
+    "energetic",
+    "complex",
+    "minimalist",
+    "overall"
+  ]);
+  if (weakEndings.has(last)) return true;
+  if (/\b(awaiting|pending|requiring|needing)\s+[\w-]+$/.test(lower)) return true;
+  if (/\b(ready|soon|yet)\s+(for|to|be)\s+[\w-]*$/.test(lower)) return true;
+  if (/\b(to\s+be|will\s+be|can\s+be|should\s+be)\s+[\w-]*$/.test(lower)) return true;
+  return /\b(featuring|showcasing|suggesting|offering|highlighting|presented as|focusing on|designed to|conveying|revealing|capturing|illustrating)\s+(a|an|the)?\s*\w{0,16}$/.test(lower);
 }
 
 async function createStoryboardPdf({ title = "Storyboard", sceneDescription = "", aspectRatio = "16:9", frames = [] } = {}) {
@@ -8725,7 +9137,7 @@ async function createStoryboardPdf({ title = "Storyboard", sceneDescription = ""
   const pageWidth = 1152;
   const pageHeight = 648;
   const marginX = 46;
-  const contentTop = pageHeight - 116;
+  const contentTop = pageHeight - 92;
   const contentBottom = 38;
   const panelLayout = storyboardPdfPanelLayout({
     pageWidth,
@@ -8753,10 +9165,10 @@ async function createStoryboardPdf({ title = "Storyboard", sceneDescription = ""
     const xobjects = {};
     const pageNumber = Math.floor(pageStart / framesPerPage) + 1;
     addPdfRect(ops, 0, 0, pageWidth, pageHeight, { fill: [0.93, 0.93, 0.93] });
-    addPdfText(ops, marginX, pageHeight - 84, "STORYBOARDS", 34, true);
-    addPdfLine(ops, marginX + 318, pageHeight - 73, pageWidth - marginX, pageHeight - 73, { width: 2.2 });
+    addPdfText(ops, marginX, pageHeight - 52, "STORYBOARDS", 24, true);
+    addPdfLine(ops, marginX + 224, pageHeight - 45, pageWidth - marginX, pageHeight - 45, { width: 1.7 });
     const metadata = [title && title !== "Storyboard" ? title : "", normalizedAspectRatio].filter(Boolean).join("  /  ");
-    if (metadata) addPdfText(ops, marginX, pageHeight - 103, metadata, 9, true, [0.18, 0.18, 0.18]);
+    if (metadata) addPdfText(ops, marginX, pageHeight - 70, metadata, 8.5, true, [0.18, 0.18, 0.18]);
 
     pageFrames.forEach((frame, index) => {
       const row = Math.floor(index / layout.cols);
@@ -8785,11 +9197,12 @@ async function createStoryboardPdf({ title = "Storyboard", sceneDescription = ""
       addPdfRect(ops, x, imageTop - 17, badgeWidth, 17, { fill: [0, 0, 0] });
       addPdfText(ops, x + 3.2, imageTop - 14, String(frame.number), 11, true, [1, 1, 1]);
 
-      const descriptionY = imageY - 16;
-      const captionLines = Math.max(2, Math.floor((layout.captionHeight - 7) / 12));
-      const captionWidth = Math.max(20, Math.floor(panelLayout.panelWidth / 6.9));
-      wrapPdfText(frame.description || storyboardFrameDescriptionFallback(frame), captionWidth).slice(0, captionLines).forEach((line, lineIndex) => {
-        addPdfText(ops, x + 9, descriptionY - lineIndex * 12, line, 10.5, false);
+      addWrappedPdfText(ops, x + 9, imageY - 16, frame.description || storyboardFrameDescriptionFallback(frame), {
+        width: panelLayout.panelWidth - 18,
+        height: layout.captionHeight - 10,
+        fontSize: 10.2,
+        minFontSize: 7.2,
+        lineHeightRatio: 1.08
       });
     });
 
@@ -8808,14 +9221,14 @@ function normalizeStoryboardAspectRatio(value) {
 function storyboardPdfLayoutForAspect(aspectRatio) {
   switch (normalizeStoryboardAspectRatio(aspectRatio)) {
     case "21:9":
-      return { cols: 2, rows: 2, gapX: 12, rowGap: 24, captionHeight: 38 };
+      return { cols: 2, rows: 2, gapX: 12, rowGap: 20, captionHeight: 78 };
     case "9:16":
-      return { cols: 6, rows: 1, gapX: 8, rowGap: 0, captionHeight: 48 };
+      return { cols: 6, rows: 1, gapX: 8, rowGap: 0, captionHeight: 108 };
     case "1:1":
-      return { cols: 4, rows: 2, gapX: 8, rowGap: 24, captionHeight: 38 };
+      return { cols: 4, rows: 2, gapX: 8, rowGap: 20, captionHeight: 84 };
     case "16:9":
     default:
-      return { cols: 3, rows: 2, gapX: 0, rowGap: 24, captionHeight: 38 };
+      return { cols: 3, rows: 2, gapX: 0, rowGap: 20, captionHeight: 78 };
   }
 }
 
@@ -8850,6 +9263,35 @@ function addPdfText(ops, x, y, text, size = 10, bold = false, color = [0, 0, 0])
   addPdfTextColor(ops, x, y, text, size, bold, color);
 }
 
+function addWrappedPdfText(ops, x, y, text, { width, height, fontSize = 10, minFontSize = 8, lineHeightRatio = 1.15, bold = false, color = [0, 0, 0] } = {}) {
+  const normalizedText = String(text || "").trim();
+  if (!normalizedText) return;
+
+  const fontSteps = [];
+  for (let size = fontSize; size >= minFontSize; size -= 0.35) {
+    fontSteps.push(Number(size.toFixed(2)));
+  }
+  if (!fontSteps.includes(minFontSize)) fontSteps.push(minFontSize);
+
+  let selected = null;
+  for (const size of fontSteps) {
+    const lineHeight = Math.max(8, size * lineHeightRatio);
+    const maxLines = Math.max(1, Math.floor(height / lineHeight));
+    const lines = wrapPdfText(normalizedText, pdfTextMaxCharsForWidth(width, size));
+    selected = { size, lineHeight, maxLines, lines };
+    if (lines.length <= maxLines) break;
+  }
+
+  const visibleLines = selected.lines.slice(0, selected.maxLines);
+  if (selected.lines.length > selected.maxLines && visibleLines.length) {
+    visibleLines[visibleLines.length - 1] = ellipsizePdfText(visibleLines[visibleLines.length - 1], pdfTextMaxCharsForWidth(width, selected.size));
+  }
+
+  visibleLines.forEach((line, lineIndex) => {
+    addPdfText(ops, x, y - lineIndex * selected.lineHeight, line, selected.size, bold, color);
+  });
+}
+
 function addPdfTextColor(ops, x, y, text, size = 10, bold = false, color = [0, 0, 0]) {
   const font = bold ? "/F2" : "/F1";
   ops.push(`${formatPdfColor(color)} rg`);
@@ -8868,20 +9310,44 @@ function addPdfLine(ops, x1, y1, x2, y2, { color = [0, 0, 0], width = 1 } = {}) 
 }
 
 function wrapPdfText(text = "", maxChars = 64) {
+  const safeMaxChars = Math.max(8, Math.floor(maxChars));
   const words = String(text || "").split(/\s+/).filter(Boolean);
   const lines = [];
   let line = "";
   for (const word of words) {
-    const next = line ? `${line} ${word}` : word;
-    if (next.length > maxChars && line) {
-      lines.push(line);
-      line = word;
-    } else {
-      line = next;
+    const wordParts = splitLongPdfWord(word, safeMaxChars);
+    for (const part of wordParts) {
+      const next = line ? `${line} ${part}` : part;
+      if (next.length > safeMaxChars && line) {
+        lines.push(line);
+        line = part;
+      } else {
+        line = next;
+      }
     }
   }
   if (line) lines.push(line);
   return lines.length ? lines : [""];
+}
+
+function splitLongPdfWord(word, maxChars) {
+  const value = String(word || "");
+  if (value.length <= maxChars) return [value];
+  const chunks = [];
+  for (let index = 0; index < value.length; index += maxChars) {
+    chunks.push(value.slice(index, index + maxChars));
+  }
+  return chunks;
+}
+
+function pdfTextMaxCharsForWidth(width, fontSize) {
+  return Math.max(8, Math.floor(Number(width || 0) / Math.max(4.2, Number(fontSize || 10) * 0.52)));
+}
+
+function ellipsizePdfText(text, maxChars) {
+  const value = String(text || "");
+  if (value.length <= maxChars || maxChars <= 3) return value;
+  return `${value.slice(0, maxChars - 3).trimEnd()}...`;
 }
 
 function escapePdfText(value = "") {
@@ -9332,6 +9798,51 @@ async function generateFalLumaPhoton({ prompt, imagePromptUrls, imagePromptLabel
   };
 }
 
+async function generateFalKrea2Large({ prompt, imagePromptUrls, imagePromptLabels, aspectRatio, creativity }) {
+  const imageInputs = [];
+
+  for (const [index, imagePromptUrl] of imagePromptUrls.entries()) {
+    const asset = await readLocalAsset(imagePromptUrl);
+    if (!asset.mimeType.startsWith("image/")) continue;
+    imageInputs.push({
+      ...asset,
+      label: cleanImagePromptLabel(imagePromptLabels[index])
+    });
+  }
+
+  const styleReferences = await Promise.all(
+    imageInputs.slice(0, 10).map(async (asset, index) => ({
+      image_url: await uploadImageInputToFal(asset, index)
+    }))
+  );
+  const normalizedCreativity = normalizeKrea2Creativity(creativity);
+  const input = {
+    prompt: promptWithReferenceLabels(prompt, imageInputs),
+    aspect_ratio: normalizeImageAspectRatioForProvider(aspectRatio, "fal-krea-2-large"),
+    creativity: normalizedCreativity,
+    image_style_references: styleReferences,
+    styles: [],
+    moodboards: []
+  };
+
+  const result = await subscribeFal(falKrea2LargeEndpoint, { input, logs: true });
+  const remoteImage = firstFalImageResult(result?.data);
+
+  if (!remoteImage?.url) {
+    throw new Error("Fal returned no Krea 2 Large image URL.");
+  }
+
+  return {
+    endpoint: falKrea2LargeEndpoint,
+    requestId: result.requestId,
+    remoteImage,
+    creativity: normalizedCreativity,
+    imageStyleReferenceCount: styleReferences.length,
+    submittedPrompt: input.prompt,
+    resultText: result?.data?.description || result?.data?.text || result?.data?.prompt || ""
+  };
+}
+
 function httpError(status, message, extra = {}) {
   return Object.assign(new Error(message), {
     status,
@@ -9355,6 +9866,10 @@ async function generateFalOpenAiImage2({ prompt, imagePromptUrls, imagePromptLab
     });
   }
 
+  return generateFalOpenAiImage2FromInputs({ prompt, imageInputs, aspectRatio, resolution });
+}
+
+async function generateFalOpenAiImage2FromInputs({ prompt, imageInputs = [], aspectRatio, resolution }) {
   const size = normalizeOpenAiImageSize({ aspectRatio, resolution });
   const quality = normalizeOpenAiImageQuality(process.env.FAL_OPENAI_IMAGE_2_QUALITY || process.env.OPENAI_IMAGE_2_QUALITY || "medium");
   const submittedPrompt = promptWithReferenceLabels(prompt, imageInputs);
@@ -9386,6 +9901,26 @@ async function generateFalOpenAiImage2({ prompt, imagePromptUrls, imagePromptLab
     quality,
     submittedPrompt,
     resultText: result?.data?.revised_prompt || result?.data?.prompt || ""
+  };
+}
+
+function imageDataUrlAsset(dataUrl, fileName = "image.png") {
+  const match = String(dataUrl || "").match(/^data:(image\/(?:png|jpe?g|webp));base64,([A-Za-z0-9+/=]+)$/i);
+  if (!match) {
+    const error = new Error("Mask must be a PNG, JPEG, or WebP data URL.");
+    error.status = 400;
+    throw error;
+  }
+  const buffer = Buffer.from(match[2], "base64");
+  if (!buffer.length || buffer.length > 24 * 1024 * 1024) {
+    const error = new Error("Mask image is empty or too large.");
+    error.status = 413;
+    throw error;
+  }
+  return {
+    fileName,
+    buffer,
+    mimeType: normalizeMimeType(match[1], "image/png")
   };
 }
 

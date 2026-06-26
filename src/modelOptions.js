@@ -1,20 +1,25 @@
 export const characterTraitOptions = ["serious", "pleasant", "happy", "angry", "sad", "silly", "confident", "content", "excited", "passionate", "fanatic", "anxious", "scared", "arrogant", "stubborn", "curious"];
 export const batchOptions = ["1", "2", "3", "4"];
+export const imageBatchOptions = Array.from({ length: 9 }, (_value, index) => String(index + 1));
 export const imageModelAutoAspectRatio = "Auto";
 export const imageModelNames = {
   zImage: "Z-Image",
   nanoBananaPro: "Nano Banana Pro",
   openAiImage2: "OpenAI Image 2",
+  krea2Large: "Krea 2 Large",
   lumaDreamMachine: "Luma Dream Machine"
 };
 export const imageModelOptions = [
   imageModelNames.zImage,
   imageModelNames.nanoBananaPro,
   imageModelNames.openAiImage2,
+  imageModelNames.krea2Large,
   imageModelNames.lumaDreamMachine
 ];
 export const nanoImageAspectRatios = ["21:9", "16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3", "4:5", "5:4"];
 export const openAiImageAspectRatios = nanoImageAspectRatios;
+export const krea2AspectRatios = ["16:9", "1:1", "4:3", "3:2", "2.35:1", "4:5", "2:3", "9:16"];
+export const krea2CreativityOptions = ["raw", "low", "medium", "high"];
 export const lumaImageAspectRatios = ["21:9", "16:9", "9:16", "1:1", "4:3", "3:4", "9:21"];
 export const imageResolutionOptions = ["2K", "1K", "4K"];
 export const seedanceVideoDurationOptions = ["15 seconds", "10 seconds", "5 seconds"];

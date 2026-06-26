@@ -2,13 +2,13 @@ import React from "react";
 
 export const nodeDraftStorageKey = "seedance-node-editor-draft-v1";
 
-export function loadNodeEditorDraft({ initialNodes = [], initialEdges = [], normalizeEditorGraph, storageKey = nodeDraftStorageKey } = {}) {
-  const fallbackGraph = normalizeEditorGraph(initialNodes, initialEdges);
+export function loadNodeEditorDraft({ initialNodes = [], initialEdges = [], initialGroups = [], initialViewport = { x: 0, y: 0, scale: 1 }, normalizeEditorGraph, storageKey = nodeDraftStorageKey } = {}) {
+  const fallbackGraph = normalizeEditorGraph(initialNodes, initialEdges, initialGroups);
   const fallback = {
     nodes: fallbackGraph.nodes,
     edges: fallbackGraph.edges,
     groups: fallbackGraph.groups,
-    viewport: { x: 0, y: 0, scale: 1 },
+    viewport: initialViewport,
     projectId: null,
     projectName: "Untitled node project",
     savedProjectName: null,
