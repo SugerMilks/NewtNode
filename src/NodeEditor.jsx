@@ -545,7 +545,7 @@ const initialNodes = [
       prompt: "A serene landscape with mountains",
       aspectRatio: "16:9",
       resolution: "2K",
-      kreaCreativity: "medium",
+      kreaCreativity: "raw",
       batchCount: "1",
       settingsOpen: true
     }
@@ -683,6 +683,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const [previewLightboxItem, setPreviewLightboxItem] = React.useState(null);
   const [compilingTransferNodeId, setCompilingTransferNodeId] = React.useState(null);
   const [selectedEdgeId, setSelectedEdgeId] = React.useState(null);
+  const selectedEdgeIdRef = React.useRef(null);
   const [composerEditorNodeId, setComposerEditorNodeId] = React.useState(null);
 
   const incomingByNode = React.useMemo(() => buildIncomingByNode(nodes, edges), [nodes, edges]);
@@ -872,9 +873,18 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
   React.useEffect(() => {
     if (selectedEdgeId && !edges.some((edge) => edge.id === selectedEdgeId)) {
+      selectedEdgeIdRef.current = null;
       setSelectedEdgeId(null);
     }
   }, [edges, selectedEdgeId]);
+
+  React.useEffect(() => {
+    selectedEdgeIdRef.current = selectedEdgeId || null;
+  }, [selectedEdgeId]);
+
+  React.useEffect(() => {
+    if (selectedNodeIds.length) selectedEdgeIdRef.current = null;
+  }, [selectedNodeIds]);
 
   React.useEffect(() => {
     if (!active) return undefined;
@@ -886,6 +896,15 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         event.preventDefault();
         saveProject();
         return;
+      }
+
+      if (event.key === "Backspace" || event.key === "Delete") {
+        const edgeId = selectedEdgeIdRef.current || selectedEdgeId;
+        if (!selectedNodeIds.length && edgeId && edgesRef.current.some((edge) => edge.id === edgeId)) {
+          event.preventDefault();
+          removeEdges([edgeId]);
+          return;
+        }
       }
 
       if (event.target.closest?.("input, textarea, select")) return;
@@ -939,15 +958,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       }
 
       if (event.key === "Backspace" || event.key === "Delete") {
-        if (selectedEdgeId) {
+        if (selectedNodeIds.length) {
           event.preventDefault();
-          removeEdges([selectedEdgeId]);
-          return;
+          removeNodes(selectedNodeIds);
         }
-
-        if (!selectedNodeIds.length) return;
-        event.preventDefault();
-        removeNodes(selectedNodeIds);
       }
     }
 
@@ -1065,11 +1079,21 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       return;
     }
 
-    setSelectionBounds(getNodeSetBounds(selectedNodeIds));
+    setSelectionBounds(getSelectionBounds(selectedNodeIds));
   }
 
   function getNodeSetBounds(nodeIds) {
     const bounds = nodeIds.map(getNodeBounds).filter((rect) => rect.right > rect.left && rect.bottom > rect.top);
+    return rectBounds(bounds);
+  }
+
+  function getSelectionBounds(nodeIds) {
+    const bounds = nodeIds.map(getNodeBounds).filter((rect) => rect.right > rect.left && rect.bottom > rect.top);
+    getSelectedGroupsForNodeIds(nodeIds).forEach((group) => bounds.push(groupToRect(group)));
+    return rectBounds(bounds);
+  }
+
+  function rectBounds(bounds) {
     if (!bounds.length) return null;
 
     const left = Math.min(...bounds.map((rect) => rect.left));
@@ -1392,6 +1416,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     );
     setEdges((current) => current.filter((edge) => !ids.has(edge.id)));
     autoAspectInputsRemoved.forEach((nodeId) => updateNode(nodeId, resetAutoAspectOutputPatch()));
+    selectedEdgeIdRef.current = null;
     setSelectedEdgeId(null);
     setSaveStatus(`${edgeIds.length} connection${edgeIds.length === 1 ? "" : "s"} deleted`);
   }
@@ -2843,7 +2868,38 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           id: item.id,
           x: item.x,
           y: item.y
-        }))
+        })),
+      groups: getSelectedGroupsForNodeIds(selectedIds).map((group) => ({
+        id: group.id,
+        x: group.x,
+        y: group.y
+      }))
+    });
+  }
+
+  function startSelectionMove(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!selectedNodeIds.length) return;
+    pushUndoSnapshot();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    const pointer = screenToScene(event.clientX, event.clientY);
+    const selected = new Set(selectedNodeIds);
+    setDragState({
+      type: "nodes",
+      startPointer: pointer,
+      nodes: nodes
+        .filter((item) => selected.has(item.id))
+        .map((item) => ({
+          id: item.id,
+          x: item.x,
+          y: item.y
+        })),
+      groups: getSelectedGroupsForNodeIds(selectedNodeIds).map((group) => ({
+        id: group.id,
+        x: group.x,
+        y: group.y
+      }))
     });
   }
 
@@ -2864,6 +2920,21 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       const deltaX = pointer.x - dragState.startPointer.x;
       const deltaY = pointer.y - dragState.startPointer.y;
       const dragged = new Map(dragState.nodes.map((item) => [item.id, item]));
+      const draggedGroups = new Map((dragState.groups || []).map((item) => [item.id, item]));
+      if (draggedGroups.size) {
+        setGroups((current) =>
+          current.map((group) => {
+            const start = draggedGroups.get(group.id);
+            return start
+              ? {
+                  ...group,
+                  x: start.x + deltaX,
+                  y: start.y + deltaY
+                }
+              : group;
+          })
+        );
+      }
       setNodes((current) =>
         current.map((node) => {
           const start = dragged.get(node.id);
@@ -3055,7 +3126,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   function selectEdge(event, edgeId) {
     event.preventDefault();
     event.stopPropagation();
+    document.activeElement?.blur?.();
     setSelectedNodeIds([]);
+    selectedEdgeIdRef.current = edgeId;
     setSelectedEdgeId(edgeId);
     setContextMenu(null);
   }
@@ -3218,6 +3291,15 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         return pointInRect(groupRect, node);
       })
       .map((node) => node.id);
+  }
+
+  function getSelectedGroupsForNodeIds(nodeIds) {
+    if (!groups.length || !nodeIds.length) return [];
+    const selected = new Set(nodeIds);
+    return groups.filter((group) => {
+      const groupNodeIds = getNodeIdsInsideGroup(group);
+      return groupNodeIds.length > 0 && groupNodeIds.every((nodeId) => selected.has(nodeId));
+    });
   }
 
   function finishConnection(event) {
@@ -4341,6 +4423,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
             runnableCount={selectedRunAllCount}
             onRunAll={runSelectedNodes}
             onGroup={createGroupFromSelection}
+            onMoveStart={startSelectionMove}
           />
         )}
         {contextMenu && (
@@ -6624,7 +6707,7 @@ function NodeBody({
     const previewItems = previewSource?.items || [];
     const activePreviewTab = node.data.previewTab === "layout" ? "layout" : "preview";
     const layoutItems = normalizedPreviewLayoutItems(node.data.previewLayoutItems);
-    const layoutColumns = previewLayoutMasonryColumns(layoutItems);
+    const layoutColumnCount = previewLayoutColumnCount(layoutItems);
     const layoutExporting = node.data.previewLayoutExportStatus === "exporting";
     const layoutExport = node.data.previewLayoutExport || null;
     const sourcePort = config.input.find((port) => port.id === "sourceIn");
@@ -6743,8 +6826,7 @@ function NodeBody({
       });
     }
 
-    function rememberLayoutItemDimensions(itemId, event) {
-      const image = event?.currentTarget;
+    function rememberLayoutItemImageElement(itemId, image) {
       const width = previewLayoutDimension(image?.naturalWidth);
       const height = previewLayoutDimension(image?.naturalHeight);
       if (!itemId || !width || !height) return;
@@ -6754,6 +6836,15 @@ function NodeBody({
       onUpdate(node.id, {
         previewLayoutItems: currentItems.map((item) => (item.id === itemId ? { ...item, width, height } : item))
       });
+    }
+
+    function rememberLayoutItemDimensions(itemId, event) {
+      rememberLayoutItemImageElement(itemId, event?.currentTarget);
+    }
+
+    function rememberCachedLayoutItemDimensions(itemId, image) {
+      if (!image?.complete || !image.naturalWidth || !image.naturalHeight) return;
+      window.requestAnimationFrame(() => rememberLayoutItemImageElement(itemId, image));
     }
 
     function openLayoutItem(item, event) {
@@ -6869,34 +6960,27 @@ function NodeBody({
               onDrop={(event) => handleLayoutDrop(event)}
             >
               {layoutItems.length ? (
-                <div className="preview-layout-grid" style={{ "--preview-layout-column-count": layoutColumns.length }}>
-                  {layoutColumns.map((column, columnIndex) => (
-                    <div
-                      key={`layout-column-${columnIndex}`}
-                      className="preview-layout-column"
+                <div className="preview-layout-grid" style={{ "--preview-layout-column-count": layoutColumnCount }}>
+                  {layoutItems.map((item, index) => (
+                    <figure
+                      key={item.id}
+                      className={`preview-layout-item ${item.width && item.height ? "has-dimensions" : ""}`}
+                      style={{ "--preview-layout-item-aspect": previewLayoutAspectValue(item) }}
+                      draggable
+                      onDragStart={(event) => startLayoutItemDrag(event, item)}
                       onDragOver={handleLayoutDragOver}
-                      onDrop={(event) => handleLayoutDrop(event)}
+                      onDrop={(event) => handleLayoutDrop(event, item.id)}
+                      onDoubleClick={(event) => openLayoutItem(item, event)}
+                      title={`${item.label || `Layout image ${index + 1}`}\nDrag to reorder, double-click to preview`}
                     >
-                      {column.map(({ item, index }) => (
-                        <figure
-                          key={item.id}
-                          className="preview-layout-item"
-                          style={{ "--preview-layout-item-aspect": previewLayoutAspectValue(item) }}
-                          draggable
-                          onDragStart={(event) => startLayoutItemDrag(event, item)}
-                          onDragOver={handleLayoutDragOver}
-                          onDrop={(event) => handleLayoutDrop(event, item.id)}
-                          onDoubleClick={(event) => openLayoutItem(item, event)}
-                          title={`${item.label || `Layout image ${index + 1}`}\nDrag to reorder, double-click to preview`}
-                        >
-                          <img src={item.url} alt={item.label || `Layout image ${index + 1}`} draggable={false} onLoad={(event) => rememberLayoutItemDimensions(item.id, event)} onError={useNewtNodeImageFallback} />
-                          <figcaption>{index + 1}</figcaption>
-                          <button type="button" onClick={(event) => removeLayoutItem(item.id, event)} title="Remove from layout" aria-label="Remove from layout">
-                            <X size={12} />
-                          </button>
-                        </figure>
-                      ))}
-                    </div>
+                      <img ref={(image) => {
+                        if (!item.width || !item.height) rememberCachedLayoutItemDimensions(item.id, image);
+                      }} src={item.url} alt={item.label || `Layout image ${index + 1}`} draggable={false} onLoad={(event) => rememberLayoutItemDimensions(item.id, event)} onError={useNewtNodeImageFallback} />
+                      <figcaption>{index + 1}</figcaption>
+                      <button type="button" onClick={(event) => removeLayoutItem(item.id, event)} title="Remove from layout" aria-label="Remove from layout">
+                        <X size={12} />
+                      </button>
+                    </figure>
                   ))}
                 </div>
               ) : (
@@ -9144,7 +9228,7 @@ function createDefaultNodeData(type, label, count) {
       prompt: "",
       aspectRatio: "16:9",
       resolution: "2K",
-      kreaCreativity: "medium",
+      kreaCreativity: "raw",
       batchCount: "1",
       settingsOpen: true
     };
@@ -9225,7 +9309,7 @@ function isKrea2LargeImageModel(model) {
 }
 
 function normalizeKrea2Creativity(value) {
-  return normalizeChoice(String(value || "medium").toLowerCase(), krea2CreativityOptions, "medium");
+  return normalizeChoice(String(value || "raw").toLowerCase(), krea2CreativityOptions, "raw");
 }
 
 function formatKrea2Creativity(value) {
@@ -10694,26 +10778,8 @@ function previewLayoutAspectValue(item = {}) {
   return width && height ? `${width} / ${height}` : "16 / 9";
 }
 
-function previewLayoutAspectNumber(item = {}) {
-  const width = previewLayoutDimension(item.width);
-  const height = previewLayoutDimension(item.height);
-  return width && height ? Math.max(0.2, Math.min(4, width / height)) : 16 / 9;
-}
-
 function previewLayoutColumnCount(items = []) {
   return Math.max(1, Math.min(3, items.length || 1));
-}
-
-function previewLayoutMasonryColumns(items = []) {
-  const columnCount = previewLayoutColumnCount(items);
-  const columns = Array.from({ length: columnCount }, () => []);
-  const heights = Array.from({ length: columnCount }, () => 0);
-  items.forEach((item, index) => {
-    const targetColumn = heights.indexOf(Math.min(...heights));
-    columns[targetColumn].push({ item, index });
-    heights[targetColumn] += 1 / previewLayoutAspectNumber(item) + 0.04;
-  });
-  return columns;
 }
 
 function previewLayoutExportCaption(item, index = 0) {

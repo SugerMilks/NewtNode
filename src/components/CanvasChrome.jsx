@@ -1,5 +1,5 @@
 import React from "react";
-import { Play, Plus } from "lucide-react";
+import { Hand, Play, Plus } from "lucide-react";
 import { normalizeRect } from "../nodeGeometry.js";
 
 export const EdgePath = React.memo(function EdgePath({ edgeId, from, to, color, draft, selected, active, inactive, onSelect }) {
@@ -37,13 +37,15 @@ export const SelectionMarquee = React.memo(function SelectionMarquee({ start, cu
   );
 });
 
-export const SelectionActionBar = React.memo(function SelectionActionBar({ bounds, viewport, selectedCount, runnableCount, onRunAll, onGroup }) {
+export const SelectionActionBar = React.memo(function SelectionActionBar({ bounds, viewport, selectedCount, runnableCount, onRunAll, onGroup, onMoveStart }) {
   const x = viewport.x + (bounds.left + bounds.width / 2) * viewport.scale;
   const y = viewport.y + bounds.top * viewport.scale - 54;
 
   return (
     <div className="selection-action-bar" style={{ left: x, top: y }} onPointerDown={(event) => event.stopPropagation()}>
-      <span className="selection-action-dot" aria-hidden="true" />
+      <button type="button" className="selection-move-handle" onPointerDown={onMoveStart} title="Move selected nodes" aria-label="Move selected nodes">
+        <Hand size={19} />
+      </button>
       <span className="selection-action-divider" aria-hidden="true" />
       <button onClick={onRunAll} disabled={!runnableCount} title={runnableCount ? `Run or play ${runnableCount} selected node${runnableCount === 1 ? "" : "s"}` : "No runnable selected nodes"}>
         <Play size={18} />

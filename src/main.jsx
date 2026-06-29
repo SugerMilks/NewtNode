@@ -94,7 +94,7 @@ function App() {
   const [imageReferences, setImageReferences] = React.useState([]);
   const [imageResolution, setImageResolution] = React.useState("2K");
   const [imageAspectRatio, setImageAspectRatio] = React.useState("16:9");
-  const [imageKreaCreativity, setImageKreaCreativity] = React.useState("medium");
+  const [imageKreaCreativity, setImageKreaCreativity] = React.useState("raw");
   const [imageStatus, setImageStatus] = React.useState("idle");
   const [imageMessage, setImageMessage] = React.useState("");
   const [imageResult, setImageResult] = React.useState([]);
@@ -950,7 +950,7 @@ function isKrea2LargeImageModel(model) {
 }
 
 function formatKrea2Creativity(value) {
-  const text = krea2CreativityOptions.includes(String(value || "").toLowerCase()) ? String(value).toLowerCase() : "medium";
+  const text = krea2CreativityOptions.includes(String(value || "").toLowerCase()) ? String(value).toLowerCase() : "raw";
   return `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
 }
 
