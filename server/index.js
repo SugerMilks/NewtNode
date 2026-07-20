@@ -6,19 +6,59 @@ import multer from "multer";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { appendFile, copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
-import { existsSync, statSync } from "node:fs";
+import { createWriteStream, existsSync, statSync } from "node:fs";
 import { File } from "node:buffer";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { execFile as execFileCallback } from "node:child_process";
 import { createRequire } from "node:module";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
 import { deflateSync, inflateSync } from "node:zlib";
 import { fal } from "@fal-ai/client";
 import ffmpegStaticPath from "ffmpeg-static";
 import ffprobeStatic from "ffprobe-static";
 import { directoryStats, fileMetadata, readJsonFile, writeJsonAtomic } from "./json-store.js";
+import { findRemoteHistoryAssetUrl } from "./local-asset-recovery.js";
 import { registerComposerPoseRoutes } from "./routes/composerPoses.js";
 import { registerCoreRoutes } from "./routes/core.js";
+import { estimateOpenAiImage2Cost as estimateOpenAiImage2OutputCost, normalizeOpenAiImage2Quality, openAiImage2Costs, openAiImage2HighCosts, openAiImage2Quality } from "../src/openAiImage2.js";
+import { nanoBananaProFalThinkingMode, nanoBananaProThinkingConfig } from "../src/nanoBananaPro.js";
+import {
+  buildNanoBanana2FalInput,
+  estimateNanoBanana2Cost,
+  isNanoBanana2Model,
+  nanoBanana2FalEditEndpoint as defaultNanoBanana2FalEditEndpoint,
+  nanoBanana2FalTextEndpoint as defaultNanoBanana2FalTextEndpoint
+} from "../src/nanoBanana2.js";
+import { filmDirectorAdjacentCoverageIssue } from "../src/filmDirectorCoverage.js";
+import { filmDirectorCutLimit } from "../src/filmDirectorLimits.js";
+import { buildFilmDirectorRevisionPrompt } from "../src/filmDirectorRevision.js";
+import {
+  buildGeminiOmniPrompt,
+  geminiOmniFalReferenceEndpoint as defaultGeminiOmniFalReferenceEndpoint,
+  geminiOmniFalTextEndpoint as defaultGeminiOmniFalTextEndpoint,
+  geminiOmniGoogleModel as defaultGeminiOmniGoogleModel,
+  normalizeGeminiOmniAspectRatio,
+  normalizeGeminiOmniDuration,
+  shouldFallbackGeminiOmniToFal,
+  uniqueGeminiOmniReferences
+} from "../src/geminiOmni.js";
+import {
+  buildKlingDirectorOptimizationPrompt,
+  clipKlingDirectorPrompt,
+  klingDirectorOptimizationSystemPrompt,
+  parseKlingDirectorOptimizations,
+  protectKlingDirectorPrompt,
+  restoreKlingDirectorPrompt
+} from "../src/klingDirectorPromptOptimization.js";
+import {
+  estimateKreaSeedanceCost,
+  extractKreaJobResultUrl,
+  kreaApiBaseUrl,
+  kreaSeedanceEndpoint,
+  resolveSeedanceRuntimeProvider
+} from "../src/kreaSeedance.js";
 import "./restart-marker.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -27,13 +67,16 @@ const require = createRequire(import.meta.url);
 const packageMetadata = require("../package.json");
 const rootDir = path.resolve(__dirname, "..");
 const uploadsDir = path.join(rootDir, "uploads");
+const klingReferenceCacheDir = path.join(uploadsDir, ".kling-reference-cache");
 const outputsDir = path.join(rootDir, "outputs");
+const runtimeThumbnailsDir = path.join(outputsDir, "thumbnails", "runtime");
 const storyboardAssetsDir = path.join(rootDir, "public", "storyboard");
 const savedWorkflowsDir = path.join(rootDir, "saved_workflows");
 const workflowAssetsPrefix = "/workflow-assets";
 const workflowPackageInputDirName = "inputs";
 const workflowPackageOutputDirName = "outputs";
 const workflowPackageDependencyDirName = "dependencies";
+const workflowPackageThumbnailDirName = "thumbnails";
 const workflowPackageStoryboardDirName = "storyboards";
 const workflowPackageMetadataDirName = ".newtnode";
 const workflowPackageManifestFileName = "manifest.json";
@@ -48,19 +91,33 @@ const recentWorkflowsPath = path.join(dataDir, "recent-workflows.json");
 const legacyHiddenWorkflowsPath = path.join(dataDir, "hidden-workflows.json");
 const runtimeSettingsPath = path.join(dataDir, "runtime-settings.json");
 const envFilePath = path.join(rootDir, ".env");
+const clientRuntimeLogDir = path.join(rootDir, ".newtnode_logs");
+const clientRuntimeLogPath = path.join(clientRuntimeLogDir, "client-runtime.log");
 const appVersion = String(packageMetadata.version || "").trim();
 const moodBoardOutputFileName = "MOOD_BOARD.png";
 const maxHistoryItems = 500;
 let historyWriteQueue = Promise.resolve();
 let updatePromise = null;
 let restartRequested = false;
+let clientDiagnosticWriteQueue = Promise.resolve();
+let falDebugWriteQueue = Promise.resolve();
+const localAssetRecoveryJobs = new Map();
+const runtimeThumbnailJobs = new Map();
 const execFile = promisify(execFileCallback);
 const updateRepositoryEnvKey = "NEWTNODE_UPDATE_REPOSITORY";
 const runtimeConfigSources = {
   FAL_KEY: process.env.FAL_KEY ? "runtime" : "",
   GOOGLE_API_KEY: process.env.GOOGLE_API_KEY ? "runtime" : "",
+  KREA_API_KEY: process.env.KREA_API_KEY ? "runtime" : "",
+  OPENAI_API_KEY: process.env.OPENAI_API_KEY ? "runtime" : "",
   [updateRepositoryEnvKey]: process.env[updateRepositoryEnvKey] ? "runtime" : ""
 };
+const defaultApiProviderPreferences = Object.freeze({
+  fal: true,
+  google: true,
+  krea: true,
+  openAi: true
+});
 const ffmpegBinaryPath = process.env.FFMPEG_PATH || ffmpegStaticPath || "ffmpeg";
 const ffprobeBinaryPath = process.env.FFPROBE_PATH || ffprobeStatic?.path || "ffprobe";
 const port = Number(process.env.PORT || 3336);
@@ -70,13 +127,21 @@ const happyHorse720pCostPerSecond = Number(process.env.HAPPY_HORSE_720P_COST_PER
 const happyHorse1080pCostPerSecond = Number(process.env.HAPPY_HORSE_1080P_COST_PER_SECOND || 0.28);
 const seedanceBillingFps = Number(process.env.SEEDANCE_BILLING_FPS || 24);
 const seedanceStandardCostPerThousandTokens = Number(process.env.SEEDANCE_STANDARD_COST_PER_1000_TOKENS || 0.014);
+const seedance4KCostPerThousandTokens = Number(process.env.SEEDANCE_4K_COST_PER_1000_TOKENS || 0.008);
 const seedanceFastCostPerThousandTokens = Number(process.env.SEEDANCE_FAST_COST_PER_1000_TOKENS || (seedanceFastCostPerSecond / 21.6));
+const klingO3ProCostPerSecond = Number(process.env.KLING_O3_PRO_COST_PER_SECOND || 0.112);
+const klingO3ProAudioCostPerSecond = Number(process.env.KLING_O3_PRO_AUDIO_COST_PER_SECOND || 0.14);
+const klingO34kCostPerSecond = Number(process.env.KLING_O3_4K_COST_PER_SECOND || 0.42);
+const geminiOmniGoogleCostPerSecond = Number(process.env.GEMINI_OMNI_GOOGLE_COST_PER_SECOND || 0.1);
+const geminiOmniFalCostPerSecond = Number(process.env.GEMINI_OMNI_FAL_COST_PER_SECOND || 0.13);
 const nanoBananaCost1K2K = Number(process.env.NANO_BANANA_IMAGE_COST_1K_2K || 0.15);
 const nanoBananaCost4K = Number(process.env.NANO_BANANA_IMAGE_COST_4K || 0.3);
 const zImageCostPerMegapixel = Number(process.env.Z_IMAGE_COST_PER_MEGAPIXEL || 0.005);
-const openAiImage2MediumCost = Number(process.env.OPENAI_IMAGE_2_MEDIUM_COST || 0.053);
 const krea2LargeCost = Number(process.env.KREA_2_LARGE_IMAGE_COST || 0.06);
 const krea2LargeStyleReferenceCost = Number(process.env.KREA_2_LARGE_IMAGE_STYLE_REFERENCE_COST || 0.065);
+const seedream5ProCostSmall = Number(process.env.SEEDREAM_5_PRO_COST_SMALL || 0.0675);
+const seedream5ProCost2K = Number(process.env.SEEDREAM_5_PRO_COST_2K || 0.135);
+const seedreamLayerSeparationCost = Number(process.env.SEEDREAM_LAYER_SEPARATION_COST || 0.05);
 const lumaPhotonCostPerMegapixel = Number(process.env.LUMA_PHOTON_COST_PER_MEGAPIXEL || 0.019);
 const lumaRay2BaseCostPerFiveSeconds = Number(process.env.LUMA_RAY2_COST_PER_5_SECONDS || 0.5);
 const hunyuan3DProBaseCost = Number(process.env.HUNYUAN_3D_PRO_BASE_COST || 0.375);
@@ -90,6 +155,8 @@ const lumaImageAspectRatios = ["21:9", "16:9", "9:16", "1:1", "4:3", "3:4", "9:2
 const lumaVideoAspectRatios = ["16:9", "9:16", "4:3", "3:4", "21:9", "9:21"];
 const imageModelNames = {
   zImage: "Z-Image",
+  seedream5Pro: "Seedream 5.0 Pro",
+  nanoBanana2: "Nano Banana 2",
   nanoBananaPro: "Nano Banana Pro",
   openAiImage2: "OpenAI Image 2",
   krea2Large: "Krea 2 Large",
@@ -97,6 +164,8 @@ const imageModelNames = {
 };
 const imageModelOptions = [
   imageModelNames.zImage,
+  imageModelNames.seedream5Pro,
+  imageModelNames.nanoBanana2,
   imageModelNames.nanoBananaPro,
   imageModelNames.openAiImage2,
   imageModelNames.krea2Large,
@@ -105,6 +174,9 @@ const imageModelOptions = [
 const videoModelNames = {
   seedance: "Seedance 2.0",
   seedanceFast: "Seedance 2.0 Fast",
+  klingO3Pro: "Kling O3 Pro",
+  klingO34k: "Kling O3 4K",
+  geminiOmni: "Gemini Omni Flash",
   wan27Reference: "Wan 2.7 Reference-to-Video",
   happyHorse: "Happy Horse",
   lumaDreamMachine: "Luma Dream Machine",
@@ -113,6 +185,9 @@ const videoModelNames = {
 const videoModelOptions = [
   videoModelNames.seedance,
   videoModelNames.seedanceFast,
+  videoModelNames.klingO3Pro,
+  videoModelNames.klingO34k,
+  videoModelNames.geminiOmni,
   videoModelNames.wan27Reference,
   videoModelNames.happyHorse,
   videoModelNames.lumaDreamMachine,
@@ -123,8 +198,21 @@ const defaultModelPreferences = {
   video: Object.fromEntries(videoModelOptions.map((model) => [model, true]))
 };
 const falNanoBananaProEndpoint = process.env.FAL_NANO_BANANA_PRO_ENDPOINT || "fal-ai/nano-banana-pro";
+const falNanoBanana2TextEndpoint = process.env.FAL_NANO_BANANA_2_ENDPOINT || defaultNanoBanana2FalTextEndpoint;
+const falNanoBanana2EditEndpoint = process.env.FAL_NANO_BANANA_2_EDIT_ENDPOINT || defaultNanoBanana2FalEditEndpoint;
 const falZImageEndpoint = process.env.FAL_Z_IMAGE_ENDPOINT || "fal-ai/z-image/turbo";
 const falKrea2LargeEndpoint = process.env.FAL_KREA_2_LARGE_ENDPOINT || "krea/v2/large/text-to-image";
+const falSeedream5ProTextEndpoint = process.env.FAL_SEEDREAM_5_PRO_TEXT_ENDPOINT || "bytedance/seedream/v5/pro/text-to-image";
+const falSeedream5ProEditEndpoint = process.env.FAL_SEEDREAM_5_PRO_EDIT_ENDPOINT || "bytedance/seedream/v5/pro/edit";
+const falSeedreamLayerEndpoint = process.env.FAL_SEEDREAM_LAYER_ENDPOINT || "fal-ai/qwen-image-layered";
+const falKlingO3ProTextEndpoint = process.env.FAL_KLING_O3_PRO_TEXT_ENDPOINT || "fal-ai/kling-video/o3/pro/text-to-video";
+const falKlingO3ProReferenceEndpoint = process.env.FAL_KLING_O3_PRO_REFERENCE_ENDPOINT || "fal-ai/kling-video/o3/pro/reference-to-video";
+const falKlingO34kTextEndpoint = process.env.FAL_KLING_O3_4K_TEXT_ENDPOINT || "fal-ai/kling-video/o3/4k/text-to-video";
+const falKlingO34kImageEndpoint = process.env.FAL_KLING_O3_4K_IMAGE_ENDPOINT || "fal-ai/kling-video/o3/4k/image-to-video";
+const falKlingO34kReferenceEndpoint = process.env.FAL_KLING_O3_4K_REFERENCE_ENDPOINT || "fal-ai/kling-video/o3/4k/reference-to-video";
+const googleGeminiOmniModel = process.env.GOOGLE_GEMINI_OMNI_MODEL || defaultGeminiOmniGoogleModel;
+const falGeminiOmniTextEndpoint = process.env.FAL_GEMINI_OMNI_TEXT_ENDPOINT || defaultGeminiOmniFalTextEndpoint;
+const falGeminiOmniReferenceEndpoint = process.env.FAL_GEMINI_OMNI_REFERENCE_ENDPOINT || defaultGeminiOmniFalReferenceEndpoint;
 const falLumaPhotonEndpoint = process.env.FAL_LUMA_PHOTON_ENDPOINT || "fal-ai/luma-photon";
 const falLumaRay2Endpoint = process.env.FAL_LUMA_RAY2_ENDPOINT || "fal-ai/luma-dream-machine/ray-2";
 const falTextRequestCost = Number(process.env.FAL_TEXT_REQUEST_COST || 0.001);
@@ -158,10 +246,17 @@ const dwposeCostPerComputeSecond = 0.0006;
 const patinaBaseCost = 0.01;
 const patinaMapCostPerMegapixel = 0.01;
 const falUtilityImageTimeoutMs = Math.max(30000, Number(process.env.FAL_UTILITY_IMAGE_TIMEOUT_MS) || 180000);
-const openAiTextModel = process.env.OPENAI_TEXT_MODEL || "gpt-5.5";
-const openAiTextApiKey = process.env.OPENAI_TEXT_API_KEY || process.env.OPENAI_API_KEY;
+const klingReferenceMaximumBytes = 9.5 * 1024 * 1024;
+const imageGenerationConcurrency = clampInteger(process.env.NEWTNODE_IMAGE_GENERATION_CONCURRENCY, 1, 6, 3);
+const openAiTextModel = process.env.OPENAI_TEXT_MODEL || "gpt-5.6-luna";
+let openAiTextApiKey = process.env.OPENAI_TEXT_API_KEY || process.env.OPENAI_API_KEY;
 const textLlmProvider = String(process.env.TEXT_LLM_PROVIDER || "fal").toLowerCase();
 const falTextModel = process.env.FAL_TEXT_MODEL || "google/gemini-2.5-flash";
+const skillDirectorLlmEndpoint = "openrouter/router";
+const skillDirectorFalModel = process.env.FILM_DIRECTOR_FAL_MODEL || process.env.SKILL_DIRECTOR_FAL_MODEL || "openai/gpt-5.6-sol";
+const skillDirectorVisionFalModel = process.env.FILM_DIRECTOR_VISION_FAL_MODEL || process.env.SKILL_DIRECTOR_VISION_FAL_MODEL || skillDirectorFalModel;
+const klingDirectorPromptFalModel = process.env.KLING_DIRECTOR_PROMPT_MODEL || "openai/gpt-5.6-luna";
+const storyboardVisionTextModel = process.env.STORYBOARD_QC_FAL_MODEL || "openai/gpt-5.6-terra";
 const falVisionTextModel = process.env.FAL_VISION_TEXT_MODEL || "google/gemini-2.5-flash";
 const falVisionTextFallbackModel = process.env.FAL_VISION_TEXT_FALLBACK_MODEL || "google/gemini-2.5-flash";
 const falVideoTextModel = process.env.FAL_VIDEO_TEXT_MODEL || "google/gemini-2.5-flash";
@@ -245,13 +340,18 @@ const composerPoseFieldKeys = [
 ];
 
 const app = express();
+const imageGenerationRequestLimiter = createRequestConcurrencyLimiter(imageGenerationConcurrency);
+const runtimeThumbnailRequestLimiter = createRequestConcurrencyLimiter(2);
 
 await Promise.all([
   mkdir(uploadsDir, { recursive: true }),
+  mkdir(klingReferenceCacheDir, { recursive: true }),
   mkdir(outputsDir, { recursive: true }),
+  mkdir(runtimeThumbnailsDir, { recursive: true }),
   mkdir(savedWorkflowsDir, { recursive: true }),
   mkdir(composerPosesDir, { recursive: true }),
-  mkdir(dataDir, { recursive: true })
+  mkdir(dataDir, { recursive: true }),
+  mkdir(clientRuntimeLogDir, { recursive: true })
 ]);
 
 await refreshRuntimeConfigFromEnvFile();
@@ -277,6 +377,16 @@ app.use(cors());
 app.use(express.json({ limit: "16mb" }));
 app.use("/uploads", express.static(uploadsDir));
 app.use("/outputs", express.static(outputsDir));
+app.get("/api/media-thumbnail", runtimeThumbnailRequestLimiter, async (req, res) => {
+  try {
+    const sourceUrl = String(req.query.url || "").trim();
+    const thumbnailUrl = await ensureRuntimeImageThumbnail(sourceUrl);
+    res.setHeader("Cache-Control", "no-store");
+    res.redirect(302, thumbnailUrl);
+  } catch (error) {
+    sendApiError(res, error, "Could not create image preview.");
+  }
+});
 app.use("/api", async (_req, _res, next) => {
   try {
     await refreshRuntimeConfigFromEnvFile();
@@ -290,6 +400,7 @@ registerCoreRoutes(app, {
   resolveLocalAssetPath,
   workflowPackagePublicPath,
   selectFolderWithDialog,
+  selectSavePathWithDialog,
   selectWorkflowFileWithDialog,
   readWorkflowFromFilePath,
   readWorkflowFromPath,
@@ -302,6 +413,11 @@ registerCoreRoutes(app, {
   requestServerRestart
 });
 
+app.post("/api/system/client-diagnostic", (req, res) => {
+  queueClientDiagnostic(req.body);
+  res.status(202).json({ ok: true });
+});
+
 registerComposerPoseRoutes(app, {
   composerPosesDir,
   readComposerPoses,
@@ -311,7 +427,7 @@ registerComposerPoseRoutes(app, {
 });
 
 function buildHealthPayload() {
-  const apiKeysFound = Boolean(process.env.FAL_KEY || process.env.GOOGLE_API_KEY);
+  const apiKeysFound = Boolean(process.env.FAL_KEY || process.env.GOOGLE_API_KEY || process.env.KREA_API_KEY || process.env.OPENAI_API_KEY);
   return {
     ok: true,
     version: appVersion,
@@ -331,6 +447,9 @@ function buildHealthPayload() {
       sam3VideoMaskOutput: true,
       extractVideoFrame: true,
       generate3d: true,
+      skillDirector: true,
+      storyboardQc: true,
+      mediaThumbnail: true,
       settings: true
     },
     ffmpeg: {
@@ -342,10 +461,20 @@ function buildHealthPayload() {
     },
     falKeyConfigured: Boolean(process.env.FAL_KEY),
     googleApiKeyConfigured: Boolean(process.env.GOOGLE_API_KEY),
+    kreaApiKeyConfigured: Boolean(process.env.KREA_API_KEY),
+    openAiApiKeyConfigured: Boolean(process.env.OPENAI_API_KEY),
     apiKeysFound,
     apiKeyStatus: apiKeysFound ? "API keys configured" : "No API keys found",
     googleImageModelsUseGoogleDirect: Boolean(process.env.GOOGLE_API_KEY),
     falZImageEndpoint,
+    falSeedream5ProTextEndpoint,
+    falSeedream5ProEditEndpoint,
+    falSeedreamLayerEndpoint,
+    falKlingO3ProTextEndpoint,
+    falKlingO3ProReferenceEndpoint,
+    falKlingO34kTextEndpoint,
+    falKlingO34kImageEndpoint,
+    falKlingO34kReferenceEndpoint,
     falNanoBananaProEndpoint,
     falLumaPhotonEndpoint,
     falLumaRay2Endpoint,
@@ -354,31 +483,117 @@ function buildHealthPayload() {
     openAiImage2ViaFalConfigured: Boolean(process.env.FAL_KEY),
     textLlmProvider,
     falTextModel,
+    skillDirectorFalModel,
+    skillDirectorVisionFalModel,
+    storyboardVisionTextModel,
     falVisionTextModel,
     falVideoTextModel,
+    imageGenerationConcurrency,
     outputDirectory: outputsDir
   };
 }
 
+function createRequestConcurrencyLimiter(maxConcurrent = 3) {
+  const limit = Math.max(1, Number(maxConcurrent) || 1);
+  const queue = [];
+  let active = 0;
+
+  function drain() {
+    while (active < limit && queue.length) {
+      const job = queue.shift();
+      if (!job || job.res.destroyed) continue;
+      active += 1;
+      let released = false;
+      const release = () => {
+        if (released) return;
+        released = true;
+        active = Math.max(0, active - 1);
+        queueMicrotask(drain);
+      };
+      job.res.once("finish", release);
+      job.res.once("close", release);
+      job.next();
+    }
+  }
+
+  return (_req, res, next) => {
+    res.setHeader("X-NewtNode-Image-Concurrency", String(limit));
+    res.setHeader("X-NewtNode-Queue-Position", String(queue.length));
+    queue.push({ res, next });
+    drain();
+  };
+}
+
+function queueClientDiagnostic(value = {}) {
+  const diagnostic = {
+    createdAt: new Date().toISOString(),
+    event: safeDiagnosticText(value.event, 80) || "client-event",
+    message: safeDiagnosticText(value.message, 1600),
+    stack: safeDiagnosticText(value.stack, 3000),
+    durationMs: diagnosticNumber(value.durationMs),
+    usedHeapBytes: diagnosticNumber(value.usedHeapBytes),
+    heapLimitBytes: diagnosticNumber(value.heapLimitBytes),
+    path: safeDiagnosticText(value.path, 300),
+    userAgent: safeDiagnosticText(value.userAgent, 500)
+  };
+
+  clientDiagnosticWriteQueue = clientDiagnosticWriteQueue
+    .then(async () => {
+      await mkdir(clientRuntimeLogDir, { recursive: true });
+      const metadata = await stat(clientRuntimeLogPath).catch(() => null);
+      if (metadata?.size > 2 * 1024 * 1024) {
+        const rotatedPath = `${clientRuntimeLogPath}.1`;
+        await rm(rotatedPath, { force: true }).catch(() => {});
+        await rename(clientRuntimeLogPath, rotatedPath).catch(() => {});
+      }
+      await appendFile(clientRuntimeLogPath, `${JSON.stringify(diagnostic)}\n`, "utf8");
+    })
+    .catch((error) => console.warn("Could not write client diagnostic:", error.message));
+}
+
+function safeDiagnosticText(value, maxLength) {
+  return String(value || "").replace(/[\r\n]+/g, " ").trim().slice(0, maxLength);
+}
+
+function diagnosticNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? Math.round(number) : 0;
+}
+
 async function readRuntimeSettings({ includeSecrets = false } = {}) {
-  const [repository, branch, settingsValues] = await Promise.all([
+  const [repository, branch, settingsValues, envValues] = await Promise.all([
     resolveUpdateRepository(),
     currentGitBranch(),
-    readRuntimeSettingsStore()
+    readRuntimeSettingsStore(),
+    readEnvFileValues(["FAL_KEY", "GOOGLE_API_KEY", "KREA_API_KEY", "OPENAI_API_KEY"])
   ]);
   const branchStatus = await resolveBranchStatus(repository, branch);
-  const apiKeysFound = Boolean(process.env.FAL_KEY || process.env.GOOGLE_API_KEY);
+  const providerPreferences = normalizeApiProviderPreferences(settingsValues.providerPreferences);
+  const configuredKeys = {
+    fal: Boolean(settingsValues.falKey || envValues.FAL_KEY || process.env.FAL_KEY),
+    google: Boolean(settingsValues.googleApiKey || envValues.GOOGLE_API_KEY || process.env.GOOGLE_API_KEY),
+    krea: Boolean(settingsValues.kreaApiKey || envValues.KREA_API_KEY || process.env.KREA_API_KEY),
+    openAi: Boolean(settingsValues.openAiApiKey || envValues.OPENAI_API_KEY || process.env.OPENAI_API_KEY || process.env.OPENAI_TEXT_API_KEY)
+  };
+  const apiKeysFound = Object.values(configuredKeys).some(Boolean);
+  const activeApiKeysFound = Object.entries(configuredKeys).some(([provider, configured]) => configured && providerPreferences[provider]);
 
   const payload = {
     version: appVersion,
-    falKeyConfigured: Boolean(process.env.FAL_KEY),
-    googleApiKeyConfigured: Boolean(process.env.GOOGLE_API_KEY),
+    falKeyConfigured: configuredKeys.fal,
+    googleApiKeyConfigured: configuredKeys.google,
+    kreaApiKeyConfigured: configuredKeys.krea,
+    openAiApiKeyConfigured: configuredKeys.openAi,
     apiKeysFound,
-    apiKeyStatus: apiKeysFound ? "API keys configured" : "No API keys found",
+    activeApiKeysFound,
+    apiKeyStatus: activeApiKeysFound ? "API keys configured" : apiKeysFound ? "API keys configured but disabled" : "No API keys found",
     keySources: {
-      fal: runtimeConfigSources.FAL_KEY || "",
-      google: runtimeConfigSources.GOOGLE_API_KEY || ""
+      fal: credentialSource(settingsValues.falKey, envValues.FAL_KEY, runtimeConfigSources.FAL_KEY),
+      google: credentialSource(settingsValues.googleApiKey, envValues.GOOGLE_API_KEY, runtimeConfigSources.GOOGLE_API_KEY),
+      krea: credentialSource(settingsValues.kreaApiKey, envValues.KREA_API_KEY, runtimeConfigSources.KREA_API_KEY),
+      openAi: credentialSource(settingsValues.openAiApiKey, envValues.OPENAI_API_KEY, runtimeConfigSources.OPENAI_API_KEY)
     },
+    providerPreferences,
     repository,
     branch,
     branchStatus,
@@ -390,7 +605,9 @@ async function readRuntimeSettings({ includeSecrets = false } = {}) {
   if (includeSecrets) {
     payload.secrets = {
       falKey: settingsValues.falKey || "",
-      googleApiKey: settingsValues.googleApiKey || ""
+      googleApiKey: settingsValues.googleApiKey || "",
+      kreaApiKey: settingsValues.kreaApiKey || "",
+      openAiApiKey: settingsValues.openAiApiKey || ""
     };
   }
 
@@ -400,13 +617,18 @@ async function readRuntimeSettings({ includeSecrets = false } = {}) {
 async function saveRuntimeSettings(body = {}) {
   const falKey = submittedRuntimeSetting(body.falKey);
   const googleApiKey = submittedRuntimeSetting(body.googleApiKey);
+  const kreaApiKey = submittedRuntimeSetting(body.kreaApiKey);
+  const openAiApiKey = submittedRuntimeSetting(body.openAiApiKey);
   const repository = normalizeUpdateRepository(body.repository);
   const updates = {};
 
   if (falKey !== undefined) updates.falKey = falKey;
   if (googleApiKey !== undefined) updates.googleApiKey = googleApiKey;
+  if (kreaApiKey !== undefined) updates.kreaApiKey = kreaApiKey;
+  if (openAiApiKey !== undefined) updates.openAiApiKey = openAiApiKey;
   if (repository) updates.repository = repository;
   if (body.modelPreferences !== undefined) updates.modelPreferences = normalizeModelPreferences(body.modelPreferences);
+  if (body.providerPreferences !== undefined) updates.providerPreferences = normalizeApiProviderPreferences(body.providerPreferences);
 
   if (Object.keys(updates).length) {
     await writeRuntimeSettingsStore(updates);
@@ -493,13 +715,23 @@ async function requestServerRestart() {
 
 async function refreshRuntimeConfigFromEnvFile() {
   const [envValues, settingsValues] = await Promise.all([
-    readEnvFileValues(["FAL_KEY", "GOOGLE_API_KEY", updateRepositoryEnvKey]),
+    readEnvFileValues(["FAL_KEY", "GOOGLE_API_KEY", "KREA_API_KEY", "OPENAI_API_KEY", updateRepositoryEnvKey]),
     readRuntimeSettingsStore()
   ]);
 
   applyRuntimeConfigValue("FAL_KEY", envValues.FAL_KEY, settingsValues.falKey, { preferSettings: true });
   applyRuntimeConfigValue("GOOGLE_API_KEY", envValues.GOOGLE_API_KEY, settingsValues.googleApiKey, { preferSettings: true });
+  applyRuntimeConfigValue("KREA_API_KEY", envValues.KREA_API_KEY, settingsValues.kreaApiKey, { preferSettings: true });
+  applyRuntimeConfigValue("OPENAI_API_KEY", envValues.OPENAI_API_KEY, settingsValues.openAiApiKey, { preferSettings: true });
   applyRuntimeConfigValue(updateRepositoryEnvKey, envValues[updateRepositoryEnvKey], settingsValues.repository);
+
+  const providerPreferences = normalizeApiProviderPreferences(settingsValues.providerPreferences);
+  applyApiProviderPreference("FAL_KEY", providerPreferences.fal);
+  applyApiProviderPreference("GOOGLE_API_KEY", providerPreferences.google);
+  applyApiProviderPreference("KREA_API_KEY", providerPreferences.krea);
+  applyApiProviderPreference("OPENAI_API_KEY", providerPreferences.openAi);
+
+  openAiTextApiKey = providerPreferences.openAi ? process.env.OPENAI_TEXT_API_KEY || process.env.OPENAI_API_KEY : "";
 
   if (process.env.FAL_KEY) {
     fal.config({ credentials: process.env.FAL_KEY });
@@ -511,8 +743,11 @@ async function readRuntimeSettingsStore() {
   return {
     falKey: optionalRuntimeSetting(data?.falKey) || "",
     googleApiKey: optionalRuntimeSetting(data?.googleApiKey) || "",
+    kreaApiKey: optionalRuntimeSetting(data?.kreaApiKey) || "",
+    openAiApiKey: optionalRuntimeSetting(data?.openAiApiKey) || "",
     repository: normalizeUpdateRepository(data?.repository),
-    modelPreferences: normalizeModelPreferences(data?.modelPreferences)
+    modelPreferences: normalizeModelPreferences(data?.modelPreferences),
+    providerPreferences: normalizeApiProviderPreferences(data?.providerPreferences)
   };
 }
 
@@ -524,9 +759,31 @@ async function writeRuntimeSettingsStore(patch) {
   };
   if (patch.falKey !== undefined) next.falKey = String(patch.falKey || "");
   if (patch.googleApiKey !== undefined) next.googleApiKey = String(patch.googleApiKey || "");
+  if (patch.kreaApiKey !== undefined) next.kreaApiKey = String(patch.kreaApiKey || "");
+  if (patch.openAiApiKey !== undefined) next.openAiApiKey = String(patch.openAiApiKey || "");
   if (patch.repository !== undefined) next.repository = normalizeUpdateRepository(patch.repository);
   if (patch.modelPreferences !== undefined) next.modelPreferences = normalizeModelPreferences(patch.modelPreferences);
+  if (patch.providerPreferences !== undefined) next.providerPreferences = normalizeApiProviderPreferences(patch.providerPreferences);
   await writeJsonAtomic(runtimeSettingsPath, next);
+}
+
+function normalizeApiProviderPreferences(value = {}) {
+  const incoming = value && typeof value === "object" ? value : {};
+  return Object.fromEntries(
+    Object.entries(defaultApiProviderPreferences).map(([provider, defaultValue]) => [provider, Boolean(incoming[provider] ?? defaultValue)])
+  );
+}
+
+function applyApiProviderPreference(key, enabled) {
+  if (enabled) return;
+  delete process.env[key];
+  runtimeConfigSources[key] = "disabled";
+}
+
+function credentialSource(settingsValue, envValue, runtimeSource) {
+  if (optionalRuntimeSetting(settingsValue)) return "settings";
+  if (optionalRuntimeSetting(envValue)) return "env";
+  return runtimeSource === "runtime" ? "runtime" : "";
 }
 
 function normalizeModelPreferences(value = {}) {
@@ -799,6 +1056,20 @@ app.get("/api/stats", async (_req, res) => {
         billingFps: seedanceBillingFps,
         currency: "USD"
       },
+      klingO3Pro: {
+        costPerSecond: klingO3ProCostPerSecond,
+        audioCostPerSecond: klingO3ProAudioCostPerSecond,
+        currency: "USD"
+      },
+      klingO34k: {
+        costPerSecond: klingO34kCostPerSecond,
+        currency: "USD"
+      },
+      geminiOmni: {
+        googleCostPerSecond: geminiOmniGoogleCostPerSecond,
+        falCostPerSecond: geminiOmniFalCostPerSecond,
+        currency: "USD"
+      },
       happyHorse: {
         costPerSecond720p: happyHorse720pCostPerSecond,
         costPerSecond1080p: happyHorse1080pCostPerSecond,
@@ -807,6 +1078,13 @@ app.get("/api/stats", async (_req, res) => {
       nanoBananaPro: {
         cost1K2K: nanoBananaCost1K2K,
         cost4K: nanoBananaCost4K,
+        currency: "USD"
+      },
+      nanoBanana2: {
+        cost0_5K: estimateNanoBanana2Cost("0.5K"),
+        cost1K: estimateNanoBanana2Cost("1K"),
+        cost2K: estimateNanoBanana2Cost("2K"),
+        cost4K: estimateNanoBanana2Cost("4K"),
         currency: "USD"
       },
       zImage: {
@@ -819,7 +1097,9 @@ app.get("/api/stats", async (_req, res) => {
         currency: "USD"
       },
       openAiImage2: {
-        mediumCost: openAiImage2MediumCost,
+        quality: openAiImage2Quality,
+        costs: openAiImage2Costs,
+        highCosts: openAiImage2HighCosts,
         currency: "USD"
       },
       krea2Large: {
@@ -1094,21 +1374,24 @@ app.post("/api/node/upload-asset", upload.single("asset"), async (req, res) => {
 
 app.post("/api/node/composer-frame", async (req, res) => {
   try {
+    const isFrameItCapture = req.body.captureKind === "frame-it";
+    const captureLabel = isFrameItCapture ? "Frame It" : "Composer";
+    const captureSlug = isFrameItCapture ? "frame-it" : "composer-frame";
     const imageDataUrl = String(req.body.imageDataUrl || "");
     const match = imageDataUrl.match(/^data:image\/png;base64,([a-z0-9+/=]+)$/i);
     if (!match) {
-      return res.status(400).json({ error: "Composer frame must be a PNG data URL." });
+      return res.status(400).json({ error: `${captureLabel} frame must be a PNG data URL.` });
     }
 
     const bytes = Buffer.from(match[1], "base64");
     if (!bytes.length) {
-      return res.status(400).json({ error: "Composer frame was empty." });
+      return res.status(400).json({ error: `${captureLabel} frame was empty.` });
     }
 
-    const output = await createManagedAssetTarget(req, "composer-frame", ".png", workflowPackageOutputDirName);
+    const output = await createManagedAssetTarget(req, captureSlug, ".png", workflowPackageOutputDirName);
     await writeFile(output.filePath, bytes);
     const localUrl = output.publicPath;
-    const title = String(req.body.nodeTitle || "Composer").trim() || "Composer";
+    const title = String(req.body.nodeTitle || captureLabel).trim() || captureLabel;
     const cost = {
       amountUsd: 0,
       currency: "USD",
@@ -1116,8 +1399,8 @@ app.post("/api/node/composer-frame", async (req, res) => {
       units: 1,
       unit: "local capture",
       mediaType: "image",
-      pricingBasis: "Local Composer viewport capture",
-      pricingSource: "local-composer"
+      pricingBasis: `Local ${captureLabel} viewport capture`,
+      pricingSource: isFrameItCapture ? "local-frame-it" : "local-composer"
     };
 
     await appendHistory({
@@ -1125,15 +1408,16 @@ app.post("/api/node/composer-frame", async (req, res) => {
       createdAt: new Date().toISOString(),
       mediaType: "image",
       provider: "local",
-      modelName: "Composer",
-      endpoint: "local/composer-frame",
-      mode: "Composer frame capture",
+      modelName: captureLabel,
+      endpoint: `local/${captureSlug}`,
+      mode: `${captureLabel} frame capture`,
       prompt: title,
       submittedPrompt: title,
       project: projectFromBody(req.body),
       node: nodeFromBody(req.body),
       settings: {
         maquetteCount: Number(req.body.maquetteCount || 0),
+        figureCount: Number(req.body.figureCount || 0),
         propCount: Number(req.body.propCount || 0),
         imagePlaneCount: Number(req.body.imagePlaneCount || 0),
         aspectRatio: req.body.aspectRatio || "16:9"
@@ -1142,7 +1426,7 @@ app.post("/api/node/composer-frame", async (req, res) => {
       localImage: localUrl,
       outputFileName: output.fileName,
       outputBytes: bytes.length,
-      text: "Composer frame capture."
+      text: `${captureLabel} frame capture.`
     });
 
     res.json({
@@ -1155,7 +1439,7 @@ app.post("/api/node/composer-frame", async (req, res) => {
     });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ error: error.message || "Composer capture failed." });
+    res.status(500).json({ error: error.message || "Viewport capture failed." });
   }
 });
 
@@ -1308,6 +1592,123 @@ app.post("/api/node/process-text", async (req, res) => {
   }
 });
 
+app.post("/api/node/run-skill-director", async (req, res) => {
+  try {
+    const action = normalizeSkillDirectorAction(req.body.action || req.body.skillDirectorAction || "build");
+    const sceneName = String(req.body.sceneName || "").trim();
+    const sceneOverview = String(req.body.sceneOverview || req.body.text || "").trim();
+    const motionBrief = String(req.body.motionBrief || "").trim();
+    const styleDirection = String(req.body.styleDirection || "").trim();
+    const motionDirection = String(req.body.motionDirection || "").trim();
+    const shotList = String(req.body.shotList || "").trim();
+    const shotListNotes = String(req.body.shotListNotes || "").trim();
+    const revisionNotes = String(req.body.revisionNotes || "").trim();
+    const currentFinalPrompt = String(req.body.currentFinalPrompt || req.body.resultText || "").trim();
+    const characterInputs = normalizedMediaInputs(req.body.characterInputs, "character");
+    const locationInputs = normalizedMediaInputs(req.body.locationInputs, "location");
+    const elementInputs = normalizedMediaInputs(req.body.elementInputs || req.body.imageInputs, "element");
+    const styleInputs = normalizedMediaInputs(req.body.styleInputs, "style");
+    const shotCount = normalizeSkillDirectorShotCount(req.body.shotCount || req.body.sceneCount || "3");
+    const durationSeconds = normalizeSkillDirectorDurationSeconds(req.body.durationSeconds || req.body.sceneDuration || "15");
+    const requestedCuts = requestedSkillDirectorShotCount(shotCount);
+    const cutLimit = filmDirectorCutLimit(durationSeconds);
+    if (["build", "shotList"].includes(action) && requestedCuts && requestedCuts > cutLimit) {
+      return res.status(400).json({
+        error: `${durationSeconds} seconds supports up to ${cutLimit} cuts at a one-second minimum in Film Director. Reduce the shot count or increase the scene duration.`
+      });
+    }
+    if (action === "revise" && !revisionNotes) {
+      return res.status(400).json({ error: "Add revision notes before updating the Film Director output." });
+    }
+    if (!sceneName && !sceneOverview && !motionBrief && !styleDirection && !motionDirection && !shotList && !characterInputs.length && !locationInputs.length && !elementInputs.length && !styleInputs.length && action !== "build") {
+      return res.status(400).json({ error: "Add a scene overview or connect scene references before running Film Director." });
+    }
+
+    const result = await runSkillDirectorWithFal({
+      action,
+      sceneName,
+      sceneOverview,
+      motionBrief,
+      styleDirection,
+      motionDirection,
+      shotList,
+      shotListNotes,
+      revisionNotes,
+      currentFinalPrompt,
+      characterInputs,
+      locationInputs,
+      elementInputs,
+      styleInputs,
+      shotCount,
+      durationSeconds
+    });
+    const allImageInputs = [...characterInputs, ...locationInputs, ...elementInputs, ...styleInputs];
+    const billedImageInputs = action === "revise" ? [] : allImageInputs;
+    const cost = estimateTextProcessingCost({ provider: result.provider, usage: result.usage, helperUsages: result.helperUsages, imageInputs: billedImageInputs, videoInputs: [] });
+    const usageRecord = result.usage || result.helperUsages?.length ? { request: result.usage || null, helpers: result.helperUsages || [] } : null;
+
+    await appendHistory({
+      id: randomUUID(),
+      createdAt: new Date().toISOString(),
+      mediaType: "text",
+      provider: result.provider,
+      modelName: result.model,
+      endpoint: result.endpoint,
+      mode: "Film Director",
+      prompt: sceneOverview || sceneName,
+      submittedPrompt: result.submittedPrompt || sceneOverview,
+      project: projectFromBody(req.body),
+      node: nodeFromBody(req.body),
+      settings: {
+        action,
+        model: result.model,
+        provider: result.provider,
+        shotCount,
+        resolvedShotCount: result.resolvedShotCount,
+        durationSeconds,
+        actualShotCount: result.actualShotCount,
+        referenceSetup: result.referenceSetup,
+        shotListNotes: result.shotListNotes,
+        revisionNotes,
+        revisionSummary: result.revisionSummary || "",
+        sceneName,
+        characterInputCount: characterInputs.length,
+        locationInputCount: locationInputs.length,
+        elementInputCount: elementInputs.length,
+        styleInputCount: styleInputs.length,
+        imageInputCount: allImageInputs.length,
+        videoInputCount: 0
+      },
+      cost,
+      text: result.text,
+      usage: usageRecord
+    });
+
+    res.json({
+      action,
+      text: result.text,
+      model: result.model,
+      provider: result.provider,
+      shotCount: result.shotCount,
+      resolvedShotCount: result.resolvedShotCount,
+      durationSeconds: result.durationSeconds,
+      actualShotCount: result.actualShotCount,
+      referenceSetup: result.referenceSetup,
+      styleDirection: result.styleDirection,
+      motionDirection: result.motionDirection,
+      shotList: result.shotList,
+      shotListNotes: result.shotListNotes,
+      sceneOverview: result.sceneOverview || sceneOverview,
+      revisionSummary: result.revisionSummary || "",
+      cost,
+      usage: usageRecord
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(error.status || 500).json({ error: error.message || "Film Director failed." });
+  }
+});
+
 async function handleTransferCollageUpload(req, res) {
   if (!req.file) {
     return res.status(400).json({ error: "No mood board collage uploaded." });
@@ -1334,7 +1735,7 @@ async function handleTransferCollageUpload(req, res) {
   }
 }
 
-app.post("/api/node/generate-image", async (req, res) => {
+app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, res) => {
   try {
     const prompt = String(req.body.prompt || "").trim();
     if (!prompt) {
@@ -1404,6 +1805,7 @@ app.post("/api/node/generate-image", async (req, res) => {
         cost,
         remoteImage: zImage.remoteImage,
         localImage: output.publicPath,
+        localThumbnail: output.thumbnailPublicPath,
         outputFileName: output.fileName,
         outputBytes: output.bytes,
         text: zImage.resultText || ""
@@ -1415,9 +1817,101 @@ app.post("/api/node/generate-image", async (req, res) => {
         image: {
           ...zImage.remoteImage,
           localUrl: output.publicPath,
+          thumbnailUrl: output.thumbnailPublicPath,
           fileName: output.fileName,
           mimeType: output.mimeType
         }
+      });
+    }
+
+    if (selectedModel.provider === "fal-seedream-5-pro") {
+      if (!process.env.FAL_KEY) {
+        return res.status(400).json({ error: "Missing FAL_KEY in .env." });
+      }
+
+      const seedreamImage = await generateFalSeedream5Pro({
+        prompt,
+        imagePromptUrls,
+        imagePromptLabels,
+        aspectRatio,
+        resolution: req.body.resolution,
+        layerSeparation: Boolean(req.body.seedreamLayers)
+      });
+      const downloadedImages = [];
+      for (const [index, remoteImage] of seedreamImage.remoteImages.entries()) {
+        downloadedImages.push({
+          remoteImage,
+          output: await downloadImage(
+            req,
+            remoteImage.url,
+            seedreamImage.layerSeparation
+              ? index === 0 ? "seedream-5-composite" : `seedream-5-layer-${index}`
+              : "seedream-5-pro",
+            remoteImage.content_type || remoteImage.mimeType
+          )
+        });
+      }
+
+      const cost = estimateSeedream5ProCost({
+        resolution: seedreamImage.resolution,
+        imageSize: seedreamImage.imageSize,
+        layerSeparation: seedreamImage.layerSeparation
+      });
+      for (const [index, item] of downloadedImages.entries()) {
+        await appendHistory({
+          id: `${seedreamImage.requestId || randomUUID()}-${index + 1}`,
+          createdAt: new Date().toISOString(),
+          mediaType: "image",
+          provider: "fal.ai",
+          modelName: selectedModel.displayName,
+          endpoint: item.remoteImage.endpoint || seedreamImage.endpoint,
+          mode: seedreamImage.layerSeparation
+            ? index === 0
+              ? "Seedream flattened composition"
+              : `Transparent layer ${index} of ${Math.max(0, downloadedImages.length - 1)}`
+            : imagePromptUrls.length ? "Seedream image edit" : "Seedream image generation",
+          prompt,
+          submittedPrompt: seedreamImage.submittedPrompt,
+          project: projectFromBody(req.body),
+          node: nodeFromBody(req.body),
+          settings: {
+            model: req.body.model || selectedModel.displayName,
+            aspectRatio,
+            requestedAspectRatio: requestedAspectRatio || aspectRatio,
+            resolution: seedreamImage.resolution,
+            imageSize: seedreamImage.imageSize,
+            imagePromptCount: imagePromptUrls.length,
+            imagePromptLabels: cleanReferenceLabels,
+            layerSeparation: seedreamImage.layerSeparation,
+            layerIndex: seedreamImage.layerSeparation && index > 0 ? index : null,
+            layerCount: seedreamImage.layerSeparation ? Math.max(0, downloadedImages.length - 1) : null
+          },
+          cost: index === 0 ? cost : null,
+          remoteImage: item.remoteImage,
+          localImage: item.output.publicPath,
+          localThumbnail: item.output.thumbnailPublicPath,
+          outputFileName: item.output.fileName,
+          outputBytes: item.output.bytes,
+          text: seedreamImage.resultText || ""
+        });
+      }
+
+      const images = downloadedImages.map(({ remoteImage, output }, index) => ({
+        ...remoteImage,
+        localUrl: output.publicPath,
+        thumbnailUrl: output.thumbnailPublicPath,
+        fileName: output.fileName,
+        mimeType: output.mimeType,
+        label: seedreamImage.layerSeparation ? index === 0 ? "Composite" : `Layer ${index}` : `Image ${index + 1}`,
+        layerIndex: seedreamImage.layerSeparation && index > 0 ? index : null
+      }));
+
+      return res.json({
+        text: seedreamImage.resultText || "",
+        cost,
+        image: images[0],
+        images,
+        layerSeparation: seedreamImage.layerSeparation
       });
     }
 
@@ -1431,14 +1925,16 @@ app.post("/api/node/generate-image", async (req, res) => {
         imagePromptUrls,
         imagePromptLabels,
         aspectRatio,
-        resolution: req.body.resolution
+        resolution: req.body.resolution,
+        quality: req.body.quality
       });
       const output = await downloadImage(req, openAiImage.remoteImage.url, "openai-image-2", openAiImage.remoteImage.content_type || openAiImage.remoteImage.mimeType);
 
       const cost = estimateOpenAiImage2Cost({
         resolution: req.body.resolution,
         size: openAiImage.size,
-        quality: openAiImage.quality
+        quality: openAiImage.quality,
+        endpoint: openAiImage.endpoint
       });
       await appendHistory({
         id: randomUUID(),
@@ -1465,6 +1961,7 @@ app.post("/api/node/generate-image", async (req, res) => {
         cost,
         remoteImage: openAiImage.remoteImage,
         localImage: output.publicPath,
+        localThumbnail: output.thumbnailPublicPath,
         outputFileName: output.fileName,
         outputBytes: output.bytes,
         text: openAiImage.resultText || ""
@@ -1476,6 +1973,7 @@ app.post("/api/node/generate-image", async (req, res) => {
         image: {
           ...openAiImage.remoteImage,
           localUrl: output.publicPath,
+          thumbnailUrl: output.thumbnailPublicPath,
           fileName: output.fileName,
           mimeType: output.mimeType
         }
@@ -1519,6 +2017,7 @@ app.post("/api/node/generate-image", async (req, res) => {
         cost,
         remoteImage: lumaImage.remoteImage,
         localImage: output.publicPath,
+        localThumbnail: output.thumbnailPublicPath,
         outputFileName: output.fileName,
         outputBytes: output.bytes,
         text: lumaImage.resultText || ""
@@ -1530,6 +2029,7 @@ app.post("/api/node/generate-image", async (req, res) => {
         image: {
           ...lumaImage.remoteImage,
           localUrl: output.publicPath,
+          thumbnailUrl: output.thumbnailPublicPath,
           fileName: output.fileName,
           mimeType: output.mimeType
         }
@@ -1579,6 +2079,7 @@ app.post("/api/node/generate-image", async (req, res) => {
         cost,
         remoteImage: kreaImage.remoteImage,
         localImage: output.publicPath,
+        localThumbnail: output.thumbnailPublicPath,
         outputFileName: output.fileName,
         outputBytes: output.bytes,
         text: kreaImage.resultText || ""
@@ -1590,6 +2091,65 @@ app.post("/api/node/generate-image", async (req, res) => {
         image: {
           ...kreaImage.remoteImage,
           localUrl: output.publicPath,
+          thumbnailUrl: output.thumbnailPublicPath,
+          fileName: output.fileName,
+          mimeType: output.mimeType
+        }
+      });
+    }
+
+    if (selectedModel.provider === "fal-nano-banana-2") {
+      if (!process.env.FAL_KEY) {
+        return res.status(400).json({ error: "Missing FAL_KEY in .env." });
+      }
+
+      const falImage = await generateFalNanoBanana2({
+        prompt,
+        imagePromptUrls,
+        imagePromptLabels,
+        aspectRatio,
+        resolution: req.body.resolution
+      });
+      const output = await downloadImage(req, falImage.remoteImage.url, "nano-banana-2", falImage.remoteImage.content_type || falImage.remoteImage.mimeType);
+      const cost = estimateNanoBanana2ImageCost({ resolution: falImage.resolution, endpoint: falImage.endpoint });
+
+      await appendHistory({
+        id: falImage.requestId || randomUUID(),
+        createdAt: new Date().toISOString(),
+        mediaType: "image",
+        provider: "fal.ai",
+        modelName: selectedModel.displayName,
+        endpoint: falImage.endpoint,
+        mode: imagePromptUrls.length ? "Image edit with references" : "Image generation",
+        prompt,
+        submittedPrompt: falImage.submittedPrompt,
+        project: projectFromBody(req.body),
+        node: nodeFromBody(req.body),
+        settings: {
+          model: req.body.model || selectedModel.displayName,
+          aspectRatio,
+          requestedAspectRatio: requestedAspectRatio || aspectRatio,
+          resolution: falImage.resolution,
+          thinkingLevel: falImage.thinkingLevel,
+          imagePromptCount: imagePromptUrls.length,
+          imagePromptLabels: cleanReferenceLabels
+        },
+        cost,
+        remoteImage: falImage.remoteImage,
+        localImage: output.publicPath,
+        localThumbnail: output.thumbnailPublicPath,
+        outputFileName: output.fileName,
+        outputBytes: output.bytes,
+        text: falImage.description || ""
+      });
+
+      return res.json({
+        text: falImage.description || "",
+        cost,
+        image: {
+          ...falImage.remoteImage,
+          localUrl: output.publicPath,
+          thumbnailUrl: output.thumbnailPublicPath,
           fileName: output.fileName,
           mimeType: output.mimeType
         }
@@ -1628,12 +2188,14 @@ app.post("/api/node/generate-image", async (req, res) => {
           aspectRatio,
           requestedAspectRatio: requestedAspectRatio || aspectRatio,
           resolution: falImage.resolution,
+          thinkingLevel: falImage.thinkingLevel,
           imagePromptCount: imagePromptUrls.length,
           imagePromptLabels: cleanReferenceLabels
         },
         cost,
         remoteImage: falImage.remoteImage,
         localImage: output.publicPath,
+        localThumbnail: output.thumbnailPublicPath,
         outputFileName: output.fileName,
         outputBytes: output.bytes,
         text: falImage.description || ""
@@ -1645,6 +2207,7 @@ app.post("/api/node/generate-image", async (req, res) => {
         image: {
           ...falImage.remoteImage,
           localUrl: output.publicPath,
+          thumbnailUrl: output.thumbnailPublicPath,
           fileName: output.fileName,
           mimeType: output.mimeType
         }
@@ -1688,6 +2251,7 @@ app.post("/api/node/generate-image", async (req, res) => {
     const output = await createManagedAssetTarget(req, "nano-banana-pro", extension, workflowPackageOutputDirName);
     const imageBytes = Buffer.from(inlineData.data, "base64");
     await writeFile(output.filePath, imageBytes);
+    const thumbnail = await createImagePreview(req, output, "nano-banana-pro");
 
     const cost = estimateImageCost({ resolution: req.body.resolution });
     await appendHistory({
@@ -1708,12 +2272,14 @@ app.post("/api/node/generate-image", async (req, res) => {
         requestedAspectRatio: requestedAspectRatio || aspectRatio,
         resolution: req.body.resolution || "2K",
         imageConfig,
+        thinkingLevel: nanoBananaProThinkingConfig.thinkingLevel,
         attempts,
         imagePromptCount: imagePromptUrls.length,
         imagePromptLabels: cleanReferenceLabels
       },
       cost,
       localImage: output.publicPath,
+      localThumbnail: thumbnail?.publicPath || "",
       outputFileName: output.fileName,
       outputBytes: imageBytes.length,
       text
@@ -1724,6 +2290,7 @@ app.post("/api/node/generate-image", async (req, res) => {
       cost,
       image: {
         localUrl: output.publicPath,
+        thumbnailUrl: thumbnail?.publicPath || "",
         fileName: output.fileName,
         mimeType
       }
@@ -1759,9 +2326,42 @@ app.post("/api/node/storyboard-plan", async (req, res) => {
     res.json({ plan: normalizeStoryboardPlan(plan, sceneDescription, requestedFrameCount) });
   } catch (error) {
     console.error(error);
+    const fallbackSceneDescription = String(req.body.sceneDescription || req.body.prompt || "");
+    const fallbackFrameCount = normalizeStoryboardFrameCount(req.body.frameCount);
     res.status(500).json({
-      error: error.message || "Storyboard planning failed.",
-      plan: fallbackStoryboardPlan(String(req.body.sceneDescription || req.body.prompt || ""), normalizeStoryboardFrameCount(req.body.frameCount))
+      error: storyboardPlannerErrorMessage(error),
+      plan: normalizeStoryboardPlan(fallbackStoryboardPlan(fallbackSceneDescription, fallbackFrameCount), fallbackSceneDescription, fallbackFrameCount)
+    });
+  }
+});
+
+app.post("/api/node/storyboard-qc", async (req, res) => {
+  try {
+    const sourceUrl = String(req.body.sourceUrl || req.body.resultUrl || "").trim();
+    if (!sourceUrl) {
+      return res.status(400).json({ error: "Storyboard frame URL is required." });
+    }
+
+    const qc = process.env.FAL_KEY
+      ? await reviewStoryboardFrameWithFal({
+        sourceUrl,
+        previousFrameUrl: String(req.body.previousFrameUrl || "").trim(),
+        spatialAnchorUrl: String(req.body.spatialAnchorUrl || "").trim(),
+        sceneDescription: String(req.body.sceneDescription || "").trim(),
+        framePrompt: String(req.body.framePrompt || req.body.prompt || "").trim(),
+        frameNumber: req.body.frameNumber,
+        shot: String(req.body.shot || "").trim(),
+        angle: String(req.body.angle || "").trim(),
+        notes: String(req.body.notes || "").trim()
+      })
+      : storyboardQcPass("Storyboard QC skipped because FAL_KEY is not configured.");
+
+    res.json({ qc });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      error: error.message || "Storyboard frame QC failed.",
+      qc: storyboardQcPass("Storyboard QC could not run.")
     });
   }
 });
@@ -1834,26 +2434,40 @@ app.post("/api/node/storyboard-export-board", async (req, res) => {
     }
 
     const sceneName = safePathSegment(req.body.sceneName || "Scene 1");
-    const exportFolderName = `final_boards_${timestampForFileName()}`;
+    let exportFolderName = `final_boards_${timestampForFileName()}`;
     const workflowContext = workflowPackageContextFromBody(req.body);
-    const descriptions = req.body.descriptionMode === "visual"
-      ? await storyboardExportVisualDescriptions({
-        sceneName,
-        sceneDescription: String(req.body.sceneDescription || "").trim(),
-        frames
-      })
-      : req.body.generateDescriptions === false
+    const includePdf = req.body.includePdf !== false;
+    const includeFrames = req.body.includeFrames !== false;
+    const descriptions = !includePdf || req.body.generateDescriptions === false
       ? frames.map(storyboardFrameDescriptionFallback)
-      : await storyboardExportDescriptions({
-        sceneName,
-        sceneDescription: String(req.body.sceneDescription || "").trim(),
-        frames
-      });
+      : req.body.descriptionMode === "visual"
+        ? await storyboardExportVisualDescriptions({
+          sceneName,
+          sceneDescription: String(req.body.sceneDescription || "").trim(),
+          frames
+        })
+        : await storyboardExportDescriptions({
+          sceneName,
+          sceneDescription: String(req.body.sceneDescription || "").trim(),
+          frames
+        });
     let targetDir;
     let publicBasePath;
+    let pdfTargetPath = "";
     const exportDestinationPath = normalizeWorkflowPackagePath(req.body.exportDestinationPath);
+    const requestedFramesPath = includeFrames ? normalizeWorkflowPackagePath(req.body.exportFramesPath) : "";
+    const requestedPdfPath = includePdf ? normalizeWorkflowPackagePath(req.body.exportFilePath) : "";
 
-    if (exportDestinationPath) {
+    if (requestedPdfPath) {
+      pdfTargetPath = path.extname(requestedPdfPath).toLowerCase() === ".pdf" ? requestedPdfPath : `${requestedPdfPath}.pdf`;
+      targetDir = path.dirname(pdfTargetPath);
+      exportFolderName = path.basename(targetDir);
+      publicBasePath = "";
+    } else if (requestedFramesPath) {
+      targetDir = requestedFramesPath;
+      exportFolderName = path.basename(targetDir);
+      publicBasePath = "";
+    } else if (exportDestinationPath) {
       targetDir = path.join(exportDestinationPath, exportFolderName);
       publicBasePath = "";
     } else if (workflowContext?.packagePath) {
@@ -1875,24 +2489,24 @@ app.post("/api/node/storyboard-export-board", async (req, res) => {
       const source = await resolveLocalAssetPath(frame.sourceUrl);
       const extension = storyboardExportFrameExtension(source.fileName);
       const fileName = `frame_${index + 1}${extension}`;
-      const targetPath = path.join(targetDir, fileName);
-      await copyFile(source.filePath, targetPath);
+      const targetPath = includeFrames ? path.join(targetDir, fileName) : source.filePath;
+      if (includeFrames) await copyFile(source.filePath, targetPath);
       exportedFrames.push({
         ...frame,
         number: index + 1,
         sourceNumber: frame.number,
-        fileName,
+        fileName: includeFrames ? fileName : source.fileName,
         filePath: targetPath,
-        localPath: targetPath,
-        localUrl: publicBasePath ? `${publicBasePath}/${encodeURIComponent(fileName)}` : "",
+        localPath: includeFrames ? targetPath : "",
+        localUrl: includeFrames && publicBasePath ? `${publicBasePath}/${encodeURIComponent(fileName)}` : "",
         description: descriptions[index] || storyboardFrameDescriptionFallback(frame)
       });
     }
 
     let pdf = null;
-    if (req.body.includePdf !== false) {
-      const pdfFileName = "storyboard_boards.pdf";
-      const pdfPath = path.join(targetDir, pdfFileName);
+    if (includePdf) {
+      const pdfPath = pdfTargetPath || path.join(targetDir, "storyboard_boards.pdf");
+      const pdfFileName = path.basename(pdfPath);
       await writeFile(pdfPath, await createStoryboardPdf({
         title: req.body.sceneName || "Storyboard",
         sceneDescription: String(req.body.sceneDescription || "").trim(),
@@ -1913,7 +2527,7 @@ app.post("/api/node/storyboard-export-board", async (req, res) => {
         folderPath: targetDir,
         publicPath: publicBasePath,
         frameCount: exportedFrames.length,
-        frames: exportedFrames.map(({ filePath: _filePath, ...frame }) => frame),
+        frames: includeFrames ? exportedFrames.map(({ filePath: _filePath, ...frame }) => frame) : [],
         pdf
       }
     });
@@ -1974,7 +2588,8 @@ app.post("/api/node/preview-inpaint", async (req, res) => {
     const cost = estimateOpenAiImage2Cost({
       resolution: req.body.resolution || "2K",
       size: openAiImage.size,
-      quality: openAiImage.quality
+      quality: openAiImage.quality,
+      endpoint: openAiImage.endpoint
     });
 
     await appendHistory({
@@ -2774,10 +3389,6 @@ async function runCompositeUtilityVideo(req, res, { referenceVideoUrls, maskVide
 
 app.post("/api/node/generate-video", async (req, res) => {
   try {
-    if (!process.env.FAL_KEY) {
-      return res.status(400).json({ error: "Missing FAL_KEY in .env." });
-    }
-
     const prompt = String(req.body.prompt || "").trim();
     if (!prompt) {
       return res.status(400).json({ error: "Prompt is required." });
@@ -2785,8 +3396,27 @@ app.post("/api/node/generate-video", async (req, res) => {
 
     const selectedVideoModel = resolveVideoModel(req.body.model);
 
+    if (selectedVideoModel.provider === "google-gemini-omni") {
+      if (!process.env.GOOGLE_API_KEY && !process.env.FAL_KEY) {
+        return res.status(400).json({ error: "Gemini Omni Flash needs a Google API key or Fal API key in Settings." });
+      }
+      return runGeminiOmniVideo(req, res, { prompt, selectedVideoModel });
+    }
+
     if (selectedVideoModel.provider === "disabled") {
       return res.status(400).json({ error: `${selectedVideoModel.displayName} is temporarily disabled.` });
+    }
+
+    if (selectedVideoModel.provider !== "fal-seedance" && !process.env.FAL_KEY) {
+      return res.status(400).json({ error: `${selectedVideoModel.displayName} needs an enabled Fal API key in Settings.` });
+    }
+
+    if (selectedVideoModel.provider === "fal-kling-o3-pro") {
+      return runKlingO3Video(req, res, { prompt, selectedVideoModel, variant: "pro" });
+    }
+
+    if (selectedVideoModel.provider === "fal-kling-o3-4k") {
+      return runKlingO3Video(req, res, { prompt, selectedVideoModel, variant: "4k" });
     }
 
     if (selectedVideoModel.provider === "fal-wan-fun-control") {
@@ -2858,10 +3488,18 @@ app.post("/api/node/generate-video", async (req, res) => {
     const referenceVideoUrls = referenceVideos.map(({ url }) => url);
     const referenceVideoNames = normalizeReferenceNames(referenceVideos.map(({ label }) => label), referenceVideoUrls.length, "Video");
     const referenceAudioUrls = Array.isArray(req.body.referenceAudioUrls) ? req.body.referenceAudioUrls.filter(isLocalAssetUrl) : [];
-    const resolution = normalizeChoice(req.body.resolution, ["480p", "720p", "1080p"], "720p");
+    const seedanceResolutionOptions = speed === "fast" ? ["480p", "720p"] : ["480p", "720p", "1080p", "4k"];
+    const resolution = normalizeChoice(req.body.resolution, seedanceResolutionOptions, "720p");
     const duration = normalizeDuration(req.body.duration);
     const aspectRatio = normalizeAspectRatio(req.body.aspectRatio);
     const generateAudio = Boolean(req.body.generateAudio);
+    const runtimeProvider = resolveSeedanceRuntimeProvider({
+      falKey: process.env.FAL_KEY,
+      kreaKey: process.env.KREA_API_KEY
+    });
+    if (!runtimeProvider) {
+      return res.status(400).json({ error: "Seedance needs an enabled Fal or Krea API key in Settings." });
+    }
 
     let routeKind = "text-to-video";
     if (startFrameUrl) {
@@ -2877,55 +3515,85 @@ app.post("/api/node/generate-video", async (req, res) => {
             videoNames: referenceVideoNames
           })
         : prompt;
-    const input = {
-      prompt: submittedPrompt,
-      resolution,
-      duration,
-      aspect_ratio: aspectRatio,
-      generate_audio: generateAudio
-    };
+    let endpoint;
+    let requestId;
+    let resultSeed = null;
+    let remoteVideo;
+    let cost;
+    let providerName;
 
-    if (routeKind === "image-to-video") {
-      input.image_url = await uploadLocalOutputToFal(startFrameUrl);
-      if (endFrameUrl) {
-        input.end_image_url = await uploadLocalOutputToFal(endFrameUrl);
-      }
-    }
+    if (runtimeProvider === "fal") {
+      const input = {
+        prompt: submittedPrompt,
+        resolution,
+        duration,
+        aspect_ratio: aspectRatio,
+        generate_audio: generateAudio
+      };
 
-    if (routeKind === "reference-to-video") {
-      if (referenceImageUrls.length) {
-        input.image_urls = await Promise.all(referenceImageUrls.map(uploadLocalOutputToFal));
+      if (routeKind === "image-to-video") {
+        input.image_url = await uploadLocalOutputToFal(startFrameUrl);
+        if (endFrameUrl) input.end_image_url = await uploadLocalOutputToFal(endFrameUrl);
       }
-      if (referenceVideoUrls.length) {
-        input.video_urls = await Promise.all(referenceVideoUrls.map(uploadLocalOutputToFal));
-      }
-      if (referenceAudioUrls.length) {
-        input.audio_urls = await Promise.all(referenceAudioUrls.slice(0, 3).map(uploadLocalOutputToFal));
-      }
-    }
 
-    const endpoint = `bytedance/seedance-2.0/${speedPrefix}${routeKind}`;
-    const result = await subscribeFal(endpoint, { input, logs: true });
-    const remoteVideo = result?.data?.video;
+      if (routeKind === "reference-to-video") {
+        if (referenceImageUrls.length) input.image_urls = await Promise.all(referenceImageUrls.map(uploadLocalOutputToFal));
+        if (referenceVideoUrls.length) input.video_urls = await Promise.all(referenceVideoUrls.map(uploadLocalOutputToFal));
+        if (referenceAudioUrls.length) input.audio_urls = await Promise.all(referenceAudioUrls.slice(0, 3).map(uploadLocalOutputToFal));
+      }
 
-    if (!remoteVideo?.url) {
-      return res.status(502).json({ error: "Fal returned no video URL.", raw: result?.data });
+      endpoint = `bytedance/seedance-2.0/${speedPrefix}${routeKind}`;
+      const result = await subscribeFal(endpoint, { input, logs: true });
+      requestId = result.requestId;
+      resultSeed = result?.data?.seed ?? null;
+      remoteVideo = result?.data?.video;
+      providerName = "fal.ai";
+      cost = estimateSeedanceCost({ speed, duration, resolution, aspectRatio, endpoint, routeKind });
+
+      if (!remoteVideo?.url) {
+        return res.status(502).json({ error: "Fal returned no video URL.", raw: result?.data });
+      }
+    } else {
+      endpoint = kreaSeedanceEndpoint(speed);
+      const input = {
+        prompt: submittedPrompt,
+        resolution,
+        duration: durationToSeconds(duration),
+        aspect_ratio: aspectRatio,
+        generate_audio: generateAudio
+      };
+
+      if (routeKind === "image-to-video") {
+        input.start_image = await uploadLocalOutputToKrea(startFrameUrl);
+        if (endFrameUrl) input.end_image = await uploadLocalOutputToKrea(endFrameUrl);
+      }
+
+      if (routeKind === "reference-to-video") {
+        if (referenceImageUrls.length) input.reference_images = await Promise.all(referenceImageUrls.slice(0, 9).map(uploadLocalOutputToKrea));
+        if (referenceVideoUrls.length) input.reference_videos = await Promise.all(referenceVideoUrls.slice(0, 3).map(uploadLocalOutputToKrea));
+        if (referenceAudioUrls.length) input.reference_audios = await Promise.all(referenceAudioUrls.slice(0, 3).map(uploadLocalOutputToKrea));
+      }
+
+      const kreaResult = await runKreaSeedanceGeneration({ endpoint, input });
+      requestId = kreaResult.requestId;
+      remoteVideo = kreaResult.remoteVideo;
+      providerName = "Krea";
+      cost = estimateKreaSeedanceCost({
+        speed,
+        durationSeconds: durationToSeconds(duration),
+        resolution,
+        hasVideoReference: referenceVideoUrls.length > 0
+      });
+      cost.aspectRatio = aspectRatio;
+      cost.routeKind = routeKind;
     }
 
     const output = await downloadVideo(req, remoteVideo.url, routeKind);
-    const cost = estimateSeedanceCost({
-      speed,
-      duration,
-      resolution,
-      aspectRatio,
-      endpoint,
-      routeKind
-    });
     await appendHistory({
-      id: result.requestId || randomUUID(),
+      id: requestId || randomUUID(),
       createdAt: new Date().toISOString(),
       mediaType: "video",
-      provider: "fal.ai",
+      provider: providerName,
       modelName: speed === "fast" ? "Seedance 2.0 Fast" : "Seedance 2.0",
       endpoint,
       mode: routeKindLabel(routeKind, speed),
@@ -2946,7 +3614,8 @@ app.post("/api/node/generate-video", async (req, res) => {
         referenceVideoCount: referenceVideoUrls.length,
         referenceVideoNames,
         referenceAudioCount: referenceAudioUrls.length,
-        seed: result?.data?.seed ?? null
+        seed: resultSeed,
+        runtimeProvider
       },
       cost,
       remoteVideo,
@@ -2956,9 +3625,10 @@ app.post("/api/node/generate-video", async (req, res) => {
     });
 
     res.json({
-      requestId: result.requestId,
-      seed: result?.data?.seed,
+      requestId,
+      seed: resultSeed,
       endpoint,
+      provider: providerName,
       modelName: speed === "fast" ? "Seedance 2.0 Fast" : "Seedance 2.0",
       submittedPrompt,
       cost,
@@ -2973,6 +3643,597 @@ app.post("/api/node/generate-video", async (req, res) => {
     sendApiError(res, error, "Video generation failed.");
   }
 });
+
+async function runGeminiOmniVideo(req, res, { prompt, selectedVideoModel }) {
+  const durationSeconds = normalizeGeminiOmniDuration(req.body.duration);
+  const aspectRatio = normalizeGeminiOmniAspectRatio(req.body.aspectRatio);
+  const generateAudio = req.body.generateAudio !== false;
+  const startFrameUrl = firstLocalOutput(req.body.startFrameUrls);
+  const filmDirector = req.body.filmDirector && typeof req.body.filmDirector === "object" ? req.body.filmDirector : null;
+  const directorReferences = Array.isArray(filmDirector?.references) ? filmDirector.references : [];
+  const rawReferenceImageUrls = Array.isArray(req.body.referenceImageUrls) ? req.body.referenceImageUrls : [];
+  const rawReferenceImageLabels = Array.isArray(req.body.referenceImageLabels) ? req.body.referenceImageLabels : [];
+  const rawCharacterUrls = Array.isArray(req.body.characterReferenceUrls) ? req.body.characterReferenceUrls : [];
+  const rawCharacterLabels = Array.isArray(req.body.characterReferenceLabels) ? req.body.characterReferenceLabels : [];
+  const references = uniqueGeminiOmniReferences([
+    ...directorReferences.map((item) => ({ url: item?.url, label: item?.tag || item?.label })),
+    ...rawCharacterUrls.map((url, index) => ({ url, label: rawCharacterLabels[index] })),
+    ...rawReferenceImageUrls.map((url, index) => ({ url, label: rawReferenceImageLabels[index] }))
+  ].filter((item) => isLocalAssetUrl(item.url) && item.url !== startFrameUrl));
+  const submittedPrompt = [
+    buildGeminiOmniPrompt({
+      prompt,
+      hasStartFrame: Boolean(startFrameUrl),
+      references,
+      generateAudio
+    }),
+    `Create a ${durationSeconds}-second video in ${aspectRatio}.`
+  ].filter(Boolean).join("\n\n");
+  const media = [
+    ...(startFrameUrl ? [{ url: startFrameUrl, label: "First Frame", role: "first-frame" }] : []),
+    ...references.map((item) => ({ ...item, role: "reference" }))
+  ];
+  const task = references.length ? "reference_to_video" : startFrameUrl ? "image_to_video" : "text_to_video";
+
+  let provider = "Google";
+  let endpoint = googleGeminiOmniModel;
+  let requestId = "";
+  let remoteVideo = null;
+  let output = null;
+  let fallbackReason = "";
+
+  if (process.env.GOOGLE_API_KEY) {
+    try {
+      const direct = await generateGoogleGeminiOmniVideo({ submittedPrompt, media, aspectRatio, task, req });
+      requestId = direct.requestId;
+      remoteVideo = direct.remoteVideo;
+      output = direct.output;
+    } catch (error) {
+      if (!process.env.FAL_KEY || !shouldFallbackGeminiOmniToFal(error)) throw error;
+      fallbackReason = error.message || "Google direct access was unavailable.";
+      console.warn(`Gemini Omni Google direct unavailable; using fal fallback: ${fallbackReason}`);
+    }
+  }
+
+  if (!output) {
+    const fallback = await generateFalGeminiOmniVideo({ submittedPrompt, media, aspectRatio, durationSeconds });
+    provider = "fal.ai";
+    endpoint = fallback.endpoint;
+    requestId = fallback.requestId;
+    remoteVideo = fallback.remoteVideo;
+    output = await downloadVideo(req, remoteVideo.url, "gemini-omni");
+  }
+
+  const cost = estimateGeminiOmniCost({ durationSeconds, provider, endpoint });
+  await appendHistory({
+    id: requestId || randomUUID(),
+    createdAt: new Date().toISOString(),
+    mediaType: "video",
+    provider,
+    modelName: selectedVideoModel.displayName,
+    endpoint,
+    mode: `${selectedVideoModel.displayName} ${task.replaceAll("_", " ")}`,
+    prompt,
+    submittedPrompt,
+    project: projectFromBody(req.body),
+    node: nodeFromBody(req.body),
+    settings: {
+      duration: String(durationSeconds),
+      resolution: "720p",
+      aspectRatio,
+      generateAudio,
+      task,
+      startFrameCount: startFrameUrl ? 1 : 0,
+      referenceImageCount: references.length,
+      referenceImageNames: references.map((item) => item.label).filter(Boolean),
+      googleDirect: provider === "Google",
+      falFallback: provider === "fal.ai" && Boolean(process.env.GOOGLE_API_KEY),
+      fallbackReason
+    },
+    cost,
+    remoteVideo,
+    localVideo: output.publicPath,
+    outputFileName: output.fileName,
+    outputBytes: output.bytes
+  });
+
+  return res.json({
+    requestId,
+    endpoint,
+    modelName: selectedVideoModel.displayName,
+    submittedPrompt,
+    provider,
+    cost,
+    video: {
+      ...remoteVideo,
+      localUrl: output.publicPath,
+      fileName: output.fileName
+    }
+  });
+}
+
+async function generateGoogleGeminiOmniVideo({ submittedPrompt, media, aspectRatio, task, req }) {
+  const input = [];
+  for (const item of media) {
+    const asset = await readLocalAsset(item.url);
+    if (!String(asset.mimeType || "").startsWith("image/")) continue;
+    input.push({
+      type: "image",
+      mime_type: asset.mimeType,
+      data: asset.buffer.toString("base64")
+    });
+  }
+  input.push({ type: "text", text: submittedPrompt });
+
+  const response = await fetch("https://generativelanguage.googleapis.com/v1beta/interactions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-goog-api-key": process.env.GOOGLE_API_KEY
+    },
+    body: JSON.stringify({
+      model: googleGeminiOmniModel,
+      input,
+      generation_config: { video_config: { task } },
+      response_format: { type: "video", aspect_ratio: aspectRatio, delivery: "uri" },
+      background: false,
+      store: true,
+      stream: false
+    })
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw httpError(response.status, data?.error?.message || data?.message || "Gemini Omni direct generation failed.", { raw: data });
+  }
+
+  const videoPart = extractGeminiOmniVideoPart(data);
+  if (!videoPart?.data && !videoPart?.uri) {
+    throw httpError(502, "Gemini Omni direct generation returned no video.", { raw: data });
+  }
+
+  const mimeType = videoPart.mime_type || videoPart.mimeType || "video/mp4";
+  const extension = mimeType === "video/webm" ? ".webm" : ".mp4";
+  const target = await createManagedAssetTarget(req, "gemini-omni", extension, workflowPackageOutputDirName);
+  const bytes = videoPart.data
+    ? Buffer.from(videoPart.data, "base64")
+    : await downloadGoogleGeminiOmniFile(videoPart.uri);
+  await writeFile(target.filePath, bytes);
+
+  return {
+    requestId: data.id || randomUUID(),
+    remoteVideo: {
+      url: videoPart.uri || "",
+      content_type: mimeType,
+      file_name: target.fileName,
+      file_size: bytes.length
+    },
+    output: {
+      fileName: target.fileName,
+      publicPath: target.publicPath,
+      filePath: target.filePath,
+      bytes: bytes.length
+    }
+  };
+}
+
+function extractGeminiOmniVideoPart(data = {}) {
+  if (data.output_video?.data || data.output_video?.uri) return data.output_video;
+  const steps = Array.isArray(data.steps) ? data.steps : [];
+  for (const step of steps) {
+    const content = Array.isArray(step?.content) ? step.content : [];
+    const video = content.find((item) => item?.type === "video" && (item.data || item.uri));
+    if (video) return video;
+  }
+  return null;
+}
+
+async function downloadGoogleGeminiOmniFile(uri) {
+  const fileId = String(uri || "").match(/files\/([^/:?]+)/)?.[1];
+  if (!fileId) throw httpError(502, "Gemini Omni returned an invalid video file URI.");
+
+  const baseUrl = `https://generativelanguage.googleapis.com/v1beta/files/${encodeURIComponent(fileId)}`;
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    const statusResponse = await fetch(baseUrl, { headers: { "x-goog-api-key": process.env.GOOGLE_API_KEY } });
+    const statusData = await statusResponse.json().catch(() => ({}));
+    if (!statusResponse.ok) {
+      throw httpError(statusResponse.status, statusData?.error?.message || "Could not check Gemini Omni video status.", { raw: statusData });
+    }
+    const state = String(statusData.state?.name || statusData.state || "").toUpperCase();
+    if (state === "ACTIVE") break;
+    if (state === "FAILED") throw httpError(502, "Gemini Omni video processing failed.", { raw: statusData });
+    if (attempt === 119) throw httpError(504, "Gemini Omni video processing timed out.");
+    await delay(5000);
+  }
+
+  const downloadResponse = await fetch(`${baseUrl}:download?alt=media`, {
+    headers: { "x-goog-api-key": process.env.GOOGLE_API_KEY }
+  });
+  if (!downloadResponse.ok) {
+    const message = await downloadResponse.text().catch(() => "");
+    throw httpError(downloadResponse.status, message || "Could not download Gemini Omni video.");
+  }
+  return Buffer.from(await downloadResponse.arrayBuffer());
+}
+
+async function generateFalGeminiOmniVideo({ submittedPrompt, media, aspectRatio, durationSeconds }) {
+  if (!process.env.FAL_KEY) throw httpError(400, "Gemini Omni fal fallback needs a Fal API key in Settings.");
+  const endpoint = media.length ? falGeminiOmniReferenceEndpoint : falGeminiOmniTextEndpoint;
+  const input = {
+    prompt: submittedPrompt,
+    aspect_ratio: aspectRatio,
+    duration: durationSeconds
+  };
+  if (media.length) {
+    input.image_urls = await Promise.all(media.map((item) => uploadLocalOutputToFal(item.url)));
+  }
+  const result = await subscribeFal(endpoint, { input, logs: true }, { route: "generate-video", model: videoModelNames.geminiOmni });
+  const remoteVideo = result?.data?.video;
+  if (!remoteVideo?.url) throw httpError(502, "Fal returned no Gemini Omni video URL.", { raw: result?.data });
+  return { endpoint, requestId: result.requestId, remoteVideo };
+}
+
+async function runKlingO3Video(req, res, { prompt, selectedVideoModel, variant = "pro" }) {
+  const is4k = variant === "4k";
+  const durationSeconds = clampInteger(durationToSeconds(req.body.duration), 3, 15, 15);
+  const duration = String(durationSeconds);
+  const aspectRatio = normalizeChoice(normalizeAspectRatio(req.body.aspectRatio), ["16:9", "9:16", "1:1"], "16:9");
+  const generateAudio = Boolean(req.body.generateAudio);
+  const cfgScale = Math.min(1, Math.max(0, Number(req.body.klingCfgScale ?? 0.5)));
+  const negativePrompt = String(req.body.negativePrompt || "blur, distort, and low quality").trim() || "blur, distort, and low quality";
+  const startFrameUrl = firstLocalOutput(req.body.startFrameUrls);
+  const endFrameUrl = firstLocalOutput(req.body.endFrameUrls);
+  const filmDirector = req.body.filmDirector && typeof req.body.filmDirector === "object" ? req.body.filmDirector : null;
+  const directorReferences = Array.isArray(filmDirector?.references) ? filmDirector.references : [];
+  const directorTagForUrl = new Map(
+    directorReferences.filter((item) => item?.url && item?.tag).map((item) => [item.url, cleanReferenceName(item.tag)])
+  );
+
+  const characterReferences = uniqueKlingReferences([
+    ...(Array.isArray(req.body.characterReferenceUrls) ? req.body.characterReferenceUrls : []).map((url, index) => ({
+      url,
+      label: req.body.characterReferenceLabels?.[index]
+    })),
+    ...directorReferences
+      .filter((item) => item?.type === "character")
+      .map((item) => ({ url: item.url, label: item.tag }))
+  ]);
+  const characterUrls = characterReferences.map((item) => item.url);
+  const characterNames = normalizeReferenceNames(
+    characterReferences.map((item) => directorTagForUrl.get(item.url) || item.label),
+    characterUrls.length,
+    "Character"
+  );
+  const characterUrlSet = new Set(characterUrls);
+  const rawImageUrls = Array.isArray(req.body.referenceImageUrls) ? req.body.referenceImageUrls : [];
+  const rawImageLabels = Array.isArray(req.body.referenceImageLabels) ? req.body.referenceImageLabels : [];
+  const propReferences = uniqueKlingReferences(
+    directorReferences
+      .filter((item) => item?.type === "prop")
+      .map((item) => ({ url: item.url, label: item.tag }))
+  );
+  const propUrlSet = new Set(propReferences.map((item) => item.url));
+  const imageReferences = uniqueKlingReferences([
+    ...rawImageUrls.map((url, index) => ({ url, label: rawImageLabels[index] })),
+    ...directorReferences
+      .filter((item) => item?.type === "location")
+      .map((item) => ({ url: item.url, label: item.tag }))
+  ]).filter(({ url }) => !characterUrlSet.has(url) && !propUrlSet.has(url));
+  const rawVideoUrls = Array.isArray(req.body.referenceVideoUrls) ? req.body.referenceVideoUrls : [];
+  const rawVideoLabels = Array.isArray(req.body.referenceVideoLabels) ? req.body.referenceVideoLabels : [];
+  const videoReferences = uniqueKlingReferences(
+    rawVideoUrls.map((url, index) => ({ url, label: rawVideoLabels[index] }))
+  );
+
+  const referenceLimit = is4k ? 7 : 4;
+  const elementSources = [
+    ...characterUrls.map((url, index) => ({ type: "image", url, name: characterNames[index] })),
+    ...propReferences.map((item, index) => ({
+      type: "image",
+      url: item.url,
+      name: cleanReferenceName(item.label) || `Prop${index + 1}`
+    })),
+    ...videoReferences.map((item, index) => ({
+      type: "video",
+      url: item.url,
+      name: cleanReferenceName(item.label) || `Video${index + 1}`
+    }))
+  ].slice(0, referenceLimit);
+  const remainingReferenceSlots = Math.max(0, referenceLimit - elementSources.length);
+  const imageSources = imageReferences.slice(0, remainingReferenceSlots);
+  const imageNames = normalizeReferenceNames(imageSources.map((item) => directorTagForUrl.get(item.url) || item.label), imageSources.length, "Image");
+  const elementNames = normalizeReferenceNames(elementSources.map((item) => item.name), elementSources.length, "Element");
+  const mentionMap = klingReferenceMentionMap(elementNames, imageNames);
+  [
+    ...characterNames,
+    ...propReferences.map((item) => cleanReferenceName(item.label)),
+    ...videoReferences.map((item) => cleanReferenceName(item.label)),
+    ...imageReferences.map((item) => cleanReferenceName(directorTagForUrl.get(item.url) || item.label))
+  ].filter(Boolean).forEach((name) => {
+    if (!mentionMap.has(name.toLowerCase())) mentionMap.set(name.toLowerCase(), name);
+  });
+  const englishMultiPrompt = buildKlingFilmDirectorMultiPrompt({
+    filmDirector,
+    fullPrompt: prompt,
+    durationSeconds,
+    mentionMap
+  });
+  const klingDirectorOptimization = await optimizeKlingFilmDirectorMultiPrompt(englishMultiPrompt);
+  const multiPrompt = klingDirectorOptimization.multiPrompt;
+  const submittedPrompt = rewriteKlingReferenceMentions(prompt, mentionMap);
+  const hasElementsOrReferences = Boolean(elementSources.length || imageSources.length);
+  const hasReferences = Boolean(startFrameUrl || endFrameUrl || hasElementsOrReferences);
+  const routeKind = is4k
+    ? hasElementsOrReferences || endFrameUrl
+      ? "reference"
+      : startFrameUrl
+        ? "image"
+        : "text"
+    : hasReferences
+      ? "reference"
+      : "text";
+  const endpoint = is4k
+    ? routeKind === "reference"
+      ? falKlingO34kReferenceEndpoint
+      : routeKind === "image"
+        ? falKlingO34kImageEndpoint
+        : falKlingO34kTextEndpoint
+    : routeKind === "reference"
+      ? falKlingO3ProReferenceEndpoint
+      : falKlingO3ProTextEndpoint;
+  const input = {
+    generate_audio: generateAudio,
+    shot_type: "customize"
+  };
+  if (routeKind !== "image") input.aspect_ratio = aspectRatio;
+  if (!is4k) {
+    input.negative_prompt = negativePrompt;
+    input.cfg_scale = cfgScale;
+  }
+
+  if (multiPrompt.length) {
+    input.multi_prompt = multiPrompt;
+  } else {
+    input.prompt = submittedPrompt;
+    input.duration = duration;
+  }
+
+  if (hasReferences) {
+    if (startFrameUrl) {
+      const uploadedStartFrame = await uploadKlingReferenceImageToFal(startFrameUrl);
+      if (routeKind === "image") input.image_url = uploadedStartFrame;
+      else input.start_image_url = uploadedStartFrame;
+    }
+    if (endFrameUrl) input.end_image_url = await uploadKlingReferenceImageToFal(endFrameUrl);
+    if (elementSources.length) {
+      input.elements = await Promise.all(elementSources.map(async (source) => {
+        const uploadedUrl = source.type === "video"
+          ? await uploadLocalOutputToFal(source.url)
+          : await uploadKlingReferenceImageToFal(source.url);
+        return source.type === "video"
+          ? { video_url: uploadedUrl }
+          : { frontal_image_url: uploadedUrl, reference_image_urls: [uploadedUrl] };
+      }));
+    }
+    if (imageSources.length) {
+      input.image_urls = await Promise.all(imageSources.map((item) => uploadKlingReferenceImageToFal(item.url)));
+    }
+  }
+
+  const result = await subscribeFal(endpoint, { input, logs: true }, { route: "generate-video", model: selectedVideoModel.displayName });
+  const remoteVideo = result?.data?.video;
+  if (!remoteVideo?.url) {
+    throw httpError(502, `Fal returned no ${is4k ? "Kling O3 4K" : "Kling O3 Pro"} video URL.`);
+  }
+
+  const output = await downloadVideo(req, remoteVideo.url, is4k ? `kling-o3-4k-${routeKind}` : `kling-o3-${routeKind}`);
+  const cost = estimateKlingO3Cost({ durationSeconds, generateAudio, endpoint, variant });
+  await appendHistory({
+    id: result.requestId || randomUUID(),
+    createdAt: new Date().toISOString(),
+    mediaType: "video",
+    provider: "fal.ai",
+    modelName: selectedVideoModel.displayName,
+    endpoint,
+    mode: multiPrompt.length
+      ? `${is4k ? "Kling O3 4K" : "Kling O3 Pro"} Film Director multi-shot`
+      : `${is4k ? "Kling O3 4K" : "Kling O3 Pro"} ${routeKind}-to-video`,
+    prompt,
+    submittedPrompt: multiPrompt.length ? JSON.stringify(multiPrompt) : submittedPrompt,
+    project: projectFromBody(req.body),
+    node: nodeFromBody(req.body),
+    settings: {
+      duration,
+      aspectRatio,
+      resolution: is4k ? "4K" : "1080p",
+      generateAudio,
+      cfgScale,
+      negativePrompt,
+      multiShotCount: multiPrompt.length,
+      directorPromptLanguage: "en",
+      directorPromptOptimized: klingDirectorOptimization.optimized,
+      directorPromptOptimizationModel: klingDirectorOptimization.optimized ? klingDirectorPromptFalModel : "",
+      elementCount: elementSources.length,
+      elementNames,
+      referenceImageCount: imageSources.length,
+      referenceImageNames: imageNames,
+      startFrameCount: startFrameUrl ? 1 : 0,
+      endFrameCount: endFrameUrl ? 1 : 0
+    },
+    cost,
+    remoteVideo,
+    localVideo: output.publicPath,
+    outputFileName: output.fileName,
+    outputBytes: output.bytes
+  });
+
+  return res.json({
+    requestId: result.requestId,
+    endpoint,
+    modelName: selectedVideoModel.displayName,
+    submittedPrompt: multiPrompt.length ? multiPrompt : submittedPrompt,
+    cost,
+    video: {
+      ...remoteVideo,
+      localUrl: output.publicPath,
+      fileName: output.fileName
+    }
+  });
+}
+
+function uniqueKlingReferences(items = []) {
+  const seen = new Set();
+  return items.filter((item) => {
+    if (!isLocalAssetUrl(item?.url) || seen.has(item.url)) return false;
+    seen.add(item.url);
+    return true;
+  });
+}
+
+function klingReferenceMentionMap(elementNames = [], imageNames = []) {
+  const map = new Map();
+  elementNames.forEach((name, index) => map.set(name.toLowerCase(), `@Element${index + 1}`));
+  imageNames.forEach((name, index) => map.set(name.toLowerCase(), `@Image${index + 1}`));
+  return map;
+}
+
+function rewriteKlingReferenceMentions(text = "", mentionMap = new Map()) {
+  return String(text || "").replace(/@([A-Za-z0-9_-]+)/g, (match, name) => mentionMap.get(name.toLowerCase()) || match);
+}
+
+function parseKlingFilmDirectorCuts(shotList = "") {
+  return sanitizeSkillDirectorShotListFormatting(shotList)
+    .split(/(?=\bCUT\s+\d{1,2}\s+—)/gi)
+    .map((block) => {
+      const match = block.match(/^CUT\s+(\d{1,2})\s+—\s+shot frame:\s*([^;\n]+);\s*camera movement:\s*([^;\n]+);\s*shot type:\s*([^:\n]+):\s*([\s\S]*)$/i);
+      if (!match) return null;
+      return {
+        number: Number(match[1]),
+        shotFrame: match[2].trim(),
+        cameraMovement: match[3].trim(),
+        shotType: match[4].trim(),
+        description: match[5].replace(/\s+/g, " ").trim()
+      };
+    })
+    .filter((cut) => cut?.description);
+}
+
+function groupKlingFilmDirectorCuts(cuts = [], maxGroups = 6) {
+  if (cuts.length <= maxGroups) return cuts.map((cut) => [cut]);
+  const groups = Array.from({ length: maxGroups }, () => []);
+  cuts.forEach((cut, index) => {
+    groups[Math.min(maxGroups - 1, Math.floor((index * maxGroups) / cuts.length))].push(cut);
+  });
+  return groups.filter((group) => group.length);
+}
+
+function distributeKlingShotDurations(totalSeconds, count) {
+  const safeCount = Math.max(1, Math.min(count, totalSeconds));
+  const base = Math.floor(totalSeconds / safeCount);
+  let remainder = totalSeconds - base * safeCount;
+  return Array.from({ length: safeCount }, () => {
+    const value = base + (remainder > 0 ? 1 : 0);
+    remainder = Math.max(0, remainder - 1);
+    return String(Math.max(1, value));
+  });
+}
+
+function buildKlingFilmDirectorMultiPrompt({ filmDirector, fullPrompt, durationSeconds, mentionMap }) {
+  if (!filmDirector?.shotList) return [];
+  const cuts = parseKlingFilmDirectorCuts(filmDirector.shotList);
+  if (!cuts.length) return [];
+  const maxShotCount = Math.max(1, Math.min(6, durationSeconds));
+  const groups = groupKlingFilmDirectorCuts(cuts, maxShotCount);
+  const durations = distributeKlingShotDurations(durationSeconds, groups.length);
+  const additionalDirection = String(fullPrompt || "").replace(String(filmDirector.finalPrompt || ""), "").trim();
+  const globalDirection = dedupeSkillDirectorInstructions([
+    filmDirector.styleDirection,
+    filmDirector.cameraDirection,
+    skillDirectorContinuityNotesForFinal(filmDirector.shotListNotes),
+    additionalDirection
+  ].filter(Boolean).join(" "), new Set());
+
+  return groups.map((group, index) => {
+    const shotDirection = group.map((cut) => (
+      `${cut.shotFrame}, ${cut.shotType}, ${cut.cameraMovement}: ${cut.description}`
+    )).join(" Then ");
+    return {
+      prompt: rewriteKlingReferenceMentions(clipSkillDirectorText([shotDirection, globalDirection].filter(Boolean).join(" "), 2300), mentionMap),
+      duration: durations[index]
+    };
+  });
+}
+
+async function optimizeKlingFilmDirectorMultiPrompt(multiPrompt = []) {
+  if (!multiPrompt.length) return { multiPrompt, optimized: false };
+
+  const protectedPrompts = multiPrompt.map((item) => protectKlingDirectorPrompt(item.prompt));
+  try {
+    const data = await subscribeFal(skillDirectorLlmEndpoint, {
+      input: {
+        model: klingDirectorPromptFalModel,
+        prompt: buildKlingDirectorOptimizationPrompt(protectedPrompts),
+        system_prompt: klingDirectorOptimizationSystemPrompt()
+      },
+      logs: true
+    }, { route: "kling-film-director-prompt-optimization", model: klingDirectorPromptFalModel });
+    const optimizedPrompts = parseKlingDirectorOptimizations(extractFalText(data), protectedPrompts);
+    const optimizedMultiPrompt = multiPrompt.map((item, index) => ({
+      ...item,
+      prompt: clipKlingDirectorPrompt(
+        restoreKlingDirectorPrompt(optimizedPrompts[index], protectedPrompts[index].literals)
+      )
+    }));
+    const optimized = optimizedMultiPrompt.some((item, index) => item.prompt !== multiPrompt[index].prompt);
+    return { multiPrompt: optimizedMultiPrompt, optimized };
+  } catch (error) {
+    console.warn("Kling Film Director prompt optimization failed; submitting a byte-safe compact prompt instead.", error);
+    return {
+      multiPrompt: multiPrompt.map((item) => ({ ...item, prompt: clipKlingDirectorPrompt(item.prompt) })),
+      optimized: false
+    };
+  }
+}
+
+function estimateGeminiOmniCost({ durationSeconds, provider, endpoint }) {
+  const googleDirect = provider === "Google";
+  const unitRateUsd = googleDirect ? geminiOmniGoogleCostPerSecond : geminiOmniFalCostPerSecond;
+  return {
+    amountUsd: roundCurrency(durationSeconds * unitRateUsd),
+    currency: "USD",
+    unitRateUsd,
+    units: durationSeconds,
+    unit: "second",
+    mediaType: "video",
+    resolution: "720p",
+    durationSeconds,
+    pricingBasis: googleDirect
+      ? "Gemini Omni Flash Google output-token estimate at approximately $0.10 per 720p second"
+      : "Gemini Omni Flash fal.ai estimate at approximately $0.13 per 720p second",
+    pricingSource: googleDirect ? "google-gemini-pricing-2026-07-09" : "fal-model-page-2026-07-10",
+    endpoint
+  };
+}
+
+function estimateKlingO3Cost({ durationSeconds, generateAudio, endpoint, variant = "pro" }) {
+  const is4k = variant === "4k";
+  const unitRateUsd = is4k ? klingO34kCostPerSecond : generateAudio ? klingO3ProAudioCostPerSecond : klingO3ProCostPerSecond;
+  return {
+    amountUsd: roundCurrency(durationSeconds * unitRateUsd),
+    currency: "USD",
+    unitRateUsd,
+    units: durationSeconds,
+    unit: "second",
+    mediaType: "video",
+    durationSeconds,
+    pricingBasis: is4k
+      ? "Kling O3 4K fal.ai native-4K per-second estimate"
+      : generateAudio
+        ? "Kling O3 Pro fal.ai per-second estimate with audio"
+        : "Kling O3 Pro fal.ai per-second estimate without audio",
+    pricingSource: "fal-model-page-2026-07-11",
+    endpoint
+  };
+}
 
 app.post("/api/node/generate-3d", async (req, res) => {
   try {
@@ -4256,13 +5517,17 @@ app.post(
   ]),
   async (req, res) => {
     try {
-      if (!process.env.FAL_KEY) {
-        return res.status(400).json({ error: "Missing FAL_KEY in .env. Add your Fal API key, then restart the server." });
-      }
-
       const prompt = String(req.body.prompt || "").trim();
       if (!prompt) {
         return res.status(400).json({ error: "Prompt is required." });
+      }
+
+      const runtimeProvider = resolveSeedanceRuntimeProvider({
+        falKey: process.env.FAL_KEY,
+        kreaKey: process.env.KREA_API_KEY
+      });
+      if (!runtimeProvider) {
+        return res.status(400).json({ error: "Seedance needs an enabled Fal or Krea API key in Settings." });
       }
 
       const startFrame = req.files?.startFrame?.[0];
@@ -4275,7 +5540,8 @@ app.post(
       }
 
       const speed = normalizeChoice(req.body.speed, ["standard", "fast"], "standard");
-      const resolution = normalizeChoice(req.body.resolution, ["480p", "720p", "1080p"], "720p");
+      const seedanceResolutionOptions = speed === "fast" ? ["480p", "720p"] : ["480p", "720p", "1080p", "4k"];
+      const resolution = normalizeChoice(req.body.resolution, seedanceResolutionOptions, "720p");
       const duration = normalizeChoice(req.body.duration, ["auto", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15"], "15");
       const aspectRatio = normalizeChoice(req.body.aspectRatio, ["auto", "21:9", "16:9", "4:3", "1:1", "3:4", "9:16"], "21:9");
       const generateAudio = String(req.body.generateAudio ?? "true") === "true";
@@ -4283,77 +5549,119 @@ app.post(
 
       const route = resolveRoute({ startFrame, references, speed });
       const promptForFal = route.kind === "reference-to-video" ? rewriteReferenceMentions(prompt, referenceNames) : prompt;
-      const input = {
-        prompt: promptForFal,
-        resolution,
-        duration,
-        aspect_ratio: aspectRatio,
-        generate_audio: generateAudio
-      };
-
-      if (Number.isInteger(seed)) {
-        input.seed = seed;
-      }
-
       const uploadedFiles = [];
+      let endpoint;
+      let requestId;
+      let resultSeed = seed ?? null;
+      let remoteVideo;
+      let providerName;
+      let cost;
 
-      if (route.kind === "image-to-video") {
-        const imageUrl = await uploadToFal(startFrame);
-        uploadedFiles.push({ role: "startFrame", local: startFrame.filename, url: imageUrl });
-        input.image_url = imageUrl;
+      if (runtimeProvider === "fal") {
+        const input = {
+          prompt: promptForFal,
+          resolution,
+          duration,
+          aspect_ratio: aspectRatio,
+          generate_audio: generateAudio
+        };
+        if (Number.isInteger(seed)) input.seed = seed;
 
-        if (endFrame) {
-          const endImageUrl = await uploadToFal(endFrame);
-          uploadedFiles.push({ role: "endFrame", local: endFrame.filename, url: endImageUrl });
-          input.end_image_url = endImageUrl;
-        }
-      }
-
-      if (route.kind === "reference-to-video") {
-        const imageUrls = [];
-        for (const reference of references) {
-          const referenceUrl = await uploadToFal(reference);
-          imageUrls.push(referenceUrl);
-          uploadedFiles.push({ role: "reference", name: referenceNames[imageUrls.length - 1], local: reference.filename, url: referenceUrl });
-        }
-        input.image_urls = imageUrls;
-      }
-
-      const result = await subscribeFal(route.endpoint, {
-        input,
-        logs: true,
-        onQueueUpdate: (update) => {
-          if (update.status === "IN_PROGRESS") {
-            for (const log of update.logs || []) {
-              console.log(`[fal] ${log.message}`);
-            }
+        if (route.kind === "image-to-video") {
+          const imageUrl = await uploadToFal(startFrame);
+          uploadedFiles.push({ role: "startFrame", local: startFrame.filename, url: imageUrl });
+          input.image_url = imageUrl;
+          if (endFrame) {
+            const endImageUrl = await uploadToFal(endFrame);
+            uploadedFiles.push({ role: "endFrame", local: endFrame.filename, url: endImageUrl });
+            input.end_image_url = endImageUrl;
           }
         }
-      });
 
-      const remoteVideo = result?.data?.video;
-      if (!remoteVideo?.url) {
-        return res.status(502).json({ error: "Fal returned no video URL.", raw: result?.data });
+        if (route.kind === "reference-to-video") {
+          const imageUrls = [];
+          for (const reference of references) {
+            const referenceUrl = await uploadToFal(reference);
+            imageUrls.push(referenceUrl);
+            uploadedFiles.push({ role: "reference", name: referenceNames[imageUrls.length - 1], local: reference.filename, url: referenceUrl });
+          }
+          input.image_urls = imageUrls;
+        }
+
+        endpoint = route.endpoint;
+        const result = await subscribeFal(endpoint, {
+          input,
+          logs: true,
+          onQueueUpdate: (update) => {
+            if (update.status === "IN_PROGRESS") {
+              for (const log of update.logs || []) console.log(`[fal] ${log.message}`);
+            }
+          }
+        });
+        requestId = result.requestId;
+        resultSeed = result?.data?.seed ?? resultSeed;
+        remoteVideo = result?.data?.video;
+        providerName = "fal.ai";
+        cost = estimateSeedanceCost({ speed, duration, resolution, aspectRatio, endpoint, routeKind: route.kind });
+        if (!remoteVideo?.url) {
+          return res.status(502).json({ error: "Fal returned no video URL.", raw: result?.data });
+        }
+      } else {
+        const input = {
+          prompt: promptForFal,
+          resolution,
+          duration: durationToSeconds(duration),
+          aspect_ratio: aspectRatio,
+          generate_audio: generateAudio
+        };
+        if (Number.isInteger(seed)) input.seed = seed;
+
+        if (route.kind === "image-to-video") {
+          const imageUrl = await uploadToKrea(startFrame);
+          uploadedFiles.push({ role: "startFrame", local: startFrame.filename, url: imageUrl });
+          input.start_image = imageUrl;
+          if (endFrame) {
+            const endImageUrl = await uploadToKrea(endFrame);
+            uploadedFiles.push({ role: "endFrame", local: endFrame.filename, url: endImageUrl });
+            input.end_image = endImageUrl;
+          }
+        }
+
+        if (route.kind === "reference-to-video") {
+          const imageUrls = [];
+          for (const reference of references.slice(0, 9)) {
+            const referenceUrl = await uploadToKrea(reference);
+            imageUrls.push(referenceUrl);
+            uploadedFiles.push({ role: "reference", name: referenceNames[imageUrls.length - 1], local: reference.filename, url: referenceUrl });
+          }
+          input.reference_images = imageUrls;
+        }
+
+        endpoint = kreaSeedanceEndpoint(speed);
+        const result = await runKreaSeedanceGeneration({ endpoint, input });
+        requestId = result.requestId;
+        remoteVideo = result.remoteVideo;
+        providerName = "Krea";
+        cost = estimateKreaSeedanceCost({
+          speed,
+          durationSeconds: durationToSeconds(duration),
+          resolution,
+          hasVideoReference: false
+        });
+        cost.aspectRatio = aspectRatio;
+        cost.routeKind = route.kind;
       }
 
       const output = await downloadVideo(req, remoteVideo.url, route.kind);
-      const cost = estimateSeedanceCost({
-        speed,
-        duration,
-        resolution,
-        aspectRatio,
-        endpoint: route.endpoint,
-        routeKind: route.kind
-      });
       const historyItem = {
-        id: result.requestId || randomUUID(),
+        id: requestId || randomUUID(),
         createdAt: new Date().toISOString(),
         mediaType: "video",
-        provider: "fal.ai",
+        provider: providerName,
         modelName: speed === "fast" ? "Seedance 2.0 Fast" : "Seedance 2.0",
         prompt,
         submittedPrompt: promptForFal,
-        endpoint: route.endpoint,
+        endpoint,
         mode: route.label,
         project: {
           id: "video",
@@ -4366,7 +5674,8 @@ app.post(
           duration,
           aspectRatio,
           generateAudio,
-          seed: result?.data?.seed ?? seed ?? null
+          seed: resultSeed,
+          runtimeProvider
         },
         cost,
         uploadedFiles,
@@ -4379,9 +5688,10 @@ app.post(
       await appendHistory(historyItem);
 
       res.json({
-        requestId: result.requestId,
-        seed: result?.data?.seed,
-        endpoint: route.endpoint,
+        requestId,
+        seed: resultSeed,
+        endpoint,
+        provider: providerName,
         mode: route.label,
         cost,
         video: {
@@ -4619,6 +5929,7 @@ async function ensureWorkflowPackageDirs(packagePath) {
     mkdir(path.join(packagePath, workflowPackageInputDirName), { recursive: true }),
     mkdir(path.join(packagePath, workflowPackageOutputDirName), { recursive: true }),
     mkdir(path.join(packagePath, workflowPackageDependencyDirName), { recursive: true }),
+    mkdir(path.join(packagePath, workflowPackageThumbnailDirName), { recursive: true }),
     mkdir(metadataDir, { recursive: true })
   ]);
   await hideWorkflowPackageMetadataDir(metadataDir);
@@ -4926,7 +6237,12 @@ function workflowPackageAssetCandidatesForLocalPath(publicPath) {
   return [
     path.join(group, relativePath),
     path.join(group, fileName),
-    ...(isUpload ? [] : [path.join(workflowPackageDependencyDirName, relativePath), path.join(workflowPackageDependencyDirName, fileName)])
+    ...(isUpload ? [] : [
+      path.join(workflowPackageDependencyDirName, relativePath),
+      path.join(workflowPackageDependencyDirName, fileName),
+      path.join(workflowPackageThumbnailDirName, relativePath),
+      path.join(workflowPackageThumbnailDirName, fileName)
+    ])
   ];
 }
 
@@ -4940,9 +6256,10 @@ function tryLocalPublicPath(value) {
 
 function workflowPackageAssetGroup(publicPath) {
   if (String(publicPath || "").startsWith("/uploads/")) return workflowPackageInputDirName;
+  if (/(?:^|\/)thumbnails\//i.test(String(publicPath || ""))) return workflowPackageThumbnailDirName;
   const packagePath = workflowPackageRelativePath(publicPath);
   const firstSegment = packagePath ? packagePath.split(/[\\/]/)[0] : "";
-  if ([workflowPackageInputDirName, workflowPackageOutputDirName, workflowPackageDependencyDirName].includes(firstSegment)) return firstSegment;
+  if ([workflowPackageInputDirName, workflowPackageOutputDirName, workflowPackageDependencyDirName, workflowPackageThumbnailDirName].includes(firstSegment)) return firstSegment;
   return workflowPackageOutputDirName;
 }
 
@@ -4979,6 +6296,18 @@ async function selectFolderWithDialog({ title = "Choose folder", defaultPath = "
   }
 
   return selectFolderWithLinuxDialog({ title, defaultPath });
+}
+
+async function selectSavePathWithDialog({ title = "Save export", defaultPath = "", defaultName = "export", extension = "" } = {}) {
+  if (process.platform === "win32") {
+    return selectSavePathWithWindowsDialog({ title, defaultPath, defaultName, extension });
+  }
+
+  if (process.platform === "darwin") {
+    return selectSavePathWithMacDialog({ title, defaultPath, defaultName });
+  }
+
+  return selectSavePathWithLinuxDialog({ title, defaultPath, defaultName, extension });
 }
 
 async function selectWorkflowFileWithDialog({ title = "Open NewtNode workflow", defaultPath = "" } = {}) {
@@ -5101,7 +6430,7 @@ function workflowShouldRegisterOpenedPackage(workflow, packagePath) {
   if (workflow.packagePath || workflow.package?.rootPath || workflow.package?.workflowFileName) return true;
   if ([...collectWorkflowAssetUrls(workflow.graph)].some((url) => String(url || "").startsWith(`${workflowAssetsPrefix}/`))) return true;
   if (existsSync(workflowPackageManifestPath(packagePath)) || existsSync(legacyWorkflowPackageManifestPath(packagePath))) return true;
-  return [workflowPackageInputDirName, workflowPackageOutputDirName, workflowPackageDependencyDirName].some((directoryName) =>
+  return [workflowPackageInputDirName, workflowPackageOutputDirName, workflowPackageDependencyDirName, workflowPackageThumbnailDirName].some((directoryName) =>
     existsSync(path.join(packagePath, directoryName))
   );
 }
@@ -5309,6 +6638,33 @@ exit 2
   return runFileDialogCommand("powershell.exe", ["-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-Command", script]);
 }
 
+async function selectSavePathWithWindowsDialog({ title, defaultPath, defaultName, extension }) {
+  const selectedPath = existingDirectoryPath(defaultPath) || rootDir;
+  const normalizedExtension = String(extension || "").replace(/^\.+/, "").replace(/[^A-Za-z0-9]+/g, "");
+  const safeDefaultName = path.basename(String(defaultName || "export"));
+  const script = `
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Windows.Forms
+$dialog = New-Object System.Windows.Forms.SaveFileDialog
+$dialog.Title = ${powershellStringLiteral(title)}
+$dialog.InitialDirectory = ${powershellStringLiteral(selectedPath)}
+$dialog.FileName = ${powershellStringLiteral(safeDefaultName)}
+$dialog.OverwritePrompt = $true
+$dialog.AddExtension = ${normalizedExtension ? "$true" : "$false"}
+$dialog.DefaultExt = ${powershellStringLiteral(normalizedExtension)}
+$dialog.Filter = ${powershellStringLiteral(normalizedExtension ? `${normalizedExtension.toUpperCase()} files (*.${normalizedExtension})|*.${normalizedExtension}|All files (*.*)|*.*` : "All files (*.*)|*.*")}
+$result = $dialog.ShowDialog()
+if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
+  [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
+  Write-Output $dialog.FileName
+  exit 0
+}
+exit 2
+`;
+
+  return runFileDialogCommand("powershell.exe", ["-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-Command", script]);
+}
+
 function powershellStringLiteral(value) {
   return `'${String(value || "").replace(/'/g, "''")}'`;
 }
@@ -5330,6 +6686,27 @@ async function selectFolderWithLinuxDialog({ title, defaultPath }) {
   } catch (error) {
     if (error.code === "DIALOG_CANCELED") throw error;
     return runFolderDialogCommand("kdialog", ["--getexistingdirectory", selectedPath || rootDir]);
+  }
+}
+
+async function selectSavePathWithMacDialog({ title, defaultPath, defaultName }) {
+  const selectedDirectory = existingDirectoryPath(defaultPath) || rootDir;
+  const safeDefaultName = path.basename(String(defaultName || "export"));
+  const script = `POSIX path of (choose file name with prompt ${JSON.stringify(title)} default name ${JSON.stringify(safeDefaultName)} default location POSIX file ${JSON.stringify(selectedDirectory)})`;
+  return runFileDialogCommand("osascript", ["-e", script]);
+}
+
+async function selectSavePathWithLinuxDialog({ title, defaultPath, defaultName, extension }) {
+  const selectedDirectory = existingDirectoryPath(defaultPath) || rootDir;
+  const normalizedExtension = String(extension || "").replace(/^\.+/, "").replace(/[^A-Za-z0-9]+/g, "");
+  const safeDefaultName = path.basename(String(defaultName || "export"));
+  try {
+    const args = ["--file-selection", "--save", "--confirm-overwrite", `--title=${title}`, `--filename=${path.join(selectedDirectory, safeDefaultName)}`];
+    if (normalizedExtension) args.push(`--file-filter=${normalizedExtension.toUpperCase()} files | *.${normalizedExtension}`);
+    return await runFileDialogCommand("zenity", args);
+  } catch (error) {
+    if (error.code === "DIALOG_CANCELED") throw error;
+    return runFileDialogCommand("kdialog", ["--getsavefilename", path.join(selectedDirectory, safeDefaultName), normalizedExtension ? `*.${normalizedExtension}|${normalizedExtension.toUpperCase()} files` : "*|All files"]);
   }
 }
 
@@ -6664,15 +8041,100 @@ async function downloadImage(req, url, kind, mimeTypeHint = "") {
   const mimeType = normalizeMimeType(mimeTypeHint || response.headers.get("content-type") || "image/png");
   const extension = imageExtensionForUrl(url, mimeType);
   const output = await createManagedAssetTarget(req, kind, extension, workflowPackageOutputDirName);
-  const bytes = Buffer.from(await response.arrayBuffer());
-  await writeFile(output.filePath, bytes);
+  if (!response.body) throw new Error("Generated image download returned no data.");
+
+  try {
+    await pipeline(Readable.fromWeb(response.body), createWriteStream(output.filePath));
+  } catch (error) {
+    await rm(output.filePath, { force: true }).catch(() => {});
+    throw error;
+  }
+
+  const outputStats = await stat(output.filePath);
+  const thumbnail = await createImagePreview(req, output, kind);
 
   return {
     fileName: output.fileName,
     publicPath: output.publicPath,
-    bytes: bytes.length,
-    mimeType
+    bytes: outputStats.size,
+    mimeType,
+    thumbnailPublicPath: thumbnail?.publicPath || "",
+    thumbnailFileName: thumbnail?.fileName || ""
   };
+}
+
+async function createImagePreview(requestLike, source, kind = "image") {
+  if (!source?.filePath) return null;
+  const sourceBaseName = path.basename(source.fileName || kind, path.extname(source.fileName || ""));
+  const target = await createManagedAssetTarget(requestLike, `${kind}-preview`, ".jpg", workflowPackageThumbnailDirName, {
+    fileNameBase: `${sourceBaseName}-preview`
+  });
+
+  try {
+    await runFfmpeg([
+      "-y",
+      "-i", source.filePath,
+      "-vf", "scale=min(640\\,iw):-2",
+      "-frames:v", "1",
+      "-q:v", "5",
+      "-map_metadata", "-1",
+      target.filePath
+    ], "Image preview", 60000);
+    return target;
+  } catch (error) {
+    await rm(target.filePath, { force: true }).catch(() => {});
+    console.warn("Image preview generation skipped:", error.message);
+    return null;
+  }
+}
+
+async function ensureRuntimeImageThumbnail(value) {
+  const publicPath = localPublicPathFromUrl(value);
+  const cleanPath = publicPath.split("?")[0].split("#")[0];
+  if (/\/(?:thumbnails)\//i.test(cleanPath) || /-preview(?:-\d+)?\.jpe?g$/i.test(cleanPath)) {
+    return cleanPath;
+  }
+  if (!/\.(?:png|jpe?g|webp|gif)$/i.test(cleanPath)) {
+    throw httpError(400, "Only local image assets can be previewed.");
+  }
+
+  const source = await resolveLocalAssetPath(cleanPath);
+  const sourceStats = await stat(source.filePath);
+  const cacheKey = createHash("sha256")
+    .update(`${cleanPath}:${sourceStats.size}:${sourceStats.mtimeMs}`)
+    .digest("hex")
+    .slice(0, 24);
+  const targetFileName = `${cacheKey}-preview.jpg`;
+  const targetFilePath = path.join(runtimeThumbnailsDir, targetFileName);
+  const targetPublicPath = `/outputs/thumbnails/runtime/${targetFileName}`;
+
+  if (existsSync(targetFilePath)) return targetPublicPath;
+  if (runtimeThumbnailJobs.has(targetFilePath)) return runtimeThumbnailJobs.get(targetFilePath);
+
+  const thumbnailJob = (async () => {
+    const temporaryPath = `${targetFilePath}.${randomUUID()}.tmp.jpg`;
+    try {
+      await runFfmpeg([
+        "-y",
+        "-i", source.filePath,
+        "-vf", "scale=min(640\\,iw):-2",
+        "-frames:v", "1",
+        "-q:v", "5",
+        "-map_metadata", "-1",
+        temporaryPath
+      ], "Runtime image preview", 60000);
+      await rename(temporaryPath, targetFilePath);
+      return targetPublicPath;
+    } catch (error) {
+      await rm(temporaryPath, { force: true }).catch(() => {});
+      throw error;
+    }
+  })().finally(() => {
+    runtimeThumbnailJobs.delete(targetFilePath);
+  });
+
+  runtimeThumbnailJobs.set(targetFilePath, thumbnailJob);
+  return thumbnailJob;
 }
 
 async function downloadModelFile(req, url, kind, mimeTypeHint = "") {
@@ -6889,6 +8351,8 @@ function historyMetadataSummary(item = {}) {
     node: item.node ? { id: item.node.id || "", title: item.node.title || "", type: item.node.type || "" } : null,
     localImage: item.localImage || "",
     localImages: Array.isArray(item.localImages) ? item.localImages : [],
+    localThumbnail: item.localThumbnail || "",
+    localThumbnails: Array.isArray(item.localThumbnails) ? item.localThumbnails : [],
     localVideo: item.localVideo || "",
     localVideos: Array.isArray(item.localVideos) ? item.localVideos : [],
     localAudio: item.localAudio || "",
@@ -7029,12 +8493,18 @@ function writeFalDebugLog(entry) {
   const consoleMessage = formatFalDebugConsoleLine(entry);
   if (consoleMessage) console.log(consoleMessage);
 
-  void (async () => {
-    await mkdir(dataDir, { recursive: true });
-    await appendFile(falDebugLogPath, `${line}\n`);
-  })().catch((error) => {
-    console.warn("Fal debug log write failed:", error.message);
-  });
+  falDebugWriteQueue = falDebugWriteQueue
+    .then(async () => {
+      await mkdir(dataDir, { recursive: true });
+      const metadata = await stat(falDebugLogPath).catch(() => null);
+      if (metadata?.size > 2 * 1024 * 1024) {
+        const rotatedPath = `${falDebugLogPath}.1`;
+        await rm(rotatedPath, { force: true }).catch(() => {});
+        await rename(falDebugLogPath, rotatedPath).catch(() => {});
+      }
+      await appendFile(falDebugLogPath, `${line}\n`);
+    })
+    .catch((error) => console.warn("Fal debug log write failed:", error.message));
 }
 
 function formatFalDebugConsoleLine(entry) {
@@ -7267,13 +8737,23 @@ const seedanceResolutionDimensions = {
     "1:1": [1536, 1536],
     "3:4": [1344, 1792],
     "9:16": [1152, 2048]
+  },
+  "4k": {
+    "21:9": [3840, 1648],
+    "16:9": [3840, 2160],
+    "4:3": [2880, 2160],
+    "1:1": [2160, 2160],
+    "3:4": [2160, 2880],
+    "9:16": [2160, 3840]
   }
 };
 
 function estimateSeedanceCost({ speed, duration, resolution, aspectRatio, endpoint, routeKind }) {
   const seconds = durationToSeconds(duration);
   const isFast = speed === "fast" || String(endpoint || "").includes("/fast/");
-  const unitRateUsd = isFast ? seedanceFastCostPerThousandTokens : seedanceStandardCostPerThousandTokens;
+  const unitRateUsd = resolution === "4k"
+    ? seedance4KCostPerThousandTokens
+    : isFast ? seedanceFastCostPerThousandTokens : seedanceStandardCostPerThousandTokens;
   const dimensions = seedanceBillingDimensions(resolution, aspectRatio);
   const billableUnits = (dimensions.width * dimensions.height * seconds * seedanceBillingFps) / 1024 / 1000;
   const amountUsd = roundCurrency(billableUnits * unitRateUsd);
@@ -7292,7 +8772,7 @@ function estimateSeedanceCost({ speed, duration, resolution, aspectRatio, endpoi
     durationSeconds: seconds,
     billingFps: seedanceBillingFps,
     pricingBasis: "Seedance 2.0 fal.ai token estimate: width * height * duration * 24 / 1024, billed per 1K tokens",
-    pricingSource: "fal-model-page-2026-05-18",
+    pricingSource: "fal-model-page-2026-07-10",
     routeKind
   };
 }
@@ -7340,7 +8820,7 @@ function estimateWan27ReferenceVideoCost({ endpoint, duration, outputVideo, refe
 }
 
 function seedanceBillingDimensions(resolution, aspectRatio) {
-  const normalizedResolution = normalizeChoice(resolution, ["480p", "720p", "1080p"], "720p");
+  const normalizedResolution = normalizeChoice(resolution, ["480p", "720p", "1080p", "4k"], "720p");
   const normalizedAspectRatio = normalizeAspectRatio(aspectRatio);
   const [width, height] =
     seedanceResolutionDimensions[normalizedResolution]?.[normalizedAspectRatio] ||
@@ -7631,6 +9111,22 @@ function estimateQwenCameraEditCost({ endpoint, image }) {
   };
 }
 
+function estimateNanoBanana2ImageCost({ resolution, endpoint }) {
+  const amountUsd = estimateNanoBanana2Cost(resolution);
+  return {
+    amountUsd: roundCurrency(amountUsd),
+    currency: "USD",
+    unitRateUsd: amountUsd,
+    units: 1,
+    unit: "image",
+    mediaType: "image",
+    resolution,
+    pricingBasis: "Nano Banana 2 fal.ai per-image estimate with high thinking",
+    pricingSource: "fal-model-page-2026-07-15",
+    endpoint
+  };
+}
+
 function estimateImageCost({ resolution }) {
   const normalized = String(resolution || "2K").toUpperCase();
   const amountUsd = normalized.includes("4K") ? nanoBananaCost4K : nanoBananaCost1K2K;
@@ -7664,6 +9160,30 @@ function estimateZImageCost({ endpoint, resolution, imageSize }) {
     pricingBasis: "Z-Image Turbo fal.ai per-megapixel estimate at $0.005/MP",
     pricingSource: "fal-model-page-2026-06-04",
     endpoint
+  };
+}
+
+function estimateSeedream5ProCost({ resolution, imageSize, layerSeparation = false }) {
+  const width = Number(imageSize?.width || 0);
+  const height = Number(imageSize?.height || 0);
+  const is2K = width * height > 1536 * 1536;
+  const unitRateUsd = is2K ? seedream5ProCost2K : seedream5ProCostSmall;
+  const units = 1;
+  const layerCost = layerSeparation ? seedreamLayerSeparationCost : 0;
+  return {
+    amountUsd: roundCurrency(unitRateUsd + layerCost),
+    currency: "USD",
+    unitRateUsd,
+    units,
+    unit: "image",
+    mediaType: "image",
+    resolution,
+    imageSize,
+    pricingBasis: layerSeparation
+      ? "Seedream 5.0 Pro image plus fal.ai RGBA layer decomposition estimate"
+      : "Seedream 5.0 Pro tentative fal.ai per-output-image estimate",
+    pricingSource: "fal-model-page-2026-07-10",
+    endpoint: falSeedream5ProTextEndpoint
   };
 }
 
@@ -7731,18 +9251,21 @@ function estimateHunyuan3DProCost({ generateType, enablePbr, faceCount, inputIma
   };
 }
 
-function estimateOpenAiImage2Cost({ resolution, size, quality }) {
+function estimateOpenAiImage2Cost({ resolution, size, quality, endpoint }) {
+  const edit = String(endpoint || "").includes("/edit");
+  const amountUsd = estimateOpenAiImage2OutputCost({ resolution, size, quality, edit });
   return {
-    amountUsd: roundCurrency(openAiImage2MediumCost),
+    amountUsd: roundCurrency(amountUsd),
     currency: "USD",
-    unitRateUsd: openAiImage2MediumCost,
+    unitRateUsd: amountUsd,
     units: 1,
     unit: "image",
     mediaType: "image",
     resolution,
     size,
     quality,
-    pricingBasis: "OpenAI GPT Image 2 medium image output estimate"
+    pricingBasis: `OpenAI GPT Image 2 ${quality} image output estimate`,
+    pricingSource: "fal-model-page-2026-07-11"
   };
 }
 
@@ -7933,10 +9456,41 @@ function normalizedMediaInputs(items, mediaType) {
     .map((item) => ({
       label: String(item?.label || `${mediaType} input`).trim(),
       url: String(item?.url || "").trim(),
+      tag: normalizeSkillDirectorReferenceTag(item?.tag || item?.label),
+      description: String(item?.description || "").trim(),
       type: mediaType
     }))
     .filter((item) => isLocalAssetUrl(item.url))
     .slice(0, 6);
+}
+
+function normalizeSkillDirectorReferenceTag(value) {
+  const cleaned = String(value || "Reference")
+    .replace(/^@+/, "")
+    .replace(/\.[a-z0-9]+$/i, "")
+    .trim();
+  const compact = cleaned
+    .split(/[^A-Za-z0-9]+/)
+    .filter(Boolean)
+    .map((part) => part.slice(0, 1).toUpperCase() + part.slice(1))
+    .join("");
+  return `@${compact || "Reference"}`;
+}
+
+function normalizeSkillDirectorShotCount(value) {
+  const text = String(value || "Auto").trim();
+  if (/^auto$/i.test(text)) return "Auto";
+  const count = Number.parseInt(text, 10);
+  return Number.isInteger(count) && count >= 1 && count <= 25 ? String(count) : "Auto";
+}
+
+function normalizeSkillDirectorDurationSeconds(value) {
+  const count = Number.parseInt(String(value || "15"), 10);
+  return ["5", "10", "15", "20", "30"].includes(String(count)) ? String(count) : "15";
+}
+
+function skillDirectorDurationLabel(durationSeconds = "15") {
+  return `${normalizeSkillDirectorDurationSeconds(durationSeconds)}-second`;
 }
 
 function textInputContext(textInputs) {
@@ -7987,6 +9541,848 @@ async function processTextWithFal({ text, textInputs, imageInputs, videoInputs }
     submittedPrompt: prompt,
     usage: falResultUsage(data),
     helperUsages: [...imageContext.usages, ...videoContext.usages]
+  };
+}
+
+const skillDirectorSceneRules =
+  "Scene rules: cinematic naturalism, premium live-action realism, motivated light, cine lens language, grounded acting, real physics, no subtitles, no music, continuity, 24fps smooth motion, environmental SFX, natural ambience.";
+const skillDirectorFinalPromptMaxChars = 7000;
+
+function skillDirectorSystemPrompt() {
+  return "You are NewtNode's Film Director: a professional director and cinematographer planning production-ready scenes for an AI video generator. Preserve connected @tags and the user's story intent. Prioritize playable pacing, motivated camera coverage, blocking, eyelines, screen direction, spatial geography, prop state, lighting, wardrobe, performance, and emotional continuity. Give neighboring shots distinct editorial purposes and do not invent major scene content. Return only the requested output contract without commentary.";
+}
+
+function skillDirectorSceneReferenceLines({ characterInputs = [], locationInputs = [], elementInputs = [] } = {}) {
+  return [...characterInputs, ...locationInputs, ...elementInputs]
+    .filter((item) => item?.tag)
+    .map((item) => {
+      const label = item.label && item.label !== item.tag ? ` (${item.label})` : "";
+      const typeLabel = item.type === "character" ? "Character" : item.type === "location" ? "Location" : "Prop";
+      const description = item.description || `${typeLabel} reference${label}.`;
+      return `${item.tag} = ${description}`;
+    });
+}
+
+function skillDirectorStyleReferenceLines(styleInputs = []) {
+  return styleInputs
+    .filter((item) => item?.tag)
+    .map((_item, index) => `Visual style reference ${index + 1} is available for abstract tone, pacing, color, texture, and cinematic atmosphere.`);
+}
+
+function skillDirectorReferenceSetupFromLines(referenceLines = []) {
+  return referenceLines.length ? `Reference setup:\n${referenceLines.join("\n")}` : "";
+}
+
+function skillDirectorShotCountDirective(shotCount = "Auto", durationSeconds = "15") {
+  const durationLabel = skillDirectorDurationLabel(durationSeconds);
+  if (shotCount === "Auto") {
+    const cutLimit = filmDirectorCutLimit(durationSeconds);
+    return [
+      `Shot count: Auto. Before writing any CUT sections, analyze the entire provided ${durationLabel} scene context, including the Scene Overview, required actions, dialogue beats, Style Direction, Camera Direction, continuity needs, and connected references.`,
+      `Choose between 1 and ${cutLimit} cuts. Use the fewest cuts that tell the scene clearly while preserving readable pacing; do not add coverage that has no editorial purpose.`,
+      "Return the chosen number as recommendedShotCount and return exactly that many cut objects."
+    ].join(" ");
+  }
+  const label = shotCount === "1" ? "shot" : "shots";
+  return `Shot count: exactly ${shotCount} ${label}. Return exactly ${shotCount} cut object${shotCount === "1" ? "" : "s"} inside one ${durationLabel} scene.`;
+}
+
+function skillDirectorContinuityMapDirective(durationLabel = "15 seconds") {
+  return [
+    "Before writing SHOT_LIST, silently build a Continuity Map for the scene.",
+    "The hidden Continuity Map must track: location geography, character starting and ending positions, screen direction and 180-degree line, prop states, lighting/time of day, wardrobe/physical continuity, emotional progression, and action state changes.",
+    "Do not print a CONTINUITY_MAP section. Use the hidden map to write one compact Continuity ledger line and to keep every CUT spatially and emotionally consistent.",
+    `For insert shots, close-ups, cutaways, or object details, preserve the hidden scene geography from surrounding shots instead of letting the insert redefine the ${durationLabel} scene.`
+  ].join(" ");
+}
+
+function skillDirectorShotLogicDirective(durationLabel = "15 seconds", characterCount = 0) {
+  const coverageDirection = characterCount > 1
+    ? "For multi-character dialogue or reactions, matching shot sizes are welcome when the cut clearly changes subjects, such as a CU of one character followed by a CU of another. If the same character remains the subject, create a more meaningful scale or angle change."
+    : "For a continuous single-character scene, avoid neighboring cuts that are too close in scale, such as ECU to CU or CU to MCU. Favor a meaningful contrast such as ECU to MS or WS, unless a closely matched cut has a clear story purpose.";
+  return [
+    "Run a Shot Logic Pass before finalizing SHOT_LIST.",
+    "Check that each CUT has a clear editorial purpose, a distinct enough shot size or angle from neighboring cuts, and a logical action handoff into the next CUT.",
+    coverageDirection,
+    "Maintain the 180-degree line, eyelines, screen direction, character side-of-frame, prop state continuity, wardrobe continuity, lighting direction, and emotional progression.",
+    "Avoid near-duplicate consecutive setups unless the scene specifically needs a locked-off repeat.",
+    `Keep the whole plan playable inside one ${durationLabel} video generation.`
+  ].join(" ");
+}
+
+function normalizeSkillDirectorAction(action = "build") {
+  const normalized = String(action || "").trim().toLowerCase();
+  if (normalized === "style") return "style";
+  if (normalized === "motion") return "motion";
+  if (normalized === "shotlist" || normalized === "shot-list" || normalized === "shot_list") return "shotList";
+  if (normalized === "revise" || normalized === "revision" || normalized === "notes") return "revise";
+  return "build";
+}
+
+function requestedSkillDirectorShotCount(shotCount = "Auto") {
+  const count = Number.parseInt(String(shotCount || ""), 10);
+  return Number.isInteger(count) && count >= 1 && count <= 25 ? count : null;
+}
+
+function largestSkillDirectorCutNumber(text) {
+  return [...String(text || "").matchAll(/\bCUT\s+(\d{1,2})\b/gi)]
+    .map((match) => Number.parseInt(match[1], 10))
+    .filter((count) => Number.isInteger(count))
+    .reduce((largest, count) => Math.max(largest, count), 0);
+}
+
+function extractSkillDirectorBlock(text, marker) {
+  const source = String(text || "");
+  const pattern = new RegExp(`${marker}:\\s*([\\s\\S]*?)(?=\\n[A-Z_ ]{3,}:|$)`, "i");
+  return source.match(pattern)?.[1]?.trim() || "";
+}
+
+function stripSkillDirectorFences(text) {
+  return String(text || "")
+    .replace(/^```(?:text|markdown)?/i, "")
+    .replace(/```$/i, "")
+    .trim();
+}
+
+function composeSkillDirectorFinalPrompt({ referenceLines = [], styleDirection = "", motionDirection = "", shotList = "", shotListNotes = "" } = {}) {
+  const seenInstructions = new Set(skillDirectorInstructionUnits(skillDirectorSceneRules).map(skillDirectorInstructionKey));
+  const continuityNotes = skillDirectorContinuityNotesForFinal(shotListNotes);
+  const cameraDirection = skillDirectorCameraDirectionForFinal(motionDirection);
+  const cleanStyle = dedupeSkillDirectorInstructions(cleanSkillDirectorMoodBoardReferences(styleDirection), seenInstructions);
+  const cleanCamera = dedupeSkillDirectorInstructions(cameraDirection, seenInstructions);
+  const cleanContinuity = dedupeSkillDirectorInstructions(continuityNotes, seenInstructions);
+  const cleanShotList = compactSkillDirectorShotList(shotList, 420);
+  let finalPrompt = [
+    dedupeSkillDirectorLines(referenceLines).join("\n"),
+    skillDirectorSceneRules,
+    cleanStyle ? `Style Direction:\n${cleanStyle}` : "",
+    cleanCamera ? `Camera Direction:\n${cleanCamera}` : "",
+    cleanContinuity ? `Scene Continuity:\n${cleanContinuity}` : "",
+    cleanShotList ? `Shot List:\n${cleanShotList}` : ""
+  ]
+    .filter(Boolean)
+    .join("\n\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  if (finalPrompt.length > skillDirectorFinalPromptMaxChars) {
+    finalPrompt = [
+      clipSkillDirectorText(dedupeSkillDirectorLines(referenceLines).join("\n"), 1400),
+      skillDirectorSceneRules,
+      cleanStyle ? `Style Direction:\n${clipSkillDirectorText(cleanStyle, 700)}` : "",
+      cleanCamera ? `Camera Direction:\n${clipSkillDirectorText(cleanCamera, 500)}` : "",
+      cleanContinuity ? `Scene Continuity:\n${clipSkillDirectorText(cleanContinuity, 500)}` : "",
+      cleanShotList ? `Shot List:\n${compactSkillDirectorShotList(cleanShotList, 280)}` : ""
+    ].filter(Boolean).join("\n\n");
+  }
+
+  return clipSkillDirectorText(finalPrompt, skillDirectorFinalPromptMaxChars);
+}
+
+function dedupeSkillDirectorLines(lines = []) {
+  const seen = new Set();
+  return lines.filter((line) => {
+    const key = String(line || "").toLowerCase().replace(/\s+/g, " ").trim();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function skillDirectorInstructionUnits(text = "") {
+  return String(text || "")
+    .split(/(?<=[.!?])\s+|\n+/)
+    .map((unit) => unit.trim())
+    .filter(Boolean);
+}
+
+function skillDirectorInstructionKey(text = "") {
+  return String(text || "").toLowerCase().replace(/[^a-z0-9@]+/g, " ").trim();
+}
+
+function dedupeSkillDirectorInstructions(text = "", seen = new Set()) {
+  return skillDirectorInstructionUnits(text)
+    .filter((unit) => {
+      const key = skillDirectorInstructionKey(unit);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .join(" ")
+    .trim();
+}
+
+function clipSkillDirectorText(text = "", maxChars = 7000) {
+  const source = String(text || "").trim();
+  if (source.length <= maxChars) return source;
+  const clipped = source.slice(0, Math.max(0, maxChars - 1));
+  const boundary = Math.max(clipped.lastIndexOf(". "), clipped.lastIndexOf("\n"), clipped.lastIndexOf(" "));
+  return `${clipped.slice(0, boundary > maxChars * 0.72 ? boundary + 1 : clipped.length).trim()}`;
+}
+
+function compactSkillDirectorShotList(text = "", maxCharsPerCut = 420) {
+  const source = cleanSkillDirectorMoodBoardReferences(sanitizeSkillDirectorShotListFormatting(text));
+  if (!source) return "";
+  return source
+    .split(/(?=\bCUT\s+\d{1,2}\s+—)/gi)
+    .map((cut) => clipSkillDirectorText(cut.trim(), maxCharsPerCut))
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function sanitizeSkillDirectorShotListFormatting(text = "") {
+  return String(text || "")
+    .replace(/\[/g, "")
+    .replace(/\]/g, "")
+    .replace(/\s+(?=\bCUT\s+\d{1,2}\b)/gi, "\n\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function splitSkillDirectorShotListNotes(text = "") {
+  const source = sanitizeSkillDirectorShotListFormatting(text).replace(/^SHOT_LIST:\s*/i, "").trim();
+  if (!source) return { shotList: "", shotListNotes: "" };
+
+  const cutMatch = source.match(/\bCUT\s+\d{1,2}\b/i);
+  if (cutMatch && cutMatch.index > 0) {
+    const prefix = source.slice(0, cutMatch.index).trim();
+    const body = source.slice(cutMatch.index).trim();
+    if (/(continuity\s+(?:rules|map|ledger)|must[-\s]*have\s+shots|must[-\s]*have\s+actions)/i.test(prefix)) {
+      return {
+        shotList: body,
+        shotListNotes: normalizeSkillDirectorShotListNotes(prefix)
+      };
+    }
+  }
+
+  const lines = source.split(/\n+/);
+  const noteLines = [];
+  const bodyLines = [];
+  let collectingBody = false;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    if (!collectingBody && /^(continuity\s+(?:rules|map|ledger)|must[-\s]*have\s+shots|must[-\s]*have\s+actions)\s*:/i.test(trimmed)) {
+      noteLines.push(trimmed);
+      continue;
+    }
+    collectingBody = true;
+    bodyLines.push(trimmed);
+  }
+
+  return {
+    shotList: bodyLines.join("\n\n").trim() || source,
+    shotListNotes: normalizeSkillDirectorShotListNotes(noteLines.join("\n"))
+  };
+}
+
+function normalizeSkillDirectorShotListNotes(text = "") {
+  return String(text || "")
+    .replace(/^SHOT_LIST:\s*/i, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function skillDirectorContinuityNotesForFinal(text = "") {
+  const source = cleanSkillDirectorMoodBoardReferences(normalizeSkillDirectorShotListNotes(text));
+  if (!source) return "";
+
+  const continuityMatch = source.match(/continuity\s+(?:rules|map|ledger)\s*:\s*([\s\S]*?)(?=\s*must[-\s]*have\s+(?:shots?\s+or\s+actions|shots?|actions)\s*:|$)/i);
+  const continuityOnly = continuityMatch
+    ? continuityMatch[1]
+    : source
+        .replace(/must[-\s]*have\s+(?:shots?\s+or\s+actions|shots?|actions)\s*:[\s\S]*$/i, "")
+        .replace(/continuity\s+(?:rules|map|ledger)\s*:/i, "");
+
+  return continuityOnly
+    .replace(/\[/g, "")
+    .replace(/\]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function skillDirectorCameraDirectionForFinal(text = "") {
+  const source = cleanSkillDirectorMoodBoardReferences(text);
+  if (!source) return "";
+
+  return source
+    .replace(/^MOTION_DIRECTION:\s*/i, "")
+    .replace(/^Camera Direction:\s*/i, "")
+    .replace(/\s*\bCUT\s+\d{1,2}\b[\s\S]*$/i, "")
+    .replace(/\s*\bShot\s+List\s*:[\s\S]*$/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function cleanSkillDirectorMoodBoardReferences(text = "") {
+  return String(text || "")
+    .replace(/@MoodBoard\b/gi, "the established visual style")
+    .replace(/\bMoodBoard\b/gi, "the established visual style")
+    .replace(/\bMOOD_BOARD\.png\b/gi, "the established visual style")
+    .replace(/\bTRANSFER\.png\b/gi, "the established visual style")
+    .replace(/\bStyle\s+Board\s*\/\s*Mood\s+Board\b/gi, "the established visual style")
+    .replace(/\b(?:the\s+)?(?:connected\s+)?(?:style\s+board|mood\s+board)\b/gi, "the established visual style")
+    .replace(/\bvisual style reference-inspired\b/gi, "visually inspired")
+    .replace(/\bestablished visual style-inspired\b/gi, "visually inspired")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+function skillDirectorStructuredObject(text = "") {
+  try {
+    const parsed = parseStoryboardPlanJson(stripSkillDirectorFences(text));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function skillDirectorStructuredValue(object, keys = []) {
+  for (const key of keys) {
+    const value = object?.[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
+}
+
+function skillDirectorStructuredNumber(object, keys = []) {
+  for (const key of keys) {
+    const value = Number.parseInt(String(object?.[key] ?? ""), 10);
+    if (Number.isInteger(value)) return value;
+  }
+  return 0;
+}
+
+function cleanSkillDirectorCutField(value, fallback) {
+  return String(value || fallback || "")
+    .replace(/[\[\]\n\r]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function skillDirectorShotPlanFromOutput(outputText = "") {
+  const parsed = skillDirectorStructuredObject(outputText);
+  const rawCuts = Array.isArray(parsed?.cuts) ? parsed.cuts : Array.isArray(parsed?.shotList) ? parsed.shotList : [];
+  if (rawCuts.length) {
+    const cuts = rawCuts
+      .map((cut, index) => {
+        if (!cut || typeof cut !== "object") return null;
+        const description = cleanSkillDirectorCutField(cut.description || cut.action || cut.prompt, "");
+        if (!description) return null;
+        return {
+          number: index + 1,
+          shotFrame: cleanSkillDirectorCutField(cut.shotFrame || cut.shot_frame || cut.frame, "MS"),
+          cameraMovement: cleanSkillDirectorCutField(cut.cameraMovement || cut.camera_movement || cut.movement, "Static"),
+          shotType: cleanSkillDirectorCutField(cut.shotType || cut.shot_type || cut.type, "Coverage"),
+          description
+        };
+      })
+      .filter(Boolean);
+    const continuityLedger = cleanSkillDirectorCutField(
+      skillDirectorStructuredValue(parsed, ["continuityLedger", "continuity_ledger", "continuity"]),
+      ""
+    );
+    const mustHaveActions = cleanSkillDirectorCutField(
+      skillDirectorStructuredValue(parsed, ["mustHaveActions", "must_have_actions", "mustHaveShots", "must_have_shots"]),
+      ""
+    );
+    const declaredShotCount = skillDirectorStructuredNumber(parsed, ["recommendedShotCount", "recommended_shot_count", "shotCount", "shot_count"]);
+    return {
+      shotList: cuts
+        .map((cut) => `CUT ${cut.number} — shot frame: ${cut.shotFrame}; camera movement: ${cut.cameraMovement}; shot type: ${cut.shotType}:\n${cut.description}`)
+        .join("\n\n"),
+      shotListNotes: [
+        continuityLedger ? `Continuity ledger: ${continuityLedger}` : "",
+        mustHaveActions ? `Must-have shots or actions: ${mustHaveActions}` : ""
+      ].filter(Boolean).join("\n"),
+      cuts,
+      recommendedShotCount: declaredShotCount || cuts.length
+    };
+  }
+
+  const rawShotList = cleanSkillDirectorMoodBoardReferences(
+    sanitizeSkillDirectorShotListFormatting(extractSkillDirectorBlock(outputText, "SHOT_LIST") || outputText)
+  );
+  const split = splitSkillDirectorShotListNotes(rawShotList);
+  return {
+    shotList: split.shotList,
+    shotListNotes: split.shotListNotes,
+    cuts: [],
+    recommendedShotCount: largestSkillDirectorCutNumber(split.shotList)
+  };
+}
+
+function skillDirectorShotPlanIssues(plan, shotCount, durationSeconds = "15", characterTags = []) {
+  const issues = [];
+  const requestedCount = requestedSkillDirectorShotCount(shotCount);
+  const actualCount = largestSkillDirectorCutNumber(plan.shotList);
+  const cutLimit = filmDirectorCutLimit(durationSeconds);
+  if (requestedCount && actualCount !== requestedCount) {
+    issues.push(`Return exactly ${requestedCount} CUT sections; the draft contains ${actualCount || "none"}.`);
+  }
+  if (actualCount > cutLimit) {
+    issues.push(`Use no more than ${cutLimit} cuts at a one-second minimum for a ${normalizeSkillDirectorDurationSeconds(durationSeconds)}-second scene.`);
+  }
+  if (!requestedCount && (actualCount < 1 || actualCount > cutLimit)) {
+    issues.push(`Auto shot planning must choose between 1 and ${cutLimit} cuts for this scene; the draft contains ${actualCount || "none"}.`);
+  }
+  if (!requestedCount && plan.recommendedShotCount !== actualCount) {
+    issues.push(`recommendedShotCount must match the number of returned CUT sections (${actualCount || "none"}).`);
+  }
+  if (!/continuity\s+(?:ledger|rules|map)\s*:/i.test(plan.shotListNotes || "")) {
+    issues.push("Include one compact Continuity ledger value.");
+  }
+  if (!/must[-\s]*have\s+(?:shots?\s+or\s+actions|shots?|actions)\s*:/i.test(plan.shotListNotes || "")) {
+    issues.push("Include one compact Must-have shots or actions value.");
+  }
+  const setupMatches = [...String(plan.shotList || "").matchAll(/CUT\s+(\d+)\s+—\s+shot frame:\s*([^;\n]+);\s*camera movement:\s*([^;\n]+);\s*shot type:\s*([^:\n]+):/gi)];
+  for (let index = 1; index < setupMatches.length; index += 1) {
+    const previous = setupMatches[index - 1];
+    const current = setupMatches[index];
+    const previousDescription = String(plan.shotList || "").slice(previous.index + previous[0].length, current.index).trim();
+    const nextMatch = setupMatches[index + 1];
+    const currentDescription = String(plan.shotList || "").slice(current.index + current[0].length, nextMatch?.index ?? String(plan.shotList || "").length).trim();
+    const coverageIssue = filmDirectorAdjacentCoverageIssue(
+      { shotFrame: previous[2], description: previousDescription },
+      { shotFrame: current[2], description: currentDescription },
+      characterTags
+    );
+    if (coverageIssue) {
+      issues.push(`CUT ${previous[1]} and CUT ${current[1]} are too close in framing; ${coverageIssue}.`);
+      break;
+    }
+  }
+  return issues;
+}
+
+async function repairSkillDirectorShotPlan({ outputText, shotCount, durationSeconds, prompt, model, issues }) {
+  const repairPrompt = [
+    `Repair this ${skillDirectorDurationLabel(durationSeconds)} Film Director shot plan.`,
+    "Return strict JSON only with this exact shape:",
+    '{"recommendedShotCount":3,"continuityLedger":"one compact line","mustHaveActions":"one compact line","cuts":[{"number":1,"shotFrame":"WS","cameraMovement":"Static","shotType":"Over-the-Shoulder","description":"one concise playable shot under 30 words"}]}',
+    skillDirectorShotCountDirective(shotCount, durationSeconds),
+    "Fix these validation failures:",
+    issues.map((issue) => `- ${issue}`).join("\n"),
+    "Preserve the story, connected @tags, major actions, spatial geography, screen direction, prop states, lighting, wardrobe, and emotional progression.",
+    "Give neighboring shots distinct editorial purposes. Do not use markdown or add keys outside the schema.",
+    "Original planning context:",
+    prompt,
+    "Draft to repair:",
+    outputText
+  ].filter(Boolean).join("\n\n");
+  const data = await subscribeFal(skillDirectorLlmEndpoint, {
+    input: {
+      model,
+      prompt: repairPrompt,
+      system_prompt: skillDirectorSystemPrompt()
+    },
+    logs: true
+  });
+  return {
+    text: stripSkillDirectorFences(extractFalText(data)) || outputText,
+    usage: falResultUsage(data)
+  };
+}
+
+async function validateAndRepairSkillDirectorShotPlan({ outputText, shotCount, durationSeconds, prompt, model, characterTags = [] }) {
+  let nextText = outputText;
+  const usages = [];
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const plan = skillDirectorShotPlanFromOutput(nextText);
+    const issues = skillDirectorShotPlanIssues(plan, shotCount, durationSeconds, characterTags);
+    if (!issues.length) return { text: nextText, plan, usages };
+    const repaired = await repairSkillDirectorShotPlan({
+      outputText: nextText,
+      shotCount,
+      durationSeconds,
+      prompt,
+      model,
+      issues
+    });
+    nextText = repaired.text || nextText;
+    if (repaired.usage) usages.push(repaired.usage);
+  }
+
+  const plan = skillDirectorShotPlanFromOutput(nextText);
+  const requestedCount = requestedSkillDirectorShotCount(shotCount);
+  const actualCount = largestSkillDirectorCutNumber(plan.shotList);
+  if (requestedCount && actualCount !== requestedCount) {
+    throw new Error(`Film Director returned ${actualCount || "no"} CUT sections, but ${requestedCount} were requested. Please run again.`);
+  }
+  return { text: nextText, plan, usages };
+}
+
+function buildSkillDirectorPrompt({
+  action = "build",
+  sceneName,
+  sceneOverview,
+  motionBrief,
+  styleDirection,
+  motionDirection,
+  shotList,
+  shotListNotes,
+  characterInputs = [],
+  locationInputs = [],
+  elementInputs = [],
+  styleInputs = [],
+  shotCount = "3",
+  durationSeconds = "15",
+  imageDescriptions = []
+}) {
+  const durationLabel = skillDirectorDurationLabel(durationSeconds);
+  const referenceLines = skillDirectorSceneReferenceLines({ characterInputs, locationInputs, elementInputs });
+  const promptImageDescriptions = imageDescriptions.map(cleanSkillDirectorMoodBoardReferences).filter(Boolean);
+  const commonContext = [
+    sceneName ? `Scene name:\n${sceneName}` : "",
+    referenceLines.length ? `Tagged scene assets:\n${referenceLines.join("\n")}` : "",
+    referenceLines.length
+      ? "Use the @tags naturally inside the planning blocks whenever the asset appears in the scene. Do not rename or drop these tags."
+      : "",
+    sceneOverview ? `Scene Overview:\n${sceneOverview}` : "",
+    promptImageDescriptions.length ? `Connected visual analysis:\n${promptImageDescriptions.join("\n\n")}` : ""
+  ].filter(Boolean);
+
+  if (action === "style") {
+    return [
+      "Generate the Film Director Style Direction.",
+      'Return strict JSON only: {"styleDirection":"one production-ready paragraph"}',
+      "Describe cinematic look, tone, pacing, lighting mood, color behavior, texture, atmosphere, image quality, color grade, and performance texture.",
+      "If a visual style reference is connected, use it only to infer abstract visual qualities.",
+      "Do not mention or name the style reference. Do not describe, name, or reuse any objects, elements, locations, subjects, people, props, compositions, or story content found inside that reference.",
+      styleDirection ? `Existing editable Style Direction. Preserve useful user edits and revise only where the current scene context requires:\n${styleDirection}` : "",
+      ...commonContext,
+      "Do not use markdown or add keys outside the schema."
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+  }
+
+  if (action === "motion") {
+    return [
+      `Generate the Camera Direction for one cinematic ${durationLabel} video scene.`,
+      'Return strict JSON only: {"cameraDirection":"one production-ready paragraph"}',
+      "Translate the user's camera intent into clear coverage, framing, lens feel, blocking, and movement instructions.",
+      "Do not create the shot list yet.",
+      ...commonContext,
+      styleDirection ? `Locked Style Direction:\n${styleDirection}` : "",
+      motionDirection || motionBrief ? `User Camera Direction:\n${motionDirection || motionBrief}` : "",
+      "Do not use markdown or add keys outside the schema."
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+  }
+
+  if (action === "shotList") {
+    return [
+      `Create the Shot List for one cinematic ${durationLabel} AI video scene.`,
+      "Return strict JSON only with this exact shape:",
+      '{"recommendedShotCount":3,"continuityLedger":"one compact line","mustHaveActions":"one compact line","cuts":[{"number":1,"shotFrame":"WS","cameraMovement":"Static","shotType":"Over-the-Shoulder","description":"one concise playable shot under 30 words"}]}',
+      skillDirectorContinuityMapDirective(durationLabel),
+      skillDirectorShotLogicDirective(durationLabel, characterInputs.length),
+      "Each description must be one playable sentence under 30 words. Preserve every connected @tag exactly when that asset appears.",
+      skillDirectorShotCountDirective(shotCount, durationSeconds),
+      ...commonContext,
+      styleDirection ? `Locked Style Direction:\n${styleDirection}` : "",
+      motionDirection ? `Locked Camera Direction:\n${motionDirection}` : "",
+      shotList ? `Existing editable Shot List. Improve only if needed and preserve useful user edits:\n${shotList}` : "",
+      "Do not invent major characters, props, locations, or story turns. Do not use markdown or add keys outside the schema."
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+  }
+
+  return [
+    `NewtNode Film Director task: create cinematic video planning blocks for a ${durationLabel} AI video generation prompt.`,
+    "Return exactly these section markers, in this order, with no markdown fences and no extra commentary:",
+    "STYLE_DIRECTION:",
+    "MOTION_DIRECTION:",
+    "SHOT_LIST:",
+    "",
+    "STYLE_DIRECTION should describe the cinematic look, tone, pacing, lighting mood, color behavior, and performance texture. If a visual style reference is connected, use it only to describe the style direction, not as literal scene content.",
+    "MOTION_DIRECTION is the Camera Direction block and should translate the user's camera brief into clear coverage, framing, lens feel, blocking, and movement instructions.",
+    "SHOT_LIST must include Continuity ledger, Must-have shots or actions, and then the exact requested number of CUT sections.",
+    "Keep Continuity ledger and Must-have shots to one compact line each.",
+    "Keep a great focus on overall pacing and continuity across all shots with professional blocking and continuity rules.",
+    skillDirectorContinuityMapDirective(durationLabel),
+    skillDirectorShotLogicDirective(durationLabel, characterInputs.length),
+    "Keep each CUT description to one concise sentence, ideally under 30 words.",
+    "Each CUT must follow this format exactly:",
+    "CUT 1 — shot frame: WS; camera movement: Static; shot type: Over-the-Shoulder:",
+    "the generated shot description",
+    "Do not use square brackets anywhere in SHOT_LIST.",
+    "",
+    skillDirectorShotCountDirective(shotCount, durationSeconds),
+    sceneName ? `Scene name:\n${sceneName}` : "",
+    referenceLines.length ? `Tagged scene assets:\n${referenceLines.join("\n")}` : "",
+    referenceLines.length
+      ? "Use the @tags naturally inside the planning blocks whenever the asset appears in the scene. Do not rename or drop these tags."
+      : "",
+    styleDirection ? `Existing editable Style Direction. Improve only if needed:\n${styleDirection}` : "",
+    motionBrief ? `User Camera Direction Brief:\n${motionBrief}` : "",
+    motionDirection ? `Existing editable Camera Direction. Improve only if needed:\n${motionDirection}` : "",
+    sceneOverview ? `Scene Overview:\n${sceneOverview}` : "",
+    shotList ? `Existing editable Shot List. Improve only if needed and preserve useful user edits:\n${shotList}` : "",
+    promptImageDescriptions.length ? `Connected visual analysis:\n${promptImageDescriptions.join("\n\n")}` : "",
+    `Do not invent major characters, props, locations, or story turns not implied by the scene overview or connected references. Prioritize continuity, blocking, eyeline, screen direction, motivated lighting, and usable ${durationLabel} pacing.`
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+async function runSkillDirectorWithFal({
+  action = "build",
+  sceneName,
+  sceneOverview,
+  motionBrief,
+  styleDirection,
+  motionDirection,
+  shotList,
+  shotListNotes = "",
+  revisionNotes = "",
+  currentFinalPrompt = "",
+  characterInputs = [],
+  locationInputs = [],
+  elementInputs = [],
+  styleInputs = [],
+  shotCount = "3",
+  durationSeconds = "15"
+}) {
+  if (!process.env.FAL_KEY) {
+    throw new Error("Missing FAL_KEY in .env.");
+  }
+
+  const model = skillDirectorFalModel;
+  const anonymizedStyleInputs = styleInputs.map((item, index) => ({
+    ...item,
+    label: `Visual style reference ${index + 1}`,
+    tag: `StyleReference${index + 1}`,
+    description: ""
+  }));
+  const visualInputs = action === "style"
+    ? [...characterInputs, ...locationInputs, ...elementInputs, ...anonymizedStyleInputs]
+    : [...characterInputs, ...locationInputs, ...elementInputs];
+  const referenceLines = skillDirectorSceneReferenceLines({ characterInputs, locationInputs, elementInputs });
+
+  if (action === "build") {
+    const finalPrompt = composeSkillDirectorFinalPrompt({
+      referenceLines,
+      styleDirection,
+      motionDirection,
+      shotList,
+      shotListNotes
+    });
+    if (!finalPrompt) {
+      throw new Error("Lock generated Film Director sections before building the scene.");
+    }
+    return {
+      action,
+      text: finalPrompt,
+      model: "NewtNode Film Director",
+      provider: "local",
+      endpoint: "local/skill-director-build",
+      submittedPrompt: finalPrompt,
+      usage: null,
+      helperUsages: [],
+      shotCount,
+      durationSeconds,
+      actualShotCount: largestSkillDirectorCutNumber(shotList || finalPrompt),
+      resolvedShotCount: largestSkillDirectorCutNumber(shotList || finalPrompt) || requestedSkillDirectorShotCount(shotCount) || 0,
+      referenceSetup: skillDirectorReferenceSetupFromLines(referenceLines),
+      styleDirection,
+      motionDirection,
+      shotList,
+      shotListNotes
+    };
+  }
+
+  if (action === "revise") {
+    const currentCutCount = largestSkillDirectorCutNumber(shotList || currentFinalPrompt);
+    const revisionPrompt = buildFilmDirectorRevisionPrompt({
+      revisionNotes,
+      durationLabel: skillDirectorDurationLabel(durationSeconds),
+      currentCutCount,
+      sceneName,
+      referenceSetup: skillDirectorReferenceSetupFromLines(referenceLines),
+      styleDirection,
+      cameraDirection: motionDirection,
+      sceneOverview,
+      shotListNotes,
+      shotList,
+      finalPrompt: currentFinalPrompt,
+      shotLogic: [
+        skillDirectorContinuityMapDirective(skillDirectorDurationLabel(durationSeconds)),
+        skillDirectorShotLogicDirective(skillDirectorDurationLabel(durationSeconds), characterInputs.length)
+      ].join(" ")
+    });
+    if (!revisionPrompt) {
+      throw new Error("Add revision notes before updating the Film Director output.");
+    }
+
+    const data = await subscribeFal(skillDirectorLlmEndpoint, {
+      input: {
+        model,
+        prompt: revisionPrompt,
+        system_prompt: skillDirectorSystemPrompt()
+      },
+      logs: true
+    });
+    const outputText = stripSkillDirectorFences(extractFalText(data));
+    if (!outputText) throw new Error("fal returned no Film Director revision.");
+
+    const structuredOutput = skillDirectorStructuredObject(outputText);
+    const validatedOutput = await validateAndRepairSkillDirectorShotPlan({
+      outputText,
+      shotCount: "Auto",
+      durationSeconds,
+      prompt: revisionPrompt,
+      model,
+      characterTags: characterInputs.map((item) => item.tag).filter(Boolean)
+    });
+    const revisedPlan = validatedOutput.plan || skillDirectorShotPlanFromOutput(outputText);
+    const revisedStyleDirection = cleanSkillDirectorMoodBoardReferences(
+      skillDirectorStructuredValue(structuredOutput, ["styleDirection", "style_direction", "style"]) || styleDirection
+    );
+    const revisedMotionDirection = cleanSkillDirectorMoodBoardReferences(
+      skillDirectorStructuredValue(structuredOutput, ["cameraDirection", "camera_direction", "motionDirection", "motion_direction"]) || motionDirection
+    );
+    const revisedSceneOverview = cleanSkillDirectorMoodBoardReferences(
+      skillDirectorStructuredValue(structuredOutput, ["sceneOverview", "scene_overview", "overview"]) || sceneOverview
+    );
+    const revisedShotList = revisedPlan.shotList || shotList;
+    const revisedShotListNotes = revisedPlan.shotListNotes || shotListNotes;
+    const finalPrompt = composeSkillDirectorFinalPrompt({
+      referenceLines,
+      styleDirection: revisedStyleDirection,
+      motionDirection: revisedMotionDirection,
+      shotList: revisedShotList,
+      shotListNotes: revisedShotListNotes
+    });
+    const actualShotCount = largestSkillDirectorCutNumber(revisedShotList);
+
+    return {
+      action,
+      text: finalPrompt,
+      model,
+      provider: "fal",
+      endpoint: skillDirectorLlmEndpoint,
+      submittedPrompt: revisionPrompt,
+      usage: falResultUsage(data),
+      helperUsages: validatedOutput.usages || [],
+      shotCount,
+      durationSeconds,
+      actualShotCount,
+      resolvedShotCount: actualShotCount,
+      referenceSetup: skillDirectorReferenceSetupFromLines(referenceLines),
+      styleDirection: revisedStyleDirection,
+      motionDirection: revisedMotionDirection,
+      sceneOverview: revisedSceneOverview,
+      shotList: revisedShotList,
+      shotListNotes: revisedShotListNotes,
+      revisionSummary: skillDirectorStructuredValue(structuredOutput, ["changeSummary", "change_summary", "summary"]) || "Applied the requested Film Director revisions."
+    };
+  }
+
+  const imageContext = await describeFilmDirectorImageInputs(visualInputs);
+  const prompt = buildSkillDirectorPrompt({
+    action,
+    sceneName,
+    sceneOverview,
+    motionBrief,
+    styleDirection,
+    motionDirection,
+    shotList,
+    shotListNotes,
+    characterInputs,
+    locationInputs,
+    elementInputs,
+    styleInputs: anonymizedStyleInputs,
+    shotCount,
+    durationSeconds,
+    imageDescriptions: imageContext.descriptions
+  });
+  const data = await subscribeFal(skillDirectorLlmEndpoint, {
+    input: {
+      model,
+      prompt,
+      system_prompt: skillDirectorSystemPrompt()
+    },
+    logs: true
+  });
+  const initialOutputText = stripSkillDirectorFences(extractFalText(data));
+  let outputText = initialOutputText;
+  const helperUsages = [];
+  let validatedShotPlan = null;
+  if (action === "shotList") {
+    const validatedOutput = await validateAndRepairSkillDirectorShotPlan({
+      outputText,
+      shotCount,
+      durationSeconds,
+      prompt,
+      model,
+      characterTags: characterInputs.map((item) => item.tag).filter(Boolean)
+    });
+    outputText = validatedOutput.text;
+    validatedShotPlan = validatedOutput.plan;
+    helperUsages.push(...validatedOutput.usages);
+  }
+
+  if (!outputText) {
+    throw new Error("fal returned no Film Director text.");
+  }
+
+  const structuredOutput = skillDirectorStructuredObject(outputText);
+  const generatedStyleDirection = cleanSkillDirectorMoodBoardReferences(
+    action === "style"
+      ? skillDirectorStructuredValue(structuredOutput, ["styleDirection", "style_direction", "style"]) || extractSkillDirectorBlock(outputText, "STYLE_DIRECTION") || outputText || styleDirection || ""
+      : styleDirection || ""
+  );
+  const generatedMotionDirection = cleanSkillDirectorMoodBoardReferences(
+    action === "motion"
+      ? skillDirectorStructuredValue(structuredOutput, ["cameraDirection", "camera_direction", "motionDirection", "motion_direction"]) || extractSkillDirectorBlock(outputText, "MOTION_DIRECTION") || outputText || motionDirection || ""
+      : motionDirection || ""
+  );
+  const parsedShotPlan = action === "shotList"
+    ? validatedShotPlan || skillDirectorShotPlanFromOutput(outputText)
+    : {
+        shotList: cleanSkillDirectorMoodBoardReferences(sanitizeSkillDirectorShotListFormatting(shotList || "")),
+        shotListNotes: shotListNotes || ""
+      };
+  const splitShotList = {
+    shotList: parsedShotPlan.shotList || "",
+    shotListNotes: parsedShotPlan.shotListNotes || shotListNotes || ""
+  };
+  const generatedShotList = splitShotList.shotList;
+  const generatedShotListNotes = splitShotList.shotListNotes || shotListNotes || "";
+  const actualShotCount = largestSkillDirectorCutNumber(generatedShotList);
+  const resolvedShotCount = action === "shotList"
+    ? parsedShotPlan.recommendedShotCount || actualShotCount
+    : requestedSkillDirectorShotCount(shotCount) || actualShotCount;
+
+  return {
+    action,
+    text:
+      action === "style"
+        ? generatedStyleDirection
+        : action === "motion"
+          ? generatedMotionDirection
+          : action === "shotList"
+            ? generatedShotList
+            : "",
+    model,
+    provider: "fal",
+    endpoint: skillDirectorLlmEndpoint,
+    submittedPrompt: prompt,
+    usage: falResultUsage(data),
+    helperUsages: [...imageContext.usages, ...helperUsages].filter(Boolean),
+    shotCount,
+    durationSeconds,
+    actualShotCount,
+    resolvedShotCount,
+    referenceSetup: skillDirectorReferenceSetupFromLines(referenceLines),
+    styleDirection: generatedStyleDirection,
+    motionDirection: generatedMotionDirection,
+    shotList: generatedShotList,
+    shotListNotes: generatedShotListNotes
   };
 }
 
@@ -8044,7 +10440,23 @@ async function describeImageInputs(imageInputs) {
   if (!imageInputs.length) return { descriptions: [], usages: [] };
 
   const imageUrls = await Promise.all(imageInputs.map((item) => localAssetToFalUrl(item.url)));
-  const data = await describeImagesWithFalVision(imageUrls, falVisionTextModel);
+  const referenceLabels = imageInputs
+    .map((item, index) => {
+      const typeLabel =
+        item.type === "character"
+          ? "Character asset"
+          : item.type === "location"
+            ? "Location asset"
+            : item.type === "element"
+              ? "Props asset"
+              : item.type === "style"
+                ? "Mood Board asset"
+                : "Image";
+      return `${typeLabel} ${index + 1}: ${item.tag || item.label}${item.label && item.label !== item.tag ? ` (${item.label})` : ""}`;
+    })
+    .join("\n");
+  const typeInstructions = [...new Set(imageInputs.map((item) => skillDirectorVisionInstructionForType(item.type)).filter(Boolean))].join("\n");
+  const data = await describeImagesWithFalVision(imageUrls, falVisionTextModel, referenceLabels, typeInstructions);
   const description = extractFalText(data).trim();
   return {
     descriptions: description ? [`Connected images: ${description}`] : [],
@@ -8052,10 +10464,68 @@ async function describeImageInputs(imageInputs) {
   };
 }
 
-async function describeImagesWithFalVision(imageUrls, model) {
+async function describeFilmDirectorImageInputs(imageInputs) {
+  if (!imageInputs.length) return { descriptions: [], usages: [] };
+
+  const imageUrls = await Promise.all(imageInputs.map((item) => localAssetToFalUrl(item.url)));
+  const referenceLabels = imageInputs
+    .map((item, index) => `Image ${index + 1}: ${item.tag || item.label || `@Reference${index + 1}`} | type: ${item.type || "image"}`)
+    .join("\n");
+  const typeInstructions = [
+    ...new Set(imageInputs.map((item) => skillDirectorVisionInstructionForType(item.type)).filter(Boolean)),
+    'Return strict JSON only: {"assets":[{"tag":"@ExactTag","description":"concise production-useful visual description"}]}.',
+    "Return one asset object for every image, in the same order. Preserve each supplied @tag exactly. Do not blend details between assets. Do not use markdown or add keys outside the schema."
+  ].join("\n");
+  const data = await describeImagesWithFalVision(
+    imageUrls,
+    skillDirectorVisionFalModel,
+    referenceLabels,
+    typeInstructions,
+    ""
+  );
+  const rawText = extractFalText(data).trim();
+  const parsed = skillDirectorStructuredObject(rawText);
+  const parsedAssets = Array.isArray(parsed?.assets) ? parsed.assets : [];
+  const descriptions = imageInputs.map((item, index) => {
+    const tag = item.tag || `@Reference${index + 1}`;
+    const tagKey = String(tag).replace(/^@/, "").toLowerCase();
+    const match = parsedAssets.find((asset) => String(asset?.tag || "").replace(/^@/, "").toLowerCase() === tagKey) || parsedAssets[index];
+    const description = String(match?.description || "").replace(/\s+/g, " ").trim();
+    if (!description) return "";
+    return `${tag} (${item.type || "image"}): ${description}`;
+  }).filter(Boolean);
+
+  return {
+    descriptions: descriptions.length ? descriptions : rawText ? [`Connected visual analysis: ${rawText}`] : [],
+    usages: [falResultUsage(data)].filter(Boolean)
+  };
+}
+
+function skillDirectorVisionInstructionForType(type) {
+  if (type === "character") {
+    return "For Character assets: Describe these images as concise visual prompt context for the subject characteristics.";
+  }
+  if (type === "location") {
+    return "For Location assets: Describe these images as concise visual prompt context. Focus on setting, composition, lighting, palette, mood, materials, and any important details.";
+  }
+  if (type === "element") {
+    return "For Props assets: Describe these images as concise visual prompt context. Focus on object, materials, and any important object details.";
+  }
+  if (type === "style") {
+    return "For Mood Board assets: Describe these images as concise visual prompt context for abstract cinematic style only. Focus on cinematic look, tone, pacing, lighting mood, color behavior, texture, atmosphere, image quality, and color grade. Do not describe, name, or reuse literal objects, subjects, locations, people, props, compositions, or story content.";
+  }
+  return "Describe these images as concise visual prompt context. Focus on subject, setting, composition, camera, lighting, palette, mood, materials, and any important details.";
+}
+
+async function describeImagesWithFalVision(imageUrls, model, referenceLabels = "", typeInstructions = "", fallbackModel = falVisionTextFallbackModel) {
   const input = {
     image_urls: imageUrls,
-    prompt: "Describe these images as concise visual prompt context. Focus on subject, setting, composition, camera, lighting, palette, mood, materials, and any important details.",
+    prompt: [
+      referenceLabels ? `Use these image labels while describing the connected references:\n${referenceLabels}` : "",
+      typeInstructions || "Describe these images as concise visual prompt context. Focus on subject, setting, composition, camera, lighting, palette, mood, materials, and any important details."
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
     system_prompt: "Return only useful prompt context. Do not use markdown.",
     model
   };
@@ -8063,12 +10533,12 @@ async function describeImagesWithFalVision(imageUrls, model) {
   try {
     return await subscribeFal("openrouter/router/vision", { input, logs: true });
   } catch (error) {
-    if (!falVisionTextFallbackModel || falVisionTextFallbackModel === model) throw error;
-    console.warn(`Fal vision model ${model} failed; retrying with ${falVisionTextFallbackModel}.`, error?.message || error);
+    if (!fallbackModel || fallbackModel === model) throw error;
+    console.warn(`Fal vision model ${model} failed; retrying with ${fallbackModel}.`, error?.message || error);
     return subscribeFal("openrouter/router/vision", {
       input: {
         ...input,
-        model: falVisionTextFallbackModel
+        model: fallbackModel
       },
       logs: true
     });
@@ -8288,6 +10758,22 @@ function resolveImageModel(model) {
     };
   }
 
+  if (normalized.includes("seedream") && (normalized.includes("5") || normalized.includes("v5"))) {
+    return {
+      provider: "fal-seedream-5-pro",
+      displayName: imageModelNames.seedream5Pro,
+      id: falSeedream5ProTextEndpoint
+    };
+  }
+
+  if (isNanoBanana2Model(model)) {
+    return {
+      provider: "fal-nano-banana-2",
+      displayName: imageModelNames.nanoBanana2,
+      id: falNanoBanana2TextEndpoint
+    };
+  }
+
   if (normalized.includes("openai") || normalized.includes("gpt-image-2") || normalized.includes("image 2")) {
     return {
       provider: "fal-openai-image-2",
@@ -8481,6 +10967,30 @@ function resolveUtilityVideoModel(model) {
 
 function resolveVideoModel(model) {
   const normalized = String(model || "").toLowerCase();
+  if (normalized.includes("gemini") && normalized.includes("omni")) {
+    return {
+      provider: "google-gemini-omni",
+      displayName: videoModelNames.geminiOmni,
+      id: googleGeminiOmniModel,
+      speed: "gemini-omni"
+    };
+  }
+  if (normalized.includes("kling") && (normalized.includes("o3") || normalized.includes("03")) && normalized.includes("4k")) {
+    return {
+      provider: "fal-kling-o3-4k",
+      displayName: videoModelNames.klingO34k,
+      id: falKlingO34kTextEndpoint,
+      speed: "kling-o3-4k"
+    };
+  }
+  if (normalized.includes("kling") && (normalized.includes("o3") || normalized.includes("03"))) {
+    return {
+      provider: "fal-kling-o3-pro",
+      displayName: videoModelNames.klingO3Pro,
+      id: falKlingO3ProTextEndpoint,
+      speed: "kling-o3-pro"
+    };
+  }
   if (normalized.includes("sam") && normalized.includes("video")) {
     if (!sam3SegmentationModelsEnabled) {
       return {
@@ -8717,7 +11227,7 @@ function normalizeStoryboardFrameCount(value) {
   const normalized = String(value || "Auto").trim();
   if (/^auto$/i.test(normalized)) return 6;
   const parsed = Number.parseInt(normalized, 10);
-  return Math.min(24, Math.max(1, Number.isFinite(parsed) ? parsed : 6));
+  return Math.min(35, Math.max(1, Number.isFinite(parsed) ? parsed : 6));
 }
 
 async function generateStoryboardPlanWithGemini({ sceneDescription, frameCount, characters = [], sceneReferences = [], notes = "" }) {
@@ -8764,6 +11274,10 @@ Rules:
 13. If the scene brief includes multiple @tagged characters, keep those identities separate in the shot plan and include each relevant @tag in every frame where that character appears.
 14. When the scene brief references a known scene image reference @tag, preserve that exact @tag in each frame prompt where the referenced product, prop, object, location, environment, brand detail, texture, or design cue appears.
 15. Use known scene image references only for their intended referenced details. Do not turn them into characters, do not force them into unrelated frames, and preserve the final storyboard drawing style.
+16. Maintain side-of-room logic. If a character starts screen-left or screen-right relative to the room, preserve that side unless the action explicitly moves them.
+17. Vary adjacent shot scale and composition with purpose. Avoid writing two neighboring frames that are almost the same size, angle, and background. Prefer clear editorial contrast such as WS to CU, MS to insert, OTS to reaction, or EWS to ECU.
+18. Do not rely on the same background view for every cut. Keep the environment consistent, but change camera distance, angle, foreground/background emphasis, or subject scale so the sequence edits like a real storyboard.
+19. In every frame with two or more visible characters, explicitly state each visible character's exact @tag and basic blocking relationship, such as screen-left, screen-right, foreground, background, facing, or eyeline. Do not rely on pronouns alone.
 
 Return this exact JSON shape:
 {
@@ -8782,7 +11296,7 @@ Return this exact JSON shape:
   ]
 }
 
-Create ${frameCount} frames unless the scene absolutely requires fewer or more, with a hard limit of 24 frames.`;
+Create ${frameCount} frames unless the scene absolutely requires fewer or more, with a hard limit of 35 frames.`;
 
   const text = await generateGeminiText({
     model,
@@ -8838,14 +11352,38 @@ function parseStoryboardPlanJson(text) {
   const firstBrace = candidate.indexOf("{");
   const lastBrace = candidate.lastIndexOf("}");
   const jsonText = firstBrace >= 0 && lastBrace > firstBrace ? candidate.slice(firstBrace, lastBrace + 1) : candidate;
-  return JSON.parse(jsonText);
+  try {
+    return JSON.parse(jsonText);
+  } catch (error) {
+    return JSON.parse(repairStoryboardJsonText(jsonText));
+  }
+}
+
+function repairStoryboardJsonText(text = "") {
+  return String(text || "")
+    .replace(/^\uFEFF/, "")
+    .replace(/[“”]/g, "\"")
+    .replace(/[‘’]/g, "'")
+    .replace(/,\s*([}\]])/g, "$1")
+    .replace(/[\u0000-\u0019]+/g, (match) => {
+      if (/^[\n\r\t]+$/.test(match)) return match;
+      return " ";
+    });
+}
+
+function storyboardPlannerErrorMessage(error) {
+  const message = String(error?.message || "");
+  if (error instanceof SyntaxError || /JSON|double-quoted property|position \d+/i.test(message)) {
+    return "Storyboard planner returned malformed JSON, so fallback frames were used. Try planning again if the generated beats feel too generic.";
+  }
+  return message || "Storyboard planning failed.";
 }
 
 function normalizeStoryboardPlan(plan = {}, sceneDescription = "", requestedFrameCount = 6) {
   const fallback = fallbackStoryboardPlan(sceneDescription, requestedFrameCount);
   const frames = Array.isArray(plan.frames) ? plan.frames : [];
   const normalizedFrames = frames
-    .slice(0, 24)
+    .slice(0, 35)
     .map((frame, index) => normalizeStoryboardPlanFrame(frame, index))
     .filter((frame) => frame.prompt);
 
@@ -8866,6 +11404,215 @@ function normalizeStoryboardPlanFrame(frame = {}, index = 0) {
     prompt: String(frame.prompt || "").trim().slice(0, 1400),
     notes: String(frame.notes || "").trim().slice(0, 240)
   };
+}
+
+function storyboardQcPass(summary = "Frame passed storyboard QC.") {
+  return {
+    pass: true,
+    shouldRetry: false,
+    severity: "ok",
+    summary,
+    issues: [],
+    correctionPrompt: ""
+  };
+}
+
+function normalizeStoryboardQcResult(result = {}) {
+  const issues = Array.isArray(result.issues)
+    ? result.issues.map((issue) => String(issue || "").trim()).filter(Boolean).slice(0, 6)
+    : [];
+  const severity = normalizeChoice(String(result.severity || "").toLowerCase(), ["ok", "minor", "major"], issues.length ? "major" : "ok");
+  const pass = result.pass !== false && severity !== "major";
+  const correctionPrompt = String(result.correctionPrompt || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 600);
+
+  return {
+    pass,
+    shouldRetry: !pass && result.shouldRetry !== false,
+    severity: pass ? "ok" : severity,
+    summary: String(result.summary || (pass ? "Frame passed storyboard QC." : "Frame needs correction.")).replace(/\s+/g, " ").trim().slice(0, 220),
+    issues,
+    correctionPrompt: correctionPrompt || (issues.length ? `Correct these storyboard problems: ${issues.join("; ")}.` : "")
+  };
+}
+
+async function storyboardQcInlineImagePart(publicPath, label, { required = false } = {}) {
+  if (!publicPath) return [];
+  try {
+    const asset = await readLocalAsset(publicPath);
+    if (!String(asset.mimeType || "").startsWith("image/")) return [];
+    return [
+      { text: `${label}:` },
+      {
+        inlineData: {
+          mimeType: asset.mimeType || "image/png",
+          data: asset.buffer.toString("base64")
+        }
+      }
+    ];
+  } catch (error) {
+    if (required) throw error;
+    console.warn(`Storyboard QC skipped optional image ${label}:`, error.message);
+    return [];
+  }
+}
+
+function storyboardQcReviewPrompt({
+  sceneDescription = "",
+  framePrompt = "",
+  frameNumber = 1,
+  shot = "",
+  angle = "",
+  notes = "",
+  imageLabels = []
+} = {}) {
+  return `You are a professional storyboard supervisor reviewing one generated storyboard frame before it becomes a continuity reference.
+
+Return strict JSON only. Do not include markdown fences.
+
+Review goal:
+- Pass the image if it is broadly usable and physically coherent.
+- Fail for obvious storyboard-breaking problems and weak editorial progression.
+- Do not fail for small style differences, minor line-art imperfections, or harmless model variation.
+- If the frame prompt includes STORYBOARD STYLE LOCK, fail obvious realistic black-and-white photographs, photorealistic grayscale renders, dense tonal realism, heavy shaded realism, or cluttered fully rendered backgrounds. Request a cleaner minimal black ink line drawing with simple gray blocking.
+
+Current frame:
+Frame ${frameNumber || 1}
+Shot: ${shot || "Not specified"}
+Angle/type: ${angle || "Not specified"}
+Frame prompt:
+${framePrompt || "No frame prompt provided."}
+
+Scene continuity:
+${sceneDescription || "No scene description provided."}
+
+Frame notes:
+${notes || "None"}
+
+Uploaded image order:
+${imageLabels.length ? imageLabels.map((label, index) => `${index + 1}. ${label}`).join("\n") : "1. Generated frame to review"}
+
+Check for these problems:
+1. Physical logic errors: floating objects, impossible contact points, impossible object placement, broken perspective, major anatomy failures.
+2. Character orientation and side-of-room continuity: characters should remain on the correct side of the environment, preserve screen direction and eyelines, and not face the wrong way unless the prompt asks for it.
+3. Spatial consistency: kitchen drawers, counters, doors, props, walls, and other environment details should belong to the room and not float or jump to impossible places.
+4. Shot progression: if previous frame or spatial anchor is provided, this frame should not be nearly identical in scale/composition unless requested. A WS-to-MS must have a clear scale change; if the MS is effectively the same wide camera view, fail it and request a tighter MS/CU or clearer angle shift.
+5. Background variety with continuity: different shots may share the same environment, but should not keep showing the exact same background from the exact same camera unless the prompt calls for a locked-off repeat.
+6. Required story content: the visible action should match the frame prompt and should not omit required named characters or key props.
+7. Storyboard style: when STORYBOARD STYLE LOCK is present, the frame should read as clean minimal line-art production boards, not realistic grayscale photography.
+
+Return this exact JSON shape:
+{
+  "pass": true,
+  "severity": "ok",
+  "summary": "short reviewer note",
+  "issues": [],
+  "shouldRetry": false,
+  "correctionPrompt": "short direct prompt addon for regeneration if failed"
+}
+
+If failing, set severity to "major", pass to false, shouldRetry to true, and write correctionPrompt as direct image-generation instructions under 80 words.`;
+}
+
+async function storyboardQcFalImageUrl(publicPath, label, { required = false } = {}) {
+  if (!publicPath) return null;
+  try {
+    return {
+      label,
+      url: await localAssetToFalUrl(publicPath)
+    };
+  } catch (error) {
+    if (required) throw error;
+    console.warn(`Storyboard QC skipped optional image ${label}:`, error.message);
+    return null;
+  }
+}
+
+async function reviewStoryboardFrameWithFal({
+  sourceUrl,
+  previousFrameUrl = "",
+  spatialAnchorUrl = "",
+  sceneDescription = "",
+  framePrompt = "",
+  frameNumber = 1,
+  shot = "",
+  angle = "",
+  notes = ""
+} = {}) {
+  const imageEntries = (await Promise.all([
+    storyboardQcFalImageUrl(sourceUrl, "Generated frame to review", { required: true }),
+    storyboardQcFalImageUrl(previousFrameUrl, "Previous approved frame for continuity"),
+    storyboardQcFalImageUrl(spatialAnchorUrl, "Spatial anchor frame for room geography")
+  ])).filter(Boolean);
+  if (!imageEntries.length) return storyboardQcPass("No readable image was available for QC.");
+
+  const prompt = storyboardQcReviewPrompt({
+    sceneDescription,
+    framePrompt,
+    frameNumber,
+    shot,
+    angle,
+    notes,
+    imageLabels: imageEntries.map((entry) => entry.label)
+  });
+
+  const data = await subscribeFal("openrouter/router/vision", {
+    input: {
+      image_urls: imageEntries.map((entry) => entry.url),
+      prompt,
+      system_prompt: "Return only valid JSON for storyboard quality control. Do not use markdown.",
+      model: storyboardVisionTextModel
+    },
+    logs: true
+  });
+
+  return normalizeStoryboardQcResult(parseStoryboardPlanJson(extractFalText(data)));
+}
+
+async function reviewStoryboardFrameWithGemini({
+  sourceUrl,
+  previousFrameUrl = "",
+  spatialAnchorUrl = "",
+  sceneDescription = "",
+  framePrompt = "",
+  frameNumber = 1,
+  shot = "",
+  angle = "",
+  notes = ""
+} = {}) {
+  const parts = [{
+    text: storyboardQcReviewPrompt({
+      sceneDescription,
+      framePrompt,
+      frameNumber,
+      shot,
+      angle,
+      notes,
+      imageLabels: [
+        "Generated frame to review",
+        previousFrameUrl ? "Previous approved frame for continuity" : "",
+        spatialAnchorUrl ? "Spatial anchor frame for room geography" : ""
+      ].filter(Boolean)
+    })
+  }];
+
+  const imageParts = [
+    ...(await storyboardQcInlineImagePart(sourceUrl, "Generated frame to review", { required: true })),
+    ...(await storyboardQcInlineImagePart(previousFrameUrl, "Previous approved frame for continuity")),
+    ...(await storyboardQcInlineImagePart(spatialAnchorUrl, "Spatial anchor frame for room geography"))
+  ];
+  if (!imageParts.length) return storyboardQcPass("No readable image was available for QC.");
+
+  const text = await generateGeminiTextFromParts({
+    model: process.env.STORYBOARD_VISION_TEXT_MODEL || process.env.STORYBOARD_TEXT_MODEL || "gemini-2.5-flash",
+    parts: [...parts, ...imageParts],
+    responseMimeType: "application/json",
+    temperature: 0.18
+  });
+
+  return normalizeStoryboardQcResult(parseStoryboardPlanJson(text));
 }
 
 function fallbackStoryboardPlan(sceneDescription = "", frameCount = 6) {
@@ -9136,9 +11883,9 @@ async function createStoryboardPdf({ title = "Storyboard", sceneDescription = ""
   const layout = storyboardPdfLayoutForAspect(normalizedAspectRatio);
   const pageWidth = 1152;
   const pageHeight = 648;
-  const marginX = 46;
-  const contentTop = pageHeight - 92;
-  const contentBottom = 38;
+  const marginX = 30;
+  const contentTop = pageHeight - 30;
+  const contentBottom = 30;
   const panelLayout = storyboardPdfPanelLayout({
     pageWidth,
     pageHeight,
@@ -9164,11 +11911,7 @@ async function createStoryboardPdf({ title = "Storyboard", sceneDescription = ""
     const ops = [];
     const xobjects = {};
     const pageNumber = Math.floor(pageStart / framesPerPage) + 1;
-    addPdfRect(ops, 0, 0, pageWidth, pageHeight, { fill: [0.93, 0.93, 0.93] });
-    addPdfText(ops, marginX, pageHeight - 52, "STORYBOARDS", 24, true);
-    addPdfLine(ops, marginX + 224, pageHeight - 45, pageWidth - marginX, pageHeight - 45, { width: 1.7 });
-    const metadata = [title && title !== "Storyboard" ? title : "", normalizedAspectRatio].filter(Boolean).join("  /  ");
-    if (metadata) addPdfText(ops, marginX, pageHeight - 70, metadata, 8.5, true, [0.18, 0.18, 0.18]);
+    addPdfRect(ops, 0, 0, pageWidth, pageHeight, { fill: [0.949, 0.949, 0.949] });
 
     pageFrames.forEach((frame, index) => {
       const row = Math.floor(index / layout.cols);
@@ -9192,13 +11935,14 @@ async function createStoryboardPdf({ title = "Storyboard", sceneDescription = ""
         addPdfText(ops, x + 16, imageY + panelLayout.panelHeight / 2, "Image unavailable", 10);
       }
 
-      addPdfRect(ops, x, imageY, panelLayout.panelWidth, panelLayout.panelHeight, { stroke: [0, 0, 0], width: 2 });
-      const badgeWidth = Math.max(17, String(frame.number).length * 8 + 8);
-      addPdfRect(ops, x, imageTop - 17, badgeWidth, 17, { fill: [0, 0, 0] });
-      addPdfText(ops, x + 3.2, imageTop - 14, String(frame.number), 11, true, [1, 1, 1]);
+      addPdfRect(ops, x, imageY, panelLayout.panelWidth, panelLayout.panelHeight, { stroke: [0.02, 0.02, 0.02], width: 1.8 });
+      const numberColumnWidth = Math.min(28, Math.max(21, panelLayout.panelWidth * 0.08));
+      addPdfText(ops, x + 1, imageY - 16, String(pageStart + index + 1).padStart(2, "0"), 10.8, true, [0.06, 0.06, 0.06]);
+      addPdfLine(ops, x + numberColumnWidth - 5, imageY - 19, x + numberColumnWidth - 5, imageY - layout.captionHeight + 6, { width: 0.45, color: [0.68, 0.68, 0.68] });
 
-      addWrappedPdfText(ops, x + 9, imageY - 16, frame.description || storyboardFrameDescriptionFallback(frame), {
-        width: panelLayout.panelWidth - 18,
+      const caption = String(frame.description || storyboardFrameDescriptionFallback(frame)).replace(/@([A-Za-z][\w-]*)/g, "$1");
+      addWrappedPdfText(ops, x + numberColumnWidth, imageY - 16, caption, {
+        width: panelLayout.panelWidth - numberColumnWidth - 8,
         height: layout.captionHeight - 10,
         fontSize: 10.2,
         minFontSize: 7.2,
@@ -9206,7 +11950,7 @@ async function createStoryboardPdf({ title = "Storyboard", sceneDescription = ""
       });
     });
 
-    addPdfText(ops, pageWidth - marginX - 18, 13, String(pageNumber), 14, false, [0.32, 0.32, 0.32]);
+    addPdfText(ops, pageWidth - marginX - 8, 12, String(pageNumber), 9, false, [0.36, 0.36, 0.36]);
     pdf.addPage({ width: pageWidth, height: pageHeight, content: ops.join("\n"), xobjects });
   }
 
@@ -9221,14 +11965,14 @@ function normalizeStoryboardAspectRatio(value) {
 function storyboardPdfLayoutForAspect(aspectRatio) {
   switch (normalizeStoryboardAspectRatio(aspectRatio)) {
     case "21:9":
-      return { cols: 2, rows: 2, gapX: 12, rowGap: 20, captionHeight: 78 };
+      return { cols: 2, rows: 2, gapX: 18, rowGap: 18, captionHeight: 72 };
     case "9:16":
-      return { cols: 6, rows: 1, gapX: 8, rowGap: 0, captionHeight: 108 };
+      return { cols: 4, rows: 1, gapX: 18, rowGap: 0, captionHeight: 92 };
     case "1:1":
-      return { cols: 4, rows: 2, gapX: 8, rowGap: 20, captionHeight: 84 };
+      return { cols: 4, rows: 2, gapX: 18, rowGap: 18, captionHeight: 72 };
     case "16:9":
     default:
-      return { cols: 3, rows: 2, gapX: 0, rowGap: 20, captionHeight: 78 };
+      return { cols: 3, rows: 2, gapX: 18, rowGap: 18, captionHeight: 72 };
   }
 }
 
@@ -9618,7 +12362,8 @@ async function generateGeminiImageWithRetries({ model, parts, imageConfig }) {
         ],
         generationConfig: {
           responseModalities: ["TEXT", "IMAGE"],
-          imageConfig
+          imageConfig,
+          thinkingConfig: nanoBananaProThinkingConfig
         }
       })
     });
@@ -9667,6 +12412,44 @@ function extractGeminiImageData(data) {
   };
 }
 
+async function generateFalNanoBanana2({ prompt, imagePromptUrls, imagePromptLabels, aspectRatio, resolution }) {
+  const imageInputs = [];
+
+  for (const [index, imagePromptUrl] of imagePromptUrls.entries()) {
+    const asset = await readLocalAsset(imagePromptUrl);
+    if (!asset.mimeType.startsWith("image/")) continue;
+    imageInputs.push({
+      ...asset,
+      label: cleanImagePromptLabel(imagePromptLabels[index])
+    });
+  }
+
+  const imageUrls = await Promise.all(imageInputs.slice(0, 14).map(uploadImageInputToFal));
+  const endpoint = imageUrls.length ? falNanoBanana2EditEndpoint : falNanoBanana2TextEndpoint;
+  const input = buildNanoBanana2FalInput({
+    prompt: promptWithReferenceLabels(prompt, imageInputs),
+    aspectRatio: normalizeImageAspectRatioForProvider(aspectRatio, "fal-nano-banana-2"),
+    resolution,
+    imageUrls
+  });
+  const result = await subscribeFal(endpoint, { input, logs: true });
+  const remoteImage = firstFalImageResult(result?.data);
+
+  if (!remoteImage?.url) {
+    throw new Error("Fal returned no Nano Banana 2 image URL.");
+  }
+
+  return {
+    endpoint,
+    requestId: result?.requestId || result?.request_id || "",
+    remoteImage,
+    resolution: input.resolution,
+    thinkingLevel: input.thinking_level,
+    submittedPrompt: input.prompt,
+    description: result?.data?.description || result?.data?.text || ""
+  };
+}
+
 async function generateFalNanoBananaPro({ prompt, imagePromptUrls, imagePromptLabels, aspectRatio, resolution }) {
   const imageInputs = [];
 
@@ -9706,8 +12489,86 @@ async function generateFalNanoBananaPro({ prompt, imagePromptUrls, imagePromptLa
     endpoint,
     remoteImage,
     resolution: normalizedResolution,
+    thinkingLevel: nanoBananaProFalThinkingMode,
     submittedPrompt: input.prompt,
     description: result?.data?.description || result?.data?.text || ""
+  };
+}
+
+async function generateFalSeedream5Pro({ prompt, imagePromptUrls, imagePromptLabels, aspectRatio, resolution, layerSeparation }) {
+  const imageInputs = [];
+
+  for (const [index, imagePromptUrl] of imagePromptUrls.entries()) {
+    const asset = await readLocalAsset(imagePromptUrl);
+    if (!asset.mimeType.startsWith("image/")) continue;
+    imageInputs.push({
+      ...asset,
+      label: cleanImagePromptLabel(imagePromptLabels[index])
+    });
+  }
+
+  const normalizedResolution = normalizeChoice(String(resolution || "2K").toUpperCase(), ["1K", "2K"], "2K");
+  const imageSize = imageSizeForResolutionAndAspectRatio({ resolution: normalizedResolution, aspectRatio });
+  const submittedPrompt = promptWithReferenceLabels(prompt, imageInputs);
+  const endpoint = imageInputs.length ? falSeedream5ProEditEndpoint : falSeedream5ProTextEndpoint;
+  const input = {
+    prompt: submittedPrompt,
+    image_size: imageSize,
+    num_images: 1,
+    max_images: 1,
+    output_format: "png",
+    sync_mode: false,
+    enable_safety_checker: true
+  };
+
+  if (imageInputs.length) {
+    input.image_urls = await Promise.all(imageInputs.slice(0, 10).map(uploadImageInputToFal));
+  }
+
+  const result = await subscribeFal(endpoint, { input, logs: true });
+  const generatedImages = falImageResults(result?.data);
+  if (!generatedImages.length) {
+    throw new Error("Fal returned no Seedream 5.0 Pro image URL.");
+  }
+
+  let remoteImages = generatedImages;
+  if (layerSeparation) {
+    const layerResult = await subscribeFal(falSeedreamLayerEndpoint, {
+      input: {
+        image_url: generatedImages[0].url,
+        prompt: "Separate this image into useful, independently editable semantic RGBA layers. Preserve text, primary subjects, foreground objects, environmental details, and background as distinct layers where possible.",
+        num_layers: 6,
+        num_inference_steps: 28,
+        guidance_scale: 5,
+        output_format: "png",
+        enable_safety_checker: true,
+        acceleration: "regular",
+        sync_mode: false
+      },
+      logs: true
+    });
+    const layers = falImageResults(layerResult?.data).map((image) => ({
+      ...image,
+      endpoint: falSeedreamLayerEndpoint
+    }));
+    if (!layers.length) {
+      throw new Error("Seedream generated the image, but Fal returned no transparent component layers.");
+    }
+    remoteImages = [
+      { ...generatedImages[0], endpoint },
+      ...layers
+    ];
+  }
+
+  return {
+    endpoint,
+    requestId: result.requestId,
+    remoteImages,
+    resolution: normalizedResolution,
+    imageSize,
+    submittedPrompt,
+    layerSeparation: Boolean(layerSeparation),
+    resultText: result?.data?.description || result?.data?.text || result?.data?.prompt || ""
   };
 }
 
@@ -9854,7 +12715,7 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function generateFalOpenAiImage2({ prompt, imagePromptUrls, imagePromptLabels, aspectRatio, resolution }) {
+async function generateFalOpenAiImage2({ prompt, imagePromptUrls, imagePromptLabels, aspectRatio, resolution, quality }) {
   const imageInputs = [];
 
   for (const [index, imagePromptUrl] of imagePromptUrls.entries()) {
@@ -9866,12 +12727,12 @@ async function generateFalOpenAiImage2({ prompt, imagePromptUrls, imagePromptLab
     });
   }
 
-  return generateFalOpenAiImage2FromInputs({ prompt, imageInputs, aspectRatio, resolution });
+  return generateFalOpenAiImage2FromInputs({ prompt, imageInputs, aspectRatio, resolution, quality });
 }
 
-async function generateFalOpenAiImage2FromInputs({ prompt, imageInputs = [], aspectRatio, resolution }) {
+async function generateFalOpenAiImage2FromInputs({ prompt, imageInputs = [], aspectRatio, resolution, quality: requestedQuality }) {
   const size = normalizeOpenAiImageSize({ aspectRatio, resolution });
-  const quality = normalizeOpenAiImageQuality(process.env.FAL_OPENAI_IMAGE_2_QUALITY || process.env.OPENAI_IMAGE_2_QUALITY || "medium");
+  const quality = normalizeOpenAiImage2Quality(requestedQuality);
   const submittedPrompt = promptWithReferenceLabels(prompt, imageInputs);
   const endpoint = imageInputs.length ? "openai/gpt-image-2/edit" : "openai/gpt-image-2";
   const input = {
@@ -9944,10 +12805,6 @@ function promptWithReferenceLabels(prompt, imageInputs) {
   const labels = imageInputs.map((image, index) => image.label || `Reference ${index + 1}`).filter(Boolean);
   if (!labels.length) return prompt;
   return `${prompt}\n\nReference image labels: ${labels.join(", ")}`;
-}
-
-function normalizeOpenAiImageQuality(value) {
-  return normalizeChoice(String(value || "medium").toLowerCase(), ["low", "medium", "high", "auto"], "medium");
 }
 
 function normalizeOpenAiImageSize({ aspectRatio, resolution }) {
@@ -10205,6 +13062,162 @@ async function uploadLocalOutputToFal(publicPath) {
   return fal.storage.upload(falFile);
 }
 
+async function uploadLocalOutputToKrea(publicPath) {
+  const { fileName, buffer, mimeType } = await readLocalAsset(publicPath);
+  return uploadAssetBufferToKrea({ fileName, buffer, mimeType });
+}
+
+async function uploadToKrea(file) {
+  return uploadAssetBufferToKrea({
+    fileName: file.originalname,
+    buffer: await readFile(file.path),
+    mimeType: file.mimetype || "application/octet-stream"
+  });
+}
+
+async function uploadAssetBufferToKrea({ fileName, buffer, mimeType }) {
+  if (!process.env.KREA_API_KEY) {
+    throw httpError(400, "Krea is disabled or its API key is missing in Settings.");
+  }
+
+  const form = new FormData();
+  form.append("file", new File([buffer], fileName, { type: mimeType }));
+  form.append("description", "NewtNode Seedance reference");
+  const response = await fetch(`${kreaApiBaseUrl}/assets`, {
+    method: "POST",
+    headers: kreaAuthorizationHeaders(),
+    body: form
+  });
+  const data = await responseJson(response);
+  if (!response.ok) {
+    throw httpError(response.status, kreaErrorMessage(data, "Krea could not upload a reference asset."), { body: data });
+  }
+  if (!data?.image_url) {
+    throw httpError(502, "Krea uploaded the reference but returned no asset URL.", { body: data });
+  }
+
+  return data.image_url;
+}
+
+async function runKreaSeedanceGeneration({ endpoint, input }) {
+  const response = await fetch(`${kreaApiBaseUrl}${endpoint}`, {
+    method: "POST",
+    headers: {
+      ...kreaAuthorizationHeaders(),
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(input)
+  });
+  const submittedJob = await responseJson(response);
+  if (!response.ok) {
+    throw httpError(response.status, kreaErrorMessage(submittedJob, "Krea could not start the Seedance generation."), { body: submittedJob });
+  }
+
+  const jobId = String(submittedJob?.job_id || "").trim();
+  if (!jobId) {
+    throw httpError(502, "Krea accepted the request but returned no job ID.", { body: submittedJob });
+  }
+
+  const job = await waitForKreaJob(jobId);
+  const videoUrl = extractKreaJobResultUrl(job);
+  if (!videoUrl) {
+    throw httpError(502, "Krea completed the Seedance job but returned no video URL.", { body: job });
+  }
+
+  return {
+    requestId: jobId,
+    remoteVideo: {
+      url: videoUrl,
+      content_type: "video/mp4",
+      file_name: "video.mp4"
+    }
+  };
+}
+
+async function waitForKreaJob(jobId) {
+  const maxAttempts = 600;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    if (attempt > 0) await delay(2000);
+    const response = await fetch(`${kreaApiBaseUrl}/jobs/${encodeURIComponent(jobId)}`, {
+      headers: kreaAuthorizationHeaders()
+    });
+    const job = await responseJson(response);
+    if (!response.ok) {
+      throw httpError(response.status, kreaErrorMessage(job, "Krea could not read the Seedance job status."), { body: job });
+    }
+
+    if (job?.status === "completed") return job;
+    if (job?.status === "failed" || job?.status === "cancelled") {
+      throw httpError(502, kreaErrorMessage(job, `Krea Seedance job ${job.status}.`), { body: job });
+    }
+  }
+
+  throw httpError(504, "Krea Seedance generation timed out after 20 minutes.");
+}
+
+function kreaAuthorizationHeaders() {
+  return { Authorization: `Bearer ${process.env.KREA_API_KEY}` };
+}
+
+async function responseJson(response) {
+  const text = await response.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { error: text.slice(0, 1000) };
+  }
+}
+
+function kreaErrorMessage(data, fallback) {
+  return String(data?.error?.message || data?.error || data?.message || data?.detail || fallback).trim();
+}
+
+async function uploadKlingReferenceImageToFal(publicPath) {
+  const { fileName, filePath } = await resolveLocalAssetPath(publicPath);
+  const metadata = await stat(filePath);
+  if (metadata.size <= klingReferenceMaximumBytes) {
+    return uploadLocalOutputToFal(publicPath);
+  }
+
+  const cacheKey = createHash("sha256")
+    .update(`${filePath}:${metadata.size}:${metadata.mtimeMs}`)
+    .digest("hex");
+  const optimizedPath = path.join(klingReferenceCacheDir, `${cacheKey}.jpg`);
+  if (!existsSync(optimizedPath)) {
+    await runFfmpeg([
+      "-y",
+      "-i", filePath,
+      "-vf", "scale='min(3072,iw)':'min(3072,ih)':force_original_aspect_ratio=decrease",
+      "-frames:v", "1",
+      "-pix_fmt", "yuvj420p",
+      "-q:v", "3",
+      "-update", "1",
+      optimizedPath
+    ], "Kling reference optimization");
+
+    const optimizedMetadata = await stat(optimizedPath);
+    if (optimizedMetadata.size > klingReferenceMaximumBytes) {
+      await runFfmpeg([
+        "-y",
+        "-i", filePath,
+        "-vf", "scale='min(2048,iw)':'min(2048,ih)':force_original_aspect_ratio=decrease",
+        "-frames:v", "1",
+        "-pix_fmt", "yuvj420p",
+        "-q:v", "5",
+        "-update", "1",
+        optimizedPath
+      ], "Kling reference fallback optimization");
+    }
+  }
+
+  const buffer = await readFile(optimizedPath);
+  const optimizedFile = new File([buffer], `${path.parse(fileName).name}-kling.jpg`, {
+    type: "image/jpeg"
+  });
+  return fal.storage.upload(optimizedFile);
+}
+
 async function readLocalAsset(publicPath) {
   const { fileName, filePath } = await resolveLocalAssetPath(publicPath);
   const buffer = await readFile(filePath);
@@ -10222,7 +13235,7 @@ async function resolveLocalAssetPathFromUrl(value) {
 
 function localPublicPathFromUrl(value) {
   const raw = String(value || "").trim();
-  if (isLocalAssetUrl(raw)) return raw;
+  if (isLocalAssetUrl(raw) && !/[?#]/.test(raw)) return raw;
 
   try {
     const parsed = new URL(raw, "http://localhost");
@@ -10267,10 +13280,53 @@ async function resolveLocalAssetPath(publicPath) {
     throw new Error("Invalid local asset path.");
   }
 
+  if (!existsSync(localPath) && String(publicPath || "").startsWith("/outputs/")) {
+    await restoreGeneratedOutputFromHistory(publicPath, localPath);
+  }
+
+  if (!existsSync(localPath)) {
+    throw httpError(400, `The referenced file is no longer available: ${path.basename(localPath)}. Reconnect or re-upload the source asset.`);
+  }
+
   return {
     fileName: path.basename(localPath),
     filePath: localPath
   };
+}
+
+async function restoreGeneratedOutputFromHistory(publicPath, filePath) {
+  const recoveryKey = path.resolve(filePath);
+  if (localAssetRecoveryJobs.has(recoveryKey)) {
+    return localAssetRecoveryJobs.get(recoveryKey);
+  }
+
+  const recovery = (async () => {
+    let temporaryPath = "";
+    try {
+      const history = await readHistory();
+      const sourceUrl = findRemoteHistoryAssetUrl(history, publicPath);
+      if (!sourceUrl) return false;
+
+      const response = await fetch(sourceUrl);
+      if (!response.ok || !response.body) return false;
+
+      await mkdir(path.dirname(filePath), { recursive: true });
+      temporaryPath = `${filePath}.recovering-${randomUUID()}`;
+      await pipeline(Readable.fromWeb(response.body), createWriteStream(temporaryPath));
+      await rename(temporaryPath, filePath);
+      console.info(`Restored missing generated asset from history: ${publicPath}`);
+      return true;
+    } catch (error) {
+      if (temporaryPath) await rm(temporaryPath, { force: true }).catch(() => {});
+      console.warn(`Could not restore generated asset ${publicPath}:`, error.message);
+      return false;
+    }
+  })().finally(() => {
+    localAssetRecoveryJobs.delete(recoveryKey);
+  });
+
+  localAssetRecoveryJobs.set(recoveryKey, recovery);
+  return recovery;
 }
 
 function localAssetFilePath(publicPath) {

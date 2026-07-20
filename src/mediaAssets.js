@@ -1,4 +1,6 @@
 export const outputDragMime = "application/x-newtnode-output";
+export const outputDragEndEvent = "newtnode-output-drag-end";
+const outputDragWindowKey = "__newtNodeDraggedOutputItem";
 
 const outputMediaTypes = new Set(["image", "video", "audio", "model3d"]);
 
@@ -7,8 +9,16 @@ export function isLocalOutputUrl(value) {
   return value.startsWith("/outputs/") || /^\/workflow-assets\/[^/]+\/outputs\//.test(value);
 }
 
+export function isLocalThumbnailUrl(value) {
+  if (typeof value !== "string") return false;
+  const clean = value.split("?")[0].split("#")[0];
+  return /(?:^|\/)thumbnails\//i.test(clean)
+    || /-preview(?:-\d+)?\.jpe?g$/i.test(clean);
+}
+
 export function isLocalDraggableMediaUrl(value) {
   if (typeof value !== "string") return false;
+  if (isLocalThumbnailUrl(value)) return false;
   return value.startsWith("/uploads/")
     || value.startsWith("/outputs/")
     || /^\/workflow-assets\/[^/]+\//.test(value);
@@ -23,17 +33,51 @@ export function outputMediaTypeForUrl(url, fallbackType) {
   return outputMediaTypes.has(fallbackType) ? fallbackType : "";
 }
 
+export function previewImageUrl(itemOrUrl, thumbnailUrl = "") {
+  const item = itemOrUrl && typeof itemOrUrl === "object" ? itemOrUrl : null;
+  const explicitThumbnail = String(
+    thumbnailUrl
+      || item?.thumbnailUrl
+      || item?.thumbnailPublicPath
+      || ""
+  ).trim();
+  if (explicitThumbnail) return explicitThumbnail;
+
+  const sourceUrl = String(
+    item?.url
+      || item?.localUrl
+      || item?.resultUrl
+      || itemOrUrl
+      || ""
+  ).trim();
+  if (!sourceUrl || isLocalThumbnailUrl(sourceUrl)) return sourceUrl;
+
+  const cleanPath = sourceUrl.split("?")[0].split("#")[0];
+  const isLocalImage = outputMediaTypeForUrl(cleanPath, "") === "image"
+    && (
+      isLocalDraggableMediaUrl(cleanPath)
+      || cleanPath.startsWith("/storyboard/")
+    );
+  if (!isLocalImage) return sourceUrl;
+
+  return `/api/media-thumbnail?url=${encodeURIComponent(sourceUrl)}`;
+}
+
 export function hasOutputItemDragData(dataTransfer) {
   const types = Array.from(dataTransfer?.types || []);
-  return types.includes(outputDragMime) || types.includes("text/uri-list") || types.includes("text/plain");
+  return types.includes(outputDragMime)
+    || types.includes("text/uri-list")
+    || types.includes("text/plain")
+    || types.includes("DownloadURL")
+    || types.includes("text/html");
 }
 
 export function outputItemFromDataTransfer(dataTransfer) {
   const raw = dataTransfer?.getData(outputDragMime);
   if (raw) {
     try {
-      const item = JSON.parse(raw);
-      if (item?.url && item?.type && isLocalDraggableMediaUrl(item.url)) return item;
+      const item = fullResolutionOutputItem(JSON.parse(raw));
+      if (item?.url && item?.type) return item;
     } catch {
       // Fall through to URL payloads below.
     }
@@ -41,7 +85,7 @@ export function outputItemFromDataTransfer(dataTransfer) {
 
   const url = localOutputUrlFromDataTransfer(dataTransfer);
   const type = outputMediaTypeForUrl(url, "");
-  if (!url || !type) return null;
+  if (!url || !type) return currentDraggedOutputItem();
 
   const fileName = fileNameFromLocalUrl(url);
   return {
@@ -54,8 +98,65 @@ export function outputItemFromDataTransfer(dataTransfer) {
   };
 }
 
+export function setOutputItemDragData(dataTransfer, item, mimeType = outputDragMime) {
+  const dragItem = fullResolutionOutputItem(item);
+  if (!dragItem?.url || !dragItem?.type) return null;
+
+  if (typeof window !== "undefined") {
+    window[outputDragWindowKey] = dragItem;
+  }
+
+  dataTransfer.effectAllowed = "copy";
+  dataTransfer.setData(mimeType, JSON.stringify(dragItem));
+  dataTransfer.setData("text/plain", dragItem.url);
+  dataTransfer.setData("text/uri-list", dragItem.url);
+  return dragItem;
+}
+
+export function clearOutputItemDragData(item) {
+  if (typeof window === "undefined") return;
+  const current = currentDraggedOutputItem();
+  if (!item || current?.id === item.id || current?.url === item.url) {
+    window[outputDragWindowKey] = null;
+  }
+}
+
+export function finishOutputItemDragData(item, event) {
+  if (typeof window === "undefined") return;
+  const activeItem = currentDraggedOutputItem() || item;
+  const clientX = Number(event?.clientX);
+  const clientY = Number(event?.clientY);
+  if (activeItem?.url && activeItem?.type && Number.isFinite(clientX) && Number.isFinite(clientY)) {
+    window.dispatchEvent(new CustomEvent(outputDragEndEvent, {
+      detail: {
+        item: activeItem,
+        clientX,
+        clientY
+      }
+    }));
+  }
+  clearOutputItemDragData(item || activeItem);
+}
+
+export function currentDraggedOutputItem() {
+  if (typeof window === "undefined") return null;
+  return fullResolutionOutputItem(window[outputDragWindowKey]);
+}
+
+export function fullResolutionOutputItem(item) {
+  if (!item?.type) return null;
+  const candidates = [item.fullResolutionUrl, item.originalUrl, item.resultUrl, item.url];
+  const url = candidates
+    .map((candidate) => normalizeDroppedLocalOutputUrl(candidate))
+    .find(Boolean);
+  if (!url) return null;
+  return { ...item, url };
+}
+
 export function localOutputUrlFromDataTransfer(dataTransfer) {
-  const rawValues = [dataTransfer?.getData("text/uri-list"), dataTransfer?.getData("text/plain")];
+  const downloadUrl = String(dataTransfer?.getData("DownloadURL") || "").split(":").slice(2).join(":");
+  const htmlUrl = localOutputUrlFromHtml(dataTransfer?.getData("text/html"));
+  const rawValues = [dataTransfer?.getData("text/uri-list"), dataTransfer?.getData("text/plain"), downloadUrl, htmlUrl];
   for (const rawValue of rawValues) {
     const candidates = String(rawValue || "")
       .split(/\r?\n/)
@@ -71,6 +172,13 @@ export function localOutputUrlFromDataTransfer(dataTransfer) {
   return "";
 }
 
+function localOutputUrlFromHtml(html) {
+  const source = String(html || "");
+  if (!source) return "";
+  const match = source.match(/\b(?:src|href)=["']([^"']+)["']/i);
+  return match?.[1] || "";
+}
+
 export function normalizeDroppedLocalOutputUrl(value) {
   const candidate = String(value || "").trim();
   if (isLocalDraggableMediaUrl(candidate)) return candidate;
@@ -78,6 +186,10 @@ export function normalizeDroppedLocalOutputUrl(value) {
   try {
     const parsed = new URL(candidate, window.location.origin);
     if (parsed.origin === window.location.origin && isLocalDraggableMediaUrl(parsed.pathname)) {
+      return parsed.pathname;
+    }
+    const localHosts = new Set(["127.0.0.1", "localhost", "0.0.0.0"]);
+    if (localHosts.has(parsed.hostname) && isLocalDraggableMediaUrl(parsed.pathname)) {
       return parsed.pathname;
     }
   } catch {
@@ -94,12 +206,15 @@ export function isOutputItemCompatibleWithNode(item, nodeType) {
 }
 
 export function assetFromOutputItem(item) {
+  const fullResolutionItem = fullResolutionOutputItem(item);
+  if (!fullResolutionItem) return null;
   return {
-    fileName: item.fileName || fileNameFromLocalUrl(item.url),
+    fileName: fullResolutionItem.fileName || fileNameFromLocalUrl(fullResolutionItem.url),
     storedFileName: "",
-    mimeType: item.mimeType || mimeForOutputItem(item),
-    mediaType: item.type,
-    localUrl: item.url
+    mimeType: fullResolutionItem.mimeType || mimeForOutputItem(fullResolutionItem),
+    mediaType: fullResolutionItem.type,
+    localUrl: fullResolutionItem.url,
+    thumbnailUrl: fullResolutionItem.thumbnailUrl || ""
   };
 }
 

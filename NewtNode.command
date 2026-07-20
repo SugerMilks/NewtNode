@@ -17,12 +17,25 @@ export PORT="$API_PORT"
 export VITE_API_PORT="$API_PORT"
 export VITE_CLIENT_PORT="$CLIENT_PORT"
 
+BUILD_REQUIRED=0
+if [ ! -f "$ROOT_DIR/dist/index.html" ]; then
+  BUILD_REQUIRED=1
+elif find "$ROOT_DIR/src" "$ROOT_DIR/public" -type f -newer "$ROOT_DIR/dist/index.html" -print -quit 2>/dev/null | grep -q .; then
+  BUILD_REQUIRED=1
+elif [ "$ROOT_DIR/index.html" -nt "$ROOT_DIR/dist/index.html" ] || [ "$ROOT_DIR/vite.config.js" -nt "$ROOT_DIR/dist/index.html" ] || [ "$ROOT_DIR/package.json" -nt "$ROOT_DIR/dist/index.html" ]; then
+  BUILD_REQUIRED=1
+fi
+
+if [ "$BUILD_REQUIRED" -eq 1 ]; then
+  npm run build > "$LOG_DIR/build.log" 2>&1
+fi
+
 if ! curl -fsS "$API_HEALTH_URL" >/dev/null 2>&1; then
   nohup node scripts/localServerSupervisor.mjs > "$LOG_DIR/server.log" 2>&1 &
 fi
 
 if ! curl -fsS "$URL" >/dev/null 2>&1; then
-  nohup npm run client > "$LOG_DIR/client.log" 2>&1 &
+  nohup npm run preview -- --port "$CLIENT_PORT" --strictPort > "$LOG_DIR/client.log" 2>&1 &
 fi
 
 for _ in {1..80}; do

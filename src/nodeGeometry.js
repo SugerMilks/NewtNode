@@ -1,7 +1,9 @@
 export const contextMenuSize = { width: 190, height: 420, inset: 8 };
 
 export function estimatedNodeWidth(type) {
+  if (type === "frameIt") return 980;
   if (type === "autoAspect") return 390;
+  if (type === "skillDirector") return 760;
   if (type === "imageModel" || type === "videoModel" || type === "utility" || type === "model3d") return 370;
   if (type === "character") return 760;
   if (type === "camera" || type === "style") return 360;
@@ -10,8 +12,10 @@ export function estimatedNodeWidth(type) {
 }
 
 export function estimatedNodeHeight(type) {
+  if (type === "frameIt") return 700;
   if (type === "character") return 520;
   if (type === "composer") return 410;
+  if (type === "skillDirector") return 940;
   if (type === "imageModel" || type === "videoModel" || type === "utility" || type === "model3d" || type === "autoAspect") return 430;
   if (type === "transfer" || type === "preview") return 360;
   if (type === "camera") return 380;

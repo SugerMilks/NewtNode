@@ -8,7 +8,9 @@ export async function runImageModelGeneration({ node, prompt, aspectRatio, image
     aspectRatio: aspectRatio || node.data.aspectRatio,
     requestedAspectRatio: node.data.aspectRatio,
     resolution: node.data.resolution,
+    quality: node.data.quality,
     kreaCreativity: node.data.kreaCreativity,
+    seedreamLayers: Boolean(node.data.seedreamLayers),
     imagePromptUrls: imagePromptItems.map((item) => item.url),
     imagePromptLabels: imagePromptItems.map((item) => item.label),
     ...workflowContextPayload(workflowContext),
@@ -17,13 +19,16 @@ export async function runImageModelGeneration({ node, prompt, aspectRatio, image
   });
   if (!response.ok) throw new Error(`Run ${index + 1}: ${data.error || "Image generation failed."}`);
 
-  return {
-    url: data.image.localUrl,
+  const images = Array.isArray(data.images) && data.images.length ? data.images : [data.image].filter(Boolean);
+  return images.map((image, imageIndex) => ({
+    url: image.localUrl,
+    thumbnailUrl: image.thumbnailUrl || "",
     type: "image",
-    label: `Image ${index + 1}`,
+    label: image.label || (data.layerSeparation ? `Layer ${imageIndex + 1}` : `Image ${index + 1}`),
     text: data.text || "",
-    cost: data.cost
-  };
+    cost: imageIndex === 0 ? data.cost : null,
+    layerIndex: image.layerIndex || null
+  }));
 }
 
 export async function runAutoAspectGeneration({
@@ -63,6 +68,7 @@ export async function runAutoAspectGeneration({
 
   return {
     url: data.image.localUrl,
+    thumbnailUrl: data.image.thumbnailUrl || "",
     type: "image",
     label: outputLabel,
     text: data.text || "",
@@ -133,6 +139,7 @@ export async function runCharacterSheetGeneration({ node, prompt, portrait, ward
 
   return {
     url: data.image.localUrl,
+    thumbnailUrl: data.image.thumbnailUrl || "",
     type: "image",
     label: `@${characterTag} Character Sheet`,
     fileName: data.image.fileName,

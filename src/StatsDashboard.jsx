@@ -10,6 +10,8 @@ import {
   TrendingUp
 } from "lucide-react";
 import { statsApi } from "./api/newtApi.js";
+import { estimateOpenAiImage2Cost, openAiImage2Costs, openAiImage2Quality } from "./openAiImage2.js";
+import { nanoBanana2Costs, normalizeNanoBanana2Resolution } from "./nanoBanana2.js";
 
 const defaultPricing = {
   seedance: {
@@ -19,15 +21,26 @@ const defaultPricing = {
     fastCostPerThousandTokens: 0.0112,
     billingFps: 24
   },
+  geminiOmni: {
+    googleCostPerSecond: 0.1,
+    falCostPerSecond: 0.13
+  },
   nanoBananaPro: {
     cost1K2K: 0.15,
     cost4K: 0.3
+  },
+  nanoBanana2: {
+    cost0_5K: nanoBanana2Costs["0.5K"],
+    cost1K: nanoBanana2Costs["1K"],
+    cost2K: nanoBanana2Costs["2K"],
+    cost4K: nanoBanana2Costs["4K"]
   },
   zImage: {
     costPerMegapixel: 0.005
   },
   openAiImage2: {
-    mediumCost: 0.053
+    quality: openAiImage2Quality,
+    costs: openAiImage2Costs
   },
   krea2Large: {
     cost: 0.06,
@@ -468,6 +481,7 @@ function resolvedItemCost(item, mediaType, pricing) {
   const trustedSource = item.cost?.pricingSource && item.cost.pricingSource !== "configured-pricing-v1";
 
   if (storedCost !== null && item.cost?.pricingSource === "fal-usage-response") return storedCost;
+  if (storedCost !== null && item.cost?.pricingSource === "krea-api-pricing-2026-07-12") return storedCost;
   if (estimatedCost !== null) return estimatedCost;
   if (storedCost !== null && trustedSource) return storedCost;
   return storedCost;
@@ -503,7 +517,13 @@ function estimateItemCost(item, mediaType, pricing) {
     }
 
     if (modelKey.includes("openai")) {
-      return pricing.openAiImage2?.mediumCost || defaultPricing.openAiImage2.mediumCost;
+      return estimateOpenAiImage2Cost({
+        resolution: settings.resolution,
+        size: settings.imageSize,
+        quality: settings.quality || pricing.openAiImage2?.quality || defaultPricing.openAiImage2.quality,
+        edit: String(item.endpoint || "").includes("/edit"),
+        pricing: pricing.openAiImage2?.costs || defaultPricing.openAiImage2.costs
+      });
     }
 
     if (modelKey.includes("krea") && modelKey.includes("large")) {
@@ -511,6 +531,12 @@ function estimateItemCost(item, mediaType, pricing) {
       return Number(settings.imageStyleReferenceCount || 0) > 0
         ? kreaPricing.styleReferenceCost
         : kreaPricing.cost;
+    }
+
+    if (modelKey.includes("nano banana 2") || modelKey.includes("nano-banana-2") || modelKey.includes("gemini 3.1 flash image")) {
+      const nano2Pricing = pricing.nanoBanana2 || defaultPricing.nanoBanana2;
+      const resolutionKey = normalizeNanoBanana2Resolution(settings.resolution).replace(".", "_");
+      return nano2Pricing[`cost${resolutionKey}`] ?? defaultPricing.nanoBanana2[`cost${resolutionKey}`];
     }
 
     if (modelKey.includes("nano") || modelKey.includes("banana") || modelKey.includes("gemini")) {
@@ -545,6 +571,13 @@ function estimateItemCost(item, mediaType, pricing) {
 
   if (modelKey.includes("seedance") || modelKey.includes("bytedance/seedance")) {
     return estimateSeedanceStatsCost(item, settings, pricing);
+  }
+
+  if (modelKey.includes("gemini") && modelKey.includes("omni")) {
+    const modelPricing = pricing.geminiOmni || defaultPricing.geminiOmni;
+    const provider = String(item.provider || "").toLowerCase();
+    const rate = provider.includes("fal") ? modelPricing.falCostPerSecond : modelPricing.googleCostPerSecond;
+    return durationToSeconds(settings.duration) * rate;
   }
 
   if (modelKey.includes("luma") || modelKey.includes("luma-dream-machine") || modelKey.includes("luma-photon")) {

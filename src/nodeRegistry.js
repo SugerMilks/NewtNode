@@ -1,21 +1,23 @@
 export const nodeTypeDefinitions = [
   { type: "plainText", label: "Text" },
-  { type: "image", label: "Image" },
-  { type: "video", label: "Video" },
-  { type: "preview", label: "Preview" },
-  { type: "autoAspect", label: "Auto Aspect" },
-  { type: "storyboard", label: "Storyboard" },
-  { type: "character", label: "Character" },
-  { type: "camera", label: "Camera" },
-  { type: "composer", label: "Composer" },
-  { type: "style", label: "Style" },
-  { type: "transfer", label: "Mood Board" },
-  { type: "utility", label: "Utility" },
-  { type: "audio", label: "Audio" },
-  { type: "model3d", label: "3D" },
+  { type: "text", label: "Smart Text" },
   { type: "imageModel", label: "Image Model" },
   { type: "videoModel", label: "Video Model" },
-  { type: "text", label: "Smart Text Model" }
+  { type: "preview", label: "Preview" },
+  { type: "style", label: "Style" },
+  { type: "transfer", label: "Mood Board" },
+  { type: "character", label: "Character" },
+  { type: "camera", label: "Camera" },
+  { type: "skillDirector", label: "Film Director" },
+  { type: "storyboard", label: "Storyboard" },
+  { type: "composer", label: "Composer" },
+  { type: "frameIt", label: "Frame It" },
+  { type: "autoAspect", label: "Auto Aspect" },
+  { type: "model3d", label: "3D" },
+  { type: "image", label: "Image" },
+  { type: "video", label: "Video" },
+  { type: "audio", label: "Audio" },
+  { type: "utility", label: "Utility" }
 ];
 
 const nodeTypeMap = new Map(nodeTypeDefinitions.map((definition) => [definition.type, definition]));

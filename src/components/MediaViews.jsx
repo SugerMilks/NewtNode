@@ -1,11 +1,11 @@
 import React from "react";
-import { Box, ChartSpline, Check, ChevronLeft, ChevronRight, Crop, Download, FileAudio, FileImage, Film, FlipHorizontal, FlipVertical, ImagePlus, Loader2, Paintbrush, PanelRightClose, Plus, RefreshCw, RotateCw, Sun, Type, Video, X } from "lucide-react";
-import { capitalizeMediaType, outputDragMime as defaultOutputDragMime } from "../mediaAssets.js";
+import { Box, Check, ChevronLeft, ChevronRight, Crop, Download, FileAudio, FileImage, Film, FlipHorizontal, FlipVertical, ImagePlus, Loader2, Paintbrush, PanelRightClose, Plus, RefreshCw, RotateCw, Sun, Type, Video, X } from "lucide-react";
+import { capitalizeMediaType, finishOutputItemDragData, outputDragMime as defaultOutputDragMime, previewImageUrl, setOutputItemDragData } from "../mediaAssets.js";
 import { normalizedResultItems, resultDownloadFileName } from "../mediaResults.js";
 
 const LazyModel3DViewer = React.lazy(() => import("./Model3DViewer.jsx").then((module) => ({ default: module.Model3DViewer })));
 
-export function MediaPreview({ node }) {
+export function MediaPreview({ node, onPreviewOpen }) {
   if (!node.data.resultUrl) {
     return (
       <div className="media-preview empty">
@@ -24,30 +24,52 @@ export function MediaPreview({ node }) {
     mimeType: node.data.mimeType || ""
   };
   function startPreviewDrag(event) {
-    event.dataTransfer.effectAllowed = "copy";
-    event.dataTransfer.setData(defaultOutputDragMime, JSON.stringify(dragItem));
-    event.dataTransfer.setData("text/plain", dragItem.url);
-    event.dataTransfer.setData("text/uri-list", dragItem.url);
+    setOutputItemDragData(event.dataTransfer, dragItem, defaultOutputDragMime);
+  }
+
+  function endPreviewDrag(event) {
+    finishOutputItemDragData(dragItem, event);
   }
 
   if (node.type === "image") {
+    const itemIndex = Math.max(0, normalizedResultItems(node.data.resultItems, node.data.resultUrl, "image").findIndex((item) => item.url === node.data.resultUrl));
     return (
-      <div className="media-preview" draggable onDragStart={startPreviewDrag} title="Drag image into another node">
-        <img src={node.data.resultUrl} alt={node.data.fileName || "Uploaded image"} draggable={false} onError={useNewtNodeImageFallback} />
+      <div
+        className="media-preview"
+        draggable
+        onPointerDown={(event) => event.stopPropagation()}
+        onDragStart={startPreviewDrag}
+        onDragEnd={endPreviewDrag}
+        onDoubleClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          onPreviewOpen?.({
+            ...dragItem,
+            type: "image",
+            editContext: {
+              type: "nodeResult",
+              nodeId: node.id,
+              itemIndex
+            }
+          });
+        }}
+        title="Drag image into another node or double-click to edit"
+      >
+        <img src={previewImageUrl(node.data.resultUrl, node.data.thumbnailUrl)} alt={node.data.fileName || "Uploaded image"} draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />
       </div>
     );
   }
 
   if (node.type === "video") {
     return (
-      <div className="media-preview" draggable onDragStart={startPreviewDrag} title="Drag video into another node">
-        <video src={node.data.resultUrl} controls muted loop draggable={false} onError={useNewtNodeVideoFallback} />
+      <div className="media-preview" draggable onDragStart={startPreviewDrag} onDragEnd={endPreviewDrag} title="Drag video into another node">
+        <video src={node.data.resultUrl} controls muted loop playsInline preload="metadata" draggable={false} onError={useNewtNodeVideoFallback} />
       </div>
     );
   }
 
   return (
-    <div className="media-preview audio" draggable onDragStart={startPreviewDrag} title="Drag audio into another node">
+    <div className="media-preview audio" draggable onDragStart={startPreviewDrag} onDragEnd={endPreviewDrag} title="Drag audio into another node">
       <FileAudio size={28} />
       <audio src={node.data.resultUrl} controls />
     </div>
@@ -63,10 +85,7 @@ export function UploadIcon({ type }) {
 
 export const ProjectOutputDrawer = React.memo(function ProjectOutputDrawer({ items, onClose, onRefresh, onPreviewOpen, outputDragMime = defaultOutputDragMime }) {
   const startDrag = React.useCallback((event, item) => {
-    event.dataTransfer.effectAllowed = "copy";
-    event.dataTransfer.setData(outputDragMime, JSON.stringify(item));
-    event.dataTransfer.setData("text/plain", item.url);
-    event.dataTransfer.setData("text/uri-list", item.url);
+    setOutputItemDragData(event.dataTransfer, item, outputDragMime);
   }, [outputDragMime]);
 
   return (
@@ -88,6 +107,7 @@ export const ProjectOutputDrawer = React.memo(function ProjectOutputDrawer({ ite
               key={item.id}
               item={item}
               onDragStart={startDrag}
+              onDragEnd={(item, event) => finishOutputItemDragData(item, event)}
               onPreviewOpen={onPreviewOpen}
             />
           ))
@@ -101,9 +121,9 @@ export const ProjectOutputDrawer = React.memo(function ProjectOutputDrawer({ ite
   );
 });
 
-const ProjectOutputThumb = React.memo(function ProjectOutputThumb({ item, onDragStart, onPreviewOpen }) {
+const ProjectOutputThumb = React.memo(function ProjectOutputThumb({ item, onDragStart, onDragEnd, onPreviewOpen }) {
   const thumbRef = React.useRef(null);
-  const mediaSrc = useLazyRailMediaSrc(thumbRef, item.url);
+  const mediaSrc = useLazyRailMediaSrc(thumbRef, item.type === "image" ? previewImageUrl(item) : item.thumbnailUrl || item.url);
   const KindIcon = item.type === "video" ? Film : item.type === "audio" ? FileAudio : item.type === "model3d" ? Box : FileImage;
 
   return (
@@ -112,6 +132,7 @@ const ProjectOutputThumb = React.memo(function ProjectOutputThumb({ item, onDrag
       className={`project-output-thumb ${item.type}`}
       draggable
       onDragStart={(event) => onDragStart(event, item)}
+      onDragEnd={(event) => onDragEnd(item, event)}
       onDoubleClick={() => onPreviewOpen?.(item)}
       title={`${item.label || item.fileName || "Output"}\nDrag to canvas or double-click to preview`}
     >
@@ -160,12 +181,12 @@ function useLazyRailMediaSrc(ref, url) {
 }
 
 const defaultCropRect = { x: 8, y: 8, width: 84, height: 84 };
-const defaultToneAdjustments = { brightness: 0, contrast: 0 };
+const defaultToneAdjustments = { brightness: 0, contrast: 0, saturation: 0 };
 const defaultCurvePoints = [
   { x: 0, y: 100 },
   { x: 100, y: 0 }
 ];
-const textOverlayFonts = ["Inter", "Arial", "Helvetica", "Georgia", "Times New Roman", "Courier New", "Impact", "Trebuchet MS", "Verdana", "Avenir Next"];
+const textOverlayFonts = ["Inter", "Arial", "Helvetica", "Comic Sans MS", "Georgia", "Times New Roman", "Courier New", "Impact", "Trebuchet MS", "Verdana", "Avenir Next"];
 const defaultTextOverlay = {
   text: "",
   x: 50,
@@ -267,20 +288,29 @@ function applyCurveToImageData(context, width, height, points = defaultCurvePoin
 function normalizedToneAdjustments(adjustments = defaultToneAdjustments) {
   return {
     brightness: Math.round(clampCurveNumber(adjustments?.brightness, -100, 100)),
-    contrast: Math.round(clampCurveNumber(adjustments?.contrast, -100, 100))
+    contrast: Math.round(clampCurveNumber(adjustments?.contrast, -100, 100)),
+    saturation: Math.round(clampCurveNumber(adjustments?.saturation, -100, 100))
   };
 }
 
 function applyToneAdjustmentsToImageData(context, width, height, adjustments = defaultToneAdjustments) {
-  const { brightness, contrast } = normalizedToneAdjustments(adjustments);
+  const { brightness, contrast, saturation } = normalizedToneAdjustments(adjustments);
   const imageData = context.getImageData(0, 0, width, height);
   const brightnessOffset = brightness * 2.55;
   const contrastValue = contrast * 2.55;
   const contrastFactor = (259 * (contrastValue + 255)) / (255 * (259 - contrastValue));
+  const saturationFactor = 1 + saturation / 100;
   for (let index = 0; index < imageData.data.length; index += 4) {
-    imageData.data[index] = clampCurveNumber(contrastFactor * (imageData.data[index] - 128) + 128 + brightnessOffset, 0, 255);
-    imageData.data[index + 1] = clampCurveNumber(contrastFactor * (imageData.data[index + 1] - 128) + 128 + brightnessOffset, 0, 255);
-    imageData.data[index + 2] = clampCurveNumber(contrastFactor * (imageData.data[index + 2] - 128) + 128 + brightnessOffset, 0, 255);
+    let red = contrastFactor * (imageData.data[index] - 128) + 128 + brightnessOffset;
+    let green = contrastFactor * (imageData.data[index + 1] - 128) + 128 + brightnessOffset;
+    let blue = contrastFactor * (imageData.data[index + 2] - 128) + 128 + brightnessOffset;
+    const luminance = red * 0.2126 + green * 0.7152 + blue * 0.0722;
+    red = luminance + (red - luminance) * saturationFactor;
+    green = luminance + (green - luminance) * saturationFactor;
+    blue = luminance + (blue - luminance) * saturationFactor;
+    imageData.data[index] = clampCurveNumber(red, 0, 255);
+    imageData.data[index + 1] = clampCurveNumber(green, 0, 255);
+    imageData.data[index + 2] = clampCurveNumber(blue, 0, 255);
   }
   context.putImageData(imageData, 0, 0);
 }
@@ -317,7 +347,7 @@ async function createCurvesPreviewUrl(url, points = defaultCurvePoints) {
   return URL.createObjectURL(blob);
 }
 
-async function createTonePreviewUrl(url, adjustments = defaultToneAdjustments) {
+async function createTonePreviewUrl(url, adjustments = defaultToneAdjustments, points = defaultCurvePoints) {
   const image = await loadPreviewImage(url);
   const sourceWidth = image.naturalWidth || image.width || 1;
   const sourceHeight = image.naturalHeight || image.height || 1;
@@ -328,13 +358,14 @@ async function createTonePreviewUrl(url, adjustments = defaultToneAdjustments) {
   canvas.width = width;
   canvas.height = height;
   const context = canvas.getContext("2d", { willReadFrequently: true });
-  if (!context) throw new Error("Could not preview brightness.");
+  if (!context) throw new Error("Could not preview adjustments.");
   context.drawImage(image, 0, 0, width, height);
   applyToneAdjustmentsToImageData(context, width, height, adjustments);
+  applyCurveToImageData(context, width, height, points);
   const blob = await new Promise((resolve, reject) => {
     canvas.toBlob((nextBlob) => {
       if (nextBlob) resolve(nextBlob);
-      else reject(new Error("Could not preview brightness."));
+      else reject(new Error("Could not preview adjustments."));
     }, "image/jpeg", 0.92);
   });
   return URL.createObjectURL(blob);
@@ -345,6 +376,7 @@ export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onResto
   const cropDragRef = React.useRef(null);
   const textDragRef = React.useRef(null);
   const paintCanvasRef = React.useRef(null);
+  const paintMaskDataCanvasRef = React.useRef(null);
   const paintDragRef = React.useRef(null);
   const curveGraphRef = React.useRef(null);
   const curveDragRef = React.useRef(null);
@@ -376,7 +408,7 @@ export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onResto
   const [editError, setEditError] = React.useState("");
   const KindIcon = displayItem.type === "video" ? Film : displayItem.type === "audio" ? FileAudio : displayItem.type === "model3d" ? Box : FileImage;
   const label = displayItem.label || displayItem.fileName || `${capitalizeMediaType(displayItem.type)} preview`;
-  const canEditImage = displayItem.type === "image" && displayItem.editContext?.type === "previewLayout" && typeof onApplyImageEdit === "function";
+  const canEditImage = displayItem.type === "image" && ["previewLayout", "storyboardFrame", "nodeResult"].includes(displayItem.editContext?.type) && typeof onApplyImageEdit === "function";
   const inpaintBusy = editBusy && paintMode;
 
   React.useEffect(() => {
@@ -479,12 +511,57 @@ export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onResto
     ));
   }
 
+  function previewEditorKeyTargetIsTyping(target) {
+    return Boolean(target?.closest?.("input, textarea, select, [contenteditable='true'], [contenteditable=''], [role='slider']"));
+  }
+
+  function applyActivePreviewTool() {
+    if (!canEditImage || editBusy) return false;
+    if (cropMode) {
+      applyEdit({ type: "crop", cropRect: clampCropRect(cropRect) });
+      return true;
+    }
+    if (textMode) {
+      const overlay = normalizedTextOverlay(textOverlay);
+      if (!overlay.text.trim()) return false;
+      applyEdit({ type: "text", overlay });
+      return true;
+    }
+    if (paintMode) {
+      if (!paintHasMask || !paintPrompt.trim()) return false;
+      applyPaintEdit();
+      return true;
+    }
+    if (toneMode) {
+      applyEdit({
+        type: "tone",
+        adjustments: normalizedToneAdjustments(toneAdjustments),
+        points: normalizedCurvePoints(curvePoints)
+      });
+      return true;
+    }
+    return false;
+  }
+
   React.useEffect(() => {
     function handleKeyDown(event) {
       const commandKey = event.metaKey || event.ctrlKey;
       const key = event.key.toLowerCase();
       if (event.key === "Escape") {
         onClose();
+        return;
+      }
+      if (
+        event.key === "Enter" &&
+        !commandKey &&
+        !event.altKey &&
+        !event.shiftKey &&
+        !previewEditorKeyTargetIsTyping(event.target) &&
+        applyActivePreviewTool()
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation?.();
         return;
       }
       if (!canEditImage || !commandKey || (key !== "z" && key !== "y")) return;
@@ -500,7 +577,7 @@ export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onResto
 
     window.addEventListener("keydown", handleKeyDown, true);
     return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, [canEditImage, cropRect, curvePoints, editBusy, onClose, onRestoreImageEdit, textOverlay, toneAdjustments]);
+  }, [canEditImage, cropMode, cropRect, curvePoints, curvesMode, editBusy, onClose, onRestoreImageEdit, paintHasMask, paintMode, paintPrompt, textMode, textOverlay, toneAdjustments, toneMode]);
 
   React.useEffect(() => {
     setCropMode(false);
@@ -577,7 +654,7 @@ export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onResto
     let canceled = false;
     const previewAdjustments = normalizedToneAdjustments(toneAdjustments);
     const timeout = window.setTimeout(() => {
-      createTonePreviewUrl(displayItem.url, previewAdjustments)
+      createTonePreviewUrl(displayItem.url, previewAdjustments, normalizedCurvePoints(curvePoints))
         .then((url) => {
           if (canceled) {
             URL.revokeObjectURL(url);
@@ -596,7 +673,7 @@ export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onResto
       canceled = true;
       window.clearTimeout(timeout);
     };
-  }, [toneMode, toneAdjustments, displayItem.type, displayItem.url]);
+  }, [toneMode, toneAdjustments, curvePoints, displayItem.type, displayItem.url]);
 
   React.useEffect(() => () => {
     if (curvePreviewUrlRef.current) URL.revokeObjectURL(curvePreviewUrlRef.current);
@@ -704,48 +781,81 @@ export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onResto
     const canvas = paintCanvasRef.current;
     const bounds = imageEditorRef.current?.getBoundingClientRect();
     if (!canvas || !bounds?.width || !bounds?.height) return;
-    const previousCanvas = preserve && canvas.width && canvas.height ? document.createElement("canvas") : null;
-    if (previousCanvas) {
-      previousCanvas.width = canvas.width;
-      previousCanvas.height = canvas.height;
-      previousCanvas.getContext("2d")?.drawImage(canvas, 0, 0);
-    }
     const pixelRatio = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
     const width = Math.max(1, Math.round(bounds.width * pixelRatio));
     const height = Math.max(1, Math.round(bounds.height * pixelRatio));
-    if (canvas.width === width && canvas.height === height) return;
-    canvas.width = width;
-    canvas.height = height;
-    const context = canvas.getContext("2d");
-    context?.clearRect(0, 0, width, height);
-    if (previousCanvas && context) {
-      context.drawImage(previousCanvas, 0, 0, width, height);
+    if (canvas.width !== width || canvas.height !== height) {
+      canvas.width = width;
+      canvas.height = height;
     }
+    redrawPaintDisplayCanvas();
   }
 
   function clearPaintMask() {
     const canvas = paintCanvasRef.current;
     const context = canvas?.getContext("2d");
     if (canvas && context) context.clearRect(0, 0, canvas.width, canvas.height);
+    const dataCanvas = paintMaskDataCanvasRef.current;
+    const dataContext = dataCanvas?.getContext("2d");
+    if (dataCanvas && dataContext) dataContext.clearRect(0, 0, dataCanvas.width, dataCanvas.height);
     setPaintHasMask(false);
   }
 
+  function previewPaintImageElement() {
+    return imageEditorRef.current?.querySelector("img") || null;
+  }
+
+  function ensurePaintMaskDataCanvas() {
+    const image = previewPaintImageElement();
+    const width = Math.max(1, Math.round(image?.naturalWidth || image?.width || 0));
+    const height = Math.max(1, Math.round(image?.naturalHeight || image?.height || 0));
+    if (!width || !height) return null;
+    let canvas = paintMaskDataCanvasRef.current;
+    if (!canvas) {
+      canvas = document.createElement("canvas");
+      paintMaskDataCanvasRef.current = canvas;
+    }
+    if (canvas.width !== width || canvas.height !== height) {
+      canvas.width = width;
+      canvas.height = height;
+    }
+    return canvas;
+  }
+
+  function redrawPaintDisplayCanvas() {
+    const displayCanvas = paintCanvasRef.current;
+    const dataCanvas = paintMaskDataCanvasRef.current;
+    const context = displayCanvas?.getContext("2d");
+    if (!displayCanvas || !context) return;
+    context.clearRect(0, 0, displayCanvas.width, displayCanvas.height);
+    if (dataCanvas?.width && dataCanvas?.height) {
+      context.drawImage(dataCanvas, 0, 0, displayCanvas.width, displayCanvas.height);
+    }
+  }
+
   function paintCanvasPoint(event) {
-    const canvas = paintCanvasRef.current;
-    const bounds = canvas?.getBoundingClientRect();
-    if (!canvas || !bounds?.width || !bounds?.height) return null;
+    const image = previewPaintImageElement();
+    const bounds = image?.getBoundingClientRect();
+    if (!image || !bounds?.width || !bounds?.height) return null;
+    const naturalWidth = image.naturalWidth || image.width || bounds.width;
+    const naturalHeight = image.naturalHeight || image.height || bounds.height;
+    const displayX = event.clientX - bounds.left;
+    const displayY = event.clientY - bounds.top;
     return {
-      x: (event.clientX - bounds.left) * (canvas.width / bounds.width),
-      y: (event.clientY - bounds.top) * (canvas.height / bounds.height)
+      displayX,
+      displayY,
+      naturalX: displayX * (naturalWidth / bounds.width),
+      naturalY: displayY * (naturalHeight / bounds.height),
+      displayWidth: bounds.width,
+      naturalWidth
     };
   }
 
   function drawPaintStroke(from, to) {
-    const canvas = paintCanvasRef.current;
-    const context = canvas?.getContext("2d");
-    const bounds = canvas?.getBoundingClientRect();
-    if (!canvas || !context || !bounds?.width) return;
-    const scale = canvas.width / bounds.width;
+    const dataCanvas = ensurePaintMaskDataCanvas();
+    const context = dataCanvas?.getContext("2d");
+    if (!dataCanvas || !context || !from?.displayWidth) return;
+    const scale = from.naturalWidth / from.displayWidth;
     context.save();
     context.globalCompositeOperation = "source-over";
     context.lineWidth = Math.max(4, paintBrushSize * scale);
@@ -754,10 +864,11 @@ export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onResto
     context.strokeStyle = "#ead42c";
     context.shadowBlur = 0;
     context.beginPath();
-    context.moveTo(from.x, from.y);
-    context.lineTo(to.x, to.y);
+    context.moveTo(from.naturalX, from.naturalY);
+    context.lineTo(to.naturalX, to.naturalY);
     context.stroke();
     context.restore();
+    redrawPaintDisplayCanvas();
     setPaintHasMask(true);
   }
 
@@ -795,11 +906,10 @@ export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onResto
   }
 
   function createPaintMaskDataUrl() {
-    const canvas = paintCanvasRef.current;
-    const image = imageEditorRef.current?.querySelector("img");
-    if (!canvas || !image || !paintHasMask) return "";
-    const width = image.naturalWidth || image.width || canvas.width;
-    const height = image.naturalHeight || image.height || canvas.height;
+    const dataCanvas = paintMaskDataCanvasRef.current;
+    if (!dataCanvas || !dataCanvas.width || !dataCanvas.height || !paintHasMask) return "";
+    const width = dataCanvas.width;
+    const height = dataCanvas.height;
     const maskCanvas = document.createElement("canvas");
     maskCanvas.width = Math.max(1, Math.round(width));
     maskCanvas.height = Math.max(1, Math.round(height));
@@ -807,10 +917,11 @@ export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onResto
     if (!context) return "";
     context.fillStyle = "#000";
     context.fillRect(0, 0, maskCanvas.width, maskCanvas.height);
-    context.drawImage(canvas, 0, 0, maskCanvas.width, maskCanvas.height);
+    context.drawImage(dataCanvas, 0, 0, maskCanvas.width, maskCanvas.height);
     const imageData = context.getImageData(0, 0, maskCanvas.width, maskCanvas.height);
     for (let index = 0; index < imageData.data.length; index += 4) {
-      const masked = imageData.data[index + 3] > 8 || imageData.data[index] > 12 || imageData.data[index + 1] > 12 || imageData.data[index + 2] > 12;
+      const luminance = (imageData.data[index] + imageData.data[index + 1] + imageData.data[index + 2]) / 3;
+      const masked = luminance > 24;
       imageData.data[index] = masked ? 255 : 0;
       imageData.data[index + 1] = masked ? 255 : 0;
       imageData.data[index + 2] = masked ? 255 : 0;
@@ -947,7 +1058,7 @@ export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onResto
   function sameToneAdjustments(a, b) {
     const left = normalizedToneAdjustments(a);
     const right = normalizedToneAdjustments(b);
-    return left.brightness === right.brightness && left.contrast === right.contrast;
+    return left.brightness === right.brightness && left.contrast === right.contrast && left.saturation === right.saturation;
   }
 
   function startToneSliderChange() {
@@ -972,6 +1083,13 @@ export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onResto
   function resetToneAdjustments() {
     if (!sameToneAdjustments(toneAdjustments, defaultToneAdjustments)) pushEditUndoSnapshot();
     setToneAdjustments(defaultToneAdjustments);
+  }
+
+  function resetToneAdjustment(key) {
+    const current = normalizedToneAdjustments(toneAdjustments);
+    if (!Object.prototype.hasOwnProperty.call(current, key) || current[key] === 0) return;
+    pushEditUndoSnapshot();
+    setToneAdjustments((value) => normalizedToneAdjustments({ ...value, [key]: 0 }));
   }
 
   function sameTextOverlays(a, b) {
@@ -1133,17 +1251,8 @@ export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onResto
                   setTextMode(false);
                   setPaintMode(false);
                   setToneMode((value) => !value);
-                }} disabled={editBusy} title="Brightness and contrast" aria-label="Brightness and contrast">
+                }} disabled={editBusy} title="Adjust brightness, contrast, saturation, and curves" aria-label="Adjust brightness, contrast, saturation, and curves">
                   <Sun size={15} />
-                </button>
-                <button type="button" className={curvesMode ? "active" : ""} onClick={() => {
-                  setCropMode(false);
-                  setToneMode(false);
-                  setTextMode(false);
-                  setPaintMode(false);
-                  setCurvesMode((value) => !value);
-                }} disabled={editBusy} title="Curves" aria-label="Curves">
-                  <ChartSpline size={15} />
                 </button>
                 {cropMode && (
                   <>
@@ -1188,26 +1297,18 @@ export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onResto
                 )}
                 {toneMode && (
                   <>
-                    <button type="button" className="crop-apply" onClick={() => applyEdit({ type: "tone", adjustments: normalizedToneAdjustments(toneAdjustments) })} disabled={editBusy} title="Apply brightness and contrast" aria-label="Apply brightness and contrast">
+                    <button type="button" className="crop-apply" onClick={() => applyEdit({
+                      type: "tone",
+                      adjustments: normalizedToneAdjustments(toneAdjustments),
+                      points: normalizedCurvePoints(curvePoints)
+                    })} disabled={editBusy} title="Apply adjustments" aria-label="Apply adjustments">
                       <Check size={15} />
                     </button>
                     <button type="button" onClick={() => {
                       setToneMode(false);
                       resetToneAdjustments();
-                    }} disabled={editBusy} title="Cancel brightness and contrast" aria-label="Cancel brightness and contrast">
-                      <X size={15} />
-                    </button>
-                  </>
-                )}
-                {curvesMode && (
-                  <>
-                    <button type="button" className="crop-apply" onClick={() => applyEdit({ type: "curves", points: normalizedCurvePoints(curvePoints) })} disabled={editBusy} title="Apply curves" aria-label="Apply curves">
-                      <Check size={15} />
-                    </button>
-                    <button type="button" onClick={() => {
-                      setCurvesMode(false);
                       resetCurves();
-                    }} disabled={editBusy} title="Cancel curves" aria-label="Cancel curves">
+                    }} disabled={editBusy} title="Cancel adjustments" aria-label="Cancel adjustments">
                       <X size={15} />
                     </button>
                   </>
@@ -1219,50 +1320,79 @@ export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onResto
             </button>
           </div>
         </header>
-        {canEditImage && curvesMode && (
-          <div className="output-curves-panel">
-            <div className="output-curves-topline">
-              <span>Channel: RGB</span>
-              <button type="button" onClick={resetCurves} disabled={editBusy}>Reset</button>
+        {canEditImage && toneMode && (
+          <div className="output-adjust-panel">
+            <div className="output-curves-panel">
+              <div className="output-curves-topline">
+                <span>Channel: RGB</span>
+                <button type="button" onClick={resetCurves} disabled={editBusy}>Reset</button>
+              </div>
+              <svg
+                ref={curveGraphRef}
+                className="output-curves-graph"
+                viewBox="-3 -3 106 106"
+                preserveAspectRatio="none"
+                onPointerDown={addCurvePoint}
+                onPointerMove={handleCurvePointMove}
+                onPointerUp={stopCurvePointDrag}
+                onPointerCancel={stopCurvePointDrag}
+                role="img"
+                aria-label="RGB curve editor"
+              >
+                <defs>
+                  <linearGradient id="newtnodeCurvesGradient" x1="0" x2="0" y1="0" y2="1">
+                    <stop offset="0" stopColor="rgba(255,255,255,0.22)" />
+                    <stop offset="1" stopColor="rgba(255,255,255,0.02)" />
+                  </linearGradient>
+                </defs>
+                <rect x="0" y="0" width="100" height="100" />
+                {[25, 50, 75].map((position) => (
+                  <React.Fragment key={position}>
+                    <line x1={position} y1="0" x2={position} y2="100" />
+                    <line x1="0" y1={position} x2="100" y2={position} />
+                  </React.Fragment>
+                ))}
+                <path className="curves-reference-line" d="M 0 100 L 100 0" />
+                <path className="curves-active-line" d={curvePathForPoints(curvePoints)} />
+                {visibleCurveControlPoints(curvePoints).map(({ point, index }) => (
+                  <circle
+                    key={`curve-point-${index}`}
+                    cx={point.x}
+                    cy={point.y}
+                    r="2.3"
+                    onPointerDown={(event) => startCurvePointDrag(event, index)}
+                    onDoubleClick={(event) => removeCurvePoint(event, index)}
+                  />
+                ))}
+              </svg>
             </div>
-            <svg
-              ref={curveGraphRef}
-              className="output-curves-graph"
-              viewBox="-3 -3 106 106"
-              preserveAspectRatio="none"
-              onPointerDown={addCurvePoint}
-              onPointerMove={handleCurvePointMove}
-              onPointerUp={stopCurvePointDrag}
-              onPointerCancel={stopCurvePointDrag}
-              role="img"
-              aria-label="RGB curve editor"
-            >
-              <defs>
-                <linearGradient id="newtnodeCurvesGradient" x1="0" x2="0" y1="0" y2="1">
-                  <stop offset="0" stopColor="rgba(255,255,255,0.22)" />
-                  <stop offset="1" stopColor="rgba(255,255,255,0.02)" />
-                </linearGradient>
-              </defs>
-              <rect x="0" y="0" width="100" height="100" />
-              {[25, 50, 75].map((position) => (
-                <React.Fragment key={position}>
-                  <line x1={position} y1="0" x2={position} y2="100" />
-                  <line x1="0" y1={position} x2="100" y2={position} />
-                </React.Fragment>
-              ))}
-              <path className="curves-reference-line" d="M 0 100 L 100 0" />
-              <path className="curves-active-line" d={curvePathForPoints(curvePoints)} />
-              {visibleCurveControlPoints(curvePoints).map(({ point, index }) => (
-                <circle
-                  key={`curve-point-${index}`}
-                  cx={point.x}
-                  cy={point.y}
-                  r="2.3"
-                  onPointerDown={(event) => startCurvePointDrag(event, index)}
-                  onDoubleClick={(event) => removeCurvePoint(event, index)}
-                />
-              ))}
-            </svg>
+            <div className="output-tone-panel">
+              {["brightness", "contrast", "saturation"].map((key) => {
+                const labelText = key.charAt(0).toUpperCase() + key.slice(1);
+                const value = toneAdjustments[key] ?? 0;
+                return (
+                  <div className="output-tone-slider" key={key}>
+                    <button type="button" onClick={() => resetToneAdjustment(key)} disabled={editBusy || value === 0}>Reset</button>
+                    <span>{labelText}</span>
+                    <input
+                      type="range"
+                      min="-100"
+                      max="100"
+                      step="1"
+                      value={value}
+                      onPointerDown={startToneSliderChange}
+                      onPointerUp={finishToneSliderChange}
+                      onPointerCancel={finishToneSliderChange}
+                      onKeyDown={startToneSliderChange}
+                      onKeyUp={finishToneSliderChange}
+                      onChange={(event) => updateToneAdjustment(key, event.target.value)}
+                      disabled={editBusy}
+                    />
+                    <output>{value > 0 ? `+${value}` : value}</output>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
         {canEditImage && textMode && (
@@ -1356,54 +1486,10 @@ export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onResto
             <small>{paintHasMask ? "Masked area ready" : "Paint the area to revise"}</small>
           </div>
         )}
-        {canEditImage && toneMode && (
-          <div className="output-tone-panel">
-            <div className="output-tone-heading">
-              <span>Brightness / Contrast</span>
-              <button type="button" onClick={resetToneAdjustments} disabled={editBusy}>Reset</button>
-            </div>
-            <label className="output-tone-slider">
-              <span>Brightness</span>
-              <input
-                type="range"
-                min="-100"
-                max="100"
-                step="1"
-                value={toneAdjustments.brightness}
-                onPointerDown={startToneSliderChange}
-                onPointerUp={finishToneSliderChange}
-                onPointerCancel={finishToneSliderChange}
-                onKeyDown={startToneSliderChange}
-                onKeyUp={finishToneSliderChange}
-                onChange={(event) => updateToneAdjustment("brightness", event.target.value)}
-                disabled={editBusy}
-              />
-              <output>{toneAdjustments.brightness > 0 ? `+${toneAdjustments.brightness}` : toneAdjustments.brightness}</output>
-            </label>
-            <label className="output-tone-slider">
-              <span>Contrast</span>
-              <input
-                type="range"
-                min="-100"
-                max="100"
-                step="1"
-                value={toneAdjustments.contrast}
-                onPointerDown={startToneSliderChange}
-                onPointerUp={finishToneSliderChange}
-                onPointerCancel={finishToneSliderChange}
-                onKeyDown={startToneSliderChange}
-                onKeyUp={finishToneSliderChange}
-                onChange={(event) => updateToneAdjustment("contrast", event.target.value)}
-                disabled={editBusy}
-              />
-              <output>{toneAdjustments.contrast > 0 ? `+${toneAdjustments.contrast}` : toneAdjustments.contrast}</output>
-            </label>
-          </div>
-        )}
         <div className="output-lightbox-stage">
           {displayItem.type === "image" && (
             <div className={`output-lightbox-image-editor ${cropMode ? "cropping" : ""} ${textMode ? "texting" : ""} ${paintMode ? "painting" : ""}`} ref={imageEditorRef}>
-              <img src={toneMode && tonePreviewUrl ? tonePreviewUrl : curvesMode && curvePreviewUrl ? curvePreviewUrl : displayItem.url} alt={label} onError={useNewtNodeImageFallback} />
+              <img src={toneMode && tonePreviewUrl ? tonePreviewUrl : displayItem.url} alt={label} onError={useNewtNodeImageFallback} />
               {textMode && normalizedTextOverlay(textOverlay).text.trim() && (
                 <div
                   className="output-text-overlay"
@@ -1477,7 +1563,7 @@ export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onResto
   );
 }
 
-export function ResultPane({ label, resultUrl, resultItems = [], selectedIndex = 0, type, status, error, onSelectResult }) {
+export function ResultPane({ label, resultUrl, resultItems = [], selectedIndex = 0, type, status, error, onSelectResult, onPreviewOpen, editContext }) {
   const items = normalizedResultItems(resultItems, resultUrl, type);
   const activeIndex = Math.min(Math.max(Number(selectedIndex) || 0, 0), Math.max(items.length - 1, 0));
   const activeItem = items[activeIndex];
@@ -1506,19 +1592,38 @@ export function ResultPane({ label, resultUrl, resultItems = [], selectedIndex =
       fileName: activeItem.fileName || resultDownloadFileName(activeItem),
       mimeType: activeItem.mimeType || ""
     };
-    event.dataTransfer.effectAllowed = "copy";
-    event.dataTransfer.setData(defaultOutputDragMime, JSON.stringify(dragItem));
-    event.dataTransfer.setData("text/plain", dragItem.url);
-    event.dataTransfer.setData("text/uri-list", dragItem.url);
+    setOutputItemDragData(event.dataTransfer, dragItem, defaultOutputDragMime);
   }
 
   return (
     <div className={`result-pane ${items.length ? "has-result" : ""} ${items.length > 1 ? "multi-result" : ""}`}>
       {activeItem && (
         <div className="result-carousel" onPointerDown={(event) => event.stopPropagation()}>
-          <div className="result-item" key={activeItem.url} draggable onDragStart={startResultDrag} title="Drag result to canvas">
-            {activeItem.type === "image" && <img src={activeItem.url} alt={activeItem.label || `Generated image ${activeIndex + 1}`} draggable={false} onError={useNewtNodeImageFallback} />}
-            {activeItem.type === "video" && <video src={activeItem.url} controls loop draggable={false} onError={useNewtNodeVideoFallback} />}
+          <div
+            className="result-item"
+            draggable
+            onDragStart={startResultDrag}
+            onDragEnd={(event) => finishOutputItemDragData(activeItem, event)}
+            onDoubleClick={(event) => {
+              if (activeItem.type !== "image") return;
+              event.preventDefault();
+              event.stopPropagation();
+              onPreviewOpen?.({
+                ...activeItem,
+                fileName: activeItem.fileName || resultDownloadFileName(activeItem),
+                mimeType: activeItem.mimeType || "",
+                editContext: editContext ? { ...editContext, itemIndex: activeIndex } : undefined
+              });
+            }}
+            title={activeItem.type === "image" ? `Drag result to canvas or double-click to ${editContext ? "edit" : "preview"}` : "Drag result to canvas"}
+          >
+            {activeItem.type === "image" && (
+              <StableResultImage
+                src={previewImageUrl(activeItem)}
+                alt={activeItem.label || `Generated image ${activeIndex + 1}`}
+              />
+            )}
+            {activeItem.type === "video" && <video src={activeItem.url} controls loop playsInline preload="metadata" draggable={false} onError={useNewtNodeVideoFallback} />}
             {activeItem.type === "model3d" && <Model3DViewer url={activeItem.url} label={activeItem.label || `3D model ${activeIndex + 1}`} />}
           </div>
           <button type="button" className="result-download-button" onClick={downloadActiveItem} title={`Download ${activeItem.type === "model3d" ? "3D model" : "result"}`} aria-label="Download result">
@@ -1540,6 +1645,45 @@ export function ResultPane({ label, resultUrl, resultItems = [], selectedIndex =
       {!items.length && <span>{status === "running" ? "Running..." : label}</span>}
       {error && <small>{error}</small>}
     </div>
+  );
+}
+
+function StableResultImage({ src, alt }) {
+  const [displaySrc, setDisplaySrc] = React.useState(src);
+
+  React.useEffect(() => {
+    if (!src || src === displaySrc) return undefined;
+    if (typeof window === "undefined" || typeof window.Image !== "function") {
+      setDisplaySrc(src);
+      return undefined;
+    }
+
+    let cancelled = false;
+    const nextImage = new window.Image();
+    const reveal = () => {
+      if (!cancelled) setDisplaySrc(src);
+    };
+    nextImage.onload = reveal;
+    nextImage.onerror = reveal;
+    nextImage.src = src;
+    if (nextImage.complete) reveal();
+
+    return () => {
+      cancelled = true;
+      nextImage.onload = null;
+      nextImage.onerror = null;
+    };
+  }, [src, displaySrc]);
+
+  return (
+    <img
+      src={displaySrc || src}
+      alt={alt}
+      draggable={false}
+      loading="eager"
+      decoding="async"
+      onError={useNewtNodeImageFallback}
+    />
   );
 }
 

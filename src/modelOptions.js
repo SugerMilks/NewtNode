@@ -4,6 +4,8 @@ export const imageBatchOptions = Array.from({ length: 9 }, (_value, index) => St
 export const imageModelAutoAspectRatio = "Auto";
 export const imageModelNames = {
   zImage: "Z-Image",
+  seedream5Pro: "Seedream 5.0 Pro",
+  nanoBanana2: "Nano Banana 2",
   nanoBananaPro: "Nano Banana Pro",
   openAiImage2: "OpenAI Image 2",
   krea2Large: "Krea 2 Large",
@@ -11,6 +13,8 @@ export const imageModelNames = {
 };
 export const imageModelOptions = [
   imageModelNames.zImage,
+  imageModelNames.seedream5Pro,
+  imageModelNames.nanoBanana2,
   imageModelNames.nanoBananaPro,
   imageModelNames.openAiImage2,
   imageModelNames.krea2Large,
@@ -22,9 +26,20 @@ export const krea2AspectRatios = ["16:9", "1:1", "4:3", "3:2", "2.35:1", "4:5", 
 export const krea2CreativityOptions = ["raw", "low", "medium", "high"];
 export const lumaImageAspectRatios = ["21:9", "16:9", "9:16", "1:1", "4:3", "3:4", "9:21"];
 export const imageResolutionOptions = ["2K", "1K", "4K"];
+export const seedream5ResolutionOptions = ["2K", "1K"];
 export const seedanceVideoDurationOptions = ["15 seconds", "10 seconds", "5 seconds"];
-export const seedanceVideoResolutionOptions = ["720p", "480p", "1080p"];
+export const seedanceVideoResolutionOptions = ["720p", "480p", "1080p", "4k"];
+export const seedanceFastVideoResolutionOptions = ["720p", "480p"];
 export const seedanceVideoAspectRatioOptions = ["16:9 (Landscape)", "21:9", "9:16 (Portrait)", "1:1"];
+export const klingO3ProDurationOptions = Array.from({ length: 13 }, (_value, index) => `${index + 3} seconds`);
+export const klingO3ProResolutionOptions = ["1080p"];
+export const klingO3ProAspectRatioOptions = ["16:9", "9:16", "1:1"];
+export const klingO34kDurationOptions = klingO3ProDurationOptions;
+export const klingO34kResolutionOptions = ["4K"];
+export const klingO34kAspectRatioOptions = klingO3ProAspectRatioOptions;
+export const geminiOmniDurationOptions = Array.from({ length: 8 }, (_value, index) => `${index + 3} seconds`);
+export const geminiOmniResolutionOptions = ["720p"];
+export const geminiOmniAspectRatioOptions = ["16:9", "9:16"];
 export const lumaVideoDurationOptions = ["5 seconds", "9 seconds"];
 export const lumaVideoResolutionOptions = ["540p", "720p", "1080p"];
 export const lumaVideoAspectRatioOptions = ["16:9", "9:16", "4:3", "3:4", "21:9", "9:21"];
@@ -34,9 +49,9 @@ export const voidVideoFrameOptions = [69, 77, 85, 93, 101, 109, 117, 125, 133, 1
 export const stylePresetPrompts = {
   None: "",
   Cinematic:
-    "High-end cinematic still frame, shot on ARRI Alexa 35, high quality prime lens, high dynamic range, shallow depth of field, atmospheric cinematography, high production value, feature film look.",
+    "High-end cinematic still frame, shot on ARRI Alexa 35, high quality prime lens, high dynamic range, shallow depth of field, atmospheric cinematography, subtle halation, gentle lens bloom, fine film grain, realistic lens softness, slight atmospheric haze, imperfect real-camera texture, high production value, feature film look.",
   Storyboard:
-    "Hand-drawn digital storyboard frame, black ink line drawing with minimal grayscale shading, cinematic composition, production-planning style, loose but intentional drawing, simple tonal blocking, clear visual storytelling. A black and white line drawing. No color. No pencil or charcoal sketches. Not a realistic black-and-white photograph, not photorealistic grayscale, no photographic skin texture, no photo lighting, no 3D render. No text or numbers unless described. No frame borders.",
+    "Minimal hand-drawn digital storyboard frame, clean black ink line drawing, simple shapes, light grayscale blocking only, open white negative space, production-planning clarity, readable silhouettes, clear visual storytelling. A black and white line drawing. No color. No pencil or charcoal sketches. Not a realistic black-and-white photograph, not photorealistic grayscale, no photographic skin texture, no photo lighting, no heavy shading, no dense detail, no 3D render. No text or numbers unless described. No frame borders.",
   Commercial:
     "Polished commercial image, premium advertising style, clean composition, bright refined lighting, shallow depth of field, elevated brand look, modern campaign aesthetic, crisp details, visually appealing.",
   Anime:
@@ -102,6 +117,9 @@ export const qwenCameraDefaults = {
 export const videoModelNames = {
   seedance: "Seedance 2.0",
   seedanceFast: "Seedance 2.0 Fast",
+  klingO3Pro: "Kling O3 Pro",
+  klingO34k: "Kling O3 4K",
+  geminiOmni: "Gemini Omni Flash",
   lumaDreamMachine: "Luma Dream Machine",
   happyHorse: "Happy Horse",
   wanFunControl: "Wan Fun Control",
@@ -112,6 +130,9 @@ export const videoModelNames = {
 export const videoModelOptions = [
   videoModelNames.seedance,
   videoModelNames.seedanceFast,
+  videoModelNames.klingO3Pro,
+  videoModelNames.klingO34k,
+  videoModelNames.geminiOmni,
   videoModelNames.wan27Reference,
   videoModelNames.happyHorse,
   videoModelNames.lumaDreamMachine,

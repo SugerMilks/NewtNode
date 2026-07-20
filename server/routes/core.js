@@ -5,6 +5,7 @@ export function registerCoreRoutes(
     resolveLocalAssetPath,
     workflowPackagePublicPath,
     selectFolderWithDialog,
+    selectSavePathWithDialog,
     selectWorkflowFileWithDialog,
     readWorkflowFromFilePath,
     readWorkflowFromPath,
@@ -42,6 +43,21 @@ export function registerCoreRoutes(
     } catch (error) {
       const status = error.code === "DIALOG_CANCELED" ? 499 : 500;
       res.status(status).json({ error: error.message || "Folder selection failed.", canceled: error.code === "DIALOG_CANCELED" });
+    }
+  });
+
+  app.post("/api/system/select-save-path", async (req, res) => {
+    try {
+      const selectedPath = await selectSavePathWithDialog({
+        title: String(req.body.title || "Save export"),
+        defaultPath: String(req.body.defaultPath || ""),
+        defaultName: String(req.body.defaultName || "export"),
+        extension: String(req.body.extension || "")
+      });
+      res.json({ path: selectedPath });
+    } catch (error) {
+      const status = error.code === "DIALOG_CANCELED" ? 499 : 500;
+      res.status(status).json({ error: error.message || "Save selection failed.", canceled: error.code === "DIALOG_CANCELED" });
     }
   });
 

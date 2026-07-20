@@ -19,6 +19,35 @@ body {
   background: #080808;
 }
 
+.app-recovery-screen {
+  min-height: 100vh;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 12px;
+  padding: 32px;
+  color: #f4f0e8;
+  background: #0d0d0d;
+  text-align: center;
+}
+
+.app-recovery-screen strong {
+  font-size: 20px;
+}
+
+.app-recovery-screen span {
+  color: rgba(244, 240, 232, 0.68);
+}
+
+.app-recovery-screen button {
+  min-height: 36px;
+  padding: 0 16px;
+  border-radius: 6px;
+  color: #11100b;
+  background: #ddc631;
+  font-weight: 760;
+}
+
 #root {
   position: relative;
   z-index: 1;
@@ -378,6 +407,17 @@ textarea::placeholder {
   color: #f4f0e8;
   background: rgba(255, 255, 255, 0.075);
   white-space: nowrap;
+}
+
+.layer-mode-chip {
+  padding: 0 15px;
+  cursor: pointer;
+}
+
+.layer-mode-chip.active {
+  border-color: rgba(221, 198, 49, 0.62);
+  color: #12110d;
+  background: #ddc631;
 }
 
 .select-chip {
@@ -765,6 +805,10 @@ textarea::placeholder {
   gap: 12px;
 }
 
+.settings-metrics {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .metric-card,
 .stats-panel {
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -955,10 +999,74 @@ textarea::placeholder {
   gap: 7px;
 }
 
-.settings-field > span {
+.settings-field > span,
+.settings-key-heading > span {
   color: rgba(244, 240, 232, 0.62);
   font-size: 12px;
   font-weight: 760;
+}
+
+.settings-key-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 22px;
+}
+
+.settings-key-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0;
+  border: 0;
+  color: rgba(244, 240, 232, 0.42);
+  background: transparent;
+  cursor: pointer;
+}
+
+.settings-key-toggle em {
+  min-width: 48px;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 760;
+  text-align: left;
+}
+
+.settings-key-toggle-track {
+  box-sizing: border-box;
+  position: relative;
+  width: 34px;
+  height: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.36);
+}
+
+.settings-key-toggle-track > span {
+  position: absolute;
+  top: 2px;
+  left: 3px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #f4f0e8;
+  box-shadow: 0 3px 7px rgba(0, 0, 0, 0.3);
+  transition: transform 160ms ease;
+}
+
+.settings-key-toggle.enabled {
+  color: rgba(244, 240, 232, 0.76);
+}
+
+.settings-key-toggle.enabled .settings-key-toggle-track {
+  border-color: rgba(221, 198, 49, 0.7);
+  background: rgba(221, 198, 49, 0.88);
+}
+
+.settings-key-toggle.enabled .settings-key-toggle-track > span {
+  transform: translateX(15px);
 }
 
 .settings-input-row {

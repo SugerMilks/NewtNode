@@ -97,6 +97,8 @@ function localApiRouteKey(path) {
   if (path.includes("composer-frame")) return "composerFrame";
   if (path.includes("composer-poses")) return "composerPoses";
   if (path.includes("preview-inpaint")) return "previewInpaint";
+  if (path.includes("run-skill-director")) return "skillDirector";
+  if (path.includes("storyboard-qc")) return "storyboardQc";
   if (path.includes("generate-3d")) return "generate3d";
   if (path.includes("settings")) return "settings";
   return "";
@@ -196,6 +198,10 @@ export const nodeApi = {
     return fetchJsonApi("/api/node/process-text", jsonBody(body), label);
   },
 
+  runSkillDirector(body, label = "Film Director") {
+    return fetchJsonApi("/api/node/run-skill-director", jsonBody(body), label);
+  },
+
   qwenCameraEdit(body, label = "Camera edit") {
     return fetchJsonApi("/api/node/qwen-camera-edit", jsonBody(body), label);
   },
@@ -224,6 +230,10 @@ export const nodeApi = {
     return fetchJsonApi("/api/node/storyboard-plan", jsonBody(body), label);
   },
 
+  reviewStoryboardFrame(body, label = "Storyboard frame QC") {
+    return fetchJsonApi("/api/node/storyboard-qc", jsonBody(body), label);
+  },
+
   exportStoryboardFrame(body, label = "Storyboard frame export") {
     return fetchJsonApi("/api/node/storyboard-export-frame", jsonBody(body), label);
   },
@@ -248,6 +258,10 @@ export const nodeApi = {
 export const systemApi = {
   selectFolder(body) {
     return fetchJsonApi("/api/system/select-folder", jsonBody(body), "Folder picker");
+  },
+
+  selectSavePath(body) {
+    return fetchJsonApi("/api/system/select-save-path", jsonBody(body), "Save picker");
   },
 
   openWorkflowFile(body, label = "Open workflow") {

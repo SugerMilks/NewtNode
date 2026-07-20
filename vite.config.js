@@ -30,5 +30,15 @@ export default defineConfig({
       "/outputs": apiTarget,
       "/workflow-assets": apiTarget
     }
+  },
+  preview: {
+    host: "127.0.0.1",
+    port: clientPort,
+    proxy: {
+      "/api": apiTarget,
+      "/uploads": apiTarget,
+      "/outputs": apiTarget,
+      "/workflow-assets": apiTarget
+    }
   }
 });

@@ -60,14 +60,19 @@ export function nodeEditorDraftSnapshot({
   };
 }
 
-export function useNodeEditorDraftPersistence(snapshot, { storageKey = nodeDraftStorageKey, delayMs = 300 } = {}) {
+export function useNodeEditorDraftPersistence(snapshot, { storageKey = nodeDraftStorageKey, delayMs = 900 } = {}) {
   const draftWriteTimerRef = React.useRef(null);
+  const draftIdleCallbackRef = React.useRef(null);
   const pendingDraftSnapshotRef = React.useRef(null);
 
   const flushDraftSnapshot = React.useCallback(() => {
     if (draftWriteTimerRef.current) {
       window.clearTimeout(draftWriteTimerRef.current);
       draftWriteTimerRef.current = null;
+    }
+    if (draftIdleCallbackRef.current && "cancelIdleCallback" in window) {
+      window.cancelIdleCallback(draftIdleCallbackRef.current);
+      draftIdleCallbackRef.current = null;
     }
 
     const pendingSnapshot = pendingDraftSnapshotRef.current;
@@ -86,7 +91,21 @@ export function useNodeEditorDraftPersistence(snapshot, { storageKey = nodeDraft
     if (draftWriteTimerRef.current) {
       window.clearTimeout(draftWriteTimerRef.current);
     }
-    draftWriteTimerRef.current = window.setTimeout(flushDraftSnapshot, delayMs);
+    if (draftIdleCallbackRef.current && "cancelIdleCallback" in window) {
+      window.cancelIdleCallback(draftIdleCallbackRef.current);
+      draftIdleCallbackRef.current = null;
+    }
+    draftWriteTimerRef.current = window.setTimeout(() => {
+      draftWriteTimerRef.current = null;
+      if ("requestIdleCallback" in window) {
+        draftIdleCallbackRef.current = window.requestIdleCallback(() => {
+          draftIdleCallbackRef.current = null;
+          flushDraftSnapshot();
+        }, { timeout: 2000 });
+        return;
+      }
+      flushDraftSnapshot();
+    }, delayMs);
   }, [snapshot, delayMs, flushDraftSnapshot]);
 
   React.useEffect(() => {

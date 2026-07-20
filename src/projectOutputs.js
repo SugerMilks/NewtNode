@@ -23,6 +23,7 @@ export function buildProjectOutputItems({
         addProjectOutput(outputMap, {
           id: `node:${node.id}:${index}:${item.url}`,
           url: item.url,
+          thumbnailUrl: item.thumbnailUrl || "",
           type: item.type || type,
           label: item.label || `${node.data.title || titleFallback?.(node.type) || node.type || "Node"} ${index + 1}`,
           fileName: item.fileName || fileNameFromLocalUrl(item.url),
@@ -41,6 +42,7 @@ export function buildProjectOutputItems({
         addProjectOutput(outputMap, {
           id: `history:${item.id || historyIndex}:${urlIndex}`,
           url,
+          thumbnailUrl: historyThumbnailUrl(item, urlIndex),
           type,
           label: item.node?.title || item.modelName || `${capitalizeMediaType(type)} output`,
           fileName: urlIndex === 0 ? item.outputFileName || fileNameFromLocalUrl(url) : fileNameFromLocalUrl(url),
@@ -95,4 +97,9 @@ function historyOutputUrls(item) {
     if (item.localImage) urls.push(item.localImage);
   }
   return [...new Set(urls.filter(isLocalOutputUrl))];
+}
+
+function historyThumbnailUrl(item, index) {
+  if (Array.isArray(item.localThumbnails) && item.localThumbnails[index]) return item.localThumbnails[index];
+  return index === 0 ? item.localThumbnail || "" : "";
 }
