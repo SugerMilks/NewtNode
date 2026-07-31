@@ -1,13 +1,11 @@
 import React from "react";
 import {
-  Bone,
   Camera,
   Grid3X3,
   LandPlot,
   Maximize2,
   Move3D,
-  MoveHorizontal,
-  MoveVertical,
+  Orbit,
   Rotate3D,
   Save,
   Trash2,
@@ -15,12 +13,16 @@ import {
   UserRoundPlus
 } from "lucide-react";
 import {
+  defaultFrameItPoseId,
   defaultFrameItFigure,
   defaultFrameItScene,
   frameItApplyPose,
   frameItAspectRatios,
   frameItFigureCompositionSnapshot,
   frameItFigureColors,
+  frameItFigurePositionPatch,
+  frameItFigureRotation,
+  frameItFigureRotationPatch,
   frameItJointLabels,
   frameItJointPatch,
   frameItJointRange,
@@ -28,19 +30,12 @@ import {
   frameItPosePresets,
   frameItPoseSnapshot,
   normalizeFrameItCamera,
+  normalizeFrameItGizmoMode,
   normalizeFrameItSavedPoses,
   normalizeFrameItScene
 } from "../frameItState.js";
 import { FrameItViewport } from "./FrameItViewport.jsx";
 import { OutputPortRow } from "./NodePorts.jsx";
-
-const frameItTools = [
-  { id: "bend", label: "Bend", icon: Bone },
-  { id: "tilt", label: "Tilt", icon: MoveHorizontal },
-  { id: "rotate", label: "Rotate", icon: Rotate3D },
-  { id: "moveVertical", label: "Move up/down", icon: MoveVertical },
-  { id: "moveFloor", label: "Move on floor", icon: Move3D }
-];
 
 export function FrameItNodeBody({
   node,
@@ -61,33 +56,19 @@ export function FrameItNodeBody({
   const selectedFigure = scene.figures.find((figure) => figure.id === node.data.frameItSelectedFigureId) || scene.figures[0];
   const selectedJoint = frameItJointLabels[node.data.frameItSelectedJoint] ? node.data.frameItSelectedJoint : "upperBodyRot";
   const selectedRotation = frameItJointRotation(selectedFigure, selectedJoint);
+  const selectedPosition = frameItFigurePositionPatch(selectedFigure);
+  const selectedFigureRotation = frameItFigureRotation(selectedFigure);
   const savedPoses = normalizeFrameItSavedPoses(node.data.frameItSavedPoses);
-  const tool = frameItTools.some((item) => item.id === node.data.frameItTool) ? node.data.frameItTool : "bend";
+  const tool = normalizeFrameItGizmoMode(node.data.frameItTool);
   const aspectRatio = frameItAspectRatios.includes(node.data.frameItAspectRatio) ? node.data.frameItAspectRatio : "16:9";
   const useLimits = node.data.frameItUseLimits !== false;
   const showGrid = node.data.frameItShowGrid !== false;
   const showFloor = node.data.frameItShowFloor !== false;
   const showGuides = node.data.frameItShowGuides !== false;
-  const bendRange = frameItJointRange(selectedJoint, "x", useLimits);
-  const rotateRange = frameItJointRange(selectedJoint, "y", useLimits);
-  const tiltRange = frameItJointRange(selectedJoint, "z", useLimits);
 
-  function invalidateCapturePatch() {
-    return {
-      resultUrl: "",
-      resultItems: [],
-      fileName: "",
-      status: "",
-      error: ""
-    };
-  }
-
-  function updateNodeData(patch, { undo = true, invalidate = false } = {}) {
+  function updateNodeData(patch, { undo = true } = {}) {
     if (undo) onUndoSnapshot?.();
-    onUpdate(node.id, {
-      ...patch,
-      ...(invalidate ? invalidateCapturePatch() : {})
-    });
+    onUpdate(node.id, patch);
   }
 
   function beginContinuousEdit(key) {
@@ -103,8 +84,7 @@ export function FrameItNodeBody({
   function updateScene(nextScene, { undo = false } = {}) {
     if (undo) onUndoSnapshot?.();
     onUpdate(node.id, {
-      frameItScene: normalizeFrameItScene(nextScene),
-      ...invalidateCapturePatch()
+      frameItScene: normalizeFrameItScene(nextScene)
     });
   }
 
@@ -119,8 +99,35 @@ export function FrameItNodeBody({
   function setSelection({ figureId, jointId }) {
     onUpdate(node.id, {
       frameItSelectedFigureId: figureId,
-      frameItSelectedJoint: jointId
+      frameItSelectedJoint: jointId,
+      frameItTool: "rotate"
     });
+  }
+
+  function selectTool(nextTool) {
+    viewportRef.current?.setTool?.(nextTool);
+    updateNodeData({ frameItTool: nextTool });
+  }
+
+  function updatePositionAxis(axis, value) {
+    patchSelectedFigure(frameItFigurePositionPatch({
+      ...selectedPosition,
+      [axis]: value
+    }), { undo: false });
+  }
+
+  function updateRotationAxis(axis, value) {
+    patchSelectedFigure(frameItJointPatch(selectedJoint, {
+      ...selectedRotation,
+      [axis]: value
+    }, useLimits), { undo: false });
+  }
+
+  function updateFigureRotationAxis(axis, value) {
+    patchSelectedFigure(frameItFigureRotationPatch({
+      ...selectedFigureRotation,
+      [axis]: value
+    }), { undo: false });
   }
 
   function addFigure() {
@@ -144,7 +151,9 @@ export function FrameItNodeBody({
     updateScene(nextScene, { undo: true });
     onUpdate(node.id, {
       frameItSelectedFigureId: nextScene.figures[0].id,
-      frameItSelectedJoint: "upperBodyRot"
+      frameItSelectedJoint: "upperBodyRot",
+      frameItSelectedPoseId: defaultFrameItPoseId,
+      frameItAspectRatio: "16:9"
     });
   }
 
@@ -154,14 +163,14 @@ export function FrameItNodeBody({
     const custom = savedPoses.find((pose) => pose.id === value);
     if (!builtIn && !custom) return;
     const preset = builtIn || custom;
-    if (custom?.scene) {
-      const restoredScene = normalizeFrameItScene(custom.scene);
+    if (preset.scene) {
+      const restoredScene = normalizeFrameItScene(preset.scene);
       updateNodeData({
         frameItScene: restoredScene,
-        frameItSelectedFigureId: custom.selectedFigureId || restoredScene.figures[0]?.id || "",
+        frameItSelectedFigureId: preset.selectedFigureId || restoredScene.figures[0]?.id || "",
         frameItSelectedPoseId: value,
-        frameItAspectRatio: custom.aspectRatio || aspectRatio
-      }, { invalidate: true });
+        frameItAspectRatio: preset.aspectRatio || aspectRatio
+      });
       return;
     }
     const pose = preset.pose;
@@ -188,7 +197,7 @@ export function FrameItNodeBody({
       }),
       frameItSelectedPoseId: value,
       frameItAspectRatio: preset.aspectRatio || aspectRatio
-    }, { invalidate: true });
+    });
   }
 
   function savePose() {
@@ -217,11 +226,6 @@ export function FrameItNodeBody({
       frameItSavedPoses: savedPoses.filter((pose) => pose.id !== selectedPoseId),
       frameItSelectedPoseId: ""
     });
-  }
-
-  function setJointAxis(axis, value) {
-    const rotation = { ...selectedRotation, [axis]: Number(value) };
-    patchSelectedFigure(frameItJointPatch(selectedJoint, rotation, useLimits), { undo: false });
   }
 
   function setCameraView(yaw, pitch = 3) {
@@ -271,22 +275,38 @@ export function FrameItNodeBody({
 
       <div className="frame-it-workspace">
         <section className="frame-it-canvas-panel">
-          <div className="frame-it-tool-rail" aria-label="Pose tools">
-            {frameItTools.map((item) => {
-              const Icon = item.icon;
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  className={tool === item.id ? "active" : ""}
-                  onClick={() => updateNodeData({ frameItTool: item.id })}
-                  title={item.label}
-                  aria-label={item.label}
-                >
-                  <Icon size={16} />
-                </button>
-              );
-            })}
+          <div className="frame-it-gizmo-toolbar" aria-label="Figure manipulation">
+            <button
+              type="button"
+              className={tool === "rotate" ? "active" : ""}
+              onClick={() => selectTool("rotate")}
+              title="Rotate selected joint (R)"
+              aria-label="Rotate selected joint"
+            >
+              <Rotate3D size={16} />
+            </button>
+            <button
+              type="button"
+              className={tool === "figureRotate" ? "active" : ""}
+              onClick={() => selectTool("figureRotate")}
+              title="Rotate whole figure (F)"
+              aria-label="Rotate whole figure"
+            >
+              <Orbit size={16} />
+            </button>
+            <button
+              type="button"
+              className={tool === "translate" ? "active" : ""}
+              onClick={() => selectTool("translate")}
+              title="Move selected figure (G)"
+              aria-label="Move selected figure"
+            >
+              <Move3D size={16} />
+            </button>
+            <span className="frame-it-gizmo-target">
+              <i aria-hidden="true" />
+              {tool === "rotate" ? frameItJointLabels[selectedJoint] : `${selectedFigure?.name} root`}
+            </span>
           </div>
           <FrameItViewport
             ref={viewportRef}
@@ -301,6 +321,7 @@ export function FrameItNodeBody({
             useLimits={useLimits}
             onSceneChange={(nextScene) => updateScene(nextScene)}
             onSelectionChange={setSelection}
+            onToolChange={(nextTool) => updateNodeData({ frameItTool: nextTool })}
             onInteractionStart={onUndoSnapshot}
             onCanvasPanStart={onCanvasPanStart}
           />
@@ -367,9 +388,54 @@ export function FrameItNodeBody({
                 )}
               </select>
             </label>
-            <FrameItSlider label="Bend" value={selectedRotation.x} min={bendRange.min} max={bendRange.max} onChange={(value) => setJointAxis("x", value)} onEditStart={() => beginContinuousEdit("joint-bend")} onEditEnd={() => endContinuousEdit("joint-bend")} onUndoStep={onUndoSnapshot} />
-            <FrameItSlider label="Rotate" value={selectedRotation.y} min={rotateRange.min} max={rotateRange.max} onChange={(value) => setJointAxis("y", value)} onEditStart={() => beginContinuousEdit("joint-rotate")} onEditEnd={() => endContinuousEdit("joint-rotate")} onUndoStep={onUndoSnapshot} />
-            <FrameItSlider label="Tilt" value={selectedRotation.z} min={tiltRange.min} max={tiltRange.max} onChange={(value) => setJointAxis("z", value)} onEditStart={() => beginContinuousEdit("joint-tilt")} onEditEnd={() => endContinuousEdit("joint-tilt")} onUndoStep={onUndoSnapshot} />
+            <div className="frame-it-transform-data">
+              <div className="frame-it-transform-column" aria-label={`${selectedFigure?.name || "Figure"} position`}>
+                <strong>Position</strong>
+                {["x", "y", "z"].map((axis) => (
+                  <FrameItAxisInput
+                    key={`position-${axis}`}
+                    axis={axis}
+                    value={selectedPosition[axis]}
+                    min={axis === "y" ? -1.5 : -12}
+                    max={axis === "y" ? 4 : 12}
+                    step={0.05}
+                    scrubStep={0.01}
+                    onChange={(value) => updatePositionAxis(axis, value)}
+                    onEditStart={() => beginContinuousEdit(`position-${axis}`)}
+                    onEditEnd={() => endContinuousEdit(`position-${axis}`)}
+                  />
+                ))}
+              </div>
+              <div
+                className="frame-it-transform-column"
+                aria-label={tool === "rotate" ? `${frameItJointLabels[selectedJoint]} rotation` : `${selectedFigure?.name || "Figure"} rotation`}
+              >
+                <strong>{tool === "rotate" ? "Joint rotation" : "Figure rotation"}</strong>
+                {["x", "y", "z"].map((axis) => {
+                  const range = tool === "rotate"
+                    ? frameItJointRange(selectedJoint, axis, useLimits)
+                    : { min: -360, max: 360 };
+                  const rotation = tool === "rotate" ? selectedRotation : selectedFigureRotation;
+                  return (
+                    <FrameItAxisInput
+                      key={`${tool === "rotate" ? "joint" : "figure"}-rotation-${axis}`}
+                      axis={axis}
+                      value={rotation[axis]}
+                      min={range.min}
+                      max={range.max}
+                      step={1}
+                      scrubStep={0.35}
+                      suffix="°"
+                      onChange={(value) => tool === "rotate"
+                        ? updateRotationAxis(axis, value)
+                        : updateFigureRotationAxis(axis, value)}
+                      onEditStart={() => beginContinuousEdit(`${tool === "rotate" ? "joint" : "figure"}-rotation-${axis}`)}
+                      onEditEnd={() => endContinuousEdit(`${tool === "rotate" ? "joint" : "figure"}-rotation-${axis}`)}
+                    />
+                  );
+                })}
+              </div>
+            </div>
             <label className="frame-it-field compact pose-save">
               <input data-frame-it-local-draft value={poseName} onChange={(event) => setPoseName(event.target.value)} placeholder="Pose name" />
               <button type="button" onClick={savePose} title="Save current pose" aria-label="Save current pose"><Save size={14} /></button>
@@ -385,7 +451,7 @@ export function FrameItNodeBody({
             <div className="frame-it-section-title"><span>Frame</span><Camera size={14} /></div>
             <label className="frame-it-field">
               <span>Ratio</span>
-              <select value={aspectRatio} onChange={(event) => updateNodeData({ frameItAspectRatio: event.target.value }, { invalidate: true })}>
+              <select value={aspectRatio} onChange={(event) => updateNodeData({ frameItAspectRatio: event.target.value })}>
                 {frameItAspectRatios.map((ratioOption) => <option key={ratioOption}>{ratioOption}</option>)}
               </select>
             </label>
@@ -398,8 +464,8 @@ export function FrameItNodeBody({
             <FrameItSlider label="Lens" value={scene.camera.fov} min={18} max={80} onChange={(value) => updateScene({ ...scene, camera: { ...scene.camera, fov: value } })} onEditStart={() => beginContinuousEdit("camera-lens")} onEditEnd={() => endContinuousEdit("camera-lens")} onUndoStep={onUndoSnapshot} />
             <div className="frame-it-display-toggles">
               <button type="button" className={showGuides ? "active" : ""} onClick={() => updateNodeData({ frameItShowGuides: !showGuides })} title="Framing guides"><Maximize2 size={14} /></button>
-              <button type="button" className={showGrid ? "active" : ""} onClick={() => updateNodeData({ frameItShowGrid: !showGrid }, { invalidate: true })} title="Floor grid"><Grid3X3 size={14} /></button>
-              <button type="button" className={showFloor ? "active" : ""} onClick={() => updateNodeData({ frameItShowFloor: !showFloor }, { invalidate: true })} title={showFloor ? "Hide floor" : "Show floor"} aria-label={showFloor ? "Hide floor" : "Show floor"}><LandPlot size={14} /></button>
+              <button type="button" className={showGrid ? "active" : ""} onClick={() => updateNodeData({ frameItShowGrid: !showGrid })} title="Floor grid"><Grid3X3 size={14} /></button>
+              <button type="button" className={showFloor ? "active" : ""} onClick={() => updateNodeData({ frameItShowFloor: !showFloor })} title={showFloor ? "Hide floor" : "Show floor"} aria-label={showFloor ? "Hide floor" : "Show floor"}><LandPlot size={14} /></button>
               <button type="button" className="frame-it-reset-button" onClick={resetScene} title="Reset scene"><Undo2 size={14} /><span>Reset</span></button>
             </div>
             <button type="button" className="run-node-button frame-it-capture" onClick={captureFrame} disabled={node.data.status === "uploading"}>
@@ -414,6 +480,133 @@ export function FrameItNodeBody({
       <button className="preview-resize-handle frame-it-resize-handle" onPointerDown={(event) => onResizeStart?.(event, node, "frameItScale")} title="Resize Frame It" aria-label="Resize Frame It" />
     </div>
   );
+}
+
+function FrameItAxisInput({
+  axis,
+  value,
+  min,
+  max,
+  step,
+  scrubStep,
+  suffix = "",
+  onChange,
+  onEditStart,
+  onEditEnd
+}) {
+  const activeRef = React.useRef(false);
+  const scrubRef = React.useRef(null);
+  const onChangeRef = React.useRef(onChange);
+  const [draft, setDraft] = React.useState(() => formatFrameItAxisValue(value));
+  onChangeRef.current = onChange;
+
+  React.useEffect(() => {
+    if (!activeRef.current) setDraft(formatFrameItAxisValue(value));
+  }, [value]);
+
+  function boundedValue(nextValue) {
+    return Math.min(max, Math.max(min, Number(nextValue) || 0));
+  }
+
+  function applyValue(nextValue) {
+    const bounded = boundedValue(nextValue);
+    setDraft(formatFrameItAxisValue(bounded));
+    onChangeRef.current?.(bounded);
+  }
+
+  function finishEdit() {
+    const parsed = Number(draft);
+    if (Number.isFinite(parsed)) applyValue(parsed);
+    else setDraft(formatFrameItAxisValue(value));
+    activeRef.current = false;
+    onEditEnd?.();
+  }
+
+  function handleScrubStart(event) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    activeRef.current = true;
+    scrubRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startValue: Number(value) || 0,
+      lastValue: Number(value) || 0
+    };
+    onEditStart?.();
+  }
+
+  function handleScrubMove(event) {
+    const scrub = scrubRef.current;
+    if (!scrub || scrub.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const precision = event.shiftKey ? 0.1 : 1;
+    const nextValue = boundedValue(scrub.startValue + (event.clientX - scrub.startX) * scrubStep * precision);
+    scrub.lastValue = nextValue;
+    applyValue(nextValue);
+  }
+
+  function handleScrubEnd(event) {
+    const scrub = scrubRef.current;
+    if (!scrub || scrub.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    scrubRef.current = null;
+    setDraft(formatFrameItAxisValue(scrub.lastValue));
+    activeRef.current = false;
+    onEditEnd?.();
+  }
+
+  return (
+    <label className={`frame-it-axis-input axis-${axis}`}>
+      <button
+        type="button"
+        onPointerDown={handleScrubStart}
+        onPointerMove={handleScrubMove}
+        onPointerUp={handleScrubEnd}
+        onPointerCancel={handleScrubEnd}
+        title={`Drag ${axis.toUpperCase()} horizontally to adjust`}
+        aria-label={`Drag ${axis.toUpperCase()} value`}
+      >
+        {axis.toUpperCase()}
+      </button>
+      <input
+        type="number"
+        value={draft}
+        min={min}
+        max={max}
+        step={step}
+        onFocus={() => {
+          activeRef.current = true;
+          onEditStart?.();
+        }}
+        onChange={(event) => {
+          const nextDraft = event.target.value;
+          setDraft(nextDraft);
+          const parsed = Number(nextDraft);
+          if (nextDraft !== "" && Number.isFinite(parsed)) onChangeRef.current?.(boundedValue(parsed));
+        }}
+        onBlur={finishEdit}
+        onKeyDown={(event) => {
+          event.stopPropagation();
+          if (event.key === "Enter") event.currentTarget.blur();
+          if (event.key === "Escape") {
+            setDraft(formatFrameItAxisValue(value));
+            event.currentTarget.blur();
+          }
+        }}
+      />
+      {suffix && <span>{suffix}</span>}
+    </label>
+  );
+}
+
+function formatFrameItAxisValue(value) {
+  const rounded = Math.round((Number(value) || 0) * 100) / 100;
+  return String(Object.is(rounded, -0) ? 0 : rounded);
 }
 
 function FrameItSlider({ label, value, min, max, onChange, onEditStart, onEditEnd, onUndoStep }) {

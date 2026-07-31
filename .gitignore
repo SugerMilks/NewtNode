@@ -17,6 +17,7 @@ server/data/runtime-settings.json
 server/data/*-index.json
 server/data/.*.tmp
 server/data/*.log
+server/data/*.log.*
 public/models/poses/.*.tmp
 .vs_ai_logs/
 .newtnode_logs/

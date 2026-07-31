@@ -30,10 +30,8 @@ test("Film Director support includes Gemini Omni while excluding unsupported vid
   assert.equal(videoModelSupportsFilmDirector("Kling O3 Pro"), true);
   assert.equal(videoModelSupportsFilmDirector("Kling O3 4K"), true);
   assert.equal(videoModelSupportsFilmDirector("Gemini Omni Flash"), true);
-  assert.equal(videoModelSupportsFilmDirector("Seedance 2.0 Fast"), false);
   assert.equal(videoModelSupportsFilmDirector("Wan 2.7 Reference-to-Video"), false);
   assert.equal(videoModelSupportsFilmDirector("Happy Horse"), false);
-  assert.equal(videoModelSupportsFilmDirector("Luma Dream Machine"), false);
   assert.equal(videoModelSupportsFilmDirector("Creatify Aurora"), false);
 });
 
@@ -56,7 +54,7 @@ test("unsupported video models never serialize a Film Director package", () => {
   };
   const unsupported = buildVideoGenerationRequest({
     ...common,
-    node: { id: "fast", data: { model: "Seedance 2.0 Fast" } }
+    node: { id: "wan", data: { model: "Wan 2.7 Reference-to-Video" } }
   });
   const supported = buildVideoGenerationRequest({
     ...common,
@@ -65,4 +63,9 @@ test("unsupported video models never serialize a Film Director package", () => {
 
   assert.equal(unsupported.filmDirector, null);
   assert.deepEqual(supported.filmDirector, filmDirector);
+});
+
+test("removed video models are no longer selectable", () => {
+  assert.equal(videoModelOptions.includes("Seedance 2.0 Fast"), false);
+  assert.equal(videoModelOptions.includes("Luma Dream Machine"), false);
 });

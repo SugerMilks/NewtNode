@@ -37,6 +37,9 @@ export default function SettingsPage() {
   const [updateLog, setUpdateLog] = React.useState("");
   const [lastUpdated, setLastUpdated] = React.useState(null);
   const initialSecretsRef = React.useRef({ falKey: "", googleApiKey: "", kreaApiKey: "", openAiApiKey: "" });
+  const modelPreferencesRef = React.useRef(defaultModelPreferences);
+  const providerPreferencesRef = React.useRef(defaultProviderPreferences);
+  const preferenceSaveQueueRef = React.useRef(Promise.resolve());
   const falKeyInputRef = React.useRef(null);
   const googleApiKeyInputRef = React.useRef(null);
   const kreaApiKeyInputRef = React.useRef(null);
@@ -157,27 +160,53 @@ export default function SettingsPage() {
     setKreaApiKey(secrets.kreaApiKey);
     setOpenAiApiKey(secrets.openAiApiKey);
     setRepository(data.repository || "");
-    setModelPreferences(normalizeModelPreferences(data.modelPreferences));
-    setProviderPreferences(normalizeProviderPreferences(data.providerPreferences));
+    const nextModelPreferences = normalizeModelPreferences(data.modelPreferences);
+    const nextProviderPreferences = normalizeProviderPreferences(data.providerPreferences);
+    modelPreferencesRef.current = nextModelPreferences;
+    providerPreferencesRef.current = nextProviderPreferences;
+    setModelPreferences(nextModelPreferences);
+    setProviderPreferences(nextProviderPreferences);
   }
 
   function updateModelPreference(kind, model, enabled) {
-    setModelPreferences((current) =>
-      normalizeModelPreferences({
-        ...current,
-        [kind]: {
-          ...(current?.[kind] || {}),
-          [model]: enabled
-        }
-      })
-    );
+    const nextPreferences = normalizeModelPreferences({
+      ...modelPreferencesRef.current,
+      [kind]: {
+        ...(modelPreferencesRef.current?.[kind] || {}),
+        [model]: enabled
+      }
+    });
+    modelPreferencesRef.current = nextPreferences;
+    setModelPreferences(nextPreferences);
+    dispatchModelPreferences(nextPreferences);
+    queuePreferenceSave({ modelPreferences: nextPreferences });
   }
 
   function updateProviderPreference(provider, enabled) {
-    setProviderPreferences((current) => ({
-      ...normalizeProviderPreferences(current),
+    const nextPreferences = {
+      ...normalizeProviderPreferences(providerPreferencesRef.current),
       [provider]: enabled
-    }));
+    };
+    providerPreferencesRef.current = nextPreferences;
+    setProviderPreferences(nextPreferences);
+    queuePreferenceSave({ providerPreferences: nextPreferences });
+  }
+
+  function queuePreferenceSave(payload) {
+    setMessage("");
+    setUpdateLog("");
+    const saveTask = preferenceSaveQueueRef.current
+      .catch(() => {})
+      .then(() => settingsApi.save(payload));
+    preferenceSaveQueueRef.current = saveTask;
+    saveTask
+      .then((data) => {
+        setSettings((current) => ({ ...(current || {}), ...(data || {}) }));
+        setLastUpdated(new Date());
+      })
+      .catch((error) => {
+        setMessage(error.message || "Could not save preference.");
+      });
   }
 
   return (
@@ -343,12 +372,6 @@ export default function SettingsPage() {
               values={modelPreferences.video}
               onToggle={updateModelPreference}
             />
-          </div>
-          <div className="settings-actions">
-            <button type="button" onClick={saveSettings} disabled={actionsDisabled}>
-              <Save size={15} />
-              <span>{busy === "save" ? "Saving" : "Save Models"}</span>
-            </button>
           </div>
         </section>
 

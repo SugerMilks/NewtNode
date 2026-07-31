@@ -1,5 +1,5 @@
 import { Compass, X } from "lucide-react";
-import { allowFileDrop, outputItemFromDataTransfer, previewImageUrl } from "../mediaAssets.js";
+import { allowFileDrop, fullResolutionImageProps, outputItemFromDataTransfer, previewImageUrl } from "../mediaAssets.js";
 import { useNewtNodeImageFallback } from "./MediaViews.jsx";
 
 export function StyleCollage({ images, locked, outputUrl, outputLabel = "MOOD_BOARD.png", onRemove, onDropImages, onDropOutput }) {
@@ -18,7 +18,7 @@ export function StyleCollage({ images, locked, outputUrl, outputLabel = "MOOD_BO
     return (
       <div className="style-collage transfer-output-preview locked">
         <div className="style-collage-cell">
-          <img src={previewImageUrl(outputUrl)} alt={outputLabel} onError={useNewtNodeImageFallback} />
+          <img {...fullResolutionImageProps(outputUrl, outputLabel)} src={previewImageUrl(outputUrl)} alt={outputLabel} onError={useNewtNodeImageFallback} />
           <span>{outputLabel}</span>
         </div>
       </div>
@@ -38,7 +38,7 @@ export function StyleCollage({ images, locked, outputUrl, outputLabel = "MOOD_BO
     <div className={`style-collage count-${images.length} ${locked ? "locked" : ""}`} onDragOver={allowFileDrop} onDrop={handleDrop}>
       {images.map((image) => (
         <div className="style-collage-cell" key={image.id}>
-          <img src={previewImageUrl(image)} alt={image.fileName || "Mood board reference"} onError={useNewtNodeImageFallback} />
+          <img {...fullResolutionImageProps(image)} src={previewImageUrl(image)} alt={image.fileName || "Mood board reference"} onError={useNewtNodeImageFallback} />
           {!locked && (
             <button onClick={() => onRemove(image.id)} title="Remove image">
               <X size={12} />

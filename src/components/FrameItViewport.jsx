@@ -4,13 +4,24 @@ import {
   frameItAspectRatioNumber,
   frameItCameraPointerGesture,
   frameItCaptureSize,
-  frameItJointPatch,
+  frameItFigureRotation,
+  frameItFigureRotationPatch,
   frameItJointRenderRotation,
   frameItJointRotation,
+  frameItJointRotationFromGizmo,
   frameItUsesCameraWheel,
+  normalizeFrameItGizmoMode,
   normalizeFrameItScene
 } from "../frameItState.js";
-import { cloneSkeleton, degreesToRadians, GLTFLoader, THREE, useThreeRuntimeReady } from "../threeRuntime.js";
+import {
+  cloneSkeleton,
+  degreesToRadians,
+  GLTFLoader,
+  radiansToDegrees,
+  THREE,
+  TransformControls,
+  useThreeRuntimeReady
+} from "../threeRuntime.js";
 
 const frameItMannequinModelPath = "/models/frame-it-mannequin.glb";
 const frameItMannequinTargetHeight = 2.62;
@@ -32,6 +43,7 @@ export const FrameItViewport = React.forwardRef(function FrameItViewport(
     useLimits,
     onSceneChange,
     onSelectionChange,
+    onToolChange,
     onInteractionStart,
     onCanvasPanStart
   },
@@ -44,6 +56,9 @@ export const FrameItViewport = React.forwardRef(function FrameItViewport(
   const cameraRef = React.useRef(null);
   const figureObjectsRef = React.useRef(new Map());
   const jointObjectsRef = React.useRef(new Map());
+  const transformControlsRef = React.useRef(null);
+  const transformProxyRef = React.useRef(null);
+  const transformSessionRef = React.useRef(null);
   const dragRef = React.useRef(null);
   const wheelSessionRef = React.useRef({ camera: null, timer: null });
   const stateRef = React.useRef({
@@ -59,6 +74,7 @@ export const FrameItViewport = React.forwardRef(function FrameItViewport(
   });
   const onSceneChangeRef = React.useRef(onSceneChange);
   const onSelectionChangeRef = React.useRef(onSelectionChange);
+  const onToolChangeRef = React.useRef(onToolChange);
   const onInteractionStartRef = React.useRef(onInteractionStart);
   const onCanvasPanStartRef = React.useRef(onCanvasPanStart);
 
@@ -78,6 +94,7 @@ export const FrameItViewport = React.forwardRef(function FrameItViewport(
     stateRef.current = nextState;
     onSceneChangeRef.current = onSceneChange;
     onSelectionChangeRef.current = onSelectionChange;
+    onToolChangeRef.current = onToolChange;
     onInteractionStartRef.current = onInteractionStart;
     onCanvasPanStartRef.current = onCanvasPanStart;
     if (threeReady) {
@@ -85,9 +102,12 @@ export const FrameItViewport = React.forwardRef(function FrameItViewport(
       const sceneDecorationChanged = previousState.showGrid !== nextState.showGrid || previousState.showFloor !== nextState.showFloor;
       const selectionChanged = previousState.selectedFigureId !== nextState.selectedFigureId || previousState.selectedJoint !== nextState.selectedJoint;
       if (figuresChanged || sceneDecorationChanged || selectionChanged) renderFrameItViewport();
-      else renderFrameItCamera();
+      else {
+        syncTransformGizmo();
+        renderFrameItCamera();
+      }
     }
-  }, [sceneData, aspectRatio, selectedFigureId, selectedJoint, tool, showGrid, showFloor, showGuides, useLimits, onSceneChange, onSelectionChange, onInteractionStart, onCanvasPanStart, threeReady]);
+  }, [sceneData, aspectRatio, selectedFigureId, selectedJoint, tool, showGrid, showFloor, showGuides, useLimits, onSceneChange, onSelectionChange, onToolChange, onInteractionStart, onCanvasPanStart, threeReady]);
 
   React.useImperativeHandle(ref, () => ({
     capture() {
@@ -98,8 +118,9 @@ export const FrameItViewport = React.forwardRef(function FrameItViewport(
       const currentSize = renderer.getSize(new THREE.Vector2());
       const currentAspect = camera.aspect;
       const { width, height } = frameItCaptureSize(stateRef.current.aspectRatio);
-      const selection = scene.getObjectByName("frame-it-selection");
-      if (selection) selection.visible = false;
+      const transformHelper = transformControlsRef.current?.getHelper?.();
+      const transformWasVisible = transformHelper?.visible;
+      if (transformHelper) transformHelper.visible = false;
       renderer.setSize(width, height, false);
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
@@ -108,9 +129,22 @@ export const FrameItViewport = React.forwardRef(function FrameItViewport(
       renderer.setSize(currentSize.x, currentSize.y, false);
       camera.aspect = currentAspect;
       camera.updateProjectionMatrix();
-      if (selection) selection.visible = true;
+      if (transformHelper) transformHelper.visible = transformWasVisible;
       renderer.render(scene, camera);
       return imageDataUrl;
+    },
+    setTool(nextTool) {
+      const normalizedTool = normalizeFrameItGizmoMode(nextTool);
+      const controls = transformControlsRef.current;
+      const helper = controls?.getHelper?.();
+      if (helper) helper.visible = false;
+      controls?.detach?.();
+      stateRef.current = { ...stateRef.current, tool: normalizedTool };
+      syncTransformGizmo();
+      const renderer = rendererRef.current;
+      const scene = sceneRef.current;
+      const camera = cameraRef.current;
+      if (renderer && scene && camera) renderer.render(scene, camera);
     }
   }), [threeReady]);
 
@@ -124,7 +158,7 @@ export const FrameItViewport = React.forwardRef(function FrameItViewport(
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.12;
+    renderer.toneMappingExposure = 1.05;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFShadowMap;
     renderer.domElement.className = "frame-it-canvas";
@@ -134,6 +168,33 @@ export const FrameItViewport = React.forwardRef(function FrameItViewport(
     sceneRef.current = scene;
     cameraRef.current = camera;
     rendererRef.current = renderer;
+
+    const transformProxy = new THREE.Object3D();
+    transformProxy.name = "frame-it-transform-proxy";
+    transformProxy.userData.frameItTransformProxy = true;
+    scene.add(transformProxy);
+
+    const transformControls = new TransformControls(camera, renderer.domElement);
+    transformControls.setColors(0xff4f5e, 0x68d56f, 0x4a8cff, 0xf4d62d);
+    transformControls.setSize(0.72);
+    transformControls.rotationSnap = degreesToRadians(1);
+    transformControls.translationSnap = 0.01;
+    disableFrameItFreeRotateHandle(transformControls);
+    transformControlsRef.current = transformControls;
+    transformProxyRef.current = transformProxy;
+    const transformHelper = transformControls.getHelper();
+    transformHelper.name = "frame-it-transform-helper";
+    transformHelper.userData.frameItTransformHelper = true;
+    transformHelper.traverse((object) => {
+      object.userData.frameItTransformHelper = true;
+      object.renderOrder = 30;
+      const materials = Array.isArray(object.material) ? object.material : object.material ? [object.material] : [];
+      materials.forEach((material) => {
+        material.depthTest = false;
+        material.depthWrite = false;
+      });
+    });
+    scene.add(transformHelper);
 
     const resizeObserver = new ResizeObserver(() => {
       const rect = mount.getBoundingClientRect();
@@ -154,6 +215,7 @@ export const FrameItViewport = React.forwardRef(function FrameItViewport(
       raycaster.setFromCamera(pointer, camera);
       const hits = raycaster.intersectObjects(scene.children, true);
       for (const hit of hits) {
+        if (hit.object.userData.frameItTransformHelper) continue;
         if (hit.object.userData.frameItSelectable) return hit;
         if (hit.object.isSkinnedMesh && hit.object.userData.frameItFigureId) {
           const jointId = frameItJointFromSkinHit(hit);
@@ -174,24 +236,106 @@ export const FrameItViewport = React.forwardRef(function FrameItViewport(
       return null;
     }
 
-    function handlePointerDown(event) {
+    function handleTransformMouseDown() {
+      const currentState = stateRef.current;
+      const figure = currentState.sceneData.figures.find((item) => item.id === currentState.selectedFigureId);
+      if (!figure) return;
+      const mode = currentState.tool === "translate"
+        ? "translate"
+        : currentState.tool === "figureRotate"
+          ? "figureRotate"
+          : "jointRotate";
+      const jointObject = frameItJointObject(jointObjectsRef.current.get(`${figure.id}:${currentState.selectedJoint}`));
+      if (mode === "jointRotate" && !jointObject) return;
+      const transformObject = transformControls.object || transformProxy;
+      onInteractionStartRef.current?.();
+      transformSessionRef.current = {
+        mode,
+        figure: { ...figure },
+        figureId: figure.id,
+        jointId: currentState.selectedJoint,
+        startingRotation: mode === "figureRotate"
+          ? frameItFigureRotation(figure)
+          : frameItJointRotation(figure, currentState.selectedJoint),
+        startTransformQuaternion: transformObject.quaternion.clone(),
+        pendingScene: null
+      };
+    }
+
+    function handleTransformObjectChange() {
+      const session = transformSessionRef.current;
+      if (!session) return;
+      const transformObject = transformControls.object || transformProxy;
+      let nextFigure = { ...session.figure };
+      if (session.mode === "translate") {
+        nextFigure = {
+          ...nextFigure,
+          x: clamp(transformObject.position.x, -12, 12),
+          y: clamp(transformObject.position.y, -1.5, 4),
+          z: clamp(transformObject.position.z, -12, 12)
+        };
+        transformObject.position.set(nextFigure.x, nextFigure.y, nextFigure.z);
+      } else if (session.mode === "figureRotate") {
+        const rootEuler = new THREE.Euler().setFromQuaternion(transformObject.quaternion, "XYZ");
+        nextFigure = {
+          ...nextFigure,
+          ...frameItFigureRotationPatch({
+            x: radiansToDegrees(rootEuler.x),
+            y: radiansToDegrees(rootEuler.y),
+            z: radiansToDegrees(rootEuler.z)
+          })
+        };
+      } else {
+        const deltaQuaternion = session.startTransformQuaternion.clone().invert().multiply(transformObject.quaternion);
+        const deltaEuler = new THREE.Euler().setFromQuaternion(deltaQuaternion, "XYZ");
+        nextFigure = {
+          ...nextFigure,
+          ...frameItJointRotationFromGizmo(session.jointId, session.startingRotation, {
+            x: radiansToDegrees(deltaEuler.x),
+            y: radiansToDegrees(deltaEuler.y),
+            z: radiansToDegrees(deltaEuler.z)
+          }, stateRef.current.useLimits)
+        };
+      }
+      const nextScene = {
+        ...stateRef.current.sceneData,
+        figures: stateRef.current.sceneData.figures.map((item) => item.id === session.figureId ? nextFigure : item)
+      };
+      session.pendingScene = nextScene;
+      applyTransientFigure(nextFigure, session.jointId);
+    }
+
+    function handleTransformMouseUp() {
+      const session = transformSessionRef.current;
+      transformSessionRef.current = null;
+      if (session?.pendingScene) onSceneChangeRef.current?.(session.pendingScene);
+    }
+
+    function handleTransformChange() {
+      renderer.render(scene, camera);
+    }
+
+    function handleCameraPointerDown(event) {
       if (event.button !== 0) return;
       const cameraGesture = frameItCameraPointerGesture(event);
-      if (cameraGesture) {
-        event.preventDefault();
-        event.stopPropagation();
-        renderer.domElement.focus();
-        renderer.domElement.setPointerCapture?.(event.pointerId);
-        onInteractionStartRef.current?.();
-        dragRef.current = {
-          type: cameraGesture,
-          pointerId: event.pointerId,
-          startX: event.clientX,
-          startY: event.clientY,
-          camera: { ...stateRef.current.sceneData.camera }
-        };
-        return;
-      }
+      if (!cameraGesture) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      renderer.domElement.focus();
+      renderer.domElement.setPointerCapture?.(event.pointerId);
+      onInteractionStartRef.current?.();
+      dragRef.current = {
+        type: cameraGesture,
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        camera: { ...stateRef.current.sceneData.camera }
+      };
+    }
+
+    function handlePointerDown(event) {
+      if (event.button !== 0) return;
+      if (transformControls.axis || transformControls.dragging) return;
 
       const hit = pointerSelection(event);
       if (!hit) {
@@ -199,29 +343,24 @@ export const FrameItViewport = React.forwardRef(function FrameItViewport(
         return;
       }
       event.preventDefault();
-      event.stopPropagation();
+      event.stopImmediatePropagation();
       renderer.domElement.focus();
-      renderer.domElement.setPointerCapture?.(event.pointerId);
       const figureId = hit.object.userData.figureId;
       const jointId = hit.object.userData.jointId;
       const figure = stateRef.current.sceneData.figures.find((item) => item.id === figureId);
       if (!figure || !jointId) return;
-      onInteractionStartRef.current?.();
       onSelectionChangeRef.current?.({ figureId, jointId });
-      dragRef.current = {
-        type: "pose",
-        pointerId: event.pointerId,
-        startX: event.clientX,
-        startY: event.clientY,
-        figure,
-        figureId,
-        jointId,
-        rotation: frameItJointRotation(figure, jointId),
-        pendingScene: stateRef.current.sceneData
-      };
     }
 
     function handlePointerMove(event) {
+      if (transformControls.dragging && event.button !== -1) {
+        const rect = renderer.domElement.getBoundingClientRect();
+        transformControls.pointerMove({
+          x: ((event.clientX - rect.left) / Math.max(1, rect.width)) * 2 - 1,
+          y: -((event.clientY - rect.top) / Math.max(1, rect.height)) * 2 + 1,
+          button: -1
+        });
+      }
       const drag = dragRef.current;
       if (!drag) return;
       event.preventDefault();
@@ -251,29 +390,6 @@ export const FrameItViewport = React.forwardRef(function FrameItViewport(
         drag.pendingCamera = nextCamera;
         return;
       }
-
-      const currentTool = stateRef.current.tool;
-      let nextFigure = { ...drag.figure };
-      if (currentTool === "moveVertical") {
-        nextFigure.y = clamp(drag.figure.y - dy * 0.008, -1.5, 4);
-      } else if (currentTool === "moveFloor") {
-        const yaw = degreesToRadians(stateRef.current.sceneData.camera.yaw);
-        const scale = Math.max(0.002, stateRef.current.sceneData.camera.distance * 0.0017);
-        nextFigure.x = drag.figure.x + (Math.cos(yaw) * dx + Math.sin(yaw) * dy) * scale;
-        nextFigure.z = drag.figure.z + (-Math.sin(yaw) * dx + Math.cos(yaw) * dy) * scale;
-      } else {
-        const nextRotation = { ...drag.rotation };
-        if (currentTool === "tilt") nextRotation.z = drag.rotation.z - dx * 0.48;
-        else if (currentTool === "rotate") nextRotation.y = drag.rotation.y + dx * 0.55;
-        else nextRotation.x = drag.rotation.x + dy * 0.48;
-        nextFigure = { ...nextFigure, ...frameItJointPatch(drag.jointId, nextRotation, stateRef.current.useLimits) };
-      }
-      const nextScene = {
-        ...stateRef.current.sceneData,
-        figures: stateRef.current.sceneData.figures.map((item) => item.id === drag.figureId ? nextFigure : item)
-      };
-      drag.pendingScene = nextScene;
-      applyTransientFigure(nextFigure, drag.jointId);
     }
 
     function handlePointerUp(event) {
@@ -282,8 +398,30 @@ export const FrameItViewport = React.forwardRef(function FrameItViewport(
       if (renderer.domElement.hasPointerCapture?.(event.pointerId)) renderer.domElement.releasePointerCapture(event.pointerId);
       if (drag?.pendingCamera) {
         onSceneChangeRef.current?.({ ...stateRef.current.sceneData, camera: drag.pendingCamera });
-      } else if (drag?.pendingScene && drag.pendingScene !== stateRef.current.sceneData) {
-        onSceneChangeRef.current?.(drag.pendingScene);
+      }
+    }
+
+    function handleKeyDown(event) {
+      if (event.metaKey || event.ctrlKey || event.altKey || event.repeat) return;
+      const key = event.key.toLowerCase();
+      if (key === "r" || key === "e") {
+        event.preventDefault();
+        event.stopPropagation();
+        stateRef.current = { ...stateRef.current, tool: "rotate" };
+        syncTransformGizmo();
+        onToolChangeRef.current?.("rotate");
+      } else if (key === "g" || key === "w") {
+        event.preventDefault();
+        event.stopPropagation();
+        stateRef.current = { ...stateRef.current, tool: "translate" };
+        syncTransformGizmo();
+        onToolChangeRef.current?.("translate");
+      } else if (key === "f") {
+        event.preventDefault();
+        event.stopPropagation();
+        stateRef.current = { ...stateRef.current, tool: "figureRotate" };
+        syncTransformGizmo();
+        onToolChangeRef.current?.("figureRotate");
       }
     }
 
@@ -320,7 +458,12 @@ export const FrameItViewport = React.forwardRef(function FrameItViewport(
       const figureObject = figureObjectsRef.current.get(figure.id);
       if (!figureObject) return;
       figureObject.position.set(figure.x, figure.y, figure.z);
-      figureObject.rotation.y = degreesToRadians(figure.rotY);
+      figureObject.rotation.set(
+        degreesToRadians(figure.rotX),
+        degreesToRadians(figure.rotY),
+        degreesToRadians(figure.rotZ),
+        "XYZ"
+      );
       figureObject.scale.setScalar(figure.scale);
       const jointObject = jointObjectsRef.current.get(`${figure.id}:${jointId}`);
       if (jointObject) {
@@ -331,23 +474,42 @@ export const FrameItViewport = React.forwardRef(function FrameItViewport(
       renderer.render(scene, camera);
     }
 
+    transformControls.addEventListener("mouseDown", handleTransformMouseDown);
+    transformControls.addEventListener("objectChange", handleTransformObjectChange);
+    transformControls.addEventListener("mouseUp", handleTransformMouseUp);
+    transformControls.addEventListener("change", handleTransformChange);
+    renderer.domElement.addEventListener("pointerdown", handleCameraPointerDown, true);
     renderer.domElement.addEventListener("pointerdown", handlePointerDown);
     renderer.domElement.addEventListener("pointermove", handlePointerMove);
     renderer.domElement.addEventListener("pointerup", handlePointerUp);
     renderer.domElement.addEventListener("pointercancel", handlePointerUp);
     renderer.domElement.addEventListener("wheel", handleWheel, { passive: false });
+    renderer.domElement.addEventListener("keydown", handleKeyDown);
     renderFrameItViewport();
 
     return () => {
       resizeObserver.disconnect();
+      transformControls.removeEventListener("mouseDown", handleTransformMouseDown);
+      transformControls.removeEventListener("objectChange", handleTransformObjectChange);
+      transformControls.removeEventListener("mouseUp", handleTransformMouseUp);
+      transformControls.removeEventListener("change", handleTransformChange);
+      transformControls.detach();
+      transformControls.dispose();
+      renderer.domElement.removeEventListener("pointerdown", handleCameraPointerDown, true);
       renderer.domElement.removeEventListener("pointerdown", handlePointerDown);
       renderer.domElement.removeEventListener("pointermove", handlePointerMove);
       renderer.domElement.removeEventListener("pointerup", handlePointerUp);
       renderer.domElement.removeEventListener("pointercancel", handlePointerUp);
       renderer.domElement.removeEventListener("wheel", handleWheel);
+      renderer.domElement.removeEventListener("keydown", handleKeyDown);
       if (wheelSessionRef.current.timer) window.clearTimeout(wheelSessionRef.current.timer);
       wheelSessionRef.current = { camera: null, timer: null };
+      transformSessionRef.current = null;
+      scene.remove(transformHelper);
+      scene.remove(transformProxy);
       disposeFrameItScene(scene);
+      transformControlsRef.current = null;
+      transformProxyRef.current = null;
       renderer.dispose();
       renderer.domElement.remove();
     };
@@ -359,20 +521,30 @@ export const FrameItViewport = React.forwardRef(function FrameItViewport(
     const camera = cameraRef.current;
     if (!renderer || !scene || !camera || !THREE) return;
     const data = normalizeFrameItScene(stateRef.current.sceneData);
+    const transformControls = transformControlsRef.current;
+    const transformProxy = transformProxyRef.current;
+    const transformHelper = transformControls?.getHelper?.();
+    if (transformHelper?.parent === scene) scene.remove(transformHelper);
+    if (transformProxy?.parent === scene) scene.remove(transformProxy);
     disposeFrameItScene(scene);
     scene.clear();
     figureObjectsRef.current.clear();
     jointObjectsRef.current.clear();
-    scene.background = new THREE.Color(0x101216);
-    scene.fog = new THREE.Fog(0x101216, 11, 22);
+    scene.background = new THREE.Color(0x111318);
+    scene.fog = new THREE.Fog(0x111318, 11, 22);
 
-    scene.add(new THREE.HemisphereLight(0xe8f2ff, 0x24201d, 2.35));
-    const keyLight = new THREE.DirectionalLight(0xffffff, 3.5);
+    scene.add(new THREE.HemisphereLight(0xf1f5ff, 0x25231f, 2.15));
+    const keyLight = new THREE.DirectionalLight(0xfff9ef, 3.25);
     keyLight.position.set(3.8, 6.5, 4.5);
     keyLight.castShadow = true;
     keyLight.shadow.mapSize.set(1024, 1024);
+    keyLight.shadow.radius = 5;
+    keyLight.shadow.bias = -0.00025;
     scene.add(keyLight);
-    const rimLight = new THREE.DirectionalLight(0x7eb9ff, 1.25);
+    const fillLight = new THREE.DirectionalLight(0x9ebeff, 0.72);
+    fillLight.position.set(-3, 2.4, 4);
+    scene.add(fillLight);
+    const rimLight = new THREE.DirectionalLight(0x7eb9ff, 1.05);
     rimLight.position.set(-4, 3.5, -3);
     scene.add(rimLight);
 
@@ -392,10 +564,12 @@ export const FrameItViewport = React.forwardRef(function FrameItViewport(
     }
 
     data.figures.forEach((figure) => {
-      const object = createFrameItFigure(figure, stateRef.current.selectedFigureId, stateRef.current.selectedJoint, jointObjectsRef.current);
+      const object = createFrameItFigure(figure, jointObjectsRef.current);
       figureObjectsRef.current.set(figure.id, object);
       scene.add(object);
     });
+    if (transformProxy) scene.add(transformProxy);
+    if (transformHelper) scene.add(transformHelper);
     if (!frameItMannequinAsset && !frameItMannequinAssetFailed) {
       loadFrameItMannequinAsset().then((asset) => {
         if (asset && rendererRef.current === renderer) renderFrameItViewport();
@@ -405,6 +579,7 @@ export const FrameItViewport = React.forwardRef(function FrameItViewport(
     camera.aspect = frameItAspectRatioNumber(stateRef.current.aspectRatio);
     camera.fov = data.camera.fov;
     camera.updateProjectionMatrix();
+    syncTransformGizmo();
     renderer.render(scene, camera);
   }
 
@@ -421,6 +596,66 @@ export const FrameItViewport = React.forwardRef(function FrameItViewport(
     renderer.render(scene, camera);
   }
 
+  function syncTransformGizmo() {
+    const controls = transformControlsRef.current;
+    const proxy = transformProxyRef.current;
+    const scene = sceneRef.current;
+    if (!controls || !proxy || !scene || !THREE || controls.dragging) return;
+    const state = stateRef.current;
+    const figure = state.sceneData.figures.find((item) => item.id === state.selectedFigureId);
+    const helper = controls.getHelper();
+    if (!figure) {
+      controls.detach();
+      helper.visible = false;
+      return;
+    }
+
+    helper.visible = false;
+    controls.detach();
+    const mode = state.tool === "translate"
+      ? "translate"
+      : state.tool === "figureRotate"
+        ? "figureRotate"
+        : "jointRotate";
+    controls.setMode(mode === "translate" ? "translate" : "rotate");
+    controls.setSpace(mode === "translate" ? "world" : "local");
+    controls.showXY = mode === "translate";
+    controls.showYZ = mode === "translate";
+    controls.showXZ = mode === "translate";
+    if (mode === "translate" || mode === "figureRotate") {
+      const figureObject = figureObjectsRef.current.get(figure.id);
+      if (!figureObject) {
+        controls.detach();
+        helper.visible = false;
+        return;
+      }
+      figureObject.updateWorldMatrix(true, false);
+      if (mode === "figureRotate") {
+        new THREE.Box3().setFromObject(figureObject).getCenter(proxy.position);
+        figureObject.getWorldQuaternion(proxy.quaternion);
+        proxy.scale.set(1, 1, 1);
+        proxy.updateMatrixWorld(true);
+        controls.attach(proxy);
+      } else {
+        controls.attach(figureObject);
+      }
+    } else {
+      const jointObject = frameItJointObject(jointObjectsRef.current.get(`${figure.id}:${state.selectedJoint}`));
+      if (!jointObject) {
+        controls.detach();
+        helper.visible = false;
+        return;
+      }
+      jointObject.updateWorldMatrix(true, false);
+      jointObject.getWorldPosition(proxy.position);
+      jointObject.getWorldQuaternion(proxy.quaternion);
+      proxy.scale.set(1, 1, 1);
+      proxy.updateMatrixWorld(true);
+      controls.attach(proxy);
+    }
+    helper.visible = true;
+  }
+
   const ratio = frameItAspectRatioNumber(aspectRatio);
   const portraitWidth = ratio < 0.85 ? `${Math.round(ratio * 82)}%` : ratio < 1.15 ? "78%" : "100%";
   return (
@@ -431,10 +666,14 @@ export const FrameItViewport = React.forwardRef(function FrameItViewport(
         style={{ aspectRatio: String(ratio), width: portraitWidth }}
       />
       {showGuides && <div className="frame-it-guides" style={{ aspectRatio: String(ratio), width: portraitWidth }} aria-hidden="true" />}
-      <div className="frame-it-camera-hint">Option drag: orbit&nbsp;&nbsp; Command drag: pan&nbsp;&nbsp; Command scroll: dolly</div>
+      <div className="frame-it-camera-hint">Click body: select&nbsp;&nbsp; R: pose&nbsp;&nbsp; F: rotate figure&nbsp;&nbsp; G: move figure&nbsp;&nbsp; Option drag: orbit&nbsp;&nbsp; Command drag: pan</div>
     </div>
   );
 });
+
+function frameItJointObject(value) {
+  return value?.primaryBone || value || null;
+}
 
 function positionFrameItCamera(camera, data) {
   const yaw = degreesToRadians(data.yaw);
@@ -470,19 +709,34 @@ function loadFrameItMannequinAsset() {
   return frameItMannequinAssetPromise;
 }
 
-function createFrameItFigure(figure, selectedFigureId, selectedJoint, jointMap) {
+function createFrameItFigure(figure, jointMap) {
   if (frameItMannequinAsset?.scene && cloneSkeleton) {
-    return createFrameItModelFigure(figure, selectedFigureId, selectedJoint, jointMap, frameItMannequinAsset);
+    return createFrameItModelFigure(figure, jointMap, frameItMannequinAsset);
   }
-  return createFrameItProceduralFigure(figure, selectedFigureId, selectedJoint, jointMap);
+  return createFrameItProceduralFigure(figure, jointMap);
 }
 
-function createFrameItModelFigure(figure, selectedFigureId, selectedJoint, jointMap, asset) {
+function disableFrameItFreeRotateHandle(controls) {
+  const rotateGizmo = controls?._gizmo;
+  rotateGizmo?.gizmo?.rotate?.children?.forEach((handle) => {
+    if (handle.name === "E" && handle.material) handle.material.visible = false;
+  });
+  rotateGizmo?.picker?.rotate?.children?.forEach((handle) => {
+    if (handle.name === "E") handle.raycast = () => {};
+  });
+}
+
+function createFrameItModelFigure(figure, jointMap, asset) {
   const root = new THREE.Group();
   root.userData.frameItFigure = true;
   root.userData.figureId = figure.id;
   root.position.set(figure.x, figure.y, figure.z);
-  root.rotation.y = degreesToRadians(figure.rotY);
+  root.rotation.set(
+    degreesToRadians(figure.rotX),
+    degreesToRadians(figure.rotY),
+    degreesToRadians(figure.rotZ),
+    "XYZ"
+  );
   root.scale.setScalar(figure.scale);
 
   const model = cloneSkeleton(asset.scene);
@@ -499,15 +753,23 @@ function createFrameItModelFigure(figure, selectedFigureId, selectedJoint, joint
     jointMap.set(`${figure.id}:${jointId}`, controller);
     pendingControllers.push({ controller, jointId });
   };
+  const registerElbowController = (jointId, forearmName, handName) => {
+    const forearm = bones.get(forearmName);
+    const hand = bones.get(handName);
+    if (!forearm || !hand) return;
+    const controller = createFrameItElbowController(forearm, hand);
+    jointMap.set(`${figure.id}:${jointId}`, controller);
+    pendingControllers.push({ controller, jointId });
+  };
 
   registerController("hipsRot", ["spine"]);
   registerController("upperBodyRot", ["spine001", "spine002", "spine003"], true);
   registerController("headRot", ["spine004", "spine005"], true);
   registerController("leftUpperArm", ["upper_armL"], false, true);
-  registerController("leftLowerArm", ["forearmL"], false, true);
+  registerElbowController("leftLowerArm", "forearmL", "handL");
   registerController("leftHandRot", ["handL"], false, true);
   registerController("rightUpperArm", ["upper_armR"], false, true);
-  registerController("rightLowerArm", ["forearmR"], false, true);
+  registerElbowController("rightLowerArm", "forearmR", "handR");
   registerController("rightHandRot", ["handR"], false, true);
   registerController("leftUpperLeg", ["thighL"]);
   registerController("leftLowerLeg", ["shinL"]);
@@ -519,21 +781,6 @@ function createFrameItModelFigure(figure, selectedFigureId, selectedJoint, joint
   pendingControllers.forEach(({ controller, jointId }) => {
     controller.apply(frameItJointRenderRotation(jointId, frameItJointRotation(figure, jointId)));
   });
-
-  if (figure.id === selectedFigureId) {
-    const controller = jointMap.get(`${figure.id}:${selectedJoint}`) || jointMap.get(`${figure.id}:hipsRot`);
-    const selectedBone = controller?.primaryBone;
-    if (selectedBone) {
-      const ring = new THREE.Mesh(
-        new THREE.TorusGeometry(0.105, 0.009, 10, 40),
-        new THREE.MeshBasicMaterial({ color: 0xf4d62d, transparent: true, opacity: 0.95, depthTest: false })
-      );
-      ring.name = "frame-it-selection";
-      ring.renderOrder = 20;
-      ring.rotation.y = Math.PI / 2;
-      selectedBone.add(ring);
-    }
-  }
 
   model.updateMatrixWorld(true);
   return root;
@@ -555,10 +802,12 @@ function prepareFrameItMannequinClone(model, figure) {
   const color = new THREE.Color(figure.color);
   const surfaceMaterial = new THREE.MeshPhysicalMaterial({
     color: color.clone(),
-    roughness: 0.58,
+    roughness: 0.76,
     metalness: 0.01,
-    clearcoat: 0.08,
-    clearcoatRoughness: 0.78
+    clearcoat: 0,
+    sheen: 0.08,
+    sheenRoughness: 0.85,
+    sheenColor: color.clone().offsetHSL(0, -0.08, 0.08)
   });
   model.traverse((object) => {
     object.frustumCulled = false;
@@ -609,6 +858,47 @@ function createFrameItBoneController(bones, distribute, followParent = false) {
   };
 }
 
+function createFrameItElbowController(forearm, hand) {
+  forearm.updateWorldMatrix(true, false);
+  hand.updateWorldMatrix(true, false);
+  const base = forearm.quaternion.clone();
+  const parentWorld = forearm.parent?.getWorldQuaternion(new THREE.Quaternion()) || new THREE.Quaternion();
+  const worldToParent = parentWorld.clone().invert();
+  const shoulderPosition = forearm.parent?.getWorldPosition(new THREE.Vector3()) || new THREE.Vector3();
+  const elbowPosition = forearm.getWorldPosition(new THREE.Vector3());
+  const wristPosition = hand.getWorldPosition(new THREE.Vector3());
+  const upperDirection = elbowPosition.clone().sub(shoulderPosition).normalize();
+  const forearmDirection = wristPosition.clone().sub(elbowPosition).normalize();
+  const flexTarget = upperDirection.clone().negate();
+  const hingeAxis = new THREE.Vector3().crossVectors(forearmDirection, flexTarget);
+  if (hingeAxis.lengthSq() < 0.0001) hingeAxis.set(0, 0, 1);
+  hingeAxis.normalize().applyQuaternion(worldToParent).normalize();
+  const forearmAxis = forearmDirection.clone().applyQuaternion(worldToParent).normalize();
+  const lateralAxis = new THREE.Vector3().crossVectors(hingeAxis, forearmAxis).normalize();
+
+  return {
+    primaryBone: forearm,
+    apply(rotation) {
+      const flex = new THREE.Quaternion().setFromAxisAngle(
+        hingeAxis,
+        degreesToRadians(-rotation.x)
+      );
+      const rotatedForearmAxis = forearmAxis.clone().applyQuaternion(flex).normalize();
+      const rotatedLateralAxis = lateralAxis.clone().applyQuaternion(flex).normalize();
+      const twist = new THREE.Quaternion().setFromAxisAngle(
+        rotatedForearmAxis,
+        degreesToRadians(rotation.y)
+      );
+      const lateral = new THREE.Quaternion().setFromAxisAngle(
+        rotatedLateralAxis,
+        degreesToRadians(rotation.z)
+      );
+      forearm.quaternion.copy(lateral.multiply(twist).multiply(flex).multiply(base));
+      forearm.updateMatrixWorld(true);
+    }
+  };
+}
+
 function frameItJointFromSkinHit(hit) {
   const geometry = hit.object.geometry;
   const skinIndex = geometry?.getAttribute?.("skinIndex");
@@ -654,12 +944,17 @@ function frameItJointForBoneName(name) {
   return "";
 }
 
-function createFrameItProceduralFigure(figure, selectedFigureId, selectedJoint, jointMap) {
+function createFrameItProceduralFigure(figure, jointMap) {
   const root = new THREE.Group();
   root.userData.frameItFigure = true;
   root.userData.figureId = figure.id;
   root.position.set(figure.x, figure.y, figure.z);
-  root.rotation.y = degreesToRadians(figure.rotY);
+  root.rotation.set(
+    degreesToRadians(figure.rotX),
+    degreesToRadians(figure.rotY),
+    degreesToRadians(figure.rotZ),
+    "XYZ"
+  );
   root.scale.setScalar(figure.scale);
 
   const color = new THREE.Color(figure.color);
@@ -705,18 +1000,6 @@ function createFrameItProceduralFigure(figure, selectedFigureId, selectedJoint, 
   createArm(chest, figure, "right", 1, standardMaterial, jointMap);
   createLeg(hips, figure, "left", -1, standardMaterial, jointMap);
   createLeg(hips, figure, "right", 1, standardMaterial, jointMap);
-
-  if (figure.id === selectedFigureId) {
-    const selectedObject = jointMap.get(`${figure.id}:${selectedJoint}`) || hips;
-    const ring = new THREE.Mesh(
-      new THREE.TorusGeometry(0.18, 0.014, 10, 40),
-      new THREE.MeshBasicMaterial({ color: 0xf4d62d, transparent: true, opacity: 0.95, depthTest: false })
-    );
-    ring.name = "frame-it-selection";
-    ring.renderOrder = 20;
-    ring.rotation.x = Math.PI / 2;
-    selectedObject.add(ring);
-  }
 
   return root;
 }

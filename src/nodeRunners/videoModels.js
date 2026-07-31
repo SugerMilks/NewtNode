@@ -3,9 +3,9 @@ import { isGeminiOmniModel } from "../geminiOmni.js";
 
 export function videoModelSupportsFilmDirector(model) {
   const normalized = String(model || "").toLowerCase();
-  const isStandardSeedance = normalized.includes("seedance") && !normalized.includes("fast");
+  const isSeedance = normalized.includes("seedance");
   const isKlingO3 = normalized.includes("kling") && (normalized.includes("o3") || normalized.includes("03"));
-  return isStandardSeedance || isKlingO3 || isGeminiOmniModel(model);
+  return isSeedance || isKlingO3 || isGeminiOmniModel(model);
 }
 
 export function buildVideoGenerationRequest({
@@ -34,7 +34,6 @@ export function buildVideoGenerationRequest({
     generateAudio: node.data.generateAudio,
     klingCfgScale: node.data.klingCfgScale ?? 0.5,
     negativePrompt: node.data.negativePrompt || "",
-    loop: Boolean(node.data.loop),
     seed: node.data.seed || "",
     enableSafetyChecker: node.data.enableSafetyChecker !== false,
     startFrameUrls,

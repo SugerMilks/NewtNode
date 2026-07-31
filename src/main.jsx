@@ -19,7 +19,8 @@ import {
 } from "lucide-react";
 import { generationApi, historyApi, settingsApi } from "./api/newtApi.js";
 import { installClientDiagnostics, reportClientDiagnostic } from "./clientDiagnostics.js";
-import { previewImageUrl } from "./mediaAssets.js";
+import { FullResolutionImageContextMenu } from "./components/FullResolutionImageContextMenu.jsx";
+import { fullResolutionImageProps, previewImageUrl } from "./mediaAssets.js";
 import {
   batchOptions,
   defaultModelPreferences,
@@ -42,15 +43,11 @@ import {
   klingO3ProDurationOptions,
   klingO3ProResolutionOptions,
   lumaImageAspectRatios,
-  lumaVideoAspectRatioOptions,
-  lumaVideoDurationOptions,
-  lumaVideoResolutionOptions,
   nanoImageAspectRatios,
   openAiImageAspectRatios,
   seedanceVideoAspectRatioOptions,
   seedanceVideoDurationOptions,
   seedanceVideoResolutionOptions,
-  seedanceFastVideoResolutionOptions,
   seedream5ResolutionOptions,
   normalizeModelPreferences,
   videoModelNames,
@@ -126,7 +123,6 @@ function App() {
   const [videoModel, setVideoModel] = React.useState(videoModelNames.seedance);
   const [modelPreferences, setModelPreferences] = React.useState(defaultModelPreferences);
   const [modelPreferencesLoaded, setModelPreferencesLoaded] = React.useState(false);
-  const [loopVideo, setLoopVideo] = React.useState(false);
   const [seed, setSeed] = React.useState("");
   const [status, setStatus] = React.useState("idle");
   const [message, setMessage] = React.useState("");
@@ -188,7 +184,6 @@ function App() {
   const supportsVideoAudio = isSeedanceVideoModel(videoModel) || isKlingO3VideoModel(videoModel) || isGeminiOmniModel(videoModel);
   const supportsVideoEndFrame = !isGeminiOmniModel(videoModel);
   const supportsVideoSeed = isSeedanceVideoModel(videoModel) || isHappyHorseVideoModel(videoModel) || isWan27VideoModel(videoModel);
-  const supportsVideoLoop = isLumaVideoModel(videoModel);
 
   React.useEffect(() => {
     if (!modelPreferencesLoaded) return;
@@ -291,7 +286,6 @@ function App() {
         duration: durationToLabel(duration),
         aspectRatio,
         generateAudio: supportsVideoAudio ? generateAudio : false,
-        loop: supportsVideoLoop ? loopVideo : false,
         seed: seed.trim(),
         startFrameUrls: uploadedStartFrame ? [uploadedStartFrame.asset.localUrl] : [],
         endFrameUrls: supportsVideoEndFrame && uploadedEndFrame ? [uploadedEndFrame.asset.localUrl] : [],
@@ -497,6 +491,7 @@ function App() {
 
   return (
     <main className={`app-shell ${workspaceMode === "nodes" ? "node-app-shell" : ""}`}>
+      <FullResolutionImageContextMenu />
       <div className="topbar">
         <div className="brand-lockup" aria-label="Versus NewtNode">
           <img src="/newtnode-logo.png" alt="Versus NewtNode" />
@@ -609,7 +604,7 @@ function App() {
                 <div className="result-stack">
                   {imageResult.map((item, index) => (
                     <div className="image-stage" key={item.image?.localUrl || index}>
-                      <img src={previewImageUrl(item.image)} alt={`Generated image ${index + 1}`} loading="lazy" decoding="async" />
+                      <img {...fullResolutionImageProps(item.image)} src={previewImageUrl(item.image)} alt={`Generated image ${index + 1}`} loading="lazy" decoding="async" />
                       <div className="video-meta">
                         <span>{imageResult.length > 1 ? `Image ${index + 1}` : imageModel}</span>
                         <span>{formatCost(item.cost)}</span>
@@ -718,12 +713,6 @@ function App() {
                   </button>
                 )}
 
-                {supportsVideoLoop && (
-                  <button className={`chip icon-chip ${loopVideo ? "active" : ""}`} onClick={() => setLoopVideo((value) => !value)} title="Loop">
-                    {loopVideo ? <Play size={17} /> : <Pause size={17} />}
-                  </button>
-                )}
-
                 {supportsVideoSeed && (
                   <input
                     className="seed-input"
@@ -749,7 +738,6 @@ function App() {
               <span>{formatDurationValue(duration)}</span>
               <span>{aspectRatio}</span>
               {supportsVideoAudio && <span>{generateAudio ? "Audio" : "Silent"}</span>}
-              {supportsVideoLoop && <span>{loopVideo ? "Loop" : "No loop"}</span>}
             </div>
 
             <div className="result-zone">
@@ -996,7 +984,7 @@ function Gallery({ history, onRemove }) {
               <Trash2 size={15} />
             </button>
             {item.mediaType === "image" ? (
-              <img src={item.localThumbnail || item.localImage} alt={item.prompt || "Generated image"} loading="lazy" decoding="async" />
+              <img {...fullResolutionImageProps(item.localImage)} src={item.localThumbnail || item.localImage} alt={item.prompt || "Generated image"} loading="lazy" decoding="async" />
             ) : (
               <video controls playsInline preload="metadata" src={item.localVideo} />
             )}
@@ -1067,16 +1055,6 @@ function videoSettingsForModel(model) {
     };
   }
 
-  if (isLumaVideoModel(model)) {
-    return {
-      durations: lumaVideoDurationOptions.map(durationLabelToValue),
-      durationValues: lumaVideoDurationOptions.map(durationLabelToValue),
-      defaultDuration: "5",
-      resolutions: lumaVideoResolutionOptions,
-      aspectRatios: lumaVideoAspectRatioOptions
-    };
-  }
-
   if (isHappyHorseVideoModel(model)) {
     return {
       durations: happyHorseDurationOptions.map(durationLabelToValue),
@@ -1101,7 +1079,7 @@ function videoSettingsForModel(model) {
     durations: seedanceVideoDurationOptions.map(durationLabelToValue),
     durationValues: seedanceVideoDurationOptions.map(durationLabelToValue),
     defaultDuration: "15",
-    resolutions: String(model || "").toLowerCase().includes("fast") ? seedanceFastVideoResolutionOptions : seedanceVideoResolutionOptions,
+    resolutions: seedanceVideoResolutionOptions,
     aspectRatios: seedanceVideoAspectRatioOptions.map((option) => option.match(/\d+:\d+/)?.[0] || option)
   };
 }
@@ -1123,11 +1101,6 @@ function isKlingO34kVideoModel(model) {
 function isLumaImageModel(model) {
   const normalized = String(model || "").toLowerCase();
   return normalized.includes("luma") || normalized.includes("photon");
-}
-
-function isLumaVideoModel(model) {
-  const normalized = String(model || "").toLowerCase();
-  return normalized.includes("luma") || normalized.includes("dream") || normalized.includes("ray2") || normalized.includes("ray 2");
 }
 
 function isHappyHorseVideoModel(model) {

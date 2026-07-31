@@ -63,6 +63,33 @@ export function previewImageUrl(itemOrUrl, thumbnailUrl = "") {
   return `/api/media-thumbnail?url=${encodeURIComponent(sourceUrl)}`;
 }
 
+export function fullResolutionImageProps(itemOrUrl, fileName = "") {
+  const item = itemOrUrl && typeof itemOrUrl === "object" ? itemOrUrl : null;
+  const sourceUrl = [
+    item?.fullResolutionUrl,
+    item?.originalUrl,
+    item?.resultUrl,
+    item?.url,
+    item?.localUrl,
+    item ? "" : itemOrUrl
+  ]
+    .map((candidate) => String(candidate || "").trim())
+    .find((candidate) => candidate && !isLocalThumbnailUrl(candidate));
+
+  if (!sourceUrl) return {};
+
+  return {
+    "data-full-resolution-url": sourceUrl,
+    "data-full-resolution-file-name": String(
+      fileName
+        || item?.fileName
+        || item?.storedFileName
+        || fileNameFromLocalUrl(sourceUrl)
+        || "image"
+    ).trim()
+  };
+}
+
 export function hasOutputItemDragData(dataTransfer) {
   const types = Array.from(dataTransfer?.types || []);
   return types.includes(outputDragMime)

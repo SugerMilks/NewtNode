@@ -29,7 +29,6 @@ export const imageResolutionOptions = ["2K", "1K", "4K"];
 export const seedream5ResolutionOptions = ["2K", "1K"];
 export const seedanceVideoDurationOptions = ["15 seconds", "10 seconds", "5 seconds"];
 export const seedanceVideoResolutionOptions = ["720p", "480p", "1080p", "4k"];
-export const seedanceFastVideoResolutionOptions = ["720p", "480p"];
 export const seedanceVideoAspectRatioOptions = ["16:9 (Landscape)", "21:9", "9:16 (Portrait)", "1:1"];
 export const klingO3ProDurationOptions = Array.from({ length: 13 }, (_value, index) => `${index + 3} seconds`);
 export const klingO3ProResolutionOptions = ["1080p"];
@@ -40,9 +39,6 @@ export const klingO34kAspectRatioOptions = klingO3ProAspectRatioOptions;
 export const geminiOmniDurationOptions = Array.from({ length: 8 }, (_value, index) => `${index + 3} seconds`);
 export const geminiOmniResolutionOptions = ["720p"];
 export const geminiOmniAspectRatioOptions = ["16:9", "9:16"];
-export const lumaVideoDurationOptions = ["5 seconds", "9 seconds"];
-export const lumaVideoResolutionOptions = ["540p", "720p", "1080p"];
-export const lumaVideoAspectRatioOptions = ["16:9", "9:16", "4:3", "3:4", "21:9", "9:21"];
 export const happyHorseDurationOptions = Array.from({ length: 13 }, (_value, index) => `${index + 3} seconds`);
 export const voidVideoFrameOptions = [69, 77, 85, 93, 101, 109, 117, 125, 133, 141, 149, 157, 165, 173, 181, 189, 197];
 
@@ -116,11 +112,9 @@ export const qwenCameraDefaults = {
 
 export const videoModelNames = {
   seedance: "Seedance 2.0",
-  seedanceFast: "Seedance 2.0 Fast",
   klingO3Pro: "Kling O3 Pro",
   klingO34k: "Kling O3 4K",
   geminiOmni: "Gemini Omni Flash",
-  lumaDreamMachine: "Luma Dream Machine",
   happyHorse: "Happy Horse",
   wanFunControl: "Wan Fun Control",
   wan27Reference: "Wan 2.7 Reference-to-Video",
@@ -129,13 +123,11 @@ export const videoModelNames = {
 };
 export const videoModelOptions = [
   videoModelNames.seedance,
-  videoModelNames.seedanceFast,
   videoModelNames.klingO3Pro,
   videoModelNames.klingO34k,
   videoModelNames.geminiOmni,
   videoModelNames.wan27Reference,
   videoModelNames.happyHorse,
-  videoModelNames.lumaDreamMachine,
   videoModelNames.aurora
 ];
 export const videoWorkspaceModelOptions = videoModelOptions.filter((model) => model !== videoModelNames.aurora);

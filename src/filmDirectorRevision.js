@@ -1,8 +1,14 @@
+import {
+  filmDirectorShotDescriptionExample,
+  filmDirectorShotDetailDirective
+} from "./filmDirectorShotDetail.js";
+
 export const filmDirectorRevisionHistoryLimit = 8;
 
 export function buildFilmDirectorRevisionPrompt({
   revisionNotes = "",
   durationLabel = "15-second",
+  durationSeconds = "15",
   currentCutCount = 0,
   sceneName = "",
   referenceSetup = "",
@@ -26,8 +32,9 @@ export function buildFilmDirectorRevisionPrompt({
       ? `Preserve the current ${currentCutCount} CUT sections unless the user explicitly asks to add, remove, combine, or restructure shots.`
       : "Preserve the current shot structure unless the user explicitly asks to change it.",
     "Return strict JSON only with this exact shape:",
-    '{"changeSummary":"one short sentence","styleDirection":"complete revised style direction","cameraDirection":"complete revised camera direction","sceneOverview":"complete revised scene overview","recommendedShotCount":3,"continuityLedger":"one compact line","mustHaveActions":"one compact line","cuts":[{"number":1,"shotFrame":"WS","cameraMovement":"Static","shotType":"Over-the-Shoulder","description":"one concise playable shot under 30 words"}]}',
+    `{"changeSummary":"one short sentence","styleDirection":"complete revised style direction","cameraDirection":"complete revised camera direction","sceneOverview":"complete revised scene overview","recommendedShotCount":3,"continuityLedger":"one compact line","mustHaveActions":"one compact line","cuts":[{"number":1,"shotFrame":"WS","cameraMovement":"Static","shotType":"Over-the-Shoulder","description":"${filmDirectorShotDescriptionExample(currentCutCount, durationSeconds)}"}]}`,
     shotLogic,
+    filmDirectorShotDetailDirective(currentCutCount || "Auto", durationSeconds),
     "Do not return a partial patch. Return the complete revised values so NewtNode can replace the finished package safely. Do not use markdown or add keys outside the schema.",
     `USER REVISION NOTES:\n${notes}`,
     sceneName ? `Scene name:\n${sceneName}` : "",

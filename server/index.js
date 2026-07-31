@@ -35,6 +35,12 @@ import { filmDirectorAdjacentCoverageIssue } from "../src/filmDirectorCoverage.j
 import { filmDirectorCutLimit } from "../src/filmDirectorLimits.js";
 import { buildFilmDirectorRevisionPrompt } from "../src/filmDirectorRevision.js";
 import {
+  filmDirectorShotDescriptionExample,
+  filmDirectorShotDetailDirective,
+  filmDirectorShotMaxCharsPerCut,
+  filmDirectorShotMinimumWords
+} from "../src/filmDirectorShotDetail.js";
+import {
   buildGeminiOmniPrompt,
   geminiOmniFalReferenceEndpoint as defaultGeminiOmniFalReferenceEndpoint,
   geminiOmniFalTextEndpoint as defaultGeminiOmniFalTextEndpoint,
@@ -54,11 +60,25 @@ import {
 } from "../src/klingDirectorPromptOptimization.js";
 import {
   estimateKreaSeedanceCost,
-  extractKreaJobResultUrl,
-  kreaApiBaseUrl,
   kreaSeedanceEndpoint,
   resolveSeedanceRuntimeProvider
 } from "../src/kreaSeedance.js";
+import {
+  buildKreaImageInput,
+  estimateKreaImageCost,
+  estimateKreaKlingCost,
+  extractKreaJobResultUrl,
+  kreaApiBaseUrl,
+  kreaEndpointForModel,
+  normalizeKreaImageResolution,
+  resolveFalKreaProvider,
+  supportsKreaModel
+} from "../src/kreaApi.js";
+import { storyboardBoardGridForAspect } from "../src/storyboardBoardLayout.js";
+import {
+  storyboardDirectorExpansionInstruction,
+  storyboardDirectorFramePlan
+} from "../src/storyboardShotExpansion.js";
 import "./restart-marker.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -122,13 +142,11 @@ const ffmpegBinaryPath = process.env.FFMPEG_PATH || ffmpegStaticPath || "ffmpeg"
 const ffprobeBinaryPath = process.env.FFPROBE_PATH || ffprobeStatic?.path || "ffprobe";
 const port = Number(process.env.PORT || 3336);
 const seedanceStandardCostPerSecond = Number(process.env.SEEDANCE_STANDARD_COST_PER_SECOND || 0.3034);
-const seedanceFastCostPerSecond = Number(process.env.SEEDANCE_FAST_COST_PER_SECOND || 0.2419);
 const happyHorse720pCostPerSecond = Number(process.env.HAPPY_HORSE_720P_COST_PER_SECOND || 0.14);
 const happyHorse1080pCostPerSecond = Number(process.env.HAPPY_HORSE_1080P_COST_PER_SECOND || 0.28);
 const seedanceBillingFps = Number(process.env.SEEDANCE_BILLING_FPS || 24);
 const seedanceStandardCostPerThousandTokens = Number(process.env.SEEDANCE_STANDARD_COST_PER_1000_TOKENS || 0.014);
 const seedance4KCostPerThousandTokens = Number(process.env.SEEDANCE_4K_COST_PER_1000_TOKENS || 0.008);
-const seedanceFastCostPerThousandTokens = Number(process.env.SEEDANCE_FAST_COST_PER_1000_TOKENS || (seedanceFastCostPerSecond / 21.6));
 const klingO3ProCostPerSecond = Number(process.env.KLING_O3_PRO_COST_PER_SECOND || 0.112);
 const klingO3ProAudioCostPerSecond = Number(process.env.KLING_O3_PRO_AUDIO_COST_PER_SECOND || 0.14);
 const klingO34kCostPerSecond = Number(process.env.KLING_O3_4K_COST_PER_SECOND || 0.42);
@@ -143,7 +161,6 @@ const seedream5ProCostSmall = Number(process.env.SEEDREAM_5_PRO_COST_SMALL || 0.
 const seedream5ProCost2K = Number(process.env.SEEDREAM_5_PRO_COST_2K || 0.135);
 const seedreamLayerSeparationCost = Number(process.env.SEEDREAM_LAYER_SEPARATION_COST || 0.05);
 const lumaPhotonCostPerMegapixel = Number(process.env.LUMA_PHOTON_COST_PER_MEGAPIXEL || 0.019);
-const lumaRay2BaseCostPerFiveSeconds = Number(process.env.LUMA_RAY2_COST_PER_5_SECONDS || 0.5);
 const hunyuan3DProBaseCost = Number(process.env.HUNYUAN_3D_PRO_BASE_COST || 0.375);
 const hunyuan3DProAddOnCost = Number(process.env.HUNYUAN_3D_PRO_ADD_ON_COST || 0.15);
 const nanoImageAspectRatios = ["21:9", "16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3", "4:5", "5:4"];
@@ -152,7 +169,6 @@ const krea2AspectRatios = ["16:9", "1:1", "4:3", "3:2", "2.35:1", "4:5", "2:3", 
 const krea2CreativityOptions = ["raw", "low", "medium", "high"];
 const storyboardAspectRatioOptions = ["16:9", "21:9", "9:16", "1:1"];
 const lumaImageAspectRatios = ["21:9", "16:9", "9:16", "1:1", "4:3", "3:4", "9:21"];
-const lumaVideoAspectRatios = ["16:9", "9:16", "4:3", "3:4", "21:9", "9:21"];
 const imageModelNames = {
   zImage: "Z-Image",
   seedream5Pro: "Seedream 5.0 Pro",
@@ -173,24 +189,20 @@ const imageModelOptions = [
 ];
 const videoModelNames = {
   seedance: "Seedance 2.0",
-  seedanceFast: "Seedance 2.0 Fast",
   klingO3Pro: "Kling O3 Pro",
   klingO34k: "Kling O3 4K",
   geminiOmni: "Gemini Omni Flash",
   wan27Reference: "Wan 2.7 Reference-to-Video",
   happyHorse: "Happy Horse",
-  lumaDreamMachine: "Luma Dream Machine",
   aurora: "Creatify Aurora"
 };
 const videoModelOptions = [
   videoModelNames.seedance,
-  videoModelNames.seedanceFast,
   videoModelNames.klingO3Pro,
   videoModelNames.klingO34k,
   videoModelNames.geminiOmni,
   videoModelNames.wan27Reference,
   videoModelNames.happyHorse,
-  videoModelNames.lumaDreamMachine,
   videoModelNames.aurora
 ];
 const defaultModelPreferences = {
@@ -214,7 +226,6 @@ const googleGeminiOmniModel = process.env.GOOGLE_GEMINI_OMNI_MODEL || defaultGem
 const falGeminiOmniTextEndpoint = process.env.FAL_GEMINI_OMNI_TEXT_ENDPOINT || defaultGeminiOmniFalTextEndpoint;
 const falGeminiOmniReferenceEndpoint = process.env.FAL_GEMINI_OMNI_REFERENCE_ENDPOINT || defaultGeminiOmniFalReferenceEndpoint;
 const falLumaPhotonEndpoint = process.env.FAL_LUMA_PHOTON_ENDPOINT || "fal-ai/luma-photon";
-const falLumaRay2Endpoint = process.env.FAL_LUMA_RAY2_ENDPOINT || "fal-ai/luma-dream-machine/ray-2";
 const falTextRequestCost = Number(process.env.FAL_TEXT_REQUEST_COST || 0.001);
 const falVisionTextUnitCost = Number(process.env.FAL_VISION_TEXT_UNIT_COST || 0.01);
 const falVideoTextUnitCost = Number(process.env.FAL_VIDEO_TEXT_UNIT_COST || 0.01);
@@ -477,7 +488,6 @@ function buildHealthPayload() {
     falKlingO34kReferenceEndpoint,
     falNanoBananaProEndpoint,
     falLumaPhotonEndpoint,
-    falLumaRay2Endpoint,
     openAiKeyConfigured: Boolean(process.env.OPENAI_API_KEY || openAiTextApiKey),
     openAiTextKeyConfigured: Boolean(openAiTextApiKey),
     openAiImage2ViaFalConfigured: Boolean(process.env.FAL_KEY),
@@ -1050,9 +1060,7 @@ app.get("/api/stats", async (_req, res) => {
       pricing: {
       seedance: {
         standardCostPerSecond: seedanceStandardCostPerSecond,
-        fastCostPerSecond: seedanceFastCostPerSecond,
         standardCostPerThousandTokens: seedanceStandardCostPerThousandTokens,
-        fastCostPerThousandTokens: seedanceFastCostPerThousandTokens,
         billingFps: seedanceBillingFps,
         currency: "USD"
       },
@@ -1093,7 +1101,6 @@ app.get("/api/stats", async (_req, res) => {
       },
       luma: {
         photonCostPerMegapixel: lumaPhotonCostPerMegapixel,
-        ray2CostPerFiveSeconds540p: lumaRay2BaseCostPerFiveSeconds,
         currency: "USD"
       },
       openAiImage2: {
@@ -1766,6 +1773,23 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
       provider: selectedModel.provider
     });
 
+    if (
+      !process.env.FAL_KEY &&
+      process.env.KREA_API_KEY &&
+      selectedModel.provider.startsWith("fal-") &&
+      supportsKreaModel("image", selectedModel.displayName)
+    ) {
+      return runKreaImageModel(req, res, {
+        prompt,
+        selectedModel,
+        imagePromptUrls,
+        imagePromptLabels,
+        cleanReferenceLabels,
+        aspectRatio,
+        requestedAspectRatio
+      });
+    }
+
     if (selectedModel.provider === "fal-z-image") {
       if (!process.env.FAL_KEY) {
         return res.status(400).json({ error: "Missing FAL_KEY in .env." });
@@ -2305,6 +2329,128 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
   }
 });
 
+async function runKreaImageModel(
+  req,
+  res,
+  {
+    prompt,
+    selectedModel,
+    imagePromptUrls,
+    imagePromptLabels,
+    cleanReferenceLabels,
+    aspectRatio,
+    requestedAspectRatio
+  }
+) {
+  if (selectedModel.displayName === imageModelNames.seedream5Pro && Boolean(req.body.seedreamLayers)) {
+    return res.status(400).json({
+      error: "Seedream Layers currently requires Fal. Disable Layers or enable Fal; standard Seedream generation works through Krea."
+    });
+  }
+
+  const endpoint = kreaEndpointForModel("image", selectedModel.displayName);
+  if (!endpoint) {
+    return res.status(400).json({ error: `${selectedModel.displayName} is not available through Krea.` });
+  }
+
+  const referenceUrls = await Promise.all(imagePromptUrls.map(uploadLocalOutputToKrea));
+  const submittedPrompt = promptWithReferenceLabels(
+    prompt,
+    imagePromptUrls.map((url, index) => ({
+      url,
+      label: cleanImagePromptLabel(imagePromptLabels[index])
+    }))
+  );
+  const resolution = normalizeKreaImageResolution(selectedModel.displayName, req.body.resolution);
+  const input = buildKreaImageInput({
+    modelName: selectedModel.displayName,
+    prompt: submittedPrompt,
+    referenceUrls,
+    aspectRatio,
+    resolution,
+    quality: req.body.quality,
+    creativity: req.body.kreaCreativity
+  });
+  const result = await runKreaGeneration({
+    endpoint,
+    input,
+    label: selectedModel.displayName
+  });
+  const remoteUrl = extractKreaJobResultUrl(result.job);
+  if (!remoteUrl) {
+    throw httpError(502, `Krea completed ${selectedModel.displayName} but returned no image URL.`, { body: result.job });
+  }
+
+  const remoteImage = {
+    url: remoteUrl,
+    content_type: "image/png",
+    file_name: `${safePathSegment(selectedModel.displayName)}.png`
+  };
+  const output = await downloadImage(
+    req,
+    remoteUrl,
+    safePathSegment(selectedModel.displayName).toLowerCase(),
+    remoteImage.content_type
+  );
+  const cost = estimateKreaImageCost({
+    modelName: selectedModel.displayName,
+    resolution,
+    referenceCount: referenceUrls.length
+  });
+  const mode = referenceUrls.length
+    ? `${selectedModel.displayName} generation with references`
+    : `${selectedModel.displayName} generation`;
+
+  await appendHistory({
+    id: result.requestId || randomUUID(),
+    createdAt: new Date().toISOString(),
+    mediaType: "image",
+    provider: "Krea",
+    modelName: selectedModel.displayName,
+    endpoint,
+    mode,
+    prompt,
+    submittedPrompt,
+    project: projectFromBody(req.body),
+    node: nodeFromBody(req.body),
+    settings: {
+      model: req.body.model || selectedModel.displayName,
+      aspectRatio,
+      requestedAspectRatio: requestedAspectRatio || aspectRatio,
+      resolution,
+      quality: selectedModel.displayName === imageModelNames.openAiImage2
+        ? normalizeOpenAiImage2Quality(req.body.quality)
+        : undefined,
+      creativity: selectedModel.displayName === imageModelNames.krea2Large
+        ? normalizeKrea2Creativity(req.body.kreaCreativity)
+        : undefined,
+      imagePromptCount: referenceUrls.length,
+      imagePromptLabels: cleanReferenceLabels,
+      runtimeProvider: "krea"
+    },
+    cost,
+    remoteImage,
+    localImage: output.publicPath,
+    localThumbnail: output.thumbnailPublicPath,
+    outputFileName: output.fileName,
+    outputBytes: output.bytes,
+    text: ""
+  });
+
+  return res.json({
+    text: "",
+    cost,
+    provider: "Krea",
+    image: {
+      ...remoteImage,
+      localUrl: output.publicPath,
+      thumbnailUrl: output.thumbnailPublicPath,
+      fileName: output.fileName,
+      mimeType: output.mimeType
+    }
+  });
+}
+
 app.post("/api/node/storyboard-plan", async (req, res) => {
   try {
     const sceneDescription = String(req.body.sceneDescription || req.body.prompt || "").trim();
@@ -2312,14 +2458,20 @@ app.post("/api/node/storyboard-plan", async (req, res) => {
       return res.status(400).json({ error: "Scene description is required." });
     }
 
-    const requestedFrameCount = normalizeStoryboardFrameCount(req.body.frameCount);
+    const directorShotList = String(req.body.directorShotList || "").trim();
+    const directorFramePlan = storyboardDirectorFramePlan(directorShotList, 35);
+    const requestedFrameCount = directorFramePlan.frameCount || normalizeStoryboardFrameCount(req.body.frameCount);
     const plan = process.env.GOOGLE_API_KEY
       ? await generateStoryboardPlanWithGemini({
         sceneDescription,
         frameCount: requestedFrameCount,
         characters: Array.isArray(req.body.characters) ? req.body.characters : [],
-        sceneReferences: Array.isArray(req.body.sceneReferences) ? req.body.sceneReferences : [],
-        notes: String(req.body.notes || "").trim()
+        locations: Array.isArray(req.body.locations)
+          ? req.body.locations
+          : Array.isArray(req.body.sceneReferences) ? req.body.sceneReferences : [],
+        props: Array.isArray(req.body.props) ? req.body.props : [],
+        notes: String(req.body.notes || "").trim(),
+        directorShotList
       })
       : fallbackStoryboardPlan(sceneDescription, requestedFrameCount);
 
@@ -2327,7 +2479,8 @@ app.post("/api/node/storyboard-plan", async (req, res) => {
   } catch (error) {
     console.error(error);
     const fallbackSceneDescription = String(req.body.sceneDescription || req.body.prompt || "");
-    const fallbackFrameCount = normalizeStoryboardFrameCount(req.body.frameCount);
+    const fallbackDirectorPlan = storyboardDirectorFramePlan(String(req.body.directorShotList || ""), 35);
+    const fallbackFrameCount = fallbackDirectorPlan.frameCount || normalizeStoryboardFrameCount(req.body.frameCount);
     res.status(500).json({
       error: storyboardPlannerErrorMessage(error),
       plan: normalizeStoryboardPlan(fallbackStoryboardPlan(fallbackSceneDescription, fallbackFrameCount), fallbackSceneDescription, fallbackFrameCount)
@@ -2551,8 +2704,8 @@ app.post("/api/node/preview-inpaint", async (req, res) => {
     if (!maskDataUrl) {
       return res.status(400).json({ error: "Paint a mask before running inpaint." });
     }
-    if (!process.env.FAL_KEY) {
-      return res.status(400).json({ error: "Missing FAL_KEY in .env." });
+    if (!resolveFalKreaProvider({ falKey: process.env.FAL_KEY, kreaKey: process.env.KREA_API_KEY })) {
+      return res.status(400).json({ error: "Preview inpainting needs an enabled Fal or Krea API key in Settings." });
     }
 
     const source = await readLocalAsset(sourceUrl);
@@ -2575,7 +2728,7 @@ app.post("/api/node/preview-inpaint", async (req, res) => {
       "Blend the edit naturally into the original image, matching lighting, perspective, texture, camera quality, style, and scale.",
       "Do not redesign the whole image, do not change unmasked subjects, and do not add unrelated elements outside the masked region."
     ].join(" ");
-    const openAiImage = await generateFalOpenAiImage2FromInputs({
+    const openAiImage = await generateOpenAiImage2FromInputs({
       prompt: inpaintPrompt,
       imageInputs: [
         { ...source, label: "Original image to preserve" },
@@ -2585,18 +2738,24 @@ app.post("/api/node/preview-inpaint", async (req, res) => {
       resolution: req.body.resolution || "2K"
     });
     const output = await downloadImage(req, openAiImage.remoteImage.url, "preview-inpaint", openAiImage.remoteImage.content_type || openAiImage.remoteImage.mimeType);
-    const cost = estimateOpenAiImage2Cost({
-      resolution: req.body.resolution || "2K",
-      size: openAiImage.size,
-      quality: openAiImage.quality,
-      endpoint: openAiImage.endpoint
-    });
+    const cost = openAiImage.provider === "Krea"
+      ? estimateKreaImageCost({
+          modelName: imageModelNames.openAiImage2,
+          resolution: req.body.resolution || "2K",
+          referenceCount: 2
+        })
+      : estimateOpenAiImage2Cost({
+          resolution: req.body.resolution || "2K",
+          size: openAiImage.size,
+          quality: openAiImage.quality,
+          endpoint: openAiImage.endpoint
+        });
 
     await appendHistory({
       id: randomUUID(),
       createdAt: new Date().toISOString(),
       mediaType: "image",
-      provider: "fal.ai",
+      provider: openAiImage.provider,
       modelName: imageModelNames.openAiImage2,
       endpoint: openAiImage.endpoint,
       mode: "Preview masked image edit",
@@ -2737,7 +2896,9 @@ app.post("/api/node/utility-image", async (req, res) => {
     }
 
     if (!process.env.FAL_KEY) {
-      return res.status(400).json({ error: "Missing FAL_KEY in .env." });
+      return res.status(400).json({
+        error: `${selectedModel.displayName} is a Fal-only utility and needs an enabled Fal API key in Settings. Krea does not expose this utility model.`
+      });
     }
 
     const imageUrl = firstLocalOutput(req.body.imageUrls);
@@ -3172,8 +3333,13 @@ app.post("/api/node/utility-video", async (req, res) => {
       });
     }
 
-    if (!process.env.FAL_KEY) {
-      return res.status(400).json({ error: "Missing FAL_KEY in .env." });
+    const kreaUtilitySupported =
+      selectedVideoModel.provider === "fal-topaz-video-upscaler" &&
+      Boolean(process.env.KREA_API_KEY);
+    if (!process.env.FAL_KEY && !kreaUtilitySupported) {
+      return res.status(400).json({
+        error: `${selectedVideoModel.displayName} is a Fal-only utility and needs an enabled Fal API key in Settings. Krea does not expose this utility model.`
+      });
     }
 
     if (!prompt && selectedVideoModel.requiresPrompt) {
@@ -3397,8 +3563,8 @@ app.post("/api/node/generate-video", async (req, res) => {
     const selectedVideoModel = resolveVideoModel(req.body.model);
 
     if (selectedVideoModel.provider === "google-gemini-omni") {
-      if (!process.env.GOOGLE_API_KEY && !process.env.FAL_KEY) {
-        return res.status(400).json({ error: "Gemini Omni Flash needs a Google API key or Fal API key in Settings." });
+      if (!process.env.GOOGLE_API_KEY && !process.env.FAL_KEY && !process.env.KREA_API_KEY) {
+        return res.status(400).json({ error: "Gemini Omni Flash needs an enabled Google, Fal, or Krea API key in Settings." });
       }
       return runGeminiOmniVideo(req, res, { prompt, selectedVideoModel });
     }
@@ -3407,8 +3573,14 @@ app.post("/api/node/generate-video", async (req, res) => {
       return res.status(400).json({ error: `${selectedVideoModel.displayName} is temporarily disabled.` });
     }
 
-    if (selectedVideoModel.provider !== "fal-seedance" && !process.env.FAL_KEY) {
-      return res.status(400).json({ error: `${selectedVideoModel.displayName} needs an enabled Fal API key in Settings.` });
+    if (
+      selectedVideoModel.provider !== "fal-seedance" &&
+      !process.env.FAL_KEY &&
+      !(process.env.KREA_API_KEY && supportsKreaModel("video", selectedVideoModel.displayName))
+    ) {
+      return res.status(400).json({
+        error: `${selectedVideoModel.displayName} is not available through Krea and needs an enabled Fal API key in Settings.`
+      });
     }
 
     if (selectedVideoModel.provider === "fal-kling-o3-pro") {
@@ -3459,18 +3631,6 @@ app.post("/api/node/generate-video", async (req, res) => {
       });
     }
 
-    if (selectedVideoModel.provider === "fal-luma-ray2") {
-      return runLumaRay2Video(req, res, {
-        prompt,
-        startFrameUrls: Array.isArray(req.body.startFrameUrls) ? req.body.startFrameUrls.filter(isLocalAssetUrl) : [],
-        endFrameUrls: Array.isArray(req.body.endFrameUrls) ? req.body.endFrameUrls.filter(isLocalAssetUrl) : [],
-        referenceImageUrls: Array.isArray(req.body.referenceImageUrls) ? req.body.referenceImageUrls.filter(isLocalAssetUrl) : [],
-        selectedVideoModel
-      });
-    }
-
-    const speed = selectedVideoModel.speed;
-    const speedPrefix = speed === "fast" ? "fast/" : "";
     const startFrameUrl = firstLocalOutput(req.body.startFrameUrls);
     const endFrameUrl = firstLocalOutput(req.body.endFrameUrls);
     const rawReferenceImageUrls = Array.isArray(req.body.referenceImageUrls) ? req.body.referenceImageUrls : [];
@@ -3488,7 +3648,7 @@ app.post("/api/node/generate-video", async (req, res) => {
     const referenceVideoUrls = referenceVideos.map(({ url }) => url);
     const referenceVideoNames = normalizeReferenceNames(referenceVideos.map(({ label }) => label), referenceVideoUrls.length, "Video");
     const referenceAudioUrls = Array.isArray(req.body.referenceAudioUrls) ? req.body.referenceAudioUrls.filter(isLocalAssetUrl) : [];
-    const seedanceResolutionOptions = speed === "fast" ? ["480p", "720p"] : ["480p", "720p", "1080p", "4k"];
+    const seedanceResolutionOptions = ["480p", "720p", "1080p", "4k"];
     const resolution = normalizeChoice(req.body.resolution, seedanceResolutionOptions, "720p");
     const duration = normalizeDuration(req.body.duration);
     const aspectRatio = normalizeAspectRatio(req.body.aspectRatio);
@@ -3542,19 +3702,19 @@ app.post("/api/node/generate-video", async (req, res) => {
         if (referenceAudioUrls.length) input.audio_urls = await Promise.all(referenceAudioUrls.slice(0, 3).map(uploadLocalOutputToFal));
       }
 
-      endpoint = `bytedance/seedance-2.0/${speedPrefix}${routeKind}`;
+      endpoint = `bytedance/seedance-2.0/${routeKind}`;
       const result = await subscribeFal(endpoint, { input, logs: true });
       requestId = result.requestId;
       resultSeed = result?.data?.seed ?? null;
       remoteVideo = result?.data?.video;
       providerName = "fal.ai";
-      cost = estimateSeedanceCost({ speed, duration, resolution, aspectRatio, endpoint, routeKind });
+      cost = estimateSeedanceCost({ duration, resolution, aspectRatio, endpoint, routeKind });
 
       if (!remoteVideo?.url) {
         return res.status(502).json({ error: "Fal returned no video URL.", raw: result?.data });
       }
     } else {
-      endpoint = kreaSeedanceEndpoint(speed);
+      endpoint = kreaSeedanceEndpoint();
       const input = {
         prompt: submittedPrompt,
         resolution,
@@ -3579,7 +3739,6 @@ app.post("/api/node/generate-video", async (req, res) => {
       remoteVideo = kreaResult.remoteVideo;
       providerName = "Krea";
       cost = estimateKreaSeedanceCost({
-        speed,
         durationSeconds: durationToSeconds(duration),
         resolution,
         hasVideoReference: referenceVideoUrls.length > 0
@@ -3594,15 +3753,14 @@ app.post("/api/node/generate-video", async (req, res) => {
       createdAt: new Date().toISOString(),
       mediaType: "video",
       provider: providerName,
-      modelName: speed === "fast" ? "Seedance 2.0 Fast" : "Seedance 2.0",
+      modelName: "Seedance 2.0",
       endpoint,
-      mode: routeKindLabel(routeKind, speed),
+      mode: routeKindLabel(routeKind),
       prompt,
       submittedPrompt,
       project: projectFromBody(req.body),
       node: nodeFromBody(req.body),
       settings: {
-        speed,
         resolution,
         duration,
         aspectRatio,
@@ -3629,7 +3787,7 @@ app.post("/api/node/generate-video", async (req, res) => {
       seed: resultSeed,
       endpoint,
       provider: providerName,
-      modelName: speed === "fast" ? "Seedance 2.0 Fast" : "Seedance 2.0",
+      modelName: "Seedance 2.0",
       submittedPrompt,
       cost,
       video: {
@@ -3689,15 +3847,21 @@ async function runGeminiOmniVideo(req, res, { prompt, selectedVideoModel }) {
       remoteVideo = direct.remoteVideo;
       output = direct.output;
     } catch (error) {
-      if (!process.env.FAL_KEY || !shouldFallbackGeminiOmniToFal(error)) throw error;
+      if ((!process.env.FAL_KEY && !process.env.KREA_API_KEY) || !shouldFallbackGeminiOmniToFal(error)) throw error;
       fallbackReason = error.message || "Google direct access was unavailable.";
-      console.warn(`Gemini Omni Google direct unavailable; using fal fallback: ${fallbackReason}`);
+      console.warn(`Gemini Omni Google direct unavailable; using API fallback: ${fallbackReason}`);
     }
   }
 
   if (!output) {
-    const fallback = await generateFalGeminiOmniVideo({ submittedPrompt, media, aspectRatio, durationSeconds });
-    provider = "fal.ai";
+    const runtimeProvider = resolveFalKreaProvider({
+      falKey: process.env.FAL_KEY,
+      kreaKey: process.env.KREA_API_KEY
+    });
+    const fallback = runtimeProvider === "fal"
+      ? await generateFalGeminiOmniVideo({ submittedPrompt, media, aspectRatio, durationSeconds })
+      : await generateKreaGeminiOmniVideo({ submittedPrompt, media, aspectRatio, durationSeconds });
+    provider = runtimeProvider === "fal" ? "fal.ai" : "Krea";
     endpoint = fallback.endpoint;
     requestId = fallback.requestId;
     remoteVideo = fallback.remoteVideo;
@@ -3728,6 +3892,7 @@ async function runGeminiOmniVideo(req, res, { prompt, selectedVideoModel }) {
       referenceImageNames: references.map((item) => item.label).filter(Boolean),
       googleDirect: provider === "Google",
       falFallback: provider === "fal.ai" && Boolean(process.env.GOOGLE_API_KEY),
+      kreaFallback: provider === "Krea" && Boolean(process.env.GOOGLE_API_KEY),
       fallbackReason
     },
     cost,
@@ -3872,6 +4037,35 @@ async function generateFalGeminiOmniVideo({ submittedPrompt, media, aspectRatio,
   return { endpoint, requestId: result.requestId, remoteVideo };
 }
 
+async function generateKreaGeminiOmniVideo({ submittedPrompt, media, aspectRatio, durationSeconds }) {
+  const endpoint = kreaEndpointForModel("video", videoModelNames.geminiOmni);
+  const startFrame = media.find((item) => item.role === "first-frame");
+  const references = media.filter((item) => item.role !== "first-frame").slice(0, 10);
+  const input = {
+    prompt: submittedPrompt,
+    aspect_ratio: normalizeChoice(aspectRatio, ["16:9", "9:16"], "16:9"),
+    duration: clampInteger(durationSeconds, 3, 10, 8),
+    start_image: startFrame ? await uploadLocalOutputToKrea(startFrame.url) : undefined,
+    reference_images: references.length
+      ? await Promise.all(references.map((item) => uploadLocalOutputToKrea(item.url)))
+      : undefined
+  };
+  const result = await runKreaGeneration({ endpoint, input, label: videoModelNames.geminiOmni });
+  const videoUrl = extractKreaJobResultUrl(result.job);
+  if (!videoUrl) {
+    throw httpError(502, "Krea completed Gemini Omni Flash but returned no video URL.", { body: result.job });
+  }
+  return {
+    endpoint,
+    requestId: result.requestId,
+    remoteVideo: {
+      url: videoUrl,
+      content_type: "video/mp4",
+      file_name: "gemini-omni.mp4"
+    }
+  };
+}
+
 async function runKlingO3Video(req, res, { prompt, selectedVideoModel, variant = "pro" }) {
   const is4k = variant === "4k";
   const durationSeconds = clampInteger(durationToSeconds(req.body.duration), 3, 15, 15);
@@ -3971,6 +4165,27 @@ async function runKlingO3Video(req, res, { prompt, selectedVideoModel, variant =
     : hasReferences
       ? "reference"
       : "text";
+  if (!process.env.FAL_KEY && process.env.KREA_API_KEY) {
+    if (hasElementsOrReferences) {
+      throw httpError(
+        400,
+        "Krea Kling 3.0 supports prompts plus start/end frames, but its API does not expose Fal's character, prop, video-element, or extra image-reference inputs. Disconnect those references, use them as a start frame, or enable Fal for the full reference workflow."
+      );
+    }
+    return runKreaKlingO3Video(req, res, {
+      prompt,
+      submittedPrompt,
+      selectedVideoModel,
+      variant,
+      durationSeconds,
+      aspectRatio,
+      generateAudio,
+      startFrameUrl,
+      endFrameUrl,
+      multiPrompt,
+      klingDirectorOptimization
+    });
+  }
   const endpoint = is4k
     ? routeKind === "reference"
       ? falKlingO34kReferenceEndpoint
@@ -4071,6 +4286,101 @@ async function runKlingO3Video(req, res, { prompt, selectedVideoModel, variant =
     endpoint,
     modelName: selectedVideoModel.displayName,
     submittedPrompt: multiPrompt.length ? multiPrompt : submittedPrompt,
+    cost,
+    video: {
+      ...remoteVideo,
+      localUrl: output.publicPath,
+      fileName: output.fileName
+    }
+  });
+}
+
+async function runKreaKlingO3Video(
+  req,
+  res,
+  {
+    prompt,
+    submittedPrompt,
+    selectedVideoModel,
+    variant,
+    durationSeconds,
+    aspectRatio,
+    generateAudio,
+    startFrameUrl,
+    endFrameUrl,
+    multiPrompt,
+    klingDirectorOptimization
+  }
+) {
+  const is4k = variant === "4k";
+  const endpoint = kreaEndpointForModel("video", selectedVideoModel.displayName);
+  const input = {
+    prompt: String(submittedPrompt || "").slice(0, 2500),
+    aspect_ratio: normalizeChoice(aspectRatio, ["16:9", "9:16"], "16:9"),
+    duration: durationSeconds,
+    generate_audio: generateAudio,
+    mode: is4k ? "4k" : "pro",
+    start_image: startFrameUrl ? await uploadLocalOutputToKrea(startFrameUrl) : undefined,
+    end_image: endFrameUrl ? await uploadLocalOutputToKrea(endFrameUrl) : undefined,
+    multi_prompt: multiPrompt.length
+      ? multiPrompt.map((item) => ({
+          prompt: String(item.prompt || "").slice(0, 512),
+          duration: clampInteger(item.duration, 1, 15, 1)
+        }))
+      : undefined
+  };
+  const result = await runKreaGeneration({ endpoint, input, label: selectedVideoModel.displayName });
+  const videoUrl = extractKreaJobResultUrl(result.job);
+  if (!videoUrl) {
+    throw httpError(502, `Krea completed ${selectedVideoModel.displayName} but returned no video URL.`, { body: result.job });
+  }
+  const remoteVideo = {
+    url: videoUrl,
+    content_type: "video/mp4",
+    file_name: `${safePathSegment(selectedVideoModel.displayName)}.mp4`
+  };
+  const output = await downloadVideo(req, videoUrl, is4k ? "krea-kling-o3-4k" : "krea-kling-o3-pro");
+  const cost = estimateKreaKlingCost({ durationSeconds, generateAudio, mode: is4k ? "4k" : "pro" });
+
+  await appendHistory({
+    id: result.requestId || randomUUID(),
+    createdAt: new Date().toISOString(),
+    mediaType: "video",
+    provider: "Krea",
+    modelName: selectedVideoModel.displayName,
+    endpoint,
+    mode: multiPrompt.length
+      ? `${selectedVideoModel.displayName} Film Director multi-shot`
+      : `${selectedVideoModel.displayName} ${startFrameUrl ? "image" : "text"}-to-video`,
+    prompt,
+    submittedPrompt: multiPrompt.length ? JSON.stringify(input.multi_prompt) : input.prompt,
+    project: projectFromBody(req.body),
+    node: nodeFromBody(req.body),
+    settings: {
+      duration: String(durationSeconds),
+      aspectRatio: input.aspect_ratio,
+      resolution: is4k ? "4K" : "1080p",
+      generateAudio,
+      multiShotCount: input.multi_prompt?.length || 0,
+      directorPromptLanguage: "en",
+      directorPromptOptimized: klingDirectorOptimization.optimized,
+      startFrameCount: startFrameUrl ? 1 : 0,
+      endFrameCount: endFrameUrl ? 1 : 0,
+      runtimeProvider: "krea"
+    },
+    cost,
+    remoteVideo,
+    localVideo: output.publicPath,
+    outputFileName: output.fileName,
+    outputBytes: output.bytes
+  });
+
+  return res.json({
+    requestId: result.requestId,
+    endpoint,
+    modelName: selectedVideoModel.displayName,
+    provider: "Krea",
+    submittedPrompt: input.multi_prompt || input.prompt,
     cost,
     video: {
       ...remoteVideo,
@@ -4196,9 +4506,10 @@ async function optimizeKlingFilmDirectorMultiPrompt(multiPrompt = []) {
 
 function estimateGeminiOmniCost({ durationSeconds, provider, endpoint }) {
   const googleDirect = provider === "Google";
-  const unitRateUsd = googleDirect ? geminiOmniGoogleCostPerSecond : geminiOmniFalCostPerSecond;
+  const krea = provider === "Krea";
+  const unitRateUsd = krea ? null : googleDirect ? geminiOmniGoogleCostPerSecond : geminiOmniFalCostPerSecond;
   return {
-    amountUsd: roundCurrency(durationSeconds * unitRateUsd),
+    amountUsd: unitRateUsd == null ? null : roundCurrency(durationSeconds * unitRateUsd),
     currency: "USD",
     unitRateUsd,
     units: durationSeconds,
@@ -4206,10 +4517,14 @@ function estimateGeminiOmniCost({ durationSeconds, provider, endpoint }) {
     mediaType: "video",
     resolution: "720p",
     durationSeconds,
-    pricingBasis: googleDirect
-      ? "Gemini Omni Flash Google output-token estimate at approximately $0.10 per 720p second"
-      : "Gemini Omni Flash fal.ai estimate at approximately $0.13 per 720p second",
-    pricingSource: googleDirect ? "google-gemini-pricing-2026-07-09" : "fal-model-page-2026-07-10",
+    pricingBasis: krea
+      ? "Gemini Omni Flash generation through Krea; current public API documentation does not list a fixed local estimate"
+      : googleDirect
+        ? "Gemini Omni Flash Google output-token estimate at approximately $0.10 per 720p second"
+        : "Gemini Omni Flash fal.ai estimate at approximately $0.13 per 720p second",
+    pricingSource: krea
+      ? "krea-api-docs-2026-07-30"
+      : googleDirect ? "google-gemini-pricing-2026-07-09" : "fal-model-page-2026-07-10",
     endpoint
   };
 }
@@ -4237,8 +4552,12 @@ function estimateKlingO3Cost({ durationSeconds, generateAudio, endpoint, variant
 
 app.post("/api/node/generate-3d", async (req, res) => {
   try {
-    if (!process.env.FAL_KEY) {
-      return res.status(400).json({ error: "Missing FAL_KEY in .env." });
+    const runtimeProvider = resolveFalKreaProvider({
+      falKey: process.env.FAL_KEY,
+      kreaKey: process.env.KREA_API_KEY
+    });
+    if (!runtimeProvider) {
+      return res.status(400).json({ error: "Hunyuan 3D needs an enabled Fal or Krea API key in Settings." });
     }
 
     const imageViewUrls = normalizeHunyuan3DImageViewUrls(req.body);
@@ -4246,19 +4565,32 @@ app.post("/api/node/generate-3d", async (req, res) => {
       return res.status(400).json({ error: "Connect a front image to the 3D node." });
     }
 
-    const endpoint = "fal-ai/hunyuan-3d/v3.1/pro/image-to-3d";
+    const endpoint = runtimeProvider === "fal"
+      ? "fal-ai/hunyuan-3d/v3.1/pro/image-to-3d"
+      : kreaEndpointForModel("model3d", "Hunyuan 3D 3.1 Pro");
     const generateType = normalizeChoice(req.body.generateType, ["Normal", "Geometry"], "Normal");
     const enablePbr = Boolean(req.body.enablePbr) && generateType !== "Geometry";
     const faceCount = clampInteger(req.body.faceCount, 40000, 1500000, 500000);
     const uploadedViewUrls = Object.fromEntries(
-      await Promise.all(Object.entries(imageViewUrls).map(async ([view, url]) => [view, await localAssetToFalUrl(url)]))
+      await Promise.all(Object.entries(imageViewUrls).map(async ([view, url]) => [
+        view,
+        runtimeProvider === "fal" ? await localAssetToFalUrl(url) : await uploadLocalOutputToKrea(url)
+      ]))
     );
-    const input = {
-      input_image_url: uploadedViewUrls.front,
-      generate_type: generateType,
-      enable_pbr: enablePbr,
-      face_count: faceCount
-    };
+    const input = runtimeProvider === "fal"
+      ? {
+          input_image_url: uploadedViewUrls.front,
+          generate_type: generateType,
+          enable_pbr: enablePbr,
+          face_count: faceCount
+        }
+      : {
+          input_mode: "image",
+          image_urls: [uploadedViewUrls.front],
+          generate_texture: generateType !== "Geometry",
+          enable_pbr: enablePbr,
+          face_count: faceCount
+        };
     const viewFields = {
       back: "back_image_url",
       left: "left_image_url",
@@ -4273,19 +4605,27 @@ app.post("/api/node/generate-3d", async (req, res) => {
       if (uploadedViewUrls[view]) input[field] = uploadedViewUrls[view];
     });
 
-    const result = await subscribeFal(endpoint, { input, logs: true }, { route: "generate-3d", node: req.body.nodeId });
-    const data = result?.data || {};
-    const remoteModel =
-      normalizeFalFile(data.model_glb) ||
-      normalizeFalFile(data.model_urls?.glb) ||
-      findFalMediaFile(data, "model/");
+    const result = runtimeProvider === "fal"
+      ? await subscribeFal(endpoint, { input, logs: true }, { route: "generate-3d", node: req.body.nodeId })
+      : await runKreaGeneration({ endpoint, input, label: "Hunyuan 3D 3.1 Pro" });
+    const data = runtimeProvider === "fal" ? result?.data || {} : result.job || {};
+    const kreaModelUrl = runtimeProvider === "krea" ? extractKreaJobResultUrl(result.job) : "";
+    const remoteModel = runtimeProvider === "fal"
+      ? normalizeFalFile(data.model_glb) ||
+        normalizeFalFile(data.model_urls?.glb) ||
+        findFalMediaFile(data, "model/")
+      : kreaModelUrl
+        ? { url: kreaModelUrl, content_type: "model/gltf-binary", file_name: "hunyuan-3d.glb" }
+        : null;
 
     if (!remoteModel?.url) {
       return res.status(502).json({ error: "Hunyuan 3D returned no GLB model.", raw: data });
     }
 
     const output = await downloadModelFile(req, remoteModel.url, "hunyuan-3d-pro", remoteModel.content_type || remoteModel.mimeType || remoteModel.mime_type);
-    const remoteThumbnail = normalizeFalFile(data.thumbnail) || normalizeFalFile(data.thumbnail_url) || firstFalImageResult(data);
+    const remoteThumbnail = runtimeProvider === "fal"
+      ? normalizeFalFile(data.thumbnail) || normalizeFalFile(data.thumbnail_url) || firstFalImageResult(data)
+      : null;
     let thumbnailOutput = null;
     if (remoteThumbnail?.url) {
       try {
@@ -4295,19 +4635,28 @@ app.post("/api/node/generate-3d", async (req, res) => {
       }
     }
 
-    const cost = estimateHunyuan3DProCost({
+    const estimatedCost = estimateHunyuan3DProCost({
       generateType,
       enablePbr,
       faceCount,
       inputImageCount: Object.keys(imageViewUrls).length,
       endpoint
     });
+    const cost = runtimeProvider === "fal"
+      ? estimatedCost
+      : {
+          ...estimatedCost,
+          amountUsd: null,
+          unitRateUsd: null,
+          pricingBasis: "Hunyuan 3D 3.1 Pro generation through Krea; current public API documentation does not list a fixed local estimate",
+          pricingSource: "krea-api-docs-2026-07-30"
+        };
 
     await appendHistory({
       id: result.requestId || randomUUID(),
       createdAt: new Date().toISOString(),
       mediaType: "model3d",
-      provider: "fal.ai",
+      provider: runtimeProvider === "fal" ? "fal.ai" : "Krea",
       modelName: "Hunyuan 3D 3.1 Pro",
       endpoint,
       mode: "Image to 3D",
@@ -4559,83 +4908,6 @@ async function runHappyHorseReferenceVideo(req, res, { prompt, referenceImageUrl
     cost,
     video: {
       ...remoteVideo,
-      localUrl: output.publicPath,
-      fileName: output.fileName
-    }
-  });
-}
-
-async function runLumaRay2Video(req, res, { prompt, startFrameUrls, endFrameUrls, referenceImageUrls, selectedVideoModel }) {
-  const startFrameUrl = firstLocalOutput(startFrameUrls) || firstLocalOutput(referenceImageUrls);
-  const endFrameUrl = firstLocalOutput(endFrameUrls);
-  if (endFrameUrl && !startFrameUrl) {
-    return res.status(400).json({ error: "Luma Dream Machine end frame requires a start frame." });
-  }
-
-  const routeKind = startFrameUrl ? "image-to-video" : "text-to-video";
-  const endpoint = routeKind === "image-to-video" ? `${selectedVideoModel.id.replace(/\/image-to-video$/i, "")}/image-to-video` : selectedVideoModel.id.replace(/\/image-to-video$/i, "");
-  const resolution = normalizeLumaVideoResolution(req.body.resolution);
-  const duration = normalizeLumaVideoDuration(req.body.duration);
-  const aspectRatio = normalizeLumaVideoAspectRatio(req.body.aspectRatio);
-  const input = {
-    prompt,
-    aspect_ratio: aspectRatio,
-    resolution,
-    duration,
-    loop: Boolean(req.body.loop)
-  };
-
-  if (startFrameUrl) {
-    input.image_url = await uploadLocalOutputToFal(startFrameUrl);
-    if (endFrameUrl) input.end_image_url = await uploadLocalOutputToFal(endFrameUrl);
-  }
-
-  const result = await subscribeFal(endpoint, { input, logs: true });
-  const remoteVideo = normalizeFalFile(result?.data?.video);
-
-  if (!remoteVideo?.url) {
-    return res.status(502).json({ error: "Fal returned no Luma Dream Machine video URL.", raw: result?.data });
-  }
-
-  const output = await downloadVideo(req, remoteVideo.url, "luma-dream-machine");
-  const outputVideo = enrichVideoMetadata(remoteVideo, await probeVideoFile(output.filePath));
-  const cost = estimateLumaRay2Cost({ endpoint, resolution, duration, routeKind });
-  await appendHistory({
-    id: result.requestId || randomUUID(),
-    createdAt: new Date().toISOString(),
-    mediaType: "video",
-    provider: "fal.ai",
-    modelName: selectedVideoModel.displayName,
-    endpoint,
-    mode: routeKind === "image-to-video" ? "Luma Ray2 image to video" : "Luma Ray2 text to video",
-    prompt,
-    submittedPrompt: prompt,
-    project: projectFromBody(req.body),
-    node: nodeFromBody(req.body),
-    settings: {
-      model: selectedVideoModel.displayName,
-      duration,
-      resolution,
-      aspectRatio,
-      loop: input.loop,
-      startFrameCount: startFrameUrl ? 1 : 0,
-      endFrameCount: endFrameUrl ? 1 : 0,
-      referenceImageCount: referenceImageUrls.length
-    },
-    cost,
-    remoteVideo: outputVideo,
-    localVideo: output.publicPath,
-    outputFileName: output.fileName,
-    outputBytes: output.bytes
-  });
-
-  return res.json({
-    requestId: result.requestId,
-    endpoint,
-    modelName: selectedVideoModel.displayName,
-    cost,
-    video: {
-      ...outputVideo,
       localUrl: output.publicPath,
       fileName: output.fileName
     }
@@ -5426,46 +5698,108 @@ async function runTopazVideoUpscaler(req, res, { referenceVideoUrls, selectedVid
     return res.status(400).json({ error: "Topaz Video Upscale requires a connected video." });
   }
 
-  const endpoint = selectedVideoModel.id;
+  const runtimeProvider = resolveFalKreaProvider({
+    falKey: process.env.FAL_KEY,
+    kreaKey: process.env.KREA_API_KEY
+  });
+  if (!runtimeProvider) {
+    return res.status(400).json({ error: "Topaz Video Upscale needs an enabled Fal or Krea API key in Settings." });
+  }
+  const endpoint = runtimeProvider === "fal"
+    ? selectedVideoModel.id
+    : kreaEndpointForModel("videoEnhance", selectedVideoModel.displayName);
   const options = req.body.topazVideoUpscaler || {};
   const targetFps = optionalInteger(options.targetFps);
-  const input = {
-    video_url: await uploadLocalOutputToFal(videoUrl),
-    model: normalizeChoice(options.model, topazUpscalerModelOptions, "Proteus"),
-    upscale_factor: clampNumber(options.upscaleFactor, 1, 8, 2),
-    H264_output: Boolean(options.h264Output)
-  };
-  if (targetFps !== undefined) input.target_fps = Math.min(120, Math.max(16, targetFps));
-  addOptionalRangeInput(input, "compression", options.compression, 0, 1);
-  addOptionalRangeInput(input, "noise", options.noise, 0, 1);
-  addOptionalRangeInput(input, "halo", options.halo, 0, 1);
-  addOptionalRangeInput(input, "grain", options.grain, 0, 0.1);
-  addOptionalRangeInput(input, "recover_detail", options.recoverDetail, 0, 1);
-
-  const result = await subscribeFal(endpoint, { input, logs: true });
-  const remoteVideo = normalizeFalFile(result?.data?.video);
+  const selectedModelName = normalizeChoice(options.model, topazUpscalerModelOptions, "Proteus");
+  let input;
+  let result;
+  let remoteVideo;
+  if (runtimeProvider === "fal") {
+    input = {
+      video_url: await uploadLocalOutputToFal(videoUrl),
+      model: selectedModelName,
+      upscale_factor: clampNumber(options.upscaleFactor, 1, 8, 2),
+      H264_output: Boolean(options.h264Output)
+    };
+    if (targetFps !== undefined) input.target_fps = Math.min(120, Math.max(16, targetFps));
+    addOptionalRangeInput(input, "compression", options.compression, 0, 1);
+    addOptionalRangeInput(input, "noise", options.noise, 0, 1);
+    addOptionalRangeInput(input, "halo", options.halo, 0, 1);
+    addOptionalRangeInput(input, "grain", options.grain, 0, 0.1);
+    addOptionalRangeInput(input, "recover_detail", options.recoverDetail, 0, 1);
+    result = await subscribeFal(endpoint, { input, logs: true });
+    remoteVideo = normalizeFalFile(result?.data?.video);
+  } else {
+    const source = await resolveLocalAssetPath(videoUrl);
+    const metadata = await probeVideoFile(source.filePath);
+    const scale = clampNumber(options.upscaleFactor, 1, 8, 2);
+    const modelMap = {
+      "Proteus": "prob-4",
+      "Artemis HQ": "ahq-12",
+      "Artemis MQ": "amq-13",
+      "Artemis LQ": "alq-13",
+      "Nyx": "nyx-3",
+      "Gaia HQ": "ghq-5",
+      "Gaia CG": "gcg-5"
+    };
+    input = {
+      video_url: await uploadLocalOutputToKrea(videoUrl),
+      target_width: metadata.width ? Math.min(8000, Math.round(metadata.width * scale)) : undefined,
+      target_height: metadata.height ? Math.min(8000, Math.round(metadata.height * scale)) : undefined,
+      enhancement: true,
+      enhancement_video_type: "Progressive",
+      enhancement_model: modelMap[selectedModelName] || "prob-4",
+      enhancement_parameters: "Manual",
+      enhancement_compression: options.compression ?? 0.1,
+      enhancement_recover_details: options.recoverDetail ?? 0.7,
+      enhancement_reduce_noise: options.noise ?? 0.3,
+      enhancement_reduce_halo: options.halo ?? 0.4,
+      frame_interpolation: targetFps !== undefined,
+      frame_interpolation_fps: targetFps !== undefined ? Math.min(240, Math.max(15, targetFps)) : undefined,
+      grain: Number(options.grain || 0) > 0,
+      grain_strength: Number(options.grain || 0) > 0 ? clampNumber(options.grain, 0, 0.1, 0.02) : undefined,
+      video_output_preset: Boolean(options.h264Output) ? "h264-high" : "h265-main"
+    };
+    result = await runKreaGeneration({ endpoint, input, label: "Topaz Video Upscale" });
+    const remoteUrl = extractKreaJobResultUrl(result.job);
+    remoteVideo = remoteUrl
+      ? { url: remoteUrl, content_type: "video/mp4", file_name: "topaz-video-upscale.mp4" }
+      : null;
+  }
 
   if (!remoteVideo?.url) {
-    return res.status(502).json({ error: "Fal returned no Topaz upscaled video URL.", raw: result?.data });
+    return res.status(502).json({
+      error: `${runtimeProvider === "fal" ? "Fal" : "Krea"} returned no Topaz upscaled video URL.`,
+      raw: runtimeProvider === "fal" ? result?.data : result?.job
+    });
   }
 
   const output = await downloadVideo(req, remoteVideo.url, "topaz-video-upscale");
   const outputVideo = enrichVideoMetadata(remoteVideo, await probeVideoFile(output.filePath));
   const billingTier = normalizeChoice(options.billingResolutionTier, topazUpscalerBillingTierOptions, "auto");
-  const cost = estimateTopazVideoUpscalerCost({
+  const estimatedCost = estimateTopazVideoUpscalerCost({
     endpoint,
-    model: input.model,
-    targetFps: input.target_fps,
+    model: runtimeProvider === "fal" ? input.model : selectedModelName,
+    targetFps: runtimeProvider === "fal" ? input.target_fps : input.frame_interpolation_fps,
     billingResolutionTier: billingTier,
     remoteVideo: outputVideo,
-    duration: result?.data?.duration ?? outputVideo.duration
+    duration: runtimeProvider === "fal" ? result?.data?.duration ?? outputVideo.duration : outputVideo.duration
   });
+  const cost = runtimeProvider === "fal"
+    ? estimatedCost
+    : {
+        ...estimatedCost,
+        amountUsd: null,
+        unitRateUsd: null,
+        pricingBasis: "Topaz video enhancement through Krea; current public API documentation does not list a fixed local estimate",
+        pricingSource: "krea-api-docs-2026-07-30"
+      };
 
   await appendHistory({
     id: result.requestId || randomUUID(),
     createdAt: new Date().toISOString(),
     mediaType: "video",
-    provider: "fal.ai",
+    provider: runtimeProvider === "fal" ? "fal.ai" : "Krea",
     modelName: selectedVideoModel.displayName,
     endpoint,
     mode: "Topaz video upscale",
@@ -5474,16 +5808,17 @@ async function runTopazVideoUpscaler(req, res, { referenceVideoUrls, selectedVid
     project: projectFromBody(req.body),
     node: nodeFromBody(req.body),
     settings: {
-      model: input.model,
-      upscaleFactor: input.upscale_factor,
-      targetFps: input.target_fps || "source",
-      h264Output: input.H264_output,
+      model: runtimeProvider === "fal" ? input.model : selectedModelName,
+      upscaleFactor: runtimeProvider === "fal" ? input.upscale_factor : clampNumber(options.upscaleFactor, 1, 8, 2),
+      targetFps: runtimeProvider === "fal" ? input.target_fps || "source" : input.frame_interpolation_fps || "source",
+      h264Output: runtimeProvider === "fal" ? input.H264_output : input.video_output_preset === "h264-high",
       billingResolutionTier: cost.billingResolutionTier || billingTier,
-      compression: input.compression ?? null,
-      noise: input.noise ?? null,
-      halo: input.halo ?? null,
-      grain: input.grain ?? null,
-      recoverDetail: input.recover_detail ?? null,
+      compression: runtimeProvider === "fal" ? input.compression ?? null : input.enhancement_compression,
+      noise: runtimeProvider === "fal" ? input.noise ?? null : input.enhancement_reduce_noise,
+      halo: runtimeProvider === "fal" ? input.halo ?? null : input.enhancement_reduce_halo,
+      grain: runtimeProvider === "fal" ? input.grain ?? null : input.grain_strength ?? null,
+      recoverDetail: runtimeProvider === "fal" ? input.recover_detail ?? null : input.enhancement_recover_details,
+      runtimeProvider,
       durationSeconds: cost.durationSeconds || null,
       sourceVideoCount: 1
     },
@@ -5539,15 +5874,14 @@ app.post(
         return res.status(400).json({ error: "End frame requires a start frame." });
       }
 
-      const speed = normalizeChoice(req.body.speed, ["standard", "fast"], "standard");
-      const seedanceResolutionOptions = speed === "fast" ? ["480p", "720p"] : ["480p", "720p", "1080p", "4k"];
+      const seedanceResolutionOptions = ["480p", "720p", "1080p", "4k"];
       const resolution = normalizeChoice(req.body.resolution, seedanceResolutionOptions, "720p");
       const duration = normalizeChoice(req.body.duration, ["auto", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15"], "15");
       const aspectRatio = normalizeChoice(req.body.aspectRatio, ["auto", "21:9", "16:9", "4:3", "1:1", "3:4", "9:16"], "21:9");
       const generateAudio = String(req.body.generateAudio ?? "true") === "true";
       const seed = req.body.seed ? Number(req.body.seed) : undefined;
 
-      const route = resolveRoute({ startFrame, references, speed });
+      const route = resolveRoute({ startFrame, references });
       const promptForFal = route.kind === "reference-to-video" ? rewriteReferenceMentions(prompt, referenceNames) : prompt;
       const uploadedFiles = [];
       let endpoint;
@@ -5602,7 +5936,7 @@ app.post(
         resultSeed = result?.data?.seed ?? resultSeed;
         remoteVideo = result?.data?.video;
         providerName = "fal.ai";
-        cost = estimateSeedanceCost({ speed, duration, resolution, aspectRatio, endpoint, routeKind: route.kind });
+        cost = estimateSeedanceCost({ duration, resolution, aspectRatio, endpoint, routeKind: route.kind });
         if (!remoteVideo?.url) {
           return res.status(502).json({ error: "Fal returned no video URL.", raw: result?.data });
         }
@@ -5637,13 +5971,12 @@ app.post(
           input.reference_images = imageUrls;
         }
 
-        endpoint = kreaSeedanceEndpoint(speed);
+        endpoint = kreaSeedanceEndpoint();
         const result = await runKreaSeedanceGeneration({ endpoint, input });
         requestId = result.requestId;
         remoteVideo = result.remoteVideo;
         providerName = "Krea";
         cost = estimateKreaSeedanceCost({
-          speed,
           durationSeconds: durationToSeconds(duration),
           resolution,
           hasVideoReference: false
@@ -5658,7 +5991,7 @@ app.post(
         createdAt: new Date().toISOString(),
         mediaType: "video",
         provider: providerName,
-        modelName: speed === "fast" ? "Seedance 2.0 Fast" : "Seedance 2.0",
+        modelName: "Seedance 2.0",
         prompt,
         submittedPrompt: promptForFal,
         endpoint,
@@ -5669,7 +6002,6 @@ app.post(
         },
         referenceNames,
         settings: {
-          speed,
           resolution,
           duration,
           aspectRatio,
@@ -5720,29 +6052,27 @@ httpServer.on("error", (error) => {
   console.error("NewtNode server failed to start.", error);
 });
 
-function resolveRoute({ startFrame, references, speed }) {
-  const speedPrefix = speed === "fast" ? "fast/" : "";
-
+function resolveRoute({ startFrame, references }) {
   if (startFrame) {
     return {
       kind: "image-to-video",
-      label: speed === "fast" ? "Fast image to video" : "Image to video",
-      endpoint: `bytedance/seedance-2.0/${speedPrefix}image-to-video`
+      label: "Image to video",
+      endpoint: "bytedance/seedance-2.0/image-to-video"
     };
   }
 
   if (references?.length) {
     return {
       kind: "reference-to-video",
-      label: speed === "fast" ? "Fast reference to video" : "Reference to video",
-      endpoint: `bytedance/seedance-2.0/${speedPrefix}reference-to-video`
+      label: "Reference to video",
+      endpoint: "bytedance/seedance-2.0/reference-to-video"
     };
   }
 
   return {
     kind: "text-to-video",
-    label: speed === "fast" ? "Fast text to video" : "Text to video",
-    endpoint: `bytedance/seedance-2.0/${speedPrefix}text-to-video`
+    label: "Text to video",
+    endpoint: "bytedance/seedance-2.0/text-to-video"
   };
 }
 
@@ -8748,12 +9078,11 @@ const seedanceResolutionDimensions = {
   }
 };
 
-function estimateSeedanceCost({ speed, duration, resolution, aspectRatio, endpoint, routeKind }) {
+function estimateSeedanceCost({ duration, resolution, aspectRatio, endpoint, routeKind }) {
   const seconds = durationToSeconds(duration);
-  const isFast = speed === "fast" || String(endpoint || "").includes("/fast/");
   const unitRateUsd = resolution === "4k"
     ? seedance4KCostPerThousandTokens
-    : isFast ? seedanceFastCostPerThousandTokens : seedanceStandardCostPerThousandTokens;
+    : seedanceStandardCostPerThousandTokens;
   const dimensions = seedanceBillingDimensions(resolution, aspectRatio);
   const billableUnits = (dimensions.width * dimensions.height * seconds * seedanceBillingFps) / 1024 / 1000;
   const amountUsd = roundCurrency(billableUnits * unitRateUsd);
@@ -9184,28 +9513,6 @@ function estimateSeedream5ProCost({ resolution, imageSize, layerSeparation = fal
       : "Seedream 5.0 Pro tentative fal.ai per-output-image estimate",
     pricingSource: "fal-model-page-2026-07-10",
     endpoint: falSeedream5ProTextEndpoint
-  };
-}
-
-function estimateLumaRay2Cost({ endpoint, duration, resolution, routeKind }) {
-  const seconds = durationToSeconds(duration);
-  const durationMultiplier = seconds > 5 ? 2 : 1;
-  const resolutionMultiplier = resolution === "1080p" ? 4 : resolution === "720p" ? 2 : 1;
-  const amountUsd = roundCurrency(lumaRay2BaseCostPerFiveSeconds * durationMultiplier * resolutionMultiplier);
-
-  return {
-    amountUsd,
-    currency: "USD",
-    unitRateUsd: lumaRay2BaseCostPerFiveSeconds,
-    units: durationMultiplier * resolutionMultiplier,
-    unit: "5s 540p Ray2 equivalent",
-    mediaType: "video",
-    resolution,
-    durationSeconds: seconds,
-    pricingBasis: "Luma Ray2 fal.ai estimate: $0.50 per 5-second 540p clip; 9s costs 2x, 720p costs 2x, 1080p costs 4x",
-    pricingSource: "fal-model-page-2026-05-31",
-    endpoint,
-    routeKind
   };
 }
 
@@ -9651,7 +9958,9 @@ function composeSkillDirectorFinalPrompt({ referenceLines = [], styleDirection =
   const cleanStyle = dedupeSkillDirectorInstructions(cleanSkillDirectorMoodBoardReferences(styleDirection), seenInstructions);
   const cleanCamera = dedupeSkillDirectorInstructions(cameraDirection, seenInstructions);
   const cleanContinuity = dedupeSkillDirectorInstructions(continuityNotes, seenInstructions);
-  const cleanShotList = compactSkillDirectorShotList(shotList, 420);
+  const finalShotCount = largestSkillDirectorCutNumber(shotList);
+  const maxCharsPerCut = filmDirectorShotMaxCharsPerCut(finalShotCount || "Auto");
+  const cleanShotList = compactSkillDirectorShotList(shotList, maxCharsPerCut);
   let finalPrompt = [
     dedupeSkillDirectorLines(referenceLines).join("\n"),
     skillDirectorSceneRules,
@@ -9935,6 +10244,19 @@ function skillDirectorShotPlanIssues(plan, shotCount, durationSeconds = "15", ch
   if (!/must[-\s]*have\s+(?:shots?\s+or\s+actions|shots?|actions)\s*:/i.test(plan.shotListNotes || "")) {
     issues.push("Include one compact Must-have shots or actions value.");
   }
+  const detailCount = requestedCount || actualCount;
+  const minimumDescriptionWords = filmDirectorShotMinimumWords(detailCount, durationSeconds);
+  if (minimumDescriptionWords && Array.isArray(plan.cuts)) {
+    const thinCut = plan.cuts.find((cut) => {
+      const wordCount = String(cut?.description || "").trim().split(/\s+/).filter(Boolean).length;
+      return wordCount < minimumDescriptionWords;
+    });
+    if (thinCut) {
+      issues.push(
+        `CUT ${thinCut.number || 1} is too thin for a ${detailCount}-shot scene. Give it at least ${minimumDescriptionWords} words of playable blocking, performance, camera progression, and ending state.`
+      );
+    }
+  }
   const setupMatches = [...String(plan.shotList || "").matchAll(/CUT\s+(\d+)\s+—\s+shot frame:\s*([^;\n]+);\s*camera movement:\s*([^;\n]+);\s*shot type:\s*([^:\n]+):/gi)];
   for (let index = 1; index < setupMatches.length; index += 1) {
     const previous = setupMatches[index - 1];
@@ -9956,11 +10278,13 @@ function skillDirectorShotPlanIssues(plan, shotCount, durationSeconds = "15", ch
 }
 
 async function repairSkillDirectorShotPlan({ outputText, shotCount, durationSeconds, prompt, model, issues }) {
+  const repairShotCount = requestedSkillDirectorShotCount(shotCount) || largestSkillDirectorCutNumber(outputText) || "Auto";
   const repairPrompt = [
     `Repair this ${skillDirectorDurationLabel(durationSeconds)} Film Director shot plan.`,
     "Return strict JSON only with this exact shape:",
-    '{"recommendedShotCount":3,"continuityLedger":"one compact line","mustHaveActions":"one compact line","cuts":[{"number":1,"shotFrame":"WS","cameraMovement":"Static","shotType":"Over-the-Shoulder","description":"one concise playable shot under 30 words"}]}',
+    `{"recommendedShotCount":3,"continuityLedger":"one compact line","mustHaveActions":"one compact line","cuts":[{"number":1,"shotFrame":"WS","cameraMovement":"Static","shotType":"Over-the-Shoulder","description":"${filmDirectorShotDescriptionExample(repairShotCount, durationSeconds)}"}]}`,
     skillDirectorShotCountDirective(shotCount, durationSeconds),
+    filmDirectorShotDetailDirective(repairShotCount, durationSeconds),
     "Fix these validation failures:",
     issues.map((issue) => `- ${issue}`).join("\n"),
     "Preserve the story, connected @tags, major actions, spatial geography, screen direction, prop states, lighting, wardrobe, and emotional progression.",
@@ -10076,10 +10400,11 @@ function buildSkillDirectorPrompt({
     return [
       `Create the Shot List for one cinematic ${durationLabel} AI video scene.`,
       "Return strict JSON only with this exact shape:",
-      '{"recommendedShotCount":3,"continuityLedger":"one compact line","mustHaveActions":"one compact line","cuts":[{"number":1,"shotFrame":"WS","cameraMovement":"Static","shotType":"Over-the-Shoulder","description":"one concise playable shot under 30 words"}]}',
+      `{"recommendedShotCount":3,"continuityLedger":"one compact line","mustHaveActions":"one compact line","cuts":[{"number":1,"shotFrame":"WS","cameraMovement":"Static","shotType":"Over-the-Shoulder","description":"${filmDirectorShotDescriptionExample(shotCount, durationSeconds)}"}]}`,
       skillDirectorContinuityMapDirective(durationLabel),
       skillDirectorShotLogicDirective(durationLabel, characterInputs.length),
-      "Each description must be one playable sentence under 30 words. Preserve every connected @tag exactly when that asset appears.",
+      filmDirectorShotDetailDirective(shotCount, durationSeconds),
+      "Preserve every connected @tag exactly when that asset appears.",
       skillDirectorShotCountDirective(shotCount, durationSeconds),
       ...commonContext,
       styleDirection ? `Locked Style Direction:\n${styleDirection}` : "",
@@ -10105,7 +10430,7 @@ function buildSkillDirectorPrompt({
     "Keep a great focus on overall pacing and continuity across all shots with professional blocking and continuity rules.",
     skillDirectorContinuityMapDirective(durationLabel),
     skillDirectorShotLogicDirective(durationLabel, characterInputs.length),
-    "Keep each CUT description to one concise sentence, ideally under 30 words.",
+    filmDirectorShotDetailDirective(shotCount, durationSeconds),
     "Each CUT must follow this format exactly:",
     "CUT 1 — shot frame: WS; camera movement: Static; shot type: Over-the-Shoulder:",
     "the generated shot description",
@@ -10200,6 +10525,7 @@ async function runSkillDirectorWithFal({
     const revisionPrompt = buildFilmDirectorRevisionPrompt({
       revisionNotes,
       durationLabel: skillDirectorDurationLabel(durationSeconds),
+      durationSeconds,
       currentCutCount,
       sceneName,
       referenceSetup: skillDirectorReferenceSetupFromLines(referenceLines),
@@ -10614,11 +10940,10 @@ function falResultUsage(result) {
   return result?.data?.usage || result?.usage || result?.data?.metrics || result?.metrics || null;
 }
 
-function routeKindLabel(routeKind, speed) {
-  const prefix = speed === "fast" ? "Fast " : "";
-  if (routeKind === "image-to-video") return `${prefix}image to video`;
-  if (routeKind === "reference-to-video") return `${prefix}reference to video`;
-  return `${prefix}text to video`;
+function routeKindLabel(routeKind) {
+  if (routeKind === "image-to-video") return "image to video";
+  if (routeKind === "reference-to-video") return "reference to video";
+  return "text to video";
 }
 
 function wantsSummary(req) {
@@ -11027,15 +11352,6 @@ function resolveVideoModel(model) {
     };
   }
 
-  if (normalized.includes("luma") || normalized.includes("dream") || normalized.includes("ray2") || normalized.includes("ray 2")) {
-    return {
-      provider: "fal-luma-ray2",
-      displayName: "Luma Dream Machine",
-      id: falLumaRay2Endpoint,
-      speed: "luma-ray2"
-    };
-  }
-
   if (normalized.includes("wan 2.7") || normalized.includes("wan2.7") || normalized.includes("reference-to-video")) {
     return {
       provider: "fal-wan-2-7-reference-to-video",
@@ -11054,12 +11370,11 @@ function resolveVideoModel(model) {
     };
   }
 
-  const speed = normalized.includes("fast") ? "fast" : "standard";
   return {
     provider: "fal-seedance",
-    displayName: speed === "fast" ? "Seedance 2.0 Fast" : "Seedance 2.0",
-    id: `bytedance/seedance-2.0/${speed === "fast" ? "fast/" : ""}`,
-    speed
+    displayName: "Seedance 2.0",
+    id: "bytedance/seedance-2.0/",
+    speed: "standard"
   };
 }
 
@@ -11230,18 +11545,26 @@ function normalizeStoryboardFrameCount(value) {
   return Math.min(35, Math.max(1, Number.isFinite(parsed) ? parsed : 6));
 }
 
-async function generateStoryboardPlanWithGemini({ sceneDescription, frameCount, characters = [], sceneReferences = [], notes = "" }) {
+async function generateStoryboardPlanWithGemini({ sceneDescription, frameCount, characters = [], locations = [], props = [], notes = "", directorShotList = "" }) {
   const model = process.env.STORYBOARD_TEXT_MODEL || "gemini-2.5-flash";
+  const directorExpansionInstruction = storyboardDirectorExpansionInstruction(directorShotList, 35);
   const characterSummary = characters
     .map((character, index) => `Character ${index + 1}: ${character.name || character.tag || "Unnamed"}${character.tag ? ` (@${character.tag})` : ""}`)
     .join("\n") || "No character references supplied.";
-  const sceneReferenceSummary = sceneReferences
+  const locationSummary = locations
     .map((reference, index) => {
-      const tag = cleanReferenceName(reference.tag || reference.label || `Reference${index + 1}`) || `Reference${index + 1}`;
+      const tag = cleanReferenceName(reference.tag || reference.label || `Location${index + 1}`) || `Location${index + 1}`;
       const label = cleanImagePromptLabel(reference.label || tag) || tag;
-      return `Reference ${index + 1}: ${label} (@${tag})`;
+      return `Location ${index + 1}: ${label} (@${tag})`;
     })
-    .join("\n") || "No scene image references supplied.";
+    .join("\n") || "No location references supplied.";
+  const propSummary = props
+    .map((reference, index) => {
+      const tag = cleanReferenceName(reference.tag || reference.label || `Prop${index + 1}`) || `Prop${index + 1}`;
+      const label = cleanImagePromptLabel(reference.label || tag) || tag;
+      return `Prop ${index + 1}: ${label} (@${tag})`;
+    })
+    .join("\n") || "No prop references supplied.";
   const prompt = `You are not an image prompt writer first. You are a professional storyboard artist and director's visual planner.
 
 Create a film storyboard shot plan as strict JSON only. Do not include markdown fences.
@@ -11252,12 +11575,16 @@ ${sceneDescription}
 Known characters:
 ${characterSummary}
 
-Known scene image references:
-${sceneReferenceSummary}
+Known locations:
+${locationSummary}
+
+Known props:
+${propSummary}
 
 Additional notes:
 ${notes || "None"}
 
+${directorExpansionInstruction ? `${directorExpansionInstruction}\n` : ""}
 Rules:
 1. Follow industry standard film storyboard practices.
 2. Maintain screen direction and follow the 180 degree rule.
@@ -11272,12 +11599,15 @@ Rules:
 11. Maintain a compact continuity bible for the scene: fixed environment, lighting source and direction, key recurring objects, wardrobe, and screen geography.
 12. Include the relevant continuity bible details inside each frame prompt so image generations preserve the same world while changing only the shot, action, or discovery.
 13. If the scene brief includes multiple @tagged characters, keep those identities separate in the shot plan and include each relevant @tag in every frame where that character appears.
-14. When the scene brief references a known scene image reference @tag, preserve that exact @tag in each frame prompt where the referenced product, prop, object, location, environment, brand detail, texture, or design cue appears.
-15. Use known scene image references only for their intended referenced details. Do not turn them into characters, do not force them into unrelated frames, and preserve the final storyboard drawing style.
+14. When a known location appears in a frame, preserve its exact @tag from Known locations. Use its reference for environment layout, architecture, geography, materials, lighting logic, palette, and recurring set details.
+15. Keep different named locations separate, do not force locations into unrelated frames, and preserve the final storyboard drawing style rather than copying a photographic rendering style.
 16. Maintain side-of-room logic. If a character starts screen-left or screen-right relative to the room, preserve that side unless the action explicitly moves them.
 17. Vary adjacent shot scale and composition with purpose. Avoid writing two neighboring frames that are almost the same size, angle, and background. Prefer clear editorial contrast such as WS to CU, MS to insert, OTS to reaction, or EWS to ECU.
 18. Do not rely on the same background view for every cut. Keep the environment consistent, but change camera distance, angle, foreground/background emphasis, or subject scale so the sequence edits like a real storyboard.
 19. In every frame with two or more visible characters, explicitly state each visible character's exact @tag and basic blocking relationship, such as screen-left, screen-right, foreground, background, facing, or eyeline. Do not rely on pronouns alone.
+20. A storyboard frame is a key visual state, not automatically a whole shot. When one continuous shot includes multiple important action or camera stages, create multiple sequential frames for that same CUT.
+21. Inside a multi-frame CUT, preserve continuous action, camera trajectory, screen direction, and environment geography. Each frame must show a distinct start, transition, or endpoint rather than duplicate the same composition.
+22. When a known prop appears in a frame, preserve its exact @tag from Known props. Use that reference only for the named object, product, wardrobe item, tool, or set dressing, and do not force unrelated props into other frames.
 
 Return this exact JSON shape:
 {
@@ -11291,12 +11621,14 @@ Return this exact JSON shape:
       "angle": "None, Low Angle, High Angle, Extreme High, Extreme Low, Portrait, or Profile",
       "beat": "story beat in one sentence",
       "prompt": "single-frame image prompt, concise but visually complete, including stable environment, lighting, recurring objects, wardrobe, and screen geography details where relevant",
-      "notes": "continuity note in one short phrase"
+      "notes": "continuity note in one short phrase; for Film Director plans begin with CUT N and the keyframe phase"
     }
   ]
 }
 
-Create ${frameCount} frames unless the scene absolutely requires fewer or more, with a hard limit of 35 frames.`;
+${directorExpansionInstruction
+    ? `Create at least the per-CUT keyframes listed above, targeting ${frameCount} storyboard frames. You may add a frame only when the visual logic clearly requires another distinct state, but do not reduce a listed multi-frame CUT to one frame. Preserve every CUT, keep multi-frame CUTS contiguous, and never exceed 35 frames.`
+    : `Create ${frameCount} frames unless the scene absolutely requires fewer or more, with a hard limit of 35 frames.`}`;
 
   const text = await generateGeminiText({
     model,
@@ -11963,17 +12295,7 @@ function normalizeStoryboardAspectRatio(value) {
 }
 
 function storyboardPdfLayoutForAspect(aspectRatio) {
-  switch (normalizeStoryboardAspectRatio(aspectRatio)) {
-    case "21:9":
-      return { cols: 2, rows: 2, gapX: 18, rowGap: 18, captionHeight: 72 };
-    case "9:16":
-      return { cols: 4, rows: 1, gapX: 18, rowGap: 0, captionHeight: 92 };
-    case "1:1":
-      return { cols: 4, rows: 2, gapX: 18, rowGap: 18, captionHeight: 72 };
-    case "16:9":
-    default:
-      return { cols: 3, rows: 2, gapX: 18, rowGap: 18, captionHeight: 72 };
-  }
+  return storyboardBoardGridForAspect(normalizeStoryboardAspectRatio(aspectRatio));
 }
 
 function storyboardPdfPanelLayout({ pageWidth, pageHeight, marginX, contentTop, contentBottom, aspectRatio, layout }) {
@@ -12730,6 +13052,65 @@ async function generateFalOpenAiImage2({ prompt, imagePromptUrls, imagePromptLab
   return generateFalOpenAiImage2FromInputs({ prompt, imageInputs, aspectRatio, resolution, quality });
 }
 
+async function generateOpenAiImage2FromInputs(options) {
+  const provider = resolveFalKreaProvider({
+    falKey: process.env.FAL_KEY,
+    kreaKey: process.env.KREA_API_KEY
+  });
+  if (provider === "fal") return generateFalOpenAiImage2FromInputs(options);
+  if (provider === "krea") return generateKreaOpenAiImage2FromInputs(options);
+  throw httpError(400, "OpenAI Image 2 needs an enabled Fal or Krea API key in Settings.");
+}
+
+async function generateKreaOpenAiImage2FromInputs({
+  prompt,
+  imageInputs = [],
+  aspectRatio,
+  resolution,
+  quality: requestedQuality
+}) {
+  const modelName = imageModelNames.openAiImage2;
+  const endpoint = kreaEndpointForModel("image", modelName);
+  const quality = normalizeOpenAiImage2Quality(requestedQuality);
+  const submittedPrompt = promptWithReferenceLabels(prompt, imageInputs);
+  const referenceUrls = await Promise.all(imageInputs.slice(0, 10).map((image, index) => {
+    const extension = extensionForMime(image.mimeType);
+    return uploadAssetBufferToKrea({
+      fileName: image.fileName || `reference-${index + 1}${extension}`,
+      buffer: image.buffer,
+      mimeType: image.mimeType
+    });
+  }));
+  const normalizedResolution = normalizeKreaImageResolution(modelName, resolution);
+  const input = buildKreaImageInput({
+    modelName,
+    prompt: submittedPrompt,
+    referenceUrls,
+    aspectRatio,
+    resolution: normalizedResolution,
+    quality
+  });
+  const result = await runKreaGeneration({ endpoint, input, label: modelName });
+  const remoteUrl = extractKreaJobResultUrl(result.job);
+  if (!remoteUrl) {
+    throw httpError(502, "Krea completed OpenAI Image 2 but returned no image URL.", { body: result.job });
+  }
+
+  return {
+    endpoint,
+    remoteImage: {
+      url: remoteUrl,
+      content_type: "image/png",
+      file_name: "openai-image-2.png"
+    },
+    size: normalizeOpenAiImageSize({ aspectRatio, resolution: normalizedResolution }),
+    quality,
+    submittedPrompt,
+    resultText: "",
+    provider: "Krea"
+  };
+}
+
 async function generateFalOpenAiImage2FromInputs({ prompt, imageInputs = [], aspectRatio, resolution, quality: requestedQuality }) {
   const size = normalizeOpenAiImageSize({ aspectRatio, resolution });
   const quality = normalizeOpenAiImage2Quality(requestedQuality);
@@ -12761,7 +13142,8 @@ async function generateFalOpenAiImage2FromInputs({ prompt, imageInputs = [], asp
     size,
     quality,
     submittedPrompt,
-    resultText: result?.data?.revised_prompt || result?.data?.prompt || ""
+    resultText: result?.data?.revised_prompt || result?.data?.prompt || "",
+    provider: "fal.ai"
   };
 }
 
@@ -12927,20 +13309,6 @@ function normalizeHappyHorseAspectRatio(value) {
   return normalizeChoice(normalized, ["16:9", "9:16", "1:1", "4:3", "3:4"], "16:9");
 }
 
-function normalizeLumaVideoDuration(value) {
-  const seconds = String(value || "5").match(/\d+/)?.[0] || "5";
-  return `${normalizeChoice(seconds, ["5", "9"], "5")}s`;
-}
-
-function normalizeLumaVideoResolution(value) {
-  return normalizeChoice(String(value || "540p"), ["540p", "720p", "1080p"], "540p");
-}
-
-function normalizeLumaVideoAspectRatio(value) {
-  const normalized = String(value || "16:9").match(/\d+:\d+/)?.[0] || "16:9";
-  return normalizeChoice(normalized, lumaVideoAspectRatios, "16:9");
-}
-
 function normalizeAspectRatio(value) {
   const normalized = String(value || "16:9").match(/\d+:\d+/)?.[0] || "16:9";
   return normalizeChoice(normalized, ["auto", "21:9", "16:9", "4:3", "1:1", "3:4", "9:16"], "16:9");
@@ -13082,7 +13450,7 @@ async function uploadAssetBufferToKrea({ fileName, buffer, mimeType }) {
 
   const form = new FormData();
   form.append("file", new File([buffer], fileName, { type: mimeType }));
-  form.append("description", "NewtNode Seedance reference");
+  form.append("description", "NewtNode generation reference");
   const response = await fetch(`${kreaApiBaseUrl}/assets`, {
     method: "POST",
     headers: kreaAuthorizationHeaders(),
@@ -13100,6 +13468,26 @@ async function uploadAssetBufferToKrea({ fileName, buffer, mimeType }) {
 }
 
 async function runKreaSeedanceGeneration({ endpoint, input }) {
+  const result = await runKreaGeneration({ endpoint, input, label: "Seedance" });
+  const videoUrl = extractKreaJobResultUrl(result.job);
+  if (!videoUrl) {
+    throw httpError(502, "Krea completed the Seedance job but returned no video URL.", { body: result.job });
+  }
+
+  return {
+    requestId: result.requestId,
+    remoteVideo: {
+      url: videoUrl,
+      content_type: "video/mp4",
+      file_name: "video.mp4"
+    }
+  };
+}
+
+async function runKreaGeneration({ endpoint, input, label = "generation" }) {
+  if (!process.env.KREA_API_KEY) {
+    throw httpError(400, "Krea is disabled or its API key is missing in Settings.");
+  }
   const response = await fetch(`${kreaApiBaseUrl}${endpoint}`, {
     method: "POST",
     headers: {
@@ -13110,7 +13498,7 @@ async function runKreaSeedanceGeneration({ endpoint, input }) {
   });
   const submittedJob = await responseJson(response);
   if (!response.ok) {
-    throw httpError(response.status, kreaErrorMessage(submittedJob, "Krea could not start the Seedance generation."), { body: submittedJob });
+    throw httpError(response.status, kreaErrorMessage(submittedJob, `Krea could not start the ${label} generation.`), { body: submittedJob });
   }
 
   const jobId = String(submittedJob?.job_id || "").trim();
@@ -13118,23 +13506,13 @@ async function runKreaSeedanceGeneration({ endpoint, input }) {
     throw httpError(502, "Krea accepted the request but returned no job ID.", { body: submittedJob });
   }
 
-  const job = await waitForKreaJob(jobId);
-  const videoUrl = extractKreaJobResultUrl(job);
-  if (!videoUrl) {
-    throw httpError(502, "Krea completed the Seedance job but returned no video URL.", { body: job });
-  }
-
   return {
     requestId: jobId,
-    remoteVideo: {
-      url: videoUrl,
-      content_type: "video/mp4",
-      file_name: "video.mp4"
-    }
+    job: await waitForKreaJob(jobId, label)
   };
 }
 
-async function waitForKreaJob(jobId) {
+async function waitForKreaJob(jobId, label = "generation") {
   const maxAttempts = 600;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     if (attempt > 0) await delay(2000);
@@ -13143,16 +13521,16 @@ async function waitForKreaJob(jobId) {
     });
     const job = await responseJson(response);
     if (!response.ok) {
-      throw httpError(response.status, kreaErrorMessage(job, "Krea could not read the Seedance job status."), { body: job });
+      throw httpError(response.status, kreaErrorMessage(job, `Krea could not read the ${label} job status.`), { body: job });
     }
 
     if (job?.status === "completed") return job;
     if (job?.status === "failed" || job?.status === "cancelled") {
-      throw httpError(502, kreaErrorMessage(job, `Krea Seedance job ${job.status}.`), { body: job });
+      throw httpError(502, kreaErrorMessage(job, `Krea ${label} job ${job.status}.`), { body: job });
     }
   }
 
-  throw httpError(504, "Krea Seedance generation timed out after 20 minutes.");
+  throw httpError(504, `Krea ${label} generation timed out after 20 minutes.`);
 }
 
 function kreaAuthorizationHeaders() {

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  fullResolutionImageProps,
   fullResolutionOutputItem,
   isLocalDraggableMediaUrl,
   isLocalThumbnailUrl,
@@ -57,4 +58,25 @@ test("existing thumbnails and remote images are preserved", () => {
     "/outputs/Test/thumbnails/full-resolution-preview.jpg"
   );
   assert.equal(previewImageUrl("https://example.com/image.png"), "https://example.com/image.png");
+});
+
+test("thumbnail context downloads point at the full-resolution image", () => {
+  assert.deepEqual(
+    fullResolutionImageProps({
+      url: "/outputs/Test/full-resolution.png",
+      thumbnailUrl: "/outputs/Test/thumbnails/full-resolution-preview.jpg",
+      fileName: "final-image.png"
+    }),
+    {
+      "data-full-resolution-url": "/outputs/Test/full-resolution.png",
+      "data-full-resolution-file-name": "final-image.png"
+    }
+  );
+});
+
+test("thumbnail-only images do not expose a download target", () => {
+  assert.deepEqual(
+    fullResolutionImageProps("/outputs/Test/thumbnails/full-resolution-preview.jpg"),
+    {}
+  );
 });

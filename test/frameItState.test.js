@@ -1,20 +1,27 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  defaultFrameItPoseId,
   defaultFrameItFigure,
   frameItApplyPose,
   frameItCameraPointerGesture,
   frameItCaptureSize,
   frameItFigureCompositionSnapshot,
   frameItFigureColors,
+  frameItFigurePositionPatch,
+  frameItFigureRotation,
+  frameItFigureRotationPatch,
   frameItJointPatch,
   frameItJointRange,
   frameItJointRenderRotation,
+  frameItJointRotationFromGizmo,
   frameItPosePresets,
   frameItUsesCameraWheel,
+  normalizeFrameItGizmoMode,
   normalizeFrameItSavedPoses,
   normalizeFrameItScene
 } from "../src/frameItState.js";
+import { frameItPresetSnapshots } from "../src/frameItPresetSnapshots.js";
 
 test("Frame It normalizes camera, figures, and joint limits", () => {
   const scene = normalizeFrameItScene({
@@ -44,21 +51,38 @@ test("Frame It poses reset old joint rotations before applying a preset", () => 
 });
 
 test("Frame It applies biological joint limits and exports native ratios", () => {
+  assert.deepEqual(frameItFigurePositionPatch({ x: 20, y: -4, z: -3.25 }), {
+    x: 12,
+    y: -1.5,
+    z: -3.25
+  });
+  assert.deepEqual(frameItFigureRotation({ rotX: 12, rotY: -45, rotZ: 8 }), {
+    x: 12,
+    y: -45,
+    z: 8
+  });
+  assert.deepEqual(frameItFigureRotationPatch({ x: 420, y: -90, z: -450 }), {
+    rotX: 360,
+    rotY: -90,
+    rotZ: -360
+  });
   assert.deepEqual(frameItJointPatch("leftLowerArm", { x: -90, y: 0, z: 0 }, true), {
-    leftLowerArmX: 0,
+    leftLowerArmX: -10,
     leftLowerArmY: 0,
     leftLowerArmZ: 0
   });
   assert.deepEqual(frameItJointPatch("rightLowerLeg", { x: 190, y: 30, z: -30 }, true), {
-    rightLowerLegX: 150,
-    rightLowerLegY: 8,
-    rightLowerLegZ: -8
+    rightLowerLegX: 160,
+    rightLowerLegY: 15,
+    rightLowerLegZ: -15
   });
-  assert.deepEqual(frameItJointRange("leftUpperLeg", "x", true), { min: -120, max: 45 });
-  assert.deepEqual(frameItJointRange("leftLowerLeg", "x", true), { min: 0, max: 150 });
-  assert.deepEqual(frameItJointRange("leftUpperArm", "x", true), { min: -65, max: 180 });
-  assert.deepEqual(frameItJointRange("leftUpperArm", "z", true), { min: -45, max: 175 });
-  assert.deepEqual(frameItJointRange("rightUpperArm", "z", true), { min: -175, max: 45 });
+  assert.deepEqual(frameItJointRange("leftUpperLeg", "x", true), { min: -130, max: 55 });
+  assert.deepEqual(frameItJointRange("leftLowerLeg", "x", true), { min: -10, max: 160 });
+  assert.deepEqual(frameItJointRange("leftUpperArm", "x", true), { min: -75, max: 190 });
+  assert.deepEqual(frameItJointRange("leftUpperArm", "z", true), { min: -55, max: 185 });
+  assert.deepEqual(frameItJointRange("rightUpperArm", "z", true), { min: -185, max: 55 });
+  assert.deepEqual(frameItJointRange("leftLowerArm", "x", true), { min: -10, max: 160 });
+  assert.deepEqual(frameItJointRange("leftLowerArm", "y", true), { min: -90, max: 90 });
   assert.deepEqual(frameItJointRenderRotation("leftUpperArm", { x: 45, y: 12, z: 30 }), { x: -45, y: 12, z: 30 });
   assert.deepEqual(frameItJointRenderRotation("rightLowerArm", { x: 90, y: 0, z: 0 }), { x: -90, y: 0, z: 0 });
   assert.deepEqual(frameItJointRenderRotation("leftLowerLeg", { x: 90, y: 0, z: 0 }), { x: 90, y: 0, z: 0 });
@@ -67,22 +91,71 @@ test("Frame It applies biological joint limits and exports native ratios", () =>
 });
 
 test("Frame It presets and saved poses preserve complete compositions", () => {
-  const seated = frameItPosePresets.find((preset) => preset.id === "seated");
-  assert.equal(seated.aspectRatio, "4:3");
-  assert.equal(seated.figurePatch.y, 0);
-  assert.equal(seated.camera.targetYOffset, 0.92);
-  assert.deepEqual(frameItPosePresets.map((preset) => preset.id), ["neutral", "walk", "reach", "seated"]);
+  assert.equal(defaultFrameItPoseId, "a-pose");
+  assert.deepEqual(frameItPosePresets.map((preset) => preset.id), [
+    "a-pose",
+    "ws",
+    "cu",
+    "cowboy",
+    "ots-ms",
+    "ots-cu",
+    "2-shot-wide",
+    "2-shot-medium",
+    "2-shot-close",
+    "3-shot-wide",
+    "3-shot-medium"
+  ]);
+  assert.deepEqual(frameItPosePresets.map((preset) => preset.label), [
+    "A-Pose",
+    "WS",
+    "CU",
+    "Cowboy",
+    "OTS-MS",
+    "OTS-CU",
+    "2-Shot-Wide",
+    "2-Shot-Medium",
+    "2-Shot-Close",
+    "3-Shot-Wide",
+    "3-Shot-Medium"
+  ]);
+  assert.equal(frameItPosePresets.some((preset) => preset.id.includes("_") || preset.label.includes("_")), false);
+  assert.equal(frameItPosePresets.find((preset) => preset.id === "a-pose").scene.figures.length, 1);
+  assert.equal(frameItPosePresets.some((preset) => ["t-pose", "mws", "ms"].includes(preset.id)), false);
+  assert.equal(frameItPosePresets.find((preset) => preset.id === "ots-ms").scene.figures.length, 2);
+  assert.equal(frameItPosePresets.find((preset) => preset.id === "2-shot-close").scene.figures.length, 2);
+  assert.equal(frameItPosePresets.find((preset) => preset.id === "3-shot-medium").scene.figures.length, 3);
+  assert.deepEqual(
+    frameItPosePresets.find((preset) => preset.id === "3-shot-medium").scene.figures.map((figure) => figure.color),
+    ["#c76666", "#5f86c9", "#67a57a"]
+  );
+  Object.entries(frameItPresetSnapshots).forEach(([id, snapshot]) => {
+    const preset = frameItPosePresets.find((candidate) => candidate.id === id);
+    const expectedScene = {
+      ...snapshot.scene,
+      figures: snapshot.scene.figures.map((figure, index) => ({
+        ...figure,
+        name: `Figure ${index + 1}`
+      }))
+    };
+    assert.deepEqual(preset.scene, expectedScene, `${id} must retain its Saved scene with generic figure names`);
+    assert.equal(preset.selectedFigureId, snapshot.selectedFigureId);
+    assert.equal(preset.aspectRatio, snapshot.aspectRatio);
+  });
+  assert.equal(
+    frameItPosePresets.every((preset) => preset.scene.figures.every((figure, index) => figure.name === `Figure ${index + 1}`)),
+    true
+  );
 
   const saved = normalizeFrameItSavedPoses([{
     id: "saved-1",
     name: "Hero frame",
     pose: { headRotY: 18 },
-    figurePatch: { x: 2, y: 0.5, z: -1, rotY: 30, scale: 1.2 },
+    figurePatch: { x: 2, y: 0.5, z: -1, rotX: 8, rotY: 30, rotZ: -4, scale: 1.2 },
     camera: { yaw: -20, pitch: 8, distance: 4, targetX: 2, targetY: 1.8, targetZ: -1, fov: 42 },
     aspectRatio: "21:9"
   }])[0];
 
-  assert.deepEqual(saved.figurePatch, frameItFigureCompositionSnapshot({ x: 2, y: 0.5, z: -1, rotY: 30, scale: 1.2 }));
+  assert.deepEqual(saved.figurePatch, frameItFigureCompositionSnapshot({ x: 2, y: 0.5, z: -1, rotX: 8, rotY: 30, rotZ: -4, scale: 1.2 }));
   assert.equal(saved.camera.fov, 42);
   assert.equal(saved.aspectRatio, "21:9");
 
@@ -129,4 +202,19 @@ test("Frame It reserves modified gestures for its camera and passes ordinary nav
   assert.equal(frameItUsesCameraWheel({ altKey: true }), true);
   assert.equal(frameItUsesCameraWheel({ ctrlKey: true }), false);
   assert.equal(frameItUsesCameraWheel({}), false);
+});
+
+test("Frame It maps C4D-style gizmo deltas back into logical joint rotations", () => {
+  assert.deepEqual(
+    frameItJointRotationFromGizmo("headRot", { x: 5, y: -10, z: 2 }, { x: 8, y: 4, z: -3 }, true),
+    { headRotX: 13, headRotY: -6, headRotZ: -1 }
+  );
+  assert.deepEqual(
+    frameItJointRotationFromGizmo("leftUpperArm", { x: 20, y: 5, z: 10 }, { x: -15, y: 7, z: 8 }, true),
+    { leftUpperArmX: 35, leftUpperArmY: 12, leftUpperArmZ: 18 }
+  );
+  assert.equal(normalizeFrameItGizmoMode("translate"), "translate");
+  assert.equal(normalizeFrameItGizmoMode("figureRotate"), "figureRotate");
+  assert.equal(normalizeFrameItGizmoMode("rotate"), "rotate");
+  assert.equal(normalizeFrameItGizmoMode("bend"), "rotate");
 });

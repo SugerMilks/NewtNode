@@ -13,14 +13,12 @@ test("Seedance prefers Fal and falls back to Krea", () => {
   assert.equal(resolveSeedanceRuntimeProvider({ falKey: "", kreaKey: "" }), "");
 });
 
-test("Krea Seedance endpoints reflect speed", () => {
-  assert.equal(kreaSeedanceEndpoint("standard"), "/generate/video/bytedance/seedance-2");
-  assert.equal(kreaSeedanceEndpoint("fast"), "/generate/video/bytedance/seedance-2-fast");
+test("Krea Seedance uses the standard endpoint", () => {
+  assert.equal(kreaSeedanceEndpoint(), "/generate/video/bytedance/seedance-2");
 });
 
 test("Krea Seedance pricing uses resolution and video-reference tier", () => {
   const cost = estimateKreaSeedanceCost({
-    speed: "standard",
     durationSeconds: 15,
     resolution: "720p",
     hasVideoReference: true

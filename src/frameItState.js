@@ -1,4 +1,5 @@
 import { clamp } from "./nodeGeometry.js";
+import { frameItPresetSnapshots } from "./frameItPresetSnapshots.js";
 
 export const frameItAspectRatios = ["16:9", "21:9", "4:3", "1:1", "9:16"];
 
@@ -33,85 +34,57 @@ export const frameItJointLabels = Object.fromEntries(frameItJointDefinitions.map
 const frameItJointIds = frameItJointDefinitions.map((joint) => joint.id);
 
 const frameItJointRanges = {
-  headRot: { x: [-50, 55], y: [-80, 80], z: [-45, 45] },
-  upperBodyRot: { x: [-45, 55], y: [-60, 60], z: [-40, 40] },
-  hipsRot: { x: [-35, 45], y: [-55, 55], z: [-35, 35] },
-  leftUpperArm: { x: [-65, 180], y: [-100, 100], z: [-45, 175] },
-  rightUpperArm: { x: [-65, 180], y: [-100, 100], z: [-175, 45] },
-  leftLowerArm: { x: [0, 155], y: [-85, 85], z: [-8, 8] },
-  rightLowerArm: { x: [0, 155], y: [-85, 85], z: [-8, 8] },
-  leftHandRot: { x: [-80, 80], y: [-85, 85], z: [-35, 35] },
-  rightHandRot: { x: [-80, 80], y: [-85, 85], z: [-35, 35] },
-  leftUpperLeg: { x: [-120, 45], y: [-55, 55], z: [-55, 55] },
-  rightUpperLeg: { x: [-120, 45], y: [-55, 55], z: [-55, 55] },
-  leftLowerLeg: { x: [0, 150], y: [-8, 8], z: [-8, 8] },
-  rightLowerLeg: { x: [0, 150], y: [-8, 8], z: [-8, 8] },
-  leftFootRot: { x: [-55, 45], y: [-35, 35], z: [-40, 40] },
-  rightFootRot: { x: [-55, 45], y: [-35, 35], z: [-40, 40] }
+  headRot: { x: [-55, 60], y: [-85, 85], z: [-45, 45] },
+  upperBodyRot: { x: [-50, 60], y: [-70, 70], z: [-45, 45] },
+  hipsRot: { x: [-40, 50], y: [-60, 60], z: [-40, 40] },
+  leftUpperArm: { x: [-75, 190], y: [-120, 120], z: [-55, 185] },
+  rightUpperArm: { x: [-75, 190], y: [-120, 120], z: [-185, 55] },
+  leftLowerArm: { x: [-10, 160], y: [-90, 90], z: [-15, 15] },
+  rightLowerArm: { x: [-10, 160], y: [-90, 90], z: [-15, 15] },
+  leftHandRot: { x: [-90, 90], y: [-90, 90], z: [-45, 45] },
+  rightHandRot: { x: [-90, 90], y: [-90, 90], z: [-45, 45] },
+  leftUpperLeg: { x: [-130, 55], y: [-70, 70], z: [-70, 70] },
+  rightUpperLeg: { x: [-130, 55], y: [-70, 70], z: [-70, 70] },
+  leftLowerLeg: { x: [-10, 160], y: [-15, 15], z: [-15, 15] },
+  rightLowerLeg: { x: [-10, 160], y: [-15, 15], z: [-15, 15] },
+  leftFootRot: { x: [-60, 50], y: [-40, 40], z: [-45, 45] },
+  rightFootRot: { x: [-60, 50], y: [-40, 40], z: [-45, 45] }
 };
 
-export const frameItPosePresets = [
-  {
-    id: "neutral",
-    label: "Neutral",
+export const defaultFrameItPoseId = "a-pose";
+
+function frameItSavedPreset(id, label) {
+  const snapshot = frameItPresetSnapshots[id];
+  const scene = snapshot?.scene
+    ? {
+        ...snapshot.scene,
+        figures: snapshot.scene.figures.map((figure, index) => ({
+          ...figure,
+          name: `Figure ${index + 1}`
+        }))
+      }
+    : snapshot?.scene;
+  return {
+    id,
+    label,
     pose: {},
-    camera: { yaw: 0, pitch: 3, distance: 5.2, targetYOffset: 1.25, fov: 34 },
-    aspectRatio: "16:9"
-  },
-  {
-    id: "walk",
-    label: "Walk",
-    pose: {
-      upperBodyRotY: -5,
-      leftUpperArmX: -26,
-      rightUpperArmX: 25,
-      leftLowerArmX: 18,
-      rightLowerArmX: 12,
-      leftUpperLegX: 28,
-      rightUpperLegX: -24,
-      leftLowerLegX: 8,
-      rightLowerLegX: 32,
-      headRotY: 5
-    },
-    camera: { yaw: -18, pitch: 2, distance: 5.35, targetYOffset: 1.28, fov: 35 },
-    aspectRatio: "16:9"
-  },
-  {
-    id: "reach",
-    label: "Reach",
-    pose: {
-      upperBodyRotZ: -5,
-      rightUpperArmZ: -52,
-      rightUpperArmY: -12,
-      rightLowerArmX: 8,
-      rightHandRotZ: 8,
-      leftUpperArmZ: 12,
-      headRotZ: -8,
-      headRotY: 12
-    },
-    camera: { yaw: -20, pitch: 5, distance: 4.85, targetYOffset: 1.34, fov: 36 },
-    aspectRatio: "4:3"
-  },
-  {
-    id: "seated",
-    label: "Seated",
-    pose: {
-      upperBodyRotX: -4,
-      leftUpperLegX: -88,
-      rightUpperLegX: -88,
-      leftLowerLegX: 86,
-      rightLowerLegX: 86,
-      leftFootRotX: 8,
-      rightFootRotX: 8,
-      leftUpperArmX: -12,
-      rightUpperArmX: -12,
-      leftLowerArmX: 54,
-      rightLowerArmX: 54
-    },
-    figurePatch: { y: 0 },
-    camera: { yaw: -12, pitch: 2, distance: 4.6, targetYOffset: 0.92, fov: 38 },
-    aspectRatio: "4:3"
-  }
+    ...snapshot,
+    scene
+  };
+}
+
+export const frameItPosePresets = [
+  frameItSavedPreset("a-pose", "A-Pose"),
+  frameItSavedPreset("ws", "WS"),
+  frameItSavedPreset("cu", "CU"),
+  frameItSavedPreset("cowboy", "Cowboy"),
+  frameItSavedPreset("ots-ms", "OTS-MS"),
+  frameItSavedPreset("ots-cu", "OTS-CU"),
+  frameItSavedPreset("2-shot-wide", "2-Shot-Wide"),
+  frameItSavedPreset("2-shot-medium", "2-Shot-Medium"),
+  frameItSavedPreset("2-shot-close", "2-Shot-Close"),
+  frameItSavedPreset("3-shot-wide", "3-Shot-Wide"),
+  frameItSavedPreset("3-shot-medium", "3-Shot-Medium")
 ];
 
 export function defaultFrameItCamera() {
@@ -135,7 +108,9 @@ export function defaultFrameItFigure(index = 1) {
     x: (index - 1) * 0.72,
     y: 0,
     z: 0,
+    rotX: 0,
     rotY: 0,
+    rotZ: 0,
     scale: 1,
     ...pose
   };
@@ -170,7 +145,9 @@ export function normalizeFrameItFigure(figure = {}, index = 0) {
     x: finiteNumber(figure.x, fallback.x),
     y: finiteNumber(figure.y, fallback.y),
     z: finiteNumber(figure.z, fallback.z),
+    rotX: finiteNumber(figure.rotX, fallback.rotX),
     rotY: finiteNumber(figure.rotY, fallback.rotY),
+    rotZ: finiteNumber(figure.rotZ, fallback.rotZ),
     scale: clamp(finiteNumber(figure.scale, fallback.scale), 0.55, 1.8)
   };
 }
@@ -214,8 +191,34 @@ export function frameItFigureCompositionSnapshot(figure = {}) {
     x: finiteNumber(figure.x, 0),
     y: finiteNumber(figure.y, 0),
     z: finiteNumber(figure.z, 0),
+    rotX: finiteNumber(figure.rotX, 0),
     rotY: finiteNumber(figure.rotY, 0),
+    rotZ: finiteNumber(figure.rotZ, 0),
     scale: clamp(finiteNumber(figure.scale, 1), 0.55, 1.8)
+  };
+}
+
+export function frameItFigurePositionPatch(position = {}) {
+  return {
+    x: clamp(finiteNumber(position.x, 0), -12, 12),
+    y: clamp(finiteNumber(position.y, 0), -1.5, 4),
+    z: clamp(finiteNumber(position.z, 0), -12, 12)
+  };
+}
+
+export function frameItFigureRotation(figure = {}) {
+  return {
+    x: finiteNumber(figure.rotX, 0),
+    y: finiteNumber(figure.rotY, 0),
+    z: finiteNumber(figure.rotZ, 0)
+  };
+}
+
+export function frameItFigureRotationPatch(rotation = {}) {
+  return {
+    rotX: clamp(finiteNumber(rotation.x, 0), -360, 360),
+    rotY: clamp(finiteNumber(rotation.y, 0), -360, 360),
+    rotZ: clamp(finiteNumber(rotation.z, 0), -360, 360)
   };
 }
 
@@ -248,6 +251,25 @@ export function frameItJointRenderRotation(jointId, rotation = {}) {
     y: finiteNumber(rotation.y, 0),
     z: finiteNumber(rotation.z, 0)
   };
+}
+
+export function frameItJointStateRotation(jointId, rotation = {}) {
+  return frameItJointRenderRotation(jointId, rotation);
+}
+
+export function frameItJointRotationFromGizmo(jointId, startingRotation, deltaRotation, useLimits = true) {
+  const renderedStart = frameItJointRenderRotation(jointId, startingRotation);
+  const logicalRotation = frameItJointStateRotation(jointId, {
+    x: renderedStart.x + finiteNumber(deltaRotation?.x, 0),
+    y: renderedStart.y + finiteNumber(deltaRotation?.y, 0),
+    z: renderedStart.z + finiteNumber(deltaRotation?.z, 0)
+  });
+  return frameItJointPatch(jointId, logicalRotation, useLimits);
+}
+
+export function normalizeFrameItGizmoMode(value) {
+  if (value === "translate" || value === "figureRotate") return value;
+  return "rotate";
 }
 
 export function frameItJointPatch(jointId, rotation, useLimits = true) {

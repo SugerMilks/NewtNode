@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { Box, ChevronDown, ChevronRight, Lock, MessageSquareText, Unlock, WandSparkles } from "lucide-react";
-import { allowFileDrop, firstAcceptedFile, mediaAccept, outputItemFromDataTransfer, previewImageUrl } from "../mediaAssets.js";
+import { allowFileDrop, firstAcceptedFile, fullResolutionImageProps, mediaAccept, outputItemFromDataTransfer, previewImageUrl } from "../mediaAssets.js";
 import { MediaPreview, UploadIcon } from "./MediaViews.jsx";
 import { NodeRow, OutputPortRow, PortHandle } from "./NodePorts.jsx";
 
@@ -783,7 +783,7 @@ export function ComposerNodeBody({ node, imageOutputPort, composerInputPorts, on
       {imageOutputPort && <OutputPortRow node={node} port={imageOutputPort} label="Frame output" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />}
       <div className={`composer-node-preview ${node.data.resultUrl ? "" : "empty"}`}>
         {node.data.resultUrl ? (
-          <img src={previewImageUrl(node.data.resultUrl, node.data.thumbnailUrl)} alt="Composer frame" />
+          <img {...fullResolutionImageProps(node.data.resultUrl, node.data.fileName)} src={previewImageUrl(node.data.resultUrl, node.data.thumbnailUrl)} alt="Composer frame" />
         ) : (
           <>
             <Box size={28} />

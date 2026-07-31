@@ -2,25 +2,28 @@ import React from "react";
 
 export let THREE = null;
 export let GLTFLoader = null;
+export let TransformControls = null;
 export let cloneSkeleton = null;
 
 let threeRuntimePromise = null;
 
 export function loadThreeRuntime() {
-  if (THREE && GLTFLoader && cloneSkeleton) {
-    return Promise.resolve({ THREE, GLTFLoader, cloneSkeleton });
+  if (THREE && GLTFLoader && TransformControls && cloneSkeleton) {
+    return Promise.resolve({ THREE, GLTFLoader, TransformControls, cloneSkeleton });
   }
 
   if (!threeRuntimePromise) {
     threeRuntimePromise = Promise.all([
       import("three"),
       import("three/examples/jsm/loaders/GLTFLoader.js"),
+      import("three/examples/jsm/controls/TransformControls.js"),
       import("three/examples/jsm/utils/SkeletonUtils.js")
-    ]).then(([threeModule, loaderModule, skeletonModule]) => {
+    ]).then(([threeModule, loaderModule, controlsModule, skeletonModule]) => {
       THREE = threeModule;
       GLTFLoader = loaderModule.GLTFLoader;
+      TransformControls = controlsModule.TransformControls;
       cloneSkeleton = skeletonModule.clone;
-      return { THREE, GLTFLoader, cloneSkeleton };
+      return { THREE, GLTFLoader, TransformControls, cloneSkeleton };
     });
   }
 
@@ -28,7 +31,7 @@ export function loadThreeRuntime() {
 }
 
 export function useThreeRuntimeReady() {
-  const [ready, setReady] = React.useState(() => Boolean(THREE && GLTFLoader && cloneSkeleton));
+  const [ready, setReady] = React.useState(() => Boolean(THREE && GLTFLoader && TransformControls && cloneSkeleton));
 
   React.useEffect(() => {
     if (ready) return undefined;
