@@ -4,9 +4,19 @@ import {
   appendedNodeResultState,
   batchRunError,
   fulfilledRunValues,
+  isRunnableNode,
+  nodeRunPriority,
   rejectedRunResults,
+  runStageLabel,
   runRunnableNodesByDependencyOrder
 } from "../src/nodeRunner.js";
+
+test("Coverage participates in batch graph runs as an image-stage node", () => {
+  const node = { id: "coverage", type: "coverage", data: {} };
+  assert.equal(isRunnableNode(node), true);
+  assert.equal(nodeRunPriority(node), 2);
+  assert.equal(runStageLabel(node.type), "coverage");
+});
 
 test("runRunnableNodesByDependencyOrder respects dependency order and stage priority", async () => {
   const nodes = [

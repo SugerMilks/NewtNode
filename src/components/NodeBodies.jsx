@@ -1,6 +1,16 @@
 import { useEffect, useRef } from "react";
-import { Box, ChevronDown, ChevronRight, Lock, MessageSquareText, Unlock, WandSparkles } from "lucide-react";
+import { Box, ChevronDown, ChevronRight, History, Lock, MessageSquareText, Plus, Unlock, WandSparkles, X } from "lucide-react";
 import { allowFileDrop, firstAcceptedFile, fullResolutionImageProps, mediaAccept, outputItemFromDataTransfer, previewImageUrl } from "../mediaAssets.js";
+import { updateFilmDirectorRevisionVersionSnapshot } from "../filmDirectorRevision.js";
+import {
+  addFilmDirectorScene,
+  filmDirectorReferencedTags,
+  filmDirectorSceneLimit,
+  filmDirectorSceneTabs,
+  filmDirectorUsesReferenceTag,
+  removeFilmDirectorScene,
+  switchFilmDirectorScene
+} from "../filmDirectorScenes.js";
 import { MediaPreview, UploadIcon } from "./MediaViews.jsx";
 import { NodeRow, OutputPortRow, PortHandle } from "./NodePorts.jsx";
 
@@ -209,6 +219,9 @@ export function SkillDirectorNodeBody({
   const elementInputPort = inputPorts.find((port) => port.id === "imageIn");
   const styleInputPort = inputPorts.find((port) => port.id === "styleIn");
   const connectedCount = connectedInputCount(incoming, inputPorts.map((port) => port.id));
+  const sceneTabs = filmDirectorSceneTabs(node.data);
+  const activeSceneId = node.data.skillDirectorActiveSceneId || sceneTabs.find((scene) => scene.active)?.id || sceneTabs[0]?.id || "scene-1";
+  const referencedTags = filmDirectorReferencedTags(node.data);
   const locks = skillDirectorDefaultLocks(node.data.skillDirectorLocks);
   const collapsed = skillDirectorDefaultCollapsed(node.data.skillDirectorCollapsed);
   const referenceItems = [
@@ -260,6 +273,8 @@ export function SkillDirectorNodeBody({
   const revisionOpen = Boolean(node.data.skillDirectorRevisionOpen);
   const revisionNotes = node.data.skillDirectorRevisionNotes || "";
   const revisionHistory = Array.isArray(node.data.skillDirectorRevisionHistory) ? node.data.skillDirectorRevisionHistory : [];
+  const revisionVersions = revisionHistory.filter((entry) => entry?.snapshot && entry?.id);
+  const selectedRevisionId = node.data.skillDirectorRevisionSelectedId || revisionVersions.at(-1)?.id || "";
   const directorOutputPort = config.output.find((port) => port.id === "directorOut") || outputPort;
   const setupReady = Boolean(sceneName.trim()) || connectedCount > 0;
   const styleReady = Boolean(styleDirection.trim());
@@ -269,6 +284,21 @@ export function SkillDirectorNodeBody({
   const canBuild = locks.setup && locks.style && locks.motion && locks.scene && locks.shotList;
   const invalidate = skillDirectorInvalidationPatch();
   const queuedRunRef = useRef("");
+
+  const selectScene = (sceneId) => {
+    if (running || sceneId === activeSceneId) return;
+    onUpdate(node.id, switchFilmDirectorScene(node.data, sceneId));
+  };
+  const addScene = () => {
+    if (running || sceneTabs.length >= filmDirectorSceneLimit) return;
+    onUpdate(node.id, addFilmDirectorScene(node.data));
+  };
+  const removeScene = (event, sceneId) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (running || sceneTabs.length <= 1) return;
+    onUpdate(node.id, removeFilmDirectorScene(node.data, sceneId));
+  };
 
   const updateUnlocked = (patch) => onUpdate(node.id, { ...patch, ...invalidate });
   const isStageCollapsed = (key) => Boolean(locks[key] && collapsed[key]);
@@ -411,9 +441,77 @@ export function SkillDirectorNodeBody({
     if (!built || running || !revisionNotes.trim()) return;
     runAction("revise", { skillDirectorRevisionNotes: revisionNotes.trim() });
   };
+  const restoreRevisionVersion = (event) => {
+    const versionId = event.target.value;
+    if (!versionId || versionId === selectedRevisionId) return;
+    const refreshedHistory = updateFilmDirectorRevisionVersionSnapshot(
+      revisionHistory,
+      selectedRevisionId,
+      node.data
+    );
+    const version = refreshedHistory.find((entry) => entry?.id === versionId && entry?.snapshot);
+    if (!version) return;
+    onUpdate(node.id, {
+      ...version.snapshot,
+      status: "complete",
+      error: "",
+      skillDirectorAction: "",
+      skillDirectorQueuedAction: "",
+      skillDirectorQueueId: "",
+      skillDirectorRevisionHistory: refreshedHistory,
+      skillDirectorRevisionSelectedId: versionId,
+      skillDirectorRevisionNotes: "",
+      skillDirectorLastRevisionSummary: version.summary || version.label || "Revision restored"
+    });
+  };
 
   return (
     <div className="node-body text-node-body skill-director-node-body">
+      <div className="skill-director-scene-tabs" aria-label="Film Director scenes">
+        <div className="skill-director-scene-tab-list">
+          {sceneTabs.map((scene) => (
+            <button
+              key={scene.id}
+              type="button"
+              className={`skill-director-scene-tab ${scene.active ? "active" : ""}`}
+              disabled={running}
+              title={scene.label}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={() => selectScene(scene.id)}
+            >
+              <span className={`skill-director-scene-status ${scene.built ? "built" : ""}`} aria-hidden="true" />
+              <span>{scene.label}</span>
+              {sceneTabs.length > 1 && (
+                <span
+                  role="button"
+                  tabIndex={0}
+                  className="skill-director-scene-remove"
+                  aria-label={`Remove ${scene.label}`}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={(event) => removeScene(event, scene.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") removeScene(event, scene.id);
+                  }}
+                >
+                  <X size={11} />
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+        <button
+          type="button"
+          className="skill-director-scene-add"
+          disabled={running || sceneTabs.length >= filmDirectorSceneLimit}
+          aria-label="Add Film Director scene"
+          title="Add scene"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={addScene}
+        >
+          <Plus size={14} />
+        </button>
+      </div>
+
       {built && (
         <OutputPortRow node={node} port={directorOutputPort} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
       )}
@@ -506,7 +604,10 @@ export function SkillDirectorNodeBody({
                   const hasCustomNote = Object.prototype.hasOwnProperty.call(referenceNotes, reference.key);
                   const noteValue = hasCustomNote ? referenceNotes[reference.key] : "";
                   return (
-                    <label key={reference.key} className="skill-director-reference-row">
+                    <label
+                      key={reference.key}
+                      className={`skill-director-reference-row ${referencedTags.size && !filmDirectorUsesReferenceTag(node.data, reference.tag) ? "unused" : "used"}`}
+                    >
                       <span title={`${reference.group}: ${reference.label}`}>{reference.tag}</span>
                       <input
                         value={noteValue}
@@ -691,6 +792,21 @@ export function SkillDirectorNodeBody({
       )}
 
       {built && (
+        revisionVersions.length > 1 && (
+          <label className="skill-director-version-history">
+            <span><History size={14} /> Revision History</span>
+            <select value={selectedRevisionId} disabled={running} onChange={restoreRevisionVersion}>
+              {revisionVersions.map((version) => (
+                <option key={version.id} value={version.id}>
+                  {version.label || "Saved Setup"}{version.summary ? ` — ${version.summary}` : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+        )
+      )}
+
+      {built && (
         <section className={`skill-director-revision-drawer ${revisionOpen ? "open" : ""}`}>
           <button
             type="button"
@@ -722,19 +838,6 @@ export function SkillDirectorNodeBody({
               </button>
               {node.data.skillDirectorLastRevisionSummary && (
                 <p className="skill-director-revision-summary">{node.data.skillDirectorLastRevisionSummary}</p>
-              )}
-              {revisionHistory.length > 0 && (
-                <details className="skill-director-revision-history">
-                  <summary>Previous revisions ({revisionHistory.length})</summary>
-                  <div>
-                    {[...revisionHistory].reverse().map((entry, index) => (
-                      <article key={`${entry.createdAt || "revision"}-${index}`}>
-                        <strong>{entry.summary || "Revision applied"}</strong>
-                        <span>{entry.notes}</span>
-                      </article>
-                    ))}
-                  </div>
-                </details>
               )}
             </div>
           )}

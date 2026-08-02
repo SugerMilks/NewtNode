@@ -4,11 +4,21 @@ import {
   EyeOff,
   GitPullRequest,
   KeyRound,
+  Minus,
+  Plus,
   RefreshCcw,
   RotateCcw,
   Save
 } from "lucide-react";
 import { settingsApi } from "./api/newtApi.js";
+import {
+  activateApiKeyVersion,
+  addApiKeyVersion,
+  apiKeyProviderIds,
+  apiKeyProviderPreferences,
+  normalizeApiKeyVersions,
+  removeApiKeyVersion
+} from "./apiKeyVersions.js";
 import {
   defaultModelPreferences,
   imageModelOptions,
@@ -17,17 +27,17 @@ import {
 } from "./modelOptions.js";
 
 const defaultProviderPreferences = Object.freeze({ fal: true, google: true, krea: true, openAi: true });
+const apiKeyProviders = Object.freeze([
+  Object.freeze({ id: "fal", label: "Fal Key", placeholder: "Fal" }),
+  Object.freeze({ id: "google", label: "Google API", placeholder: "Google API" }),
+  Object.freeze({ id: "krea", label: "Krea API", placeholder: "Krea API" }),
+  Object.freeze({ id: "openAi", label: "OpenAI API", placeholder: "OpenAI API" })
+]);
 
 export default function SettingsPage() {
   const [settings, setSettings] = React.useState(null);
-  const [falKey, setFalKey] = React.useState("");
-  const [falKeyVisible, setFalKeyVisible] = React.useState(false);
-  const [googleApiKey, setGoogleApiKey] = React.useState("");
-  const [googleApiKeyVisible, setGoogleApiKeyVisible] = React.useState(false);
-  const [kreaApiKey, setKreaApiKey] = React.useState("");
-  const [kreaApiKeyVisible, setKreaApiKeyVisible] = React.useState(false);
-  const [openAiApiKey, setOpenAiApiKey] = React.useState("");
-  const [openAiApiKeyVisible, setOpenAiApiKeyVisible] = React.useState(false);
+  const [apiKeyVersions, setApiKeyVersions] = React.useState(() => normalizeApiKeyVersions());
+  const [visibleApiKeys, setVisibleApiKeys] = React.useState({});
   const [repository, setRepository] = React.useState("");
   const [modelPreferences, setModelPreferences] = React.useState(defaultModelPreferences);
   const [providerPreferences, setProviderPreferences] = React.useState(defaultProviderPreferences);
@@ -36,14 +46,9 @@ export default function SettingsPage() {
   const [message, setMessage] = React.useState("");
   const [updateLog, setUpdateLog] = React.useState("");
   const [lastUpdated, setLastUpdated] = React.useState(null);
-  const initialSecretsRef = React.useRef({ falKey: "", googleApiKey: "", kreaApiKey: "", openAiApiKey: "" });
   const modelPreferencesRef = React.useRef(defaultModelPreferences);
   const providerPreferencesRef = React.useRef(defaultProviderPreferences);
   const preferenceSaveQueueRef = React.useRef(Promise.resolve());
-  const falKeyInputRef = React.useRef(null);
-  const googleApiKeyInputRef = React.useRef(null);
-  const kreaApiKeyInputRef = React.useRef(null);
-  const openAiApiKeyInputRef = React.useRef(null);
   const actionsDisabled = status === "loading" || Boolean(busy);
 
   React.useEffect(() => {
@@ -65,27 +70,16 @@ export default function SettingsPage() {
   }
 
   async function saveSettings() {
-    const submittedSecrets = {
-      falKey: falKeyInputRef.current?.value ?? falKey,
-      googleApiKey: googleApiKeyInputRef.current?.value ?? googleApiKey,
-      kreaApiKey: kreaApiKeyInputRef.current?.value ?? kreaApiKey,
-      openAiApiKey: openAiApiKeyInputRef.current?.value ?? openAiApiKey
-    };
     setBusy("save");
     setMessage("");
     setUpdateLog("");
     try {
-      const initialSecrets = initialSecretsRef.current;
       const nextModelPreferences = normalizeModelPreferences(modelPreferences);
       const payload = {
         repository,
         modelPreferences: nextModelPreferences,
-        providerPreferences: normalizeProviderPreferences(providerPreferences)
+        apiKeyVersions: serializableApiKeyVersions(apiKeyVersions)
       };
-      if (submittedSecrets.falKey !== initialSecrets.falKey) payload.falKey = submittedSecrets.falKey;
-      if (submittedSecrets.googleApiKey !== initialSecrets.googleApiKey) payload.googleApiKey = submittedSecrets.googleApiKey;
-      if (submittedSecrets.kreaApiKey !== initialSecrets.kreaApiKey) payload.kreaApiKey = submittedSecrets.kreaApiKey;
-      if (submittedSecrets.openAiApiKey !== initialSecrets.openAiApiKey) payload.openAiApiKey = submittedSecrets.openAiApiKey;
 
       const savedData = await settingsApi.save(payload);
       const loadedData = await settingsApi.load();
@@ -147,21 +141,13 @@ export default function SettingsPage() {
   }
 
   function applyLoadedSettings(data) {
-    const secrets = {
-      falKey: data.secrets?.falKey || "",
-      googleApiKey: data.secrets?.googleApiKey || "",
-      kreaApiKey: data.secrets?.kreaApiKey || "",
-      openAiApiKey: data.secrets?.openAiApiKey || ""
-    };
-    initialSecretsRef.current = secrets;
+    const nextApiKeyVersions = hydrateApiKeyVersions(data);
     setSettings(data);
-    setFalKey(secrets.falKey);
-    setGoogleApiKey(secrets.googleApiKey);
-    setKreaApiKey(secrets.kreaApiKey);
-    setOpenAiApiKey(secrets.openAiApiKey);
+    setApiKeyVersions(nextApiKeyVersions);
+    setVisibleApiKeys({});
     setRepository(data.repository || "");
     const nextModelPreferences = normalizeModelPreferences(data.modelPreferences);
-    const nextProviderPreferences = normalizeProviderPreferences(data.providerPreferences);
+    const nextProviderPreferences = apiKeyProviderPreferences(nextApiKeyVersions);
     modelPreferencesRef.current = nextModelPreferences;
     providerPreferencesRef.current = nextProviderPreferences;
     setModelPreferences(nextModelPreferences);
@@ -182,14 +168,39 @@ export default function SettingsPage() {
     queuePreferenceSave({ modelPreferences: nextPreferences });
   }
 
-  function updateProviderPreference(provider, enabled) {
-    const nextPreferences = {
-      ...normalizeProviderPreferences(providerPreferencesRef.current),
-      [provider]: enabled
-    };
+  function updateApiKeyValue(provider, versionIndex, value) {
+    setApiKeyVersions((current) => ({
+      ...current,
+      [provider]: current[provider].map((entry, index) => index === versionIndex ? { ...entry, value } : entry)
+    }));
+  }
+
+  function updateApiKeyEnabled(provider, versionIndex, enabled) {
+    const nextVersions = activateApiKeyVersion(apiKeyVersions, provider, versionIndex, enabled);
+    persistApiKeyVersions(nextVersions);
+  }
+
+  function addApiKey(provider) {
+    persistApiKeyVersions(addApiKeyVersion(apiKeyVersions, provider));
+  }
+
+  function removeApiKey(provider, versionIndex) {
+    persistApiKeyVersions(removeApiKeyVersion(apiKeyVersions, provider, versionIndex));
+    setVisibleApiKeys((current) => {
+      const next = { ...current };
+      for (const key of Object.keys(next)) {
+        if (key.startsWith(`${provider}:`)) delete next[key];
+      }
+      return next;
+    });
+  }
+
+  function persistApiKeyVersions(nextVersions) {
+    const nextPreferences = apiKeyProviderPreferences(nextVersions);
+    setApiKeyVersions(nextVersions);
     providerPreferencesRef.current = nextPreferences;
     setProviderPreferences(nextPreferences);
-    queuePreferenceSave({ providerPreferences: nextPreferences });
+    queuePreferenceSave({ apiKeyVersions: serializableApiKeyVersions(nextVersions) });
   }
 
   function queuePreferenceSave(payload) {
@@ -223,10 +234,10 @@ export default function SettingsPage() {
       </header>
 
       <div className="stats-metrics settings-metrics">
-        <SettingsMetric icon={<KeyRound size={20} />} label="Fal Key" value={providerMetricValue(settings?.falKeyConfigured, providerPreferences.fal)} detail={keyDetail(settings?.keySources?.fal, status, providerPreferences.fal)} tone={providerMetricTone(settings?.falKeyConfigured, providerPreferences.fal)} />
-        <SettingsMetric icon={<KeyRound size={20} />} label="Google API" value={providerMetricValue(settings?.googleApiKeyConfigured, providerPreferences.google)} detail={keyDetail(settings?.keySources?.google, status, providerPreferences.google)} tone={providerMetricTone(settings?.googleApiKeyConfigured, providerPreferences.google)} />
-        <SettingsMetric icon={<KeyRound size={20} />} label="Krea API" value={providerMetricValue(settings?.kreaApiKeyConfigured, providerPreferences.krea)} detail={keyDetail(settings?.keySources?.krea, status, providerPreferences.krea)} tone={providerMetricTone(settings?.kreaApiKeyConfigured, providerPreferences.krea)} />
-        <SettingsMetric icon={<KeyRound size={20} />} label="OpenAI API" value={providerMetricValue(settings?.openAiApiKeyConfigured, providerPreferences.openAi)} detail={keyDetail(settings?.keySources?.openAi, status, providerPreferences.openAi)} tone={providerMetricTone(settings?.openAiApiKeyConfigured, providerPreferences.openAi)} />
+        <SettingsMetric icon={<KeyRound size={20} />} label="Fal Key" value={providerMetricValue(settings?.falKeyConfigured, providerPreferences.fal)} detail={providerKeyDetail(settings, "fal", status, providerPreferences.fal)} tone={providerMetricTone(settings?.falKeyConfigured, providerPreferences.fal)} />
+        <SettingsMetric icon={<KeyRound size={20} />} label="Google API" value={providerMetricValue(settings?.googleApiKeyConfigured, providerPreferences.google)} detail={providerKeyDetail(settings, "google", status, providerPreferences.google)} tone={providerMetricTone(settings?.googleApiKeyConfigured, providerPreferences.google)} />
+        <SettingsMetric icon={<KeyRound size={20} />} label="Krea API" value={providerMetricValue(settings?.kreaApiKeyConfigured, providerPreferences.krea)} detail={providerKeyDetail(settings, "krea", status, providerPreferences.krea)} tone={providerMetricTone(settings?.kreaApiKeyConfigured, providerPreferences.krea)} />
+        <SettingsMetric icon={<KeyRound size={20} />} label="OpenAI API" value={providerMetricValue(settings?.openAiApiKeyConfigured, providerPreferences.openAi)} detail={providerKeyDetail(settings, "openAi", status, providerPreferences.openAi)} tone={providerMetricTone(settings?.openAiApiKeyConfigured, providerPreferences.openAi)} />
         <SettingsMetric icon={<GitPullRequest size={20} />} label="Branch" value={branchMetricValue(settings)} detail={branchMetricDetail(settings)} tone={settings?.branchStatus?.state === "up-to-date" ? "good" : settings?.branchStatus?.state === "update-available" ? "warn" : ""} />
         <SettingsMetric icon={<RotateCcw size={20} />} label="Server" value={settings?.restartRequested ? "Restarting" : "Running"} detail="Local app" tone={settings?.restartRequested ? "warn" : "good"} />
       </div>
@@ -235,117 +246,19 @@ export default function SettingsPage() {
         <section className="stats-panel settings-panel wide">
           <SettingsPanelTitle title="API Keys" aside="Stored locally" />
           <div className="settings-form-grid">
-            <div className="settings-field">
-              <SettingsKeyHeading label="Fal Key" enabled={providerPreferences.fal} onToggle={(enabled) => updateProviderPreference("fal", enabled)} />
-              <div className="settings-input-row secret">
-                <KeyRound size={15} />
-                <input
-                  ref={falKeyInputRef}
-                  type={falKeyVisible ? "text" : "password"}
-                  value={falKey}
-                  onInput={(event) => setFalKey(event.currentTarget.value)}
-                  onChange={(event) => setFalKey(event.target.value)}
-                  placeholder={secretPlaceholder(settings?.keySources?.fal, "Fal")}
-                  autoComplete="off"
-                  spellCheck="false"
-                  aria-label="Fal Key"
-                />
-                <button
-                  type="button"
-                  className="settings-secret-toggle"
-                  onClick={() => setFalKeyVisible((value) => !value)}
-                  disabled={!falKey}
-                  title={falKeyVisible ? "Hide Fal key" : "Show Fal key"}
-                  aria-label={falKeyVisible ? "Hide Fal key" : "Show Fal key"}
-                >
-                  {falKeyVisible ? <EyeOff size={15} /> : <Eye size={15} />}
-                </button>
-              </div>
-            </div>
-
-            <div className="settings-field">
-              <SettingsKeyHeading label="Google API" enabled={providerPreferences.google} onToggle={(enabled) => updateProviderPreference("google", enabled)} />
-              <div className="settings-input-row secret">
-                <KeyRound size={15} />
-                <input
-                  ref={googleApiKeyInputRef}
-                  type={googleApiKeyVisible ? "text" : "password"}
-                  value={googleApiKey}
-                  onInput={(event) => setGoogleApiKey(event.currentTarget.value)}
-                  onChange={(event) => setGoogleApiKey(event.target.value)}
-                  placeholder={secretPlaceholder(settings?.keySources?.google, "Google API")}
-                  autoComplete="off"
-                  spellCheck="false"
-                  aria-label="Google API"
-                />
-                <button
-                  type="button"
-                  className="settings-secret-toggle"
-                  onClick={() => setGoogleApiKeyVisible((value) => !value)}
-                  disabled={!googleApiKey}
-                  title={googleApiKeyVisible ? "Hide Google API key" : "Show Google API key"}
-                  aria-label={googleApiKeyVisible ? "Hide Google API key" : "Show Google API key"}
-                >
-                  {googleApiKeyVisible ? <EyeOff size={15} /> : <Eye size={15} />}
-                </button>
-              </div>
-            </div>
-
-            <div className="settings-field">
-              <SettingsKeyHeading label="Krea API" enabled={providerPreferences.krea} onToggle={(enabled) => updateProviderPreference("krea", enabled)} />
-              <div className="settings-input-row secret">
-                <KeyRound size={15} />
-                <input
-                  ref={kreaApiKeyInputRef}
-                  type={kreaApiKeyVisible ? "text" : "password"}
-                  value={kreaApiKey}
-                  onInput={(event) => setKreaApiKey(event.currentTarget.value)}
-                  onChange={(event) => setKreaApiKey(event.target.value)}
-                  placeholder={secretPlaceholder(settings?.keySources?.krea, "Krea API")}
-                  autoComplete="off"
-                  spellCheck="false"
-                  aria-label="Krea API"
-                />
-                <button
-                  type="button"
-                  className="settings-secret-toggle"
-                  onClick={() => setKreaApiKeyVisible((value) => !value)}
-                  disabled={!kreaApiKey}
-                  title={kreaApiKeyVisible ? "Hide Krea API key" : "Show Krea API key"}
-                  aria-label={kreaApiKeyVisible ? "Hide Krea API key" : "Show Krea API key"}
-                >
-                  {kreaApiKeyVisible ? <EyeOff size={15} /> : <Eye size={15} />}
-                </button>
-              </div>
-            </div>
-
-            <div className="settings-field">
-              <SettingsKeyHeading label="OpenAI API" enabled={providerPreferences.openAi} onToggle={(enabled) => updateProviderPreference("openAi", enabled)} />
-              <div className="settings-input-row secret">
-                <KeyRound size={15} />
-                <input
-                  ref={openAiApiKeyInputRef}
-                  type={openAiApiKeyVisible ? "text" : "password"}
-                  value={openAiApiKey}
-                  onInput={(event) => setOpenAiApiKey(event.currentTarget.value)}
-                  onChange={(event) => setOpenAiApiKey(event.target.value)}
-                  placeholder={secretPlaceholder(settings?.keySources?.openAi, "OpenAI API")}
-                  autoComplete="off"
-                  spellCheck="false"
-                  aria-label="OpenAI API"
-                />
-                <button
-                  type="button"
-                  className="settings-secret-toggle"
-                  onClick={() => setOpenAiApiKeyVisible((value) => !value)}
-                  disabled={!openAiApiKey}
-                  title={openAiApiKeyVisible ? "Hide OpenAI API key" : "Show OpenAI API key"}
-                  aria-label={openAiApiKeyVisible ? "Hide OpenAI API key" : "Show OpenAI API key"}
-                >
-                  {openAiApiKeyVisible ? <EyeOff size={15} /> : <Eye size={15} />}
-                </button>
-              </div>
-            </div>
+            {apiKeyProviders.map((provider) => (
+              <ApiKeyStack
+                key={provider.id}
+                provider={provider}
+                versions={apiKeyVersions[provider.id]}
+                visibleApiKeys={visibleApiKeys}
+                onVisibilityChange={setVisibleApiKeys}
+                onValueChange={updateApiKeyValue}
+                onToggle={updateApiKeyEnabled}
+                onAdd={addApiKey}
+                onRemove={removeApiKey}
+              />
+            ))}
           </div>
           <div className="settings-actions">
             <button type="button" onClick={saveSettings} disabled={actionsDisabled}>
@@ -421,10 +334,77 @@ export default function SettingsPage() {
   );
 }
 
-function SettingsKeyHeading({ label, enabled, onToggle }) {
+function ApiKeyStack({
+  provider,
+  versions = [],
+  visibleApiKeys,
+  onVisibilityChange,
+  onValueChange,
+  onToggle,
+  onAdd,
+  onRemove
+}) {
+  return (
+    <div className="settings-key-stack">
+      {versions.map((entry, versionIndex) => {
+        const visibilityKey = provider.id + ":" + versionIndex;
+        const visible = Boolean(visibleApiKeys[visibilityKey]);
+        const label = provider.label + " V" + (versionIndex + 1);
+        return (
+          <div key={entry.id} className="settings-key-version">
+            <SettingsKeyHeading
+              label={label}
+              enabled={entry.enabled}
+              toggleDisabled={!entry.value && !entry.configured}
+              onToggle={(enabled) => onToggle(provider.id, versionIndex, enabled)}
+              onAdd={versionIndex === 0 ? () => onAdd(provider.id) : null}
+              onRemove={versionIndex > 0 ? () => onRemove(provider.id, versionIndex) : null}
+            />
+            <div className="settings-input-row secret">
+              <KeyRound size={15} />
+              <input
+                type={visible ? "text" : "password"}
+                value={entry.value}
+                onChange={(event) => onValueChange(provider.id, versionIndex, event.target.value)}
+                placeholder={secretPlaceholder(entry.source, provider.placeholder + " V" + (versionIndex + 1))}
+                autoComplete="off"
+                spellCheck="false"
+                aria-label={label}
+              />
+              <button
+                type="button"
+                className="settings-secret-toggle"
+                onClick={() => onVisibilityChange((current) => ({ ...current, [visibilityKey]: !visible }))}
+                disabled={!entry.value}
+                title={(visible ? "Hide " : "Show ") + label}
+                aria-label={(visible ? "Hide " : "Show ") + label}
+              >
+                {visible ? <EyeOff size={15} /> : <Eye size={15} />}
+              </button>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function SettingsKeyHeading({ label, enabled, toggleDisabled, onToggle, onAdd, onRemove }) {
   return (
     <div className="settings-key-heading">
-      <span>{label}</span>
+      <span className="settings-key-label">
+        <span>{label}</span>
+        {onAdd && (
+          <button type="button" className="settings-key-version-action" onClick={onAdd} title={"Add another " + label.replace(/ V\d+$/, "")} aria-label={"Add another " + label.replace(/ V\d+$/, "")}>
+            <Plus size={13} />
+          </button>
+        )}
+        {onRemove && (
+          <button type="button" className="settings-key-version-action remove" onClick={onRemove} title={"Remove " + label} aria-label={"Remove " + label}>
+            <Minus size={13} />
+          </button>
+        )}
+      </span>
       <button
         type="button"
         className={`settings-key-toggle ${enabled ? "enabled" : ""}`}
@@ -432,6 +412,7 @@ function SettingsKeyHeading({ label, enabled, onToggle }) {
         aria-checked={enabled}
         aria-label={`${enabled ? "Disable" : "Enable"} ${label}`}
         title={`${enabled ? "Disable" : "Enable"} ${label}`}
+        disabled={toggleDisabled}
         onClick={() => onToggle(!enabled)}
       >
         <span className="settings-key-toggle-track" aria-hidden="true"><span /></span>
@@ -489,10 +470,52 @@ function SettingsMetric({ icon, label, value, detail, tone = "" }) {
   );
 }
 
-function normalizeProviderPreferences(value = {}) {
-  const incoming = value && typeof value === "object" ? value : {};
+function hydrateApiKeyVersions(data = {}) {
+  const publicVersions = data.apiKeyVersions && typeof data.apiKeyVersions === "object" ? data.apiKeyVersions : {};
+  const savedVersions = data.secrets?.apiKeyVersions && typeof data.secrets.apiKeyVersions === "object"
+    ? data.secrets.apiKeyVersions
+    : {};
+  const legacyValues = {
+    fal: data.secrets?.falKey || "",
+    google: data.secrets?.googleApiKey || "",
+    krea: data.secrets?.kreaApiKey || "",
+    openAi: data.secrets?.openAiApiKey || ""
+  };
+  const combined = Object.fromEntries(
+    apiKeyProviderIds.map((provider) => {
+      const metadata = Array.isArray(publicVersions[provider]) ? publicVersions[provider] : [];
+      const saved = Array.isArray(savedVersions[provider]) ? savedVersions[provider] : [];
+      const count = Math.max(metadata.length, saved.length, 1);
+      return [
+        provider,
+        Array.from({ length: count }, (_value, index) => ({
+          value: saved[index]?.value ?? (index === 0 ? legacyValues[provider] : ""),
+          enabled: metadata[index]?.enabled ?? saved[index]?.enabled ?? data.providerPreferences?.[provider] ?? true
+        }))
+      ];
+    })
+  );
+  const normalized = normalizeApiKeyVersions(combined);
+
   return Object.fromEntries(
-    Object.entries(defaultProviderPreferences).map(([provider, defaultValue]) => [provider, Boolean(incoming[provider] ?? defaultValue)])
+    apiKeyProviderIds.map((provider) => [
+      provider,
+      normalized[provider].map((entry, index) => ({
+        ...entry,
+        configured: Boolean(publicVersions[provider]?.[index]?.configured || entry.value),
+        source: publicVersions[provider]?.[index]?.source || (entry.value ? "settings" : "")
+      }))
+    ])
+  );
+}
+
+function serializableApiKeyVersions(value) {
+  const normalized = normalizeApiKeyVersions(value);
+  return Object.fromEntries(
+    apiKeyProviderIds.map((provider) => [
+      provider,
+      normalized[provider].map(({ id, value, enabled }) => ({ id, value, enabled }))
+    ])
   );
 }
 
@@ -510,6 +533,14 @@ function keyDetail(source, status, enabled = true) {
   if (source === "env") return ".env";
   if (source === "settings") return "Settings";
   return statusLabel(status);
+}
+
+function providerKeyDetail(settings, provider, status, enabled) {
+  if (!enabled) return "Keys retained locally";
+  const versions = Array.isArray(settings?.apiKeyVersions?.[provider]) ? settings.apiKeyVersions[provider] : [];
+  const active = versions.find((entry) => entry.enabled && entry.configured);
+  if (!active) return statusLabel(status);
+  return `V${active.version || 1} / ${keyDetail(active.source, status, true)}`;
 }
 
 function secretPlaceholder(source, label) {

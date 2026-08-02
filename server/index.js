@@ -22,6 +22,11 @@ import { directoryStats, fileMetadata, readJsonFile, writeJsonAtomic } from "./j
 import { findRemoteHistoryAssetUrl } from "./local-asset-recovery.js";
 import { registerComposerPoseRoutes } from "./routes/composerPoses.js";
 import { registerCoreRoutes } from "./routes/core.js";
+import {
+  apiKeyProviderIds,
+  apiKeyProviderPreferences,
+  normalizeApiKeyVersions
+} from "../src/apiKeyVersions.js";
 import { estimateOpenAiImage2Cost as estimateOpenAiImage2OutputCost, normalizeOpenAiImage2Quality, openAiImage2Costs, openAiImage2HighCosts, openAiImage2Quality } from "../src/openAiImage2.js";
 import { nanoBananaProFalThinkingMode, nanoBananaProThinkingConfig } from "../src/nanoBananaPro.js";
 import {
@@ -135,6 +140,17 @@ const localAssetRecoveryJobs = new Map();
 const runtimeThumbnailJobs = new Map();
 const execFile = promisify(execFileCallback);
 const updateRepositoryEnvKey = "NEWTNODE_UPDATE_REPOSITORY";
+const apiKeyRuntimeConfig = Object.freeze({
+  fal: Object.freeze({ envKey: "FAL_KEY" }),
+  google: Object.freeze({ envKey: "GOOGLE_API_KEY" }),
+  krea: Object.freeze({ envKey: "KREA_API_KEY" }),
+  openAi: Object.freeze({ envKey: "OPENAI_API_KEY" })
+});
+const initialRuntimeApiKeyValues = Object.freeze(
+  Object.fromEntries(
+    Object.values(apiKeyRuntimeConfig).map(({ envKey }) => [envKey, String(process.env[envKey] || "")])
+  )
+);
 const runtimeConfigSources = {
   FAL_KEY: process.env.FAL_KEY ? "runtime" : "",
   GOOGLE_API_KEY: process.env.GOOGLE_API_KEY ? "runtime" : "",
@@ -587,15 +603,19 @@ async function readRuntimeSettings({ includeSecrets = false } = {}) {
     readEnvFileValues(["FAL_KEY", "GOOGLE_API_KEY", "KREA_API_KEY", "OPENAI_API_KEY"])
   ]);
   const branchStatus = await resolveBranchStatus(repository, branch);
-  const providerPreferences = normalizeApiProviderPreferences(settingsValues.providerPreferences);
-  const configuredKeys = {
-    fal: Boolean(settingsValues.falKey || envValues.FAL_KEY || process.env.FAL_KEY),
-    google: Boolean(settingsValues.googleApiKey || envValues.GOOGLE_API_KEY || process.env.GOOGLE_API_KEY),
-    krea: Boolean(settingsValues.kreaApiKey || envValues.KREA_API_KEY || process.env.KREA_API_KEY),
-    openAi: Boolean(settingsValues.openAiApiKey || envValues.OPENAI_API_KEY || process.env.OPENAI_API_KEY || process.env.OPENAI_TEXT_API_KEY)
-  };
+  const resolvedApiKeys = resolveApiKeyVersions(settingsValues.apiKeyVersions, envValues);
+  const providerPreferences = apiKeyProviderPreferences(settingsValues.apiKeyVersions);
+  const configuredKeys = Object.fromEntries(
+    apiKeyProviderIds.map((provider) => [
+      provider,
+      resolvedApiKeys[provider].some((entry) => entry.configured) ||
+        (provider === "openAi" && Boolean(process.env.OPENAI_TEXT_API_KEY))
+    ])
+  );
   const apiKeysFound = Object.values(configuredKeys).some(Boolean);
-  const activeApiKeysFound = Object.entries(configuredKeys).some(([provider, configured]) => configured && providerPreferences[provider]);
+  const activeApiKeysFound = apiKeyProviderIds.some((provider) =>
+    resolvedApiKeys[provider].some((entry) => entry.enabled && entry.configured)
+  );
 
   const payload = {
     version: appVersion,
@@ -607,11 +627,12 @@ async function readRuntimeSettings({ includeSecrets = false } = {}) {
     activeApiKeysFound,
     apiKeyStatus: activeApiKeysFound ? "API keys configured" : apiKeysFound ? "API keys configured but disabled" : "No API keys found",
     keySources: {
-      fal: credentialSource(settingsValues.falKey, envValues.FAL_KEY, runtimeConfigSources.FAL_KEY),
-      google: credentialSource(settingsValues.googleApiKey, envValues.GOOGLE_API_KEY, runtimeConfigSources.GOOGLE_API_KEY),
-      krea: credentialSource(settingsValues.kreaApiKey, envValues.KREA_API_KEY, runtimeConfigSources.KREA_API_KEY),
-      openAi: credentialSource(settingsValues.openAiApiKey, envValues.OPENAI_API_KEY, runtimeConfigSources.OPENAI_API_KEY)
+      fal: preferredApiKeySource(resolvedApiKeys.fal),
+      google: preferredApiKeySource(resolvedApiKeys.google),
+      krea: preferredApiKeySource(resolvedApiKeys.krea),
+      openAi: preferredApiKeySource(resolvedApiKeys.openAi)
     },
+    apiKeyVersions: publicApiKeyVersions(resolvedApiKeys),
     providerPreferences,
     repository,
     branch,
@@ -623,10 +644,11 @@ async function readRuntimeSettings({ includeSecrets = false } = {}) {
 
   if (includeSecrets) {
     payload.secrets = {
-      falKey: settingsValues.falKey || "",
-      googleApiKey: settingsValues.googleApiKey || "",
-      kreaApiKey: settingsValues.kreaApiKey || "",
-      openAiApiKey: settingsValues.openAiApiKey || ""
+      apiKeyVersions: settingsValues.apiKeyVersions,
+      falKey: settingsValues.apiKeyVersions.fal[0]?.value || "",
+      googleApiKey: settingsValues.apiKeyVersions.google[0]?.value || "",
+      kreaApiKey: settingsValues.apiKeyVersions.krea[0]?.value || "",
+      openAiApiKey: settingsValues.apiKeyVersions.openAi[0]?.value || ""
     };
   }
 
@@ -639,15 +661,36 @@ async function saveRuntimeSettings(body = {}) {
   const kreaApiKey = submittedRuntimeSetting(body.kreaApiKey);
   const openAiApiKey = submittedRuntimeSetting(body.openAiApiKey);
   const repository = normalizeUpdateRepository(body.repository);
+  const current = await readRuntimeSettingsStore();
   const updates = {};
 
-  if (falKey !== undefined) updates.falKey = falKey;
-  if (googleApiKey !== undefined) updates.googleApiKey = googleApiKey;
-  if (kreaApiKey !== undefined) updates.kreaApiKey = kreaApiKey;
-  if (openAiApiKey !== undefined) updates.openAiApiKey = openAiApiKey;
+  if (body.apiKeyVersions !== undefined) {
+    updates.apiKeyVersions = normalizeApiKeyVersions(body.apiKeyVersions);
+    updates.providerPreferences = apiKeyProviderPreferences(updates.apiKeyVersions);
+  } else {
+    const legacyUpdates = { fal: falKey, google: googleApiKey, krea: kreaApiKey, openAi: openAiApiKey };
+    if (Object.values(legacyUpdates).some((value) => value !== undefined)) {
+      const nextVersions = normalizeApiKeyVersions(current.apiKeyVersions);
+      for (const [provider, value] of Object.entries(legacyUpdates)) {
+        if (value !== undefined) nextVersions[provider][0].value = value;
+      }
+      updates.apiKeyVersions = nextVersions;
+    }
+    if (body.providerPreferences !== undefined) {
+      const preferences = normalizeApiProviderPreferences(body.providerPreferences);
+      const nextVersions = normalizeApiKeyVersions(updates.apiKeyVersions || current.apiKeyVersions);
+      for (const provider of apiKeyProviderIds) {
+        nextVersions[provider] = nextVersions[provider].map((entry, index) => ({
+          ...entry,
+          enabled: Boolean(preferences[provider]) && index === 0
+        }));
+      }
+      updates.apiKeyVersions = nextVersions;
+      updates.providerPreferences = preferences;
+    }
+  }
   if (repository) updates.repository = repository;
   if (body.modelPreferences !== undefined) updates.modelPreferences = normalizeModelPreferences(body.modelPreferences);
-  if (body.providerPreferences !== undefined) updates.providerPreferences = normalizeApiProviderPreferences(body.providerPreferences);
 
   if (Object.keys(updates).length) {
     await writeRuntimeSettingsStore(updates);
@@ -738,19 +781,24 @@ async function refreshRuntimeConfigFromEnvFile() {
     readRuntimeSettingsStore()
   ]);
 
-  applyRuntimeConfigValue("FAL_KEY", envValues.FAL_KEY, settingsValues.falKey, { preferSettings: true });
-  applyRuntimeConfigValue("GOOGLE_API_KEY", envValues.GOOGLE_API_KEY, settingsValues.googleApiKey, { preferSettings: true });
-  applyRuntimeConfigValue("KREA_API_KEY", envValues.KREA_API_KEY, settingsValues.kreaApiKey, { preferSettings: true });
-  applyRuntimeConfigValue("OPENAI_API_KEY", envValues.OPENAI_API_KEY, settingsValues.openAiApiKey, { preferSettings: true });
+  const resolvedApiKeys = resolveApiKeyVersions(settingsValues.apiKeyVersions, envValues);
+  for (const provider of apiKeyProviderIds) {
+    const { envKey } = apiKeyRuntimeConfig[provider];
+    const active = resolvedApiKeys[provider].find((entry) => entry.enabled && entry.value);
+    if (active) {
+      process.env[envKey] = active.value;
+      runtimeConfigSources[envKey] = active.source;
+    } else {
+      delete process.env[envKey];
+      runtimeConfigSources[envKey] = "disabled";
+    }
+  }
   applyRuntimeConfigValue(updateRepositoryEnvKey, envValues[updateRepositoryEnvKey], settingsValues.repository);
 
-  const providerPreferences = normalizeApiProviderPreferences(settingsValues.providerPreferences);
-  applyApiProviderPreference("FAL_KEY", providerPreferences.fal);
-  applyApiProviderPreference("GOOGLE_API_KEY", providerPreferences.google);
-  applyApiProviderPreference("KREA_API_KEY", providerPreferences.krea);
-  applyApiProviderPreference("OPENAI_API_KEY", providerPreferences.openAi);
-
-  openAiTextApiKey = providerPreferences.openAi ? process.env.OPENAI_TEXT_API_KEY || process.env.OPENAI_API_KEY : "";
+  const providerPreferences = apiKeyProviderPreferences(settingsValues.apiKeyVersions);
+  openAiTextApiKey = providerPreferences.openAi
+    ? process.env.OPENAI_API_KEY || process.env.OPENAI_TEXT_API_KEY || ""
+    : "";
 
   if (process.env.FAL_KEY) {
     fal.config({ credentials: process.env.FAL_KEY });
@@ -759,14 +807,22 @@ async function refreshRuntimeConfigFromEnvFile() {
 
 async function readRuntimeSettingsStore() {
   const data = await readJsonFile(runtimeSettingsPath, {});
+  const providerPreferences = normalizeApiProviderPreferences(data?.providerPreferences);
+  const legacyValues = {
+    fal: optionalRuntimeSetting(data?.falKey) || "",
+    google: optionalRuntimeSetting(data?.googleApiKey) || "",
+    krea: optionalRuntimeSetting(data?.kreaApiKey) || "",
+    openAi: optionalRuntimeSetting(data?.openAiApiKey) || ""
+  };
+  const apiKeyVersions = normalizeApiKeyVersions(data?.apiKeyVersions, {
+    legacyValues,
+    providerPreferences
+  });
   return {
-    falKey: optionalRuntimeSetting(data?.falKey) || "",
-    googleApiKey: optionalRuntimeSetting(data?.googleApiKey) || "",
-    kreaApiKey: optionalRuntimeSetting(data?.kreaApiKey) || "",
-    openAiApiKey: optionalRuntimeSetting(data?.openAiApiKey) || "",
+    apiKeyVersions,
     repository: normalizeUpdateRepository(data?.repository),
     modelPreferences: normalizeModelPreferences(data?.modelPreferences),
-    providerPreferences: normalizeApiProviderPreferences(data?.providerPreferences)
+    providerPreferences: apiKeyProviderPreferences(apiKeyVersions)
   };
 }
 
@@ -780,6 +836,7 @@ async function writeRuntimeSettingsStore(patch) {
   if (patch.googleApiKey !== undefined) next.googleApiKey = String(patch.googleApiKey || "");
   if (patch.kreaApiKey !== undefined) next.kreaApiKey = String(patch.kreaApiKey || "");
   if (patch.openAiApiKey !== undefined) next.openAiApiKey = String(patch.openAiApiKey || "");
+  if (patch.apiKeyVersions !== undefined) next.apiKeyVersions = normalizeApiKeyVersions(patch.apiKeyVersions);
   if (patch.repository !== undefined) next.repository = normalizeUpdateRepository(patch.repository);
   if (patch.modelPreferences !== undefined) next.modelPreferences = normalizeModelPreferences(patch.modelPreferences);
   if (patch.providerPreferences !== undefined) next.providerPreferences = normalizeApiProviderPreferences(patch.providerPreferences);
@@ -793,16 +850,49 @@ function normalizeApiProviderPreferences(value = {}) {
   );
 }
 
-function applyApiProviderPreference(key, enabled) {
-  if (enabled) return;
-  delete process.env[key];
-  runtimeConfigSources[key] = "disabled";
+function resolveApiKeyVersions(value, envValues = {}) {
+  const normalized = normalizeApiKeyVersions(value);
+
+  return Object.fromEntries(
+    apiKeyProviderIds.map((provider) => {
+      const { envKey } = apiKeyRuntimeConfig[provider];
+      const versions = normalized[provider].map((entry, index) => {
+        const settingsValue = optionalRuntimeSetting(entry.value);
+        const envValue = index === 0 ? optionalRuntimeSetting(envValues?.[envKey]) : null;
+        const runtimeValue = index === 0 ? optionalRuntimeSetting(initialRuntimeApiKeyValues[envKey]) : null;
+        const resolvedValue = settingsValue || envValue || runtimeValue || "";
+        const source = settingsValue ? "settings" : envValue ? "env" : runtimeValue ? "runtime" : "";
+        return {
+          ...entry,
+          value: resolvedValue,
+          configured: Boolean(resolvedValue),
+          source
+        };
+      });
+      return [provider, versions];
+    })
+  );
 }
 
-function credentialSource(settingsValue, envValue, runtimeSource) {
-  if (optionalRuntimeSetting(settingsValue)) return "settings";
-  if (optionalRuntimeSetting(envValue)) return "env";
-  return runtimeSource === "runtime" ? "runtime" : "";
+function publicApiKeyVersions(value) {
+  return Object.fromEntries(
+    apiKeyProviderIds.map((provider) => [
+      provider,
+      value[provider].map(({ id, enabled, configured, source }, index) => ({
+        id,
+        version: index + 1,
+        enabled,
+        configured,
+        source
+      }))
+    ])
+  );
+}
+
+function preferredApiKeySource(versions = []) {
+  return versions.find((entry) => entry.enabled && entry.configured)?.source ||
+    versions.find((entry) => entry.configured)?.source ||
+    "";
 }
 
 function normalizeModelPreferences(value = {}) {
@@ -1679,15 +1769,15 @@ app.post("/api/node/run-skill-director", async (req, res) => {
         action,
         model: result.model,
         provider: result.provider,
-        shotCount,
+        shotCount: result.shotCount || shotCount,
         resolvedShotCount: result.resolvedShotCount,
-        durationSeconds,
+        durationSeconds: result.durationSeconds || durationSeconds,
         actualShotCount: result.actualShotCount,
         referenceSetup: result.referenceSetup,
         shotListNotes: result.shotListNotes,
         revisionNotes,
         revisionSummary: result.revisionSummary || "",
-        sceneName,
+        sceneName: result.sceneName || sceneName,
         characterInputCount: characterInputs.length,
         locationInputCount: locationInputs.length,
         elementInputCount: elementInputs.length,
@@ -1715,6 +1805,7 @@ app.post("/api/node/run-skill-director", async (req, res) => {
       shotList: result.shotList,
       shotListNotes: result.shotListNotes,
       sceneOverview: result.sceneOverview || sceneOverview,
+      sceneName: Object.prototype.hasOwnProperty.call(result, "sceneName") ? result.sceneName : sceneName,
       revisionSummary: result.revisionSummary || "",
       cost,
       usage: usageRecord
@@ -10546,10 +10637,20 @@ async function runSkillDirectorWithFal({
     if (!outputText) throw new Error("fal returned no Film Director revision.");
 
     const structuredOutput = skillDirectorStructuredObject(outputText);
+    const revisedSceneName = skillDirectorStructuredValue(
+      structuredOutput,
+      ["sceneName", "scene_name", "title"]
+    ) || sceneName;
+    const requestedRevisedDuration = String(
+      skillDirectorStructuredNumber(structuredOutput, ["durationSeconds", "duration_seconds", "duration"])
+    );
+    const revisedDurationSeconds = ["5", "10", "15", "20", "30"].includes(requestedRevisedDuration)
+      ? requestedRevisedDuration
+      : durationSeconds;
     const validatedOutput = await validateAndRepairSkillDirectorShotPlan({
       outputText,
       shotCount: "Auto",
-      durationSeconds,
+      durationSeconds: revisedDurationSeconds,
       prompt: revisionPrompt,
       model,
       characterTags: characterInputs.map((item) => item.tag).filter(Boolean)
@@ -10584,10 +10685,11 @@ async function runSkillDirectorWithFal({
       submittedPrompt: revisionPrompt,
       usage: falResultUsage(data),
       helperUsages: validatedOutput.usages || [],
-      shotCount,
-      durationSeconds,
+      shotCount: actualShotCount ? String(actualShotCount) : shotCount,
+      durationSeconds: revisedDurationSeconds,
       actualShotCount,
       resolvedShotCount: actualShotCount,
+      sceneName: revisedSceneName,
       referenceSetup: skillDirectorReferenceSetupFromLines(referenceLines),
       styleDirection: revisedStyleDirection,
       motionDirection: revisedMotionDirection,
@@ -11607,8 +11709,8 @@ Return this exact JSON shape:
     {
       "number": 1,
       "shot": "CU, MS, WS, ECU, or EWS",
-      "lens": "None, 18mm, 35mm, 50mm, 85mm, 120mm, or Macro",
-      "angle": "None, Low Angle, High Angle, Extreme High, Extreme Low, Portrait, or Profile",
+      "lens": "None, 8mm, 18mm, 35mm, 50mm, 85mm, or 120mm",
+      "angle": "None, Macro, Low Angle, High Angle, Extreme High, Bird's Eye View, Extreme Low, Portrait, Profile, or Selfie",
       "beat": "story beat in one sentence",
       "prompt": "single-frame image prompt, concise but visually complete, including stable environment, lighting, recurring objects, wardrobe, and screen geography details where relevant",
       "notes": "continuity note in one short phrase; for Film Director plans begin with CUT N and the keyframe phase"
@@ -11720,8 +11822,8 @@ function normalizeStoryboardPlanFrame(frame = {}, index = 0) {
   return {
     number: Math.max(1, Number.parseInt(frame.number, 10) || index + 1),
     shot: normalizeChoice(String(frame.shot || "None"), ["None", "CU", "MS", "WS", "ECU", "EWS"], "None"),
-    lens: normalizeChoice(String(frame.lens || "None"), ["None", "18mm", "35mm", "50mm", "85mm", "120mm", "Macro"], "None"),
-    angle: normalizeChoice(String(frame.angle || "None"), ["None", "Low Angle", "High Angle", "Extreme High", "Extreme Low", "Portrait", "Profile"], "None"),
+    lens: normalizeChoice(String(frame.lens || "None"), ["None", "8mm", "18mm", "35mm", "50mm", "85mm", "120mm"], "None"),
+    angle: normalizeChoice(String(frame.angle || "None"), ["None", "Macro", "Low Angle", "High Angle", "Extreme High", "Bird's Eye View", "Extreme Low", "Portrait", "Profile", "Selfie"], "None"),
     beat: String(frame.beat || "").trim().slice(0, 240),
     prompt: String(frame.prompt || "").trim().slice(0, 1400),
     notes: String(frame.notes || "").trim().slice(0, 240)

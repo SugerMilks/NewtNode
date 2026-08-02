@@ -1,5 +1,6 @@
 import React from "react";
 import {
+  Aperture,
   Box,
   Camera,
   ChevronDown,
@@ -129,6 +130,7 @@ import {
   preferredCharacterReferenceForVideo
 } from "./characterVideoSheets.js";
 import { normalizeOpenAiImage2Quality, openAiImage2Quality, openAiImage2QualityOptions } from "./openAiImage2.js";
+import { coverageMethods, coveragePreviewItems, coverageShotsForMethod, normalizeCoverageMethod } from "./coveragePresets.js";
 import {
   batchOptions,
   birefnetModelOptions,
@@ -180,6 +182,7 @@ import {
   shotPresetNames,
   shotPresetPrompts,
   stylePresetNames,
+  normalizeStylePresetName,
   stylePresetPrompts,
   topazUpscalerBillingTierOptions,
   topazUpscalerFpsOptions,
@@ -237,9 +240,14 @@ import {
   runRunnableNodesByDependencyOrder,
   settleSequential
 } from "./nodeRunner.js";
-import { run3DModelGeneration, runAutoAspectGeneration, runCharacterSheetGeneration, runImageModelGeneration } from "./nodeRunners/mediaModels.js";
+import { run3DModelGeneration, runAutoAspectGeneration, runCharacterSheetGeneration, runCoverageGeneration, runImageModelGeneration } from "./nodeRunners/mediaModels.js";
 import { runSkillDirectorNode } from "./nodeRunners/skillDirector.js";
-import { appendFilmDirectorRevisionHistory } from "./filmDirectorRevision.js";
+import {
+  appendFilmDirectorRevisionVersionHistory,
+  filmDirectorRevisionStatePatch,
+  trimFilmDirectorRevisionHistory
+} from "./filmDirectorRevision.js";
+import { filmDirectorUsesReferenceTag, normalizeFilmDirectorScenes } from "./filmDirectorScenes.js";
 import { runTextNodeProcessing } from "./nodeRunners/textModels.js";
 import {
   buildUtilityVideoRequest,
@@ -286,6 +294,7 @@ const nodeIcons = {
   audio: FileAudio,
   model3d: Box,
   autoAspect: Maximize2,
+  coverage: Aperture,
   imageModel: ImagePlus,
   videoModel: Film,
   storyboard: Clapperboard,
@@ -353,6 +362,13 @@ const nodeHelpContent = {
     lines: [
       "Reframes one connected image into selected aspect ratios.",
       "Use advanced options for model, resolution, or removing graphic overlays before compositing."
+    ]
+  },
+  coverage: {
+    title: "Coverage",
+    lines: [
+      "Creates nine alternate camera angles while preserving the connected scene, subject, lighting, and grade.",
+      "Connect the blue output to Preview and use Layout to review all nine coverage frames together."
     ]
   },
   storyboard: {
@@ -453,6 +469,12 @@ const maxTransferImages = 6;
 const moodBoardOutputFileName = "MOOD_BOARD.png";
 const autoAspectDefaultRatios = [];
 const autoAspectModelOptions = [imageModelNames.openAiImage2, imageModelNames.nanoBananaPro];
+const coverageModelOptions = [
+  imageModelNames.openAiImage2,
+  imageModelNames.nanoBananaPro,
+  imageModelNames.reve21,
+  imageModelNames.seedream5Pro
+];
 const composerCharacterPortPrefix = "characterIn:";
 const maxCharacterWardrobes = 8;
 const maxCharacterVoices = 8;
@@ -771,7 +793,7 @@ const initialNodes = [
     y: 970.3715360841652,
     data: {
       title: "Style",
-      stylePreset: "Cinematic",
+      stylePreset: "Cinematic Standard",
       customPaletteRgbText: "",
       customPalettePicker: "#ddc631",
       customPaletteColors: [],
@@ -917,6 +939,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     () => (modelPreferencesReady ? enabledImageModelOptions(modelPreferences) : imageModelOptions),
     [modelPreferences, modelPreferencesReady]
   );
+  const enabledCoverageModels = React.useMemo(
+    () => coverageModelOptions.filter((model) => enabledImageModels.includes(model)),
+    [enabledImageModels]
+  );
   const enabledVideoModels = React.useMemo(
     () => (modelPreferencesReady ? enabledVideoModelOptions(modelPreferences) : videoModelOptions),
     [modelPreferences, modelPreferencesReady]
@@ -1030,13 +1056,23 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         if (node.type === "imageModel" && !isSam3ImageModel(node.data.model) && !enabledImageModels.includes(node.data.model)) {
           return { ...node, data: { ...node.data, model: fallbackImageModel } };
         }
+        if (node.type === "coverage" && !enabledCoverageModels.includes(node.data.model)) {
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              model: enabledCoverageModels[0] || imageModelNames.openAiImage2,
+              resolution: normalizeImageModelResolutionForModel(node.data.resolution, enabledCoverageModels[0] || imageModelNames.openAiImage2)
+            }
+          };
+        }
         if (node.type === "videoModel" && !isSam3VideoModel(node.data.model) && !enabledVideoModels.includes(node.data.model)) {
           return { ...node, data: { ...node.data, model: fallbackVideoModel } };
         }
         return node;
       })
     );
-  }, [enabledImageModels, enabledVideoModels, modelPreferences, modelPreferencesReady]);
+  }, [enabledCoverageModels, enabledImageModels, enabledVideoModels, modelPreferences, modelPreferencesReady]);
 
   React.useEffect(() => {
     setEdges((current) => {
@@ -1489,6 +1525,14 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         ...imageModelSelectionPatch(data, model)
       };
     }
+    if (type === "coverage") {
+      const model = enabledCoverageModels[0] || imageModelNames.openAiImage2;
+      return {
+        ...data,
+        model,
+        resolution: normalizeImageModelResolutionForModel(data.resolution, model)
+      };
+    }
     if (type === "videoModel") {
       const model = enabledVideoModels[0] || videoModelNames.seedance;
       return {
@@ -1740,8 +1784,15 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         .filter((edge) => edge.to.port === "imageIn" && nodesRef.current.find((node) => node.id === edge.to.nodeId)?.type === "autoAspect")
         .map((edge) => edge.to.nodeId)
     );
+    const coverageInputsRemoved = new Set(
+      edgesRef.current
+        .filter((edge) => ids.has(edge.id))
+        .filter((edge) => edge.to.port === "imageIn" && nodesRef.current.find((node) => node.id === edge.to.nodeId)?.type === "coverage")
+        .map((edge) => edge.to.nodeId)
+    );
     setEdges((current) => current.filter((edge) => !ids.has(edge.id)));
     autoAspectInputsRemoved.forEach((nodeId) => updateNode(nodeId, resetAutoAspectOutputPatch()));
+    coverageInputsRemoved.forEach((nodeId) => updateNode(nodeId, resetCoverageOutputPatch()));
     selectedEdgeIdRef.current = null;
     setSelectedEdgeId(null);
     setSaveStatus(`${edgeIds.length} connection${edgeIds.length === 1 ? "" : "s"} deleted`);
@@ -4034,6 +4085,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (targetNode?.type === "autoAspect" && port === "imageIn") {
       updateNode(nodeId, resetAutoAspectOutputPatch());
     }
+    if (targetNode?.type === "coverage" && port === "imageIn") {
+      updateNode(nodeId, resetCoverageOutputPatch());
+    }
     setSelectedEdgeId(null);
     setDraftEdge(null);
     setSaveStatus("Disconnected input");
@@ -4292,13 +4346,16 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         pushUndoSnapshot();
         const targetNodeForConnection = nodesRef.current.find((node) => node.id === to.nodeId);
         const shouldResetAutoAspectOutput = targetNodeForConnection?.type === "autoAspect" && to.port === "imageIn";
+        const shouldResetCoverageOutput = targetNodeForConnection?.type === "coverage" && to.port === "imageIn";
         setEdges((current) => {
           const replacesSingleComposerCharacterInput = isComposerCharacterInputPort(to.port, targetNodeForConnection);
           const replacesSingleAutoAspectInput = targetNodeForConnection?.type === "autoAspect" && to.port === "imageIn";
+          const replacesSingleCoverageInput = targetNodeForConnection?.type === "coverage" && to.port === "imageIn";
           const replacesSingleStoryboardSceneInput = targetNodeForConnection?.type === "storyboard" && to.port === "sceneDescriptionIn";
           let nextEdges = current.filter((edge) => {
             if (replacesSingleComposerCharacterInput && edge.to.nodeId === to.nodeId && edge.to.port === to.port) return false;
             if (replacesSingleAutoAspectInput && edge.to.nodeId === to.nodeId && edge.to.port === to.port) return false;
+            if (replacesSingleCoverageInput && edge.to.nodeId === to.nodeId && edge.to.port === to.port) return false;
             if (replacesSingleStoryboardSceneInput && edge.to.nodeId === to.nodeId && edge.to.port === to.port) return false;
             return !(edge.from.nodeId === draftEdge.from.nodeId && edge.from.port === draftEdge.from.port && edge.to.nodeId === to.nodeId && edge.to.port === to.port);
           });
@@ -4314,6 +4371,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           ];
         });
         if (shouldResetAutoAspectOutput) updateNode(to.nodeId, resetAutoAspectOutputPatch());
+        if (shouldResetCoverageOutput) updateNode(to.nodeId, resetCoverageOutputPatch());
       }
     } else {
       event.preventDefault();
@@ -4369,6 +4427,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       image: {
         preview: ["sourceIn"],
         autoAspect: ["imageIn"],
+        coverage: ["imageIn"],
         camera: ["imageIn"],
         composer: ["imageIn"],
         model3d: ["frontImageIn"],
@@ -4424,6 +4483,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   function autoConnectionOutputKind(source, from) {
     if (source.type === "storyboard") return storyboardOutputItem(source, { from })?.url ? "image" : "";
     if (source.type === "autoAspect") return autoAspectOutputItem(source, { from })?.url ? "image" : "";
+    if (source.type === "coverage") return normalizedResultItems(source.data?.resultItems, source.data?.resultUrl, "image").length ? "image" : "";
     if (source.type === "camera") return "camera";
     if (source.type === "composer") return "image";
     if (source.type === "frameIt") return "image";
@@ -4485,6 +4545,23 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       if (target.type === "text" && to.port === "imageIn") return "";
       if (target.type === "skillDirector" && ["imageIn", "locationIn"].includes(to.port)) return "";
       return "Auto Aspect outputs connect to image inputs or previews";
+    }
+
+    if (source.type === "coverage") {
+      if (!normalizedResultItems(source.data?.resultItems, source.data?.resultUrl, "image").length) {
+        return "Generate Coverage before connecting it";
+      }
+      if (target.type === "preview" && to.port === "sourceIn") return "";
+      if (target.type === "storyboard" && ["sceneReferenceIn", "propsIn"].includes(to.port)) return "";
+      if (["autoAspect", "coverage"].includes(target.type) && to.port === "imageIn") return "";
+      if (target.type === "composer" && to.port === "imageIn") return "";
+      if (target.type === "model3d" && isModel3DImageInputPort(to.port)) return "";
+      if (target.type === "imageModel" && ["imagePromptIn", "transferIn"].includes(to.port)) return "";
+      if (target.type === "videoModel" && ["startFrameIn", "endFrameIn", "referenceImageIn"].includes(to.port)) return "";
+      if (target.type === "utility" && ["imageIn", "referenceImageIn"].includes(to.port)) return "";
+      if (target.type === "text" && to.port === "imageIn") return "";
+      if (target.type === "skillDirector" && ["imageIn", "locationIn"].includes(to.port)) return "";
+      return "Coverage output connects to image inputs or previews";
     }
 
     if (source.type === "camera") {
@@ -4607,6 +4684,16 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       }
     }
 
+    if (target?.type === "coverage" && to.port === "imageIn") {
+      if (source.type === "composer") return from.port === "imageOut" ? "" : "Coverage accepts image outputs";
+      if (source.type === "utility") return utilityOutputType(source) === "image" ? "" : "Coverage accepts image outputs";
+      if (source.type === "storyboard") return storyboardOutputItem(source, { from })?.url ? "" : "Generate this Storyboard output before connecting it";
+      if (source.type === "autoAspect") return autoAspectOutputItem(source, { from })?.url ? "" : "Generate this Auto Aspect output before connecting it";
+      if (source.type === "coverage") return normalizedResultItems(source.data?.resultItems, source.data?.resultUrl, "image").length ? "" : "Generate Coverage before connecting it";
+      if (["image", "imageModel", "frameIt"].includes(source.type)) return "";
+      return "Coverage accepts image outputs";
+    }
+
     if (source?.type === "composer") {
       if (from.port === "imageOut") {
         if (target.type === "preview" && to.port === "sourceIn") return "";
@@ -4665,7 +4752,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     }
 
     if (target?.type === "preview") {
-      if (["image", "video", "imageModel", "videoModel", "utility", "transfer", "composer", "frameIt", "model3d"].includes(source?.type)) return "";
+      if (["image", "video", "imageModel", "videoModel", "utility", "transfer", "composer", "frameIt", "coverage", "model3d"].includes(source?.type)) return "";
       return "Preview accepts image, video, and 3D sources";
     }
 
@@ -5022,27 +5109,27 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           return { status: "complete" };
         }
         if (action === "revise") {
-          const revisionHistory = appendFilmDirectorRevisionHistory(currentNode.data.skillDirectorRevisionHistory, {
+          const revisionState = filmDirectorRevisionStatePatch(currentNode.data, {
+            ...processed,
+            text: formatSkillDirectorFinalPromptForClient(processed.text),
+            shotList: formatSkillDirectorShotListForClient(processed.shotList || currentNode.data.shotList || "")
+          });
+          const revisionVersion = appendFilmDirectorRevisionVersionHistory(currentNode.data.skillDirectorRevisionHistory, {
+            current: currentNode.data,
+            revised: { ...currentNode.data, ...nextSkillPatch, ...revisionState },
             notes: currentNode.data.skillDirectorRevisionNotes,
             summary: processed.revisionSummary,
+            selectedId: currentNode.data.skillDirectorRevisionSelectedId,
             createdAt: new Date().toISOString()
           });
           updateNode(currentNode.id, {
             ...nextSkillPatch,
-            resultText: formatSkillDirectorFinalPromptForClient(processed.text),
-            styleDirection: processed.styleDirection || currentNode.data.styleDirection || "",
-            motionDirection: processed.motionDirection || currentNode.data.motionDirection || "",
-            motionBrief: processed.motionDirection || currentNode.data.motionDirection || "",
-            sceneOverview: processed.sceneOverview || currentNode.data.sceneOverview || "",
-            text: processed.sceneOverview || currentNode.data.sceneOverview || "",
-            shotList: formatSkillDirectorShotListForClient(processed.shotList || currentNode.data.shotList || ""),
-            shotListNotes: processed.shotListNotes || currentNode.data.shotListNotes || "",
-            skillDirectorBuilt: Boolean(processed.text),
-            skillPreviewOpen: Boolean(processed.text),
+            ...revisionState,
             skillDirectorRevisionOpen: true,
             skillDirectorRevisionNotes: "",
             skillDirectorLastRevisionSummary: processed.revisionSummary || "Applied the requested revisions.",
-            skillDirectorRevisionHistory: revisionHistory
+            skillDirectorRevisionHistory: revisionVersion.history,
+            skillDirectorRevisionSelectedId: revisionVersion.selectedId
           });
           return { status: "complete" };
         }
@@ -5098,6 +5185,56 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           autoAspectResults,
           resultText: resultTextFromItems(autoAspectResults),
           error: batchRunError("image", autoAspectTargets.length, successes, failures)
+        });
+        loadOutputHistory();
+        return { status: "complete" };
+      }
+
+      if (currentNode.type === "coverage") {
+        const sourceImageUrl = connectedAssetUrls(incoming.imageIn).at(-1);
+        if (!sourceImageUrl) throw new Error("Connect an image to Coverage.");
+        const method = normalizeCoverageMethod(currentNode.data.coverageMethod);
+        const shots = coverageShotsForMethod(method);
+        const aspectRatio = await resolveImageModelAspectRatio(
+          {
+            ...currentNode,
+            data: {
+              ...currentNode.data,
+              aspectRatio: imageModelAutoAspectRatio
+            }
+          },
+          { imagePromptIn: incoming.imageIn || [] }
+        );
+
+        updateNode(currentNode.id, {
+          ...resetCoverageOutputPatch(),
+          status: "running"
+        });
+        const settled = await settleSequential(
+          shots,
+          (shot, index) => runCoverageGeneration({
+            node: currentNode,
+            sourceImageUrl,
+            shot,
+            aspectRatio,
+            workflowContext: requestContext,
+            index
+          }),
+          imageRunStaggerMs
+        );
+        const successes = fulfilledRunValues(settled, { flatten: true });
+        const failures = rejectedRunResults(settled);
+        ensureRunSuccesses(successes, failures, "Coverage generation failed.");
+        const { resultItems, firstNewIndex } = appendedNodeResultState([], successes, "image");
+
+        updateNode(currentNode.id, {
+          status: "complete",
+          resultUrl: resultItems[firstNewIndex]?.url || successes[0]?.url || "",
+          resultItems,
+          selectedResultIndex: firstNewIndex,
+          coverageResults: resultItems,
+          resultText: resultTextFromItems(successes),
+          error: batchRunError("image", shots.length, successes, failures)
         });
         loadOutputHistory();
         return { status: "complete" };
@@ -8828,6 +8965,72 @@ function NodeBody({
     );
   }
 
+  if (node.type === "coverage") {
+    const inputPort = config.input.find((port) => port.id === "imageIn");
+    const coverageOutputPort = outputPortDefinitionsForNode(node).find((port) => port.id === "imageOut") || outputPort;
+    const sourceConnected = Boolean(incoming.imageIn?.length);
+    const sourceSummary = autoAspectSourceSummary(incoming.imageIn, "Connect image");
+    const availableModels = coverageModelOptions.filter((model) => imageModelOptions.includes(model));
+    const modelChoices = availableModels.length ? availableModels : [node.data.model || imageModelNames.openAiImage2];
+    const model = modelChoices.includes(node.data.model) ? node.data.model : modelChoices[0];
+    const method = normalizeCoverageMethod(node.data.coverageMethod);
+    const resetResults = () => resetCoverageOutputPatch();
+
+    return (
+      <div className="node-body model-node-body coverage-node-body">
+        <ResultPane
+          label="9 coverage angles will appear here"
+          resultUrl={node.data.resultUrl}
+          resultItems={node.data.resultItems}
+          selectedIndex={node.data.selectedResultIndex}
+          type="image"
+          status={node.data.status}
+          error={node.data.error}
+          onSelectResult={(index, item) => onUpdate(node.id, { selectedResultIndex: index, resultUrl: item.url })}
+          onPreviewOpen={onPreviewOpen}
+        />
+        <div className="coverage-controls">
+          <NodeRow label="Image" inputPort={inputPort} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+            <button className={sourceConnected ? "connected-field" : ""}>{sourceSummary}</button>
+          </NodeRow>
+          <NodeRow label="Model">
+            <select
+              value={model}
+              disabled={running}
+              onChange={(event) => {
+                const nextModel = event.target.value;
+                onUpdate(node.id, {
+                  ...resetResults(),
+                  model: nextModel,
+                  resolution: normalizeImageModelResolutionForModel("2K", nextModel)
+                });
+              }}
+            >
+              {modelChoices.map((option) => (
+                <option key={option} value={option}>{coverageModelLabel(option)}</option>
+              ))}
+            </select>
+          </NodeRow>
+          <NodeRow label="Method">
+            <select
+              value={method}
+              disabled={running}
+              onChange={(event) => onUpdate(node.id, { ...resetResults(), coverageMethod: normalizeCoverageMethod(event.target.value) })}
+            >
+              {coverageMethods.map((option) => (
+                <option key={option} value={option}>{option}</option>
+              ))}
+            </select>
+          </NodeRow>
+        </div>
+        <OutputPortRow node={node} port={coverageOutputPort} label="Coverage output" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
+        <button className="run-node-button" onClick={() => onRun(node)} disabled={running || !sourceConnected}>
+          {running ? "Generating 9 angles..." : "Generate Coverage"}
+        </button>
+      </div>
+    );
+  }
+
   if (node.type === "utility") {
     const mode = utilityMode(node);
     const isVideoMode = mode === "video";
@@ -10732,6 +10935,11 @@ function getNodeConfig(type) {
       input: [{ id: "imageIn", label: "Image", color: portColors.image }],
       output: []
     },
+    coverage: {
+      icon: Aperture,
+      input: [{ id: "imageIn", label: "Image", color: portColors.image }],
+      output: [{ id: "imageOut", label: "Coverage", color: portColors.image }]
+    },
     storyboard: {
       icon: Clapperboard,
       input: [
@@ -10787,7 +10995,7 @@ function createDefaultNodeData(type, label, count) {
   if (type === "plainText") return { title, text: "" };
   if (type === "text") return { title, text: "" };
   if (type === "skillDirector") {
-    return {
+    const directorData = {
       title,
       sceneName: "",
       sceneOverview: "",
@@ -10823,7 +11031,14 @@ function createDefaultNodeData(type, label, count) {
       skillDirectorRevisionOpen: false,
       skillDirectorRevisionNotes: "",
       skillDirectorLastRevisionSummary: "",
-      skillDirectorRevisionHistory: []
+      skillDirectorRevisionHistory: [],
+      skillDirectorRevisionSelectedId: ""
+    };
+    const sceneState = normalizeFilmDirectorScenes(directorData);
+    return {
+      ...directorData,
+      skillDirectorScenes: sceneState.scenes,
+      skillDirectorActiveSceneId: sceneState.activeId
     };
   }
   if (type === "image" || type === "video" || type === "audio") return { title };
@@ -10837,6 +11052,19 @@ function createDefaultNodeData(type, label, count) {
       resolution: "2K",
       removeTextGraphics: false,
       advancedOpen: false
+    };
+  }
+  if (type === "coverage") {
+    return {
+      title,
+      model: imageModelNames.openAiImage2,
+      coverageMethod: "Standard",
+      resolution: "2K",
+      quality: openAiImage2Quality,
+      coverageResults: [],
+      resultItems: [],
+      resultUrl: "",
+      selectedResultIndex: 0
     };
   }
   if (type === "storyboard") {
@@ -11592,6 +11820,11 @@ function outputPortDefinitionsForNode(node) {
     ...storyboardFrameOutputPortsForNode(node)
   ];
   if (node?.type === "autoAspect") return [...basePorts, ...autoAspectOutputPortsForNode(node)];
+  if (node?.type === "coverage") return basePorts.map((port) => ({
+    ...port,
+    disabled: !normalizedResultItems(node?.data?.resultItems, node?.data?.resultUrl, "image").length,
+    disabledReason: "Generate Coverage before connecting it"
+  }));
   if (node?.type === "text") return [{ id: "promptOut", label: "Prompt", color: portColors.prompt }];
   return basePorts;
 }
@@ -11834,6 +12067,25 @@ function resetAutoAspectOutputPatch() {
   };
 }
 
+function resetCoverageOutputPatch() {
+  return {
+    coverageResults: [],
+    resultItems: [],
+    resultUrl: "",
+    resultText: "",
+    selectedResultIndex: 0,
+    status: "",
+    error: ""
+  };
+}
+
+function coverageModelLabel(model) {
+  if (model === imageModelNames.openAiImage2) return "GPT Image 2";
+  if (model === imageModelNames.reve21) return "REVE 2.1";
+  if (model === imageModelNames.seedream5Pro) return "Seedream";
+  return model;
+}
+
 function composerCharacterInputPortIdsForNode(node) {
   return composerCharacterInputPortsForNode(node).map((port) => port.id);
 }
@@ -11877,7 +12129,7 @@ function nodeResultMediaType(node) {
   if (node.type === "utility") return utilityResultType(node);
   if (node.type === "image" || node.type === "video" || node.type === "audio" || node.type === "model3d") return node.type;
   if (node.type === "videoModel") return "video";
-  if (node.type === "imageModel" || node.type === "autoAspect" || node.type === "camera" || node.type === "composer" || node.type === "frameIt" || node.type === "character" || node.type === "storyboard") return "image";
+  if (node.type === "imageModel" || node.type === "autoAspect" || node.type === "coverage" || node.type === "camera" || node.type === "composer" || node.type === "frameIt" || node.type === "character" || node.type === "storyboard") return "image";
   return "";
 }
 
@@ -11973,6 +12225,7 @@ function buildInactiveEdgeIds(nodes, edges) {
         if (isImageModelUnsupportedSource(target, source)) return true;
         if (isVideoModelUnsupportedInput(target, edge.to.port)) return true;
         if (source?.type === "autoAspect" && !autoAspectOutputItem(source, edge)?.url) return true;
+        if (source?.type === "coverage" && !normalizedResultItems(source.data?.resultItems, source.data?.resultUrl, "image").length) return true;
         if (source?.type === "frameIt" && !source.data?.resultUrl) return true;
         if (source?.type === "skillDirector" && (!source.data?.skillDirectorBuilt || !source.data?.resultText)) return true;
         return (
@@ -12019,21 +12272,29 @@ function connectedDirectorPackageSource(items = []) {
   return directorPackageConnections(items)[0]?.source || null;
 }
 
+function directorSceneUsesConnection(directorSource, itemSource, type = "image") {
+  if (!directorSource?.data || !itemSource) return false;
+  const tag = type === "character"
+    ? characterTag(itemSource)
+    : cleanPromptTag(itemSource.data?.title || sourceLabel(itemSource));
+  return filmDirectorUsesReferenceTag(directorSource.data, tag);
+}
+
 function directorPackageForVideo(source = null, incomingByNode = {}) {
   if (!source?.data?.skillDirectorBuilt || !source.data.resultText) return null;
   const directorIncoming = incomingByNode[source.id] || {};
   const references = [
-    ...(directorIncoming.characterIn || []).map(({ source: itemSource }) => ({
+    ...(directorIncoming.characterIn || []).filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "character")).map(({ source: itemSource }) => ({
       type: "character",
       tag: characterTag(itemSource),
       url: preferredCharacterReferenceForVideo(itemSource)?.url || ""
     })),
-    ...(directorIncoming.locationIn || []).map(({ source: itemSource, edge }) => ({
+    ...(directorIncoming.locationIn || []).filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "location")).map(({ source: itemSource, edge }) => ({
       type: "location",
       tag: cleanPromptTag(itemSource.data?.title || sourceLabel(itemSource)),
       url: connectedOutputUrl(itemSource, edge)
     })),
-    ...(directorIncoming.imageIn || []).map(({ source: itemSource, edge }) => ({
+    ...(directorIncoming.imageIn || []).filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "image")).map(({ source: itemSource, edge }) => ({
       type: "prop",
       tag: cleanPromptTag(itemSource.data?.title || sourceLabel(itemSource)),
       url: connectedOutputUrl(itemSource, edge)
@@ -12102,8 +12363,13 @@ function expandVideoDirectorPackageIncoming(incoming = {}, incomingByNode = {}, 
 
   directorItems.forEach(({ source }) => {
     const directorIncoming = incomingByNode?.[source.id] || {};
-    referenceImageIn.push(...(directorIncoming.locationIn || []), ...(directorIncoming.imageIn || []));
-    if (includeCharacters) characterIn.push(...(directorIncoming.characterIn || []));
+    referenceImageIn.push(
+      ...(directorIncoming.locationIn || []).filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "location")),
+      ...(directorIncoming.imageIn || []).filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "image"))
+    );
+    if (includeCharacters) {
+      characterIn.push(...(directorIncoming.characterIn || []).filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "character")));
+    }
   });
 
   return {
@@ -12123,9 +12389,9 @@ function expandStoryboardDirectorIncoming(incoming = {}, incomingByNode = {}) {
 
   directorItems.forEach(({ source }) => {
     const directorIncoming = incomingByNode?.[source.id] || {};
-    sceneReferenceIn.push(...(directorIncoming.locationIn || []));
-    propsIn.push(...(directorIncoming.imageIn || []));
-    characterIn.push(...(directorIncoming.characterIn || []));
+    sceneReferenceIn.push(...(directorIncoming.locationIn || []).filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "location")));
+    propsIn.push(...(directorIncoming.imageIn || []).filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "image")));
+    characterIn.push(...(directorIncoming.characterIn || []).filter(({ source: itemSource }) => directorSceneUsesConnection(source, itemSource, "character")));
   });
 
   return {
@@ -12733,6 +12999,7 @@ function previewSourceResultItems(source, edge, sourceType = "image") {
   }
 
   const resultItems = normalizedResultItems(source.data?.resultItems, source.data?.resultUrl, sourceType);
+  if (source.type === "coverage" && resultItems.length) return coveragePreviewItems(resultItems);
   if (resultItems.length) return resultItems;
 
   const outputItem = connectedOutputItem(source, edge);
@@ -13886,6 +14153,7 @@ function sourceLabel(source) {
   if (source.type === "storyboard") return source.data.title || "Storyboard";
   if (source.type === "skillDirector") return source.data.title === "Skill Director" ? "Film Director" : source.data.title || "Film Director";
   if (source.type === "autoAspect") return source.data.title || "Auto Aspect";
+  if (source.type === "coverage") return source.data.title || "Coverage";
   if (source.type === "model3d" && source.data.resultUrl) return source.data.title || "3D model";
   if (source.type === "transfer" && source.data.resultUrl) return "Style Reference";
   if (source.type === "character" && source.data.resultUrl) return `@${characterTag(source)}`;
@@ -13968,22 +14236,22 @@ function normalizeEditorGraph(nodes = [], edges = [], groups = []) {
 
 function normalizeEdgesForCurrentGraph(edges = [], nodes = []) {
   const nodeMap = new Map(nodes.map((node) => [node.id, node]));
-  return keepLatestAutoAspectInputs(dedupeEdges(edges.map((edge) => normalizeEdgeForCurrentGraph(edge, nodeMap)).filter(Boolean)), nodeMap);
+  return keepLatestSingleImageInputs(dedupeEdges(edges.map((edge) => normalizeEdgeForCurrentGraph(edge, nodeMap)).filter(Boolean)), nodeMap);
 }
 
-function keepLatestAutoAspectInputs(edges = [], nodeMap = new Map()) {
-  const latestAutoAspectInputIndexes = new Map();
+function keepLatestSingleImageInputs(edges = [], nodeMap = new Map()) {
+  const latestInputIndexes = new Map();
   edges.forEach((edge, index) => {
     const target = nodeMap.get(edge.to.nodeId);
-    if (target?.type === "autoAspect" && edge.to.port === "imageIn") {
-      latestAutoAspectInputIndexes.set(edge.to.nodeId, index);
+    if (["autoAspect", "coverage"].includes(target?.type) && edge.to.port === "imageIn") {
+      latestInputIndexes.set(edge.to.nodeId, index);
     }
   });
-  if (!latestAutoAspectInputIndexes.size) return edges;
+  if (!latestInputIndexes.size) return edges;
   return edges.filter((edge, index) => {
     const target = nodeMap.get(edge.to.nodeId);
-    if (target?.type !== "autoAspect" || edge.to.port !== "imageIn") return true;
-    return latestAutoAspectInputIndexes.get(edge.to.nodeId) === index;
+    if (!["autoAspect", "coverage"].includes(target?.type) || edge.to.port !== "imageIn") return true;
+    return latestInputIndexes.get(edge.to.nodeId) === index;
   });
 }
 
@@ -14094,9 +14362,7 @@ function normalizeCurrentNode(node) {
     ["skillCategory", "skillId", "skillEditorOpen", "skillDraft", "skillSceneCount", "shotCount"].forEach((field) => {
       delete skillDirectorData[field];
     });
-    return {
-      ...nextNode,
-      data: {
+    const normalizedDirectorData = {
         ...createDefaultNodeData("skillDirector", filmDirectorTitle, 1),
         ...skillDirectorData,
         title: filmDirectorTitle,
@@ -14140,7 +14406,16 @@ function normalizeCurrentNode(node) {
         skillDirectorRevisionOpen: Boolean(data.skillDirectorRevisionOpen),
         skillDirectorRevisionNotes: String(data.skillDirectorRevisionNotes || ""),
         skillDirectorLastRevisionSummary: String(data.skillDirectorLastRevisionSummary || ""),
-        skillDirectorRevisionHistory: Array.isArray(data.skillDirectorRevisionHistory) ? data.skillDirectorRevisionHistory.slice(-8) : []
+        skillDirectorRevisionHistory: trimFilmDirectorRevisionHistory(data.skillDirectorRevisionHistory),
+        skillDirectorRevisionSelectedId: String(data.skillDirectorRevisionSelectedId || "")
+    };
+    const normalizedSceneState = normalizeFilmDirectorScenes(normalizedDirectorData);
+    return {
+      ...nextNode,
+      data: {
+        ...normalizedDirectorData,
+        skillDirectorScenes: normalizedSceneState.scenes,
+        skillDirectorActiveSceneId: normalizedSceneState.activeId
       }
     };
   }
@@ -14200,6 +14475,13 @@ function normalizeCurrentNode(node) {
     return {
       ...nextNode,
       data: normalizeAutoAspectData(data)
+    };
+  }
+
+  if (nextNode.type === "coverage") {
+    return {
+      ...nextNode,
+      data: normalizeCoverageData(data)
     };
   }
 
@@ -14333,7 +14615,7 @@ function normalizeStoryboardData(data = {}) {
     useMoodBoard: data.useMoodBoard !== false,
     useInternalStoryboardCharacters: data.useInternalStoryboardCharacters !== false,
     useHighResolution: Boolean(data.useHighResolution),
-    storyboardStylePreset: normalizeChoice(data.storyboardStylePreset || "None", stylePresetNames, "None"),
+    storyboardStylePreset: normalizeStylePresetName(data.storyboardStylePreset || "None"),
     storyboardMoodBoardUrl: data.storyboardMoodBoardUrl || storyboardDefaultMoodBoardUrl,
     storyboardMoodBoardFileName: data.storyboardMoodBoardFileName || storyboardMoodBoardLabel,
     storyboardCharacters: normalizedStoryboardCharacters(data.storyboardCharacters),
@@ -15260,6 +15542,28 @@ function normalizeAutoAspectData(data = {}) {
   };
 }
 
+function normalizeCoverageData(data = {}) {
+  const model = coverageModelOptions.includes(data.model) ? data.model : imageModelNames.openAiImage2;
+  const resultItems = normalizedResultItems(data.resultItems, data.resultUrl, "image");
+  const selectedResultIndex = Math.min(
+    Math.max(0, Math.trunc(Number(data.selectedResultIndex) || 0)),
+    Math.max(0, resultItems.length - 1)
+  );
+  return {
+    ...createDefaultNodeData("coverage", data.title || "Coverage", 1),
+    ...data,
+    title: data.title || "Coverage",
+    model,
+    coverageMethod: normalizeCoverageMethod(data.coverageMethod),
+    resolution: normalizeImageModelResolutionForModel(data.resolution || "2K", model),
+    quality: openAiImage2Quality,
+    coverageResults: resultItems,
+    resultItems,
+    resultUrl: resultItems[selectedResultIndex]?.url || resultItems[0]?.url || "",
+    selectedResultIndex
+  };
+}
+
 function normalizeStyleData(data = {}) {
   const defaultData = createDefaultNodeData("style", data.title || "Style", 1);
   const customPaletteColors = normalizedCustomPaletteColors(data);
@@ -15267,7 +15571,7 @@ function normalizeStyleData(data = {}) {
     ...defaultData,
     ...data,
     title: data.title || "Style",
-    stylePreset: normalizeChoice(data.stylePreset || "None", stylePresetNames, "None"),
+    stylePreset: normalizeStylePresetName(data.stylePreset || "None"),
     customPaletteRgbText: String(data.customPaletteRgbText || ""),
     customPalettePicker: /^#[0-9a-f]{6}$/i.test(String(data.customPalettePicker || "")) ? data.customPalettePicker : "#ddc631",
     customPaletteColors,

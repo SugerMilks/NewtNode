@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { appendFilmDirectorRevisionHistory, buildFilmDirectorRevisionPrompt } from "../src/filmDirectorRevision.js";
+import {
+  appendFilmDirectorRevisionHistory,
+  appendFilmDirectorRevisionVersionHistory,
+  buildFilmDirectorRevisionPrompt,
+  filmDirectorRevisionStatePatch,
+  updateFilmDirectorRevisionVersionSnapshot
+} from "../src/filmDirectorRevision.js";
 
 test("Film Director revision prompts preserve the package while prioritizing user notes", () => {
   const prompt = buildFilmDirectorRevisionPrompt({
@@ -20,6 +26,10 @@ test("Film Director revision prompts preserve the package while prioritizing use
   assert.match(prompt, /Keep all connected @tags exactly as written/);
   assert.match(prompt, /Current final output:\nExisting final output/);
   assert.match(prompt, /each shot must carry more of the scene/i);
+  assert.match(prompt, /removing or adding a shot must update recommendedShotCount/i);
+  assert.match(prompt, /tighter framing or camera movement must update both cameraDirection/i);
+  assert.match(prompt, /"sceneName":"complete revised scene name"/);
+  assert.match(prompt, /"durationSeconds":"15"/);
 });
 
 test("single-shot Film Director revisions preserve a fully directed sustained take", () => {
@@ -43,4 +53,98 @@ test("Film Director revision history stays bounded and ignores empty notes", () 
   assert.equal(next.at(-1).notes, "Latest note");
   assert.equal(next.at(-1).summary, "Adjusted CUT 2.");
   assert.deepEqual(appendFilmDirectorRevisionHistory(next, { notes: "" }), next);
+});
+
+test("Film Director revision state updates every dependent node section atomically", () => {
+  const patch = filmDirectorRevisionStatePatch(
+    {
+      sceneName: "Old Scene",
+      skillDurationSeconds: "15",
+      skillShotCount: "6",
+      styleDirection: "Old style",
+      motionDirection: "Old camera",
+      sceneOverview: "Old overview",
+      shotList: "Old cuts",
+      shotListNotes: "Old continuity",
+      resultText: "Old final prompt"
+    },
+    {
+      sceneName: "New Scene",
+      durationSeconds: "10",
+      resolvedShotCount: 4,
+      styleDirection: "New style",
+      motionDirection: "New camera",
+      sceneOverview: "New overview",
+      shotList: "New cuts",
+      shotListNotes: "New continuity",
+      text: "New final prompt"
+    }
+  );
+
+  assert.equal(patch.sceneName, "New Scene");
+  assert.equal(patch.skillDurationSeconds, "10");
+  assert.equal(patch.skillShotCount, "4");
+  assert.equal(patch.shotCount, "4");
+  assert.equal(patch.styleDirection, "New style");
+  assert.equal(patch.motionDirection, "New camera");
+  assert.equal(patch.motionBrief, "New camera");
+  assert.equal(patch.sceneOverview, "New overview");
+  assert.equal(patch.text, "New overview");
+  assert.equal(patch.shotList, "New cuts");
+  assert.equal(patch.shotListNotes, "New continuity");
+  assert.equal(patch.resultText, "New final prompt");
+  assert.deepEqual(patch.skillDirectorLocks, { setup: true, style: true, motion: true, scene: true, shotList: true });
+  assert.equal(patch.skillDirectorBuilt, true);
+});
+
+test("Film Director version history preserves the original and complete revision snapshots", () => {
+  const original = {
+    sceneName: "Original Scene",
+    skillShotCount: "3",
+    styleDirection: "Original style",
+    motionDirection: "Original camera",
+    sceneOverview: "Original overview",
+    shotList: "Original cuts",
+    resultText: "Original prompt",
+    skillDirectorLocks: { setup: true, style: true, motion: true, scene: true, shotList: true }
+  };
+  const revised = {
+    ...original,
+    skillShotCount: "2",
+    styleDirection: "Revised style",
+    shotList: "Revised cuts",
+    resultText: "Revised prompt"
+  };
+  const versioned = appendFilmDirectorRevisionVersionHistory([], {
+    current: original,
+    revised,
+    notes: "Remove a shot and change the style.",
+    summary: "Reduced the scene to two shots.",
+    createdAt: "2026-08-02T12:00:00.000Z"
+  });
+
+  assert.equal(versioned.history.length, 2);
+  assert.equal(versioned.history[0].label, "Original Setup");
+  assert.equal(versioned.history[0].snapshot.resultText, "Original prompt");
+  assert.equal(versioned.history[1].label, "Revision 1");
+  assert.equal(versioned.history[1].snapshot.skillShotCount, "2");
+  assert.equal(versioned.history[1].snapshot.styleDirection, "Revised style");
+  assert.equal(versioned.selectedId, versioned.history[1].id);
+});
+
+test("switching Film Director history versions preserves manual edits to the current version", () => {
+  const first = appendFilmDirectorRevisionVersionHistory([], {
+    current: { resultText: "Original prompt" },
+    revised: { resultText: "Revision prompt" },
+    notes: "First revision",
+    createdAt: "2026-08-02T12:00:00.000Z"
+  });
+  const updated = updateFilmDirectorRevisionVersionSnapshot(
+    first.history,
+    first.selectedId,
+    { resultText: "Manually edited revision prompt" }
+  );
+
+  assert.equal(updated[1].snapshot.resultText, "Manually edited revision prompt");
+  assert.equal(updated[0].snapshot.resultText, "Original prompt");
 });

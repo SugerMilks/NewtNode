@@ -31,6 +31,46 @@ export async function runImageModelGeneration({ node, prompt, aspectRatio, image
   }));
 }
 
+export async function runCoverageGeneration({
+  node,
+  sourceImageUrl,
+  shot,
+  aspectRatio,
+  workflowContext,
+  index
+}) {
+  const { response, data } = await nodeApi.generateImage({
+    prompt: shot.prompt,
+    model: node.data.model,
+    aspectRatio,
+    requestedAspectRatio: aspectRatio,
+    resolution: node.data.resolution,
+    quality: node.data.quality,
+    seedreamLayers: false,
+    imagePromptUrls: [sourceImageUrl],
+    imagePromptLabels: ["Coverage base image"],
+    ...workflowContextPayload(workflowContext),
+    nodeId: node.id,
+    nodeTitle: `${node.data.title || "Coverage"} ${String(index + 1).padStart(2, "0")}`,
+    outputFileNameBase: coverageOutputFileNameBase(node.data.title, index, shot.label)
+  });
+  if (!response.ok) throw new Error(`Run ${index + 1}: ${data.error || "Coverage generation failed."}`);
+
+  const image = Array.isArray(data.images) && data.images.length ? data.images[0] : data.image;
+  if (!image?.localUrl) throw new Error(`Run ${index + 1}: Coverage generation returned no image.`);
+
+  return {
+    url: image.localUrl,
+    thumbnailUrl: image.thumbnailUrl || "",
+    type: "image",
+    label: `${String(index + 1).padStart(2, "0")} ${shot.label}`,
+    text: data.text || "",
+    cost: data.cost,
+    sourceUrl: image.localUrl,
+    shotId: shot.id
+  };
+}
+
 export async function runAutoAspectGeneration({
   node,
   sourceImageUrl,
@@ -91,6 +131,21 @@ function autoAspectOutputFileNameBase(title, aspectRatio) {
     .replace(/[^A-Za-z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "");
   return safeRatio ? `${safeTitle}_${safeRatio}` : safeTitle;
+}
+
+function coverageOutputFileNameBase(title, index, label) {
+  const safeTitle = String(title || "coverage")
+    .trim()
+    .replace(/\.[A-Za-z0-9]{1,8}$/g, "")
+    .replace(/[^A-Za-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 56) || "coverage";
+  const safeLabel = String(label || `angle_${index + 1}`)
+    .trim()
+    .replace(/[^A-Za-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 48) || `angle_${index + 1}`;
+  return `${safeTitle}_${String(index + 1).padStart(2, "0")}_${safeLabel}`;
 }
 
 export async function run3DModelGeneration({ node, imageViewUrls, workflowContext, model, generateType, faceCount }) {

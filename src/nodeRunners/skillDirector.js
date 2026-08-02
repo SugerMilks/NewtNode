@@ -1,4 +1,5 @@
 import { nodeApi } from "../api/newtApi.js";
+import { filmDirectorUsesReferenceTag } from "../filmDirectorScenes.js";
 import { workflowContextPayload } from "../workflowContext.js";
 
 export async function runSkillDirectorNode({
@@ -8,8 +9,12 @@ export async function runSkillDirectorNode({
   workflowContext,
   sourceLabel
 }) {
+  const action = node.data.skillDirectorAction || "build";
+  const characterInputs = connectedCharacterInputItems(incoming.characterIn, sourceLabel, node.data.skillReferenceNotes || {});
+  const locationInputs = connectedMediaInputItems(incoming.locationIn, "location", sourceLabel, node.data.skillReferenceNotes || {});
+  const elementInputs = connectedMediaInputItems(incoming.imageIn, "element", sourceLabel, node.data.skillReferenceNotes || {});
   const { response, data } = await nodeApi.runSkillDirector({
-    action: node.data.skillDirectorAction || "build",
+    action,
     sceneName: node.data.sceneName,
     sceneOverview: node.data.sceneOverview ?? node.data.text,
     motionBrief: node.data.motionBrief || node.data.motionDirection,
@@ -19,9 +24,9 @@ export async function runSkillDirectorNode({
     shotListNotes: node.data.shotListNotes,
     revisionNotes: node.data.skillDirectorRevisionNotes,
     currentFinalPrompt: node.data.resultText,
-    characterInputs: connectedCharacterInputItems(incoming.characterIn, sourceLabel, node.data.skillReferenceNotes || {}),
-    locationInputs: connectedMediaInputItems(incoming.locationIn, "location", sourceLabel, node.data.skillReferenceNotes || {}),
-    elementInputs: connectedMediaInputItems(incoming.imageIn, "element", sourceLabel, node.data.skillReferenceNotes || {}),
+    characterInputs: activeSceneReferenceItems(characterInputs, node.data, action),
+    locationInputs: activeSceneReferenceItems(locationInputs, node.data, action),
+    elementInputs: activeSceneReferenceItems(elementInputs, node.data, action),
     styleInputs: connectedMediaInputItems(incoming.styleIn, "style", sourceLabel, node.data.skillReferenceNotes || {}),
     videoInputs: [],
     shotCount: node.data.skillShotCount || node.data.skillSceneCount || node.data.shotCount || "3",
@@ -42,6 +47,7 @@ export async function runSkillDirectorNode({
     resolvedShotCount: data.resolvedShotCount || data.actualShotCount || 0,
     durationSeconds: data.durationSeconds || node.data.skillDurationSeconds || node.data.durationSeconds || "15",
     actualShotCount: data.actualShotCount || 0,
+    sceneName: Object.prototype.hasOwnProperty.call(data, "sceneName") ? data.sceneName : node.data.sceneName || "",
     referenceSetup: data.referenceSetup || "",
     styleDirection: data.styleDirection || "",
     motionDirection: data.motionDirection || "",
@@ -50,6 +56,11 @@ export async function runSkillDirectorNode({
     sceneOverview: data.sceneOverview || node.data.sceneOverview || "",
     revisionSummary: data.revisionSummary || ""
   };
+}
+
+function activeSceneReferenceItems(items = [], data = {}, action = "build") {
+  if (action === "style") return [];
+  return items.filter((item) => filmDirectorUsesReferenceTag(data, item.tag));
 }
 
 function connectedCharacterInputItems(items = [], sourceLabel, referenceNotes = {}) {

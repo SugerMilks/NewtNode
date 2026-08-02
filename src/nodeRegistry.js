@@ -10,6 +10,7 @@ export const nodeTypeDefinitions = [
   { type: "camera", label: "Camera" },
   { type: "skillDirector", label: "Film Director" },
   { type: "storyboard", label: "Storyboard" },
+  { type: "coverage", label: "Coverage" },
   { type: "composer", label: "Composer" },
   { type: "frameIt", label: "Frame It" },
   { type: "autoAspect", label: "Auto Aspect" },
