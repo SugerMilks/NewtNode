@@ -121,6 +121,13 @@ import {
   setOutputItemDragData
 } from "./mediaAssets.js";
 import { appendResultItems, existingResultItemsForNode, normalizedResultItems } from "./mediaResults.js";
+import {
+  characterVideoBasicWardrobePrompt,
+  characterVideoCustomSheetWardrobePrompt,
+  characterVideoSheetPrompt,
+  characterVideoWardrobePrompt,
+  preferredCharacterReferenceForVideo
+} from "./characterVideoSheets.js";
 import { normalizeOpenAiImage2Quality, openAiImage2Quality, openAiImage2QualityOptions } from "./openAiImage2.js";
 import {
   batchOptions,
@@ -156,7 +163,6 @@ import {
   klingO3ProResolutionOptions,
   lensPresetNames,
   lensPresetPrompts,
-  lumaImageAspectRatios,
   model3DDescription,
   model3DNames,
   model3DViewInputs,
@@ -164,6 +170,8 @@ import {
   openAiImageAspectRatios,
   patinaMapOptions,
   qwenCameraDefaults,
+  reve21AspectRatios,
+  reve21ResolutionOptions,
   sam3SegmentationModelsEnabled,
   seedanceVideoAspectRatioOptions,
   seedanceVideoDurationOptions,
@@ -194,6 +202,7 @@ import {
 } from "./modelOptions.js";
 import { isGeminiOmniModel } from "./geminiOmni.js";
 import { isNanoBanana2Model, nanoBanana2ResolutionOptions, normalizeNanoBanana2Resolution } from "./nanoBanana2.js";
+import { isReve21Model } from "./reve21.js";
 import {
   clamp,
   clampContextMenuPosition,
@@ -821,8 +830,6 @@ const nodeColorPalette = [{ label: "Neutral", color: "" }, ...namedColorPalette]
 const referenceTagPalette = ["#4d8dff", "#ff4fb3", "#9b5cff", "#58ce63", "#ff8b35", "#f0c83b"];
 const zImageUnsupportedInputPorts = new Set(["cameraIn", "styleIn", "transferIn", "characterIn"]);
 const zImageUnsupportedSourceTypes = new Set(["camera", "style", "transfer", "character"]);
-const lumaImageUnsupportedInputPorts = new Set(["cameraIn", "transferIn", "characterIn"]);
-const lumaImageUnsupportedSourceTypes = new Set(["camera", "transfer", "character"]);
 const krea2UnsupportedInputPorts = new Set(["cameraIn", "transferIn", "characterIn"]);
 const krea2UnsupportedSourceTypes = new Set(["camera", "transfer", "character"]);
 const emptyPortSet = new Set();
@@ -1042,13 +1049,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
   React.useLayoutEffect(() => {
     if (!active) return undefined;
-
-    const frame = window.requestAnimationFrame(() => {
-      updatePortPositions();
-      updateSelectionBounds();
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [active, nodes, selectedNodeIds]);
+    schedulePortPositionRefresh();
+    return undefined;
+  }, [active, nodes, groups, selectedNodeIds]);
 
   React.useLayoutEffect(() => {
     if (!active || typeof ResizeObserver === "undefined") return undefined;
@@ -2437,46 +2440,75 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const selectedVoice = activeCharacterVoice(node);
     const physicalDetailsPrompt = characterPhysicalDetailsPrompt(node.data);
     const baseCharacterSheetPrompt = node.data.cinematicCharacterSheet ? cinematicCharacterSheetPrompt : characterSheetPrompt;
+    const generateCuVideoSheet = Boolean(node.data.cuVideoGeneration);
     let completedVariantCount = 0;
 
     if (useCustomSheet) {
-      const generated = {
-        url: customSheet.localUrl,
-        thumbnailUrl: customSheet.thumbnailUrl || "",
-        type: "image",
-        label: `@${characterTag(node)} Character Sheet`,
-        fileName: customSheet.fileName || "Custom character sheet",
-        text: "",
-        cost: null
-      };
-      const selectedVariant = {
-        wardrobeId: characterDefaultWardrobeId,
-        wardrobeUrl: "",
-        wardrobeFileName: "Custom character sheet",
-        generated
-      };
-      pushUndoSnapshot();
-      updateNode(node.id, {
-        activated: true,
-        locked: true,
-        characterTab: "sheet",
-        characterSheetVariants: [selectedVariant],
-        activeWardrobeId: "",
-        compiledTraitPrompt: characterTraitPrompt(node.data),
-        compiledVoicePrompt: selectedVoice ? characterVoicePrompt : "",
-        characterBatchProgress: null,
-        characterVariantNotice: "",
-        ...characterVariantDisplayPatch(selectedVariant),
-        status: "ready",
-        error: ""
-      });
+      try {
+        updateNode(node.id, {
+          status: generateCuVideoSheet ? "compiling" : "ready",
+          characterBatchProgress: generateCuVideoSheet ? { completed: 0, total: 1 } : null,
+          characterVariantNotice: "",
+          error: ""
+        });
+        const generated = {
+          url: customSheet.localUrl,
+          thumbnailUrl: customSheet.thumbnailUrl || "",
+          type: "image",
+          label: `@${characterTag(node)} Character Sheet`,
+          fileName: customSheet.fileName || "Custom character sheet",
+          text: "",
+          cost: null
+        };
+        const videoGenerated = generateCuVideoSheet
+          ? await runCharacterSheetGeneration({
+              node,
+              prompt: [characterVideoSheetPrompt, characterVideoCustomSheetWardrobePrompt, physicalDetailsPrompt].filter(Boolean).join("\n\n"),
+              portrait: customSheet,
+              wardrobe: null,
+              workflowContext: workflowRequestContext(),
+              characterTag: characterTag(node),
+              sheetKind: "video"
+            })
+          : null;
+        const selectedVariant = {
+          wardrobeId: characterDefaultWardrobeId,
+          wardrobeUrl: "",
+          wardrobeFileName: "Custom character sheet",
+          generated,
+          ...(videoGenerated ? { videoGenerated } : {})
+        };
+        pushUndoSnapshot();
+        updateNode(node.id, {
+          activated: true,
+          locked: true,
+          characterTab: "sheet",
+          characterSheetPreviewKind: "image",
+          characterSheetVariants: [selectedVariant],
+          activeWardrobeId: "",
+          compiledTraitPrompt: characterTraitPrompt(node.data),
+          compiledVoicePrompt: selectedVoice ? characterVoicePrompt : "",
+          characterBatchProgress: null,
+          characterVariantNotice: "",
+          ...characterVariantDisplayPatch(selectedVariant),
+          status: "ready",
+          error: ""
+        });
+      } catch (error) {
+        updateNode(node.id, {
+          status: "error",
+          characterBatchProgress: null,
+          error: error.message
+        });
+      }
       return;
     }
 
     try {
+      const generationCount = wardrobeOptions.length * (generateCuVideoSheet ? 2 : 1);
       updateNode(node.id, {
         status: "compiling",
-        characterBatchProgress: { completed: 0, total: wardrobeOptions.length },
+        characterBatchProgress: { completed: 0, total: generationCount },
         characterVariantNotice: "",
         error: ""
       });
@@ -2492,16 +2524,32 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
               workflowContext: workflowRequestContext(),
               characterTag: characterTag(node)
             });
+            completedVariantCount += 1;
+            updateNode(node.id, {
+              characterBatchProgress: { completed: completedVariantCount, total: generationCount }
+            });
+            const videoGenerated = generateCuVideoSheet
+              ? await runCharacterSheetGeneration({
+                  node,
+                  prompt: [characterVideoSheetPrompt, wardrobe ? characterVideoWardrobePrompt : characterVideoBasicWardrobePrompt, physicalDetailsPrompt].filter(Boolean).join("\n\n"),
+                  portrait,
+                  wardrobe,
+                  workflowContext: workflowRequestContext(),
+                  characterTag: characterTag(node),
+                  sheetKind: "video"
+                })
+              : null;
             return {
               wardrobeId: characterWardrobeVariantId(wardrobe),
               wardrobeUrl: wardrobe?.localUrl || "",
               wardrobeFileName: wardrobe?.fileName || "Default black wardrobe",
-              generated
+              generated,
+              ...(videoGenerated ? { videoGenerated } : {})
             };
           } finally {
-            completedVariantCount += 1;
+            if (generateCuVideoSheet) completedVariantCount += 1;
             updateNode(node.id, {
-              characterBatchProgress: { completed: completedVariantCount, total: wardrobeOptions.length }
+              characterBatchProgress: { completed: Math.min(completedVariantCount, generationCount), total: generationCount }
             });
           }
         })
@@ -2520,6 +2568,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         activated: true,
         locked: true,
         characterTab: "sheet",
+        characterSheetPreviewKind: "image",
         characterSheetVariants: variants,
         activeWardrobeId: selectedVariant.wardrobeId === characterDefaultWardrobeId ? "" : selectedVariant.wardrobeId,
         compiledTraitPrompt: characterTraitPrompt(node.data),
@@ -2552,6 +2601,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       compiledTraitPrompt: "",
       compiledVoicePrompt: "",
       characterSheetVariants: [],
+      characterSheetPreviewKind: "image",
       characterBatchProgress: null,
       characterVariantNotice: "",
       status: "ready",
@@ -3886,6 +3936,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   function stopNodeDrag() {
     if (dragState?.type === "pan") commitTransientViewport();
     setDragState(null);
+    schedulePortPositionRefresh();
   }
 
   function selectNodeForDrag(nodeId, shouldAdd) {
@@ -7005,6 +7056,7 @@ function NodeBody({
     const hasCharacterTraits = selectedTraits.length > 0 || Boolean(String(node.data.customCharacterTraits || "").trim());
     const characterVariants = Array.isArray(node.data.characterSheetVariants) ? node.data.characterSheetVariants : [];
     const variantCount = characterVariants.length;
+    const cuVideoVariantCount = characterVariants.filter((variant) => variant?.videoGenerated?.url).length;
     const targetVariantCount = Math.max(1, wardrobes.length);
     const batchProgress = node.data.characterBatchProgress;
     const locked = Boolean(node.data.locked && node.data.activated && node.data.resultUrl);
@@ -7015,7 +7067,11 @@ function NodeBody({
       Math.max(Number(node.data.selectedResultIndex) || 0, 0),
       Math.max(characterResultItems.length - 1, 0)
     );
-    const characterSheetItem = characterResultItems[characterResultIndex] || null;
+    const activeCharacterVariant = characterSheetVariantForWardrobeId(node.data, node.data.activeWardrobeId);
+    const hasCuVideoSheet = Boolean(activeCharacterVariant?.videoGenerated?.url);
+    const characterSheetPreviewKind = node.data.characterSheetPreviewKind === "video" && hasCuVideoSheet ? "video" : "image";
+    const selectedCharacterSheet = characterSheetPreviewKind === "video" ? activeCharacterVariant?.videoGenerated : activeCharacterVariant?.generated;
+    const characterSheetItem = selectedCharacterSheet?.url ? selectedCharacterSheet : characterResultItems[characterResultIndex] || null;
     const characterSheetPreviewItem = characterSheetItem?.url
       ? {
           ...characterSheetItem,
@@ -7041,6 +7097,7 @@ function NodeBody({
       if (locked && !variant) return;
       onUpdate(node.id, {
         activeWardrobeId: wardrobe.id,
+        characterSheetPreviewKind: node.data.characterSheetPreviewKind === "video" && variant?.videoGenerated?.url ? "video" : "image",
         ...(locked && variant ? characterVariantDisplayPatch(variant) : {})
       });
     }
@@ -7188,6 +7245,18 @@ function NodeBody({
                 <label className="character-section character-option-row">
                   <input
                     type="checkbox"
+                    checked={Boolean(node.data.cuVideoGeneration)}
+                    disabled={compiling || locked}
+                    onChange={(event) => onUpdate(node.id, { cuVideoGeneration: event.target.checked })}
+                  />
+                  <span>
+                    <strong>CU Video Generation</strong>
+                    <small>Creates a simplified close-up video sheet for every wardrobe</small>
+                  </span>
+                </label>
+                <label className="character-section character-option-row">
+                  <input
+                    type="checkbox"
                     checked={useCustomSheet}
                     disabled={compiling || locked}
                     onChange={(event) => onUpdate(node.id, { useCustomCharacterSheet: event.target.checked })}
@@ -7294,18 +7363,26 @@ function NodeBody({
             <div className="character-actions">
               <span className={node.data.characterVariantNotice ? "upload-error" : ""}>
                 {compiling && batchProgress
-                  ? `Building outfit sheets ${batchProgress.completed} / ${batchProgress.total}`
+                  ? `Building character sheets ${batchProgress.completed} / ${batchProgress.total}`
                   : node.data.characterVariantNotice
                     ? node.data.characterVariantNotice
                   : locked
                     ? useCustomSheet
-                      ? `Custom character sheet ready. @${characterTag(node)} uses the uploaded override.`
-                      : `${variantCount} outfit sheet${variantCount === 1 ? "" : "s"} ready. @${characterTag(node)} uses the selected outfit.`
+                      ? node.data.cuVideoGeneration
+                        ? `Custom image sheet and CU video sheet ready for @${characterTag(node)}.`
+                        : `Custom character sheet ready. @${characterTag(node)} uses the uploaded override.`
+                      : node.data.cuVideoGeneration
+                        ? `${variantCount} image sheet${variantCount === 1 ? "" : "s"} and ${cuVideoVariantCount} CU video sheet${cuVideoVariantCount === 1 ? "" : "s"} ready.`
+                        : `${variantCount} outfit sheet${variantCount === 1 ? "" : "s"} ready. @${characterTag(node)} uses the selected outfit.`
                     : useCustomSheet
                       ? customSheet?.localUrl
-                        ? "Custom character sheet will be used on lock."
+                        ? node.data.cuVideoGeneration
+                          ? "The custom image sheet and one CU video sheet will be prepared on lock."
+                          : "Custom character sheet will be used on lock."
                         : "Upload a completed custom character sheet."
-                    : `${targetVariantCount} outfit sheet${targetVariantCount === 1 ? "" : "s"} will generate on lock.`}
+                    : node.data.cuVideoGeneration
+                      ? `${targetVariantCount} image sheet${targetVariantCount === 1 ? "" : "s"} and ${targetVariantCount} CU video sheet${targetVariantCount === 1 ? "" : "s"} will generate on lock.`
+                      : `${targetVariantCount} outfit sheet${targetVariantCount === 1 ? "" : "s"} will generate on lock.`}
               </span>
               <button
                 className={`style-lock-button ${locked ? "locked" : ""}`}
@@ -7320,6 +7397,28 @@ function NodeBody({
           </section>
         ) : (
           <section className="character-sheet-view">
+            {hasCuVideoSheet && (
+              <div className="character-sheet-preview-switch" role="tablist" aria-label="Character sheet preview">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={characterSheetPreviewKind === "image"}
+                  className={characterSheetPreviewKind === "image" ? "active" : ""}
+                  onClick={() => onUpdate(node.id, { characterSheetPreviewKind: "image" })}
+                >
+                  Image Sheet
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={characterSheetPreviewKind === "video"}
+                  className={characterSheetPreviewKind === "video" ? "active" : ""}
+                  onClick={() => onUpdate(node.id, { characterSheetPreviewKind: "video" })}
+                >
+                  CU Video Sheet
+                </button>
+              </div>
+            )}
             {characterSheetPreviewItem ? (
               <div
                 className="character-sheet-drag-source"
@@ -9547,7 +9646,6 @@ function NodeBody({
     const isZImage = isZImageImageModel(node.data.model);
     const isKrea2Large = isKrea2LargeImageModel(node.data.model);
     const isSeedream5 = isSeedream5ImageModel(node.data.model);
-    const isNanoBanana2 = isNanoBanana2Model(node.data.model);
     const isOpenAiImage2 = node.data.model === imageModelNames.openAiImage2;
     const imageInstructionSources = imageInstructionSourcesForModel(node.data.model, incoming);
     const effectivePromptValue = isSam3Image || isZImage ? promptValue : buildEffectiveImagePrompt(promptValue, imageInstructionSources, node.data.aspectRatio, incomingByNode);
@@ -9725,7 +9823,7 @@ function NodeBody({
               </NodeRow>
               <NodeRow label="Resolution">
                 <select value={node.data.resolution} onChange={(event) => onUpdate(node.id, { resolution: event.target.value })}>
-                  {(isSeedream5 ? seedream5ResolutionOptions : isNanoBanana2 ? nanoBanana2ResolutionOptions : imageResolutionOptions).map((option) => (
+                  {imageModelResolutionOptions(node.data.model).map((option) => (
                     <option key={option}>{option}</option>
                   ))}
                 </select>
@@ -10826,6 +10924,7 @@ function createDefaultNodeData(type, label, count) {
       characterTraits: [],
       customCharacterTraits: "",
       cinematicCharacterSheet: false,
+      cuVideoGeneration: false,
       useCustomCharacterSheet: false,
       customCharacterSheet: null,
       characterVoices: [],
@@ -10837,6 +10936,7 @@ function createDefaultNodeData(type, label, count) {
       compiledTraitPrompt: "",
       compiledVoicePrompt: "",
       characterSheetVariants: [],
+      characterSheetPreviewKind: "image",
       characterBatchProgress: null,
       characterVariantNotice: ""
     };
@@ -10990,15 +11090,10 @@ function createDefaultNodeData(type, label, count) {
 
 function imageModelSelectionPatch(data = {}, model) {
   const isSeedream5 = isSeedream5ImageModel(model);
-  const isNanoBanana2 = isNanoBanana2Model(model);
   return {
     model,
     aspectRatio: normalizeImageModelAspectRatio(data.aspectRatio, model),
-    resolution: isSeedream5
-      ? normalizeChoice(String(data.resolution || "2K").toUpperCase(), seedream5ResolutionOptions, "2K")
-      : isNanoBanana2
-        ? normalizeNanoBanana2Resolution(data.resolution)
-        : normalizeImageModelResolution(data.resolution),
+    resolution: normalizeImageModelResolutionForModel(data.resolution, model),
     quality: normalizeOpenAiImage2Quality(data.quality),
     kreaCreativity: normalizeKrea2Creativity(data.kreaCreativity),
     seedreamLayers: isSeedream5 ? Boolean(data.seedreamLayers) : false,
@@ -11029,8 +11124,8 @@ function imageModelAspectRatioOptions(model) {
 }
 
 function imageModelSupportedAspectRatios(model) {
+  if (isReve21Model(model)) return reve21AspectRatios;
   if (isKrea2LargeImageModel(model)) return krea2AspectRatios;
-  if (isLumaImageModel(model)) return lumaImageAspectRatios;
   return isOpenAiImageModel(model) ? openAiImageAspectRatios : nanoImageAspectRatios;
 }
 
@@ -11083,28 +11178,21 @@ function zImageUnsupportedInputMessage() {
   return "Z-Image supports Prompt and Image Prompt only; Camera, Style, Mood Board, and Character inputs are not supported.";
 }
 
-function lumaImageUnsupportedInputMessage() {
-  return "Luma Dream Machine supports Prompt, Image Prompt, and Style inputs only; Camera, Mood Board, and Character inputs are not supported.";
-}
-
 function imageModelUnsupportedInputMessage(model) {
   if (isZImageImageModel(model)) return zImageUnsupportedInputMessage();
   if (isKrea2LargeImageModel(model)) return "This input is not supported by the selected model.";
-  if (isLumaImageModel(model)) return lumaImageUnsupportedInputMessage();
   return "";
 }
 
 function imageModelUnsupportedInputPorts(model) {
   if (isZImageImageModel(model)) return zImageUnsupportedInputPorts;
   if (isKrea2LargeImageModel(model)) return krea2UnsupportedInputPorts;
-  if (isLumaImageModel(model)) return lumaImageUnsupportedInputPorts;
   return emptyPortSet;
 }
 
 function imageModelUnsupportedSourceTypes(model) {
   if (isZImageImageModel(model)) return zImageUnsupportedSourceTypes;
   if (isKrea2LargeImageModel(model)) return krea2UnsupportedSourceTypes;
-  if (isLumaImageModel(model)) return lumaImageUnsupportedSourceTypes;
   return emptyPortSet;
 }
 
@@ -11147,11 +11235,6 @@ function imageReferenceConnectionsForModel(model, incoming = {}) {
     ...(!unsupportedPorts.has("transferIn") ? incoming.transferIn || [] : []),
     ...(!unsupportedPorts.has("characterIn") ? incoming.characterIn || [] : [])
   ];
-}
-
-function isLumaImageModel(model) {
-  const normalized = String(model || "").toLowerCase();
-  return normalized.includes("luma") || normalized.includes("photon");
 }
 
 function isWanFunControlModel(model) {
@@ -11277,6 +11360,19 @@ function videoModelSelectionPatch(data = {}, model) {
 
 function normalizeImageModelResolution(value) {
   return imageResolutionOptions.includes(value) ? value : "2K";
+}
+
+function imageModelResolutionOptions(model) {
+  if (isReve21Model(model)) return reve21ResolutionOptions;
+  if (isSeedream5ImageModel(model)) return seedream5ResolutionOptions;
+  if (isNanoBanana2Model(model)) return nanoBanana2ResolutionOptions;
+  return imageResolutionOptions;
+}
+
+function normalizeImageModelResolutionForModel(value, model) {
+  const options = imageModelResolutionOptions(model);
+  if (isNanoBanana2Model(model)) return normalizeNanoBanana2Resolution(value);
+  return normalizeChoice(String(value || options[0]).toUpperCase(), options, options[0]);
 }
 
 function normalizeAutoAspectModel(value) {
@@ -11927,10 +12023,10 @@ function directorPackageForVideo(source = null, incomingByNode = {}) {
   if (!source?.data?.skillDirectorBuilt || !source.data.resultText) return null;
   const directorIncoming = incomingByNode[source.id] || {};
   const references = [
-    ...(directorIncoming.characterIn || []).map(({ source: itemSource, edge }) => ({
+    ...(directorIncoming.characterIn || []).map(({ source: itemSource }) => ({
       type: "character",
       tag: characterTag(itemSource),
-      url: connectedOutputUrl(itemSource, edge)
+      url: preferredCharacterReferenceForVideo(itemSource)?.url || ""
     })),
     ...(directorIncoming.locationIn || []).map(({ source: itemSource, edge }) => ({
       type: "location",
@@ -12095,10 +12191,15 @@ function connectedAssetLabels(items = []) {
 function connectedCharacterReferences(items = []) {
   return items
     .filter(({ source }) => source.type === "character" && source.data.locked && source.data.activated && source.data.resultUrl)
-    .map(({ source }) => ({
-      url: source.data.resultUrl,
-      label: characterTag(source)
-    }));
+    .map(({ source }) => {
+      const reference = preferredCharacterReferenceForVideo(source);
+      if (!reference?.url) return null;
+      return {
+        url: reference.url,
+        label: reference.usesCuVideoSheet ? `${characterTag(source)} CU Video Character Sheet` : characterTag(source)
+      };
+    })
+    .filter(Boolean);
 }
 
 function connectedCharacterVoiceUrls(items = []) {
@@ -15119,18 +15220,13 @@ function normalizeModel3DData(data = {}) {
 function normalizeImageModelData(data = {}) {
   const model = data.model || imageModelNames.openAiImage2;
   const isSeedream5 = isSeedream5ImageModel(model);
-  const isNanoBanana2 = isNanoBanana2Model(model);
   return {
     ...data,
     title: data.title || "Image Model",
     model,
     prompt: data.prompt || "",
     aspectRatio: normalizeImageModelAspectRatio(data.aspectRatio, model),
-    resolution: isSeedream5
-      ? normalizeChoice(String(data.resolution || "2K").toUpperCase(), seedream5ResolutionOptions, "2K")
-      : isNanoBanana2
-        ? normalizeNanoBanana2Resolution(data.resolution)
-        : normalizeImageModelResolution(data.resolution),
+    resolution: normalizeImageModelResolutionForModel(data.resolution, model),
     quality: normalizeOpenAiImage2Quality(data.quality),
     kreaCreativity: normalizeKrea2Creativity(data.kreaCreativity),
     seedreamLayers: isSeedream5 ? Boolean(data.seedreamLayers) : false,

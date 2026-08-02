@@ -1,5 +1,7 @@
 export const outputDragMime = "application/x-newtnode-output";
 export const outputDragEndEvent = "newtnode-output-drag-end";
+export const fullResolutionContextPreparedAttribute = "data-full-resolution-context-prepared";
+export const fullResolutionPreviewSourceAttribute = "data-full-resolution-preview-source";
 const outputDragWindowKey = "__newtNodeDraggedOutputItem";
 
 const outputMediaTypes = new Set(["image", "video", "audio", "model3d"]);
@@ -88,6 +90,30 @@ export function fullResolutionImageProps(itemOrUrl, fileName = "") {
         || "image"
     ).trim()
   };
+}
+
+export function prepareFullResolutionImageForNativeSave(image) {
+  const fullResolutionUrl = String(
+    image?.dataset?.fullResolutionUrl
+      || image?.getAttribute?.("data-full-resolution-url")
+      || ""
+  ).trim();
+  const previewSource = String(image?.getAttribute?.("src") || "").trim();
+  if (!fullResolutionUrl || !previewSource || previewSource === fullResolutionUrl) return false;
+
+  image.setAttribute(fullResolutionPreviewSourceAttribute, previewSource);
+  image.setAttribute(fullResolutionContextPreparedAttribute, "true");
+  image.setAttribute("src", fullResolutionUrl);
+  return true;
+}
+
+export function restoreFullResolutionImagePreview(image) {
+  const previewSource = String(image?.getAttribute?.(fullResolutionPreviewSourceAttribute) || "").trim();
+  image?.removeAttribute?.(fullResolutionContextPreparedAttribute);
+  image?.removeAttribute?.(fullResolutionPreviewSourceAttribute);
+  if (!previewSource) return false;
+  image.setAttribute("src", previewSource);
+  return true;
 }
 
 export function hasOutputItemDragData(dataTransfer) {

@@ -42,9 +42,10 @@ import {
   klingO3ProAspectRatioOptions,
   klingO3ProDurationOptions,
   klingO3ProResolutionOptions,
-  lumaImageAspectRatios,
   nanoImageAspectRatios,
   openAiImageAspectRatios,
+  reve21AspectRatios,
+  reve21ResolutionOptions,
   seedanceVideoAspectRatioOptions,
   seedanceVideoDurationOptions,
   seedanceVideoResolutionOptions,
@@ -57,6 +58,7 @@ import {
 } from "./modelOptions.js";
 import { isGeminiOmniModel } from "./geminiOmni.js";
 import { isNanoBanana2Model, nanoBanana2ResolutionOptions } from "./nanoBanana2.js";
+import { isReve21Model } from "./reve21.js";
 import "./styles.css";
 
 installClientDiagnostics();
@@ -1008,8 +1010,8 @@ function isImageWorkspaceHistory(item) {
 }
 
 function imageAspectRatiosForModel(model) {
+  if (isReve21Model(model)) return reve21AspectRatios;
   if (isKrea2LargeImageModel(model)) return krea2AspectRatios;
-  if (isLumaImageModel(model)) return lumaImageAspectRatios;
   return model === imageModelNames.openAiImage2 ? openAiImageAspectRatios : nanoImageAspectRatios;
 }
 
@@ -1024,6 +1026,7 @@ function isSeedream5ImageModel(model) {
 }
 
 function imageResolutionOptionsForModel(model) {
+  if (isReve21Model(model)) return reve21ResolutionOptions;
   if (isNanoBanana2Model(model)) return nanoBanana2ResolutionOptions;
   return isSeedream5ImageModel(model) ? seedream5ResolutionOptions : imageResolutionOptions;
 }
@@ -1096,11 +1099,6 @@ function isKlingO3VideoModel(model) {
 
 function isKlingO34kVideoModel(model) {
   return isKlingO3VideoModel(model) && String(model || "").toLowerCase().includes("4k");
-}
-
-function isLumaImageModel(model) {
-  const normalized = String(model || "").toLowerCase();
-  return normalized.includes("luma") || normalized.includes("photon");
 }
 
 function isHappyHorseVideoModel(model) {

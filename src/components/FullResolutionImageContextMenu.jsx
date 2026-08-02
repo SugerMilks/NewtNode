@@ -1,87 +1,48 @@
 import React from "react";
-import { Download } from "lucide-react";
+import {
+  fullResolutionContextPreparedAttribute,
+  prepareFullResolutionImageForNativeSave,
+  restoreFullResolutionImagePreview
+} from "../mediaAssets.js";
 
-const menuWidth = 228;
-const menuHeight = 46;
-const menuMargin = 10;
+const restoreDelayMs = 60_000;
 
 export function FullResolutionImageContextMenu() {
-  const [menu, setMenu] = React.useState(null);
-  const menuRef = React.useRef(null);
-
   React.useEffect(() => {
-    function openMenu(event) {
+    let restoreTimer = 0;
+
+    function restorePreparedImages() {
+      window.clearTimeout(restoreTimer);
+      restoreTimer = 0;
+      document.querySelectorAll(`img[${fullResolutionContextPreparedAttribute}="true"]`).forEach(restoreFullResolutionImagePreview);
+    }
+
+    function prepareNativeImageMenu(event) {
+      restorePreparedImages();
+
       const image = event.target?.closest?.("img[data-full-resolution-url]");
       if (!image) return;
 
-      const url = String(image.dataset.fullResolutionUrl || "").trim();
-      if (!url) return;
+      if (!prepareFullResolutionImageForNativeSave(image)) return;
 
-      event.preventDefault();
-      event.stopPropagation();
-      setMenu({
-        x: clamp(event.clientX, menuMargin, window.innerWidth - menuWidth - menuMargin),
-        y: clamp(event.clientY, menuMargin, window.innerHeight - menuHeight - menuMargin),
-        url,
-        fileName: String(image.dataset.fullResolutionFileName || "image").trim() || "image"
-      });
+      // Native Save Image As reads the image's current src. Keep the original
+      // attached while the system menu is open, then restore the lightweight
+      // preview on the user's next page interaction.
+      restoreTimer = window.setTimeout(restorePreparedImages, restoreDelayMs);
     }
 
-    function closeMenu(event) {
-      if (menuRef.current?.contains(event.target)) return;
-      setMenu(null);
-    }
-
-    function handleKeyDown(event) {
-      if (event.key === "Escape") setMenu(null);
-    }
-
-    window.addEventListener("contextmenu", openMenu, true);
-    window.addEventListener("pointerdown", closeMenu, true);
-    window.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("blur", closeMenu);
-    window.addEventListener("resize", closeMenu);
+    window.addEventListener("contextmenu", prepareNativeImageMenu, true);
+    window.addEventListener("pointerdown", restorePreparedImages, true);
+    window.addEventListener("keydown", restorePreparedImages, true);
+    window.addEventListener("pagehide", restorePreparedImages);
     return () => {
-      window.removeEventListener("contextmenu", openMenu, true);
-      window.removeEventListener("pointerdown", closeMenu, true);
-      window.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("blur", closeMenu);
-      window.removeEventListener("resize", closeMenu);
+      window.removeEventListener("contextmenu", prepareNativeImageMenu, true);
+      window.removeEventListener("pointerdown", restorePreparedImages, true);
+      window.removeEventListener("keydown", restorePreparedImages, true);
+      window.removeEventListener("pagehide", restorePreparedImages);
+      restorePreparedImages();
     };
   }, []);
 
-  function downloadOriginal() {
-    if (!menu?.url) return;
-    const link = document.createElement("a");
-    link.href = menu.url;
-    link.download = menu.fileName;
-    link.rel = "noopener";
-    link.style.display = "none";
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    setMenu(null);
-  }
-
-  if (!menu) return null;
-
-  return (
-    <div
-      ref={menuRef}
-      className="full-resolution-context-menu"
-      style={{ left: menu.x, top: menu.y }}
-      role="menu"
-      aria-label="Image actions"
-      onContextMenu={(event) => event.preventDefault()}
-    >
-      <button type="button" role="menuitem" onClick={downloadOriginal}>
-        <Download size={15} />
-        <span>Download full resolution</span>
-      </button>
-    </div>
-  );
-}
-
-function clamp(value, minimum, maximum) {
-  return Math.min(Math.max(value, minimum), Math.max(minimum, maximum));
+  return null;
 }

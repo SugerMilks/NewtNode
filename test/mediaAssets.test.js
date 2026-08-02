@@ -2,11 +2,15 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  fullResolutionContextPreparedAttribute,
   fullResolutionImageProps,
+  fullResolutionPreviewSourceAttribute,
   fullResolutionOutputItem,
   isLocalDraggableMediaUrl,
   isLocalThumbnailUrl,
-  previewImageUrl
+  prepareFullResolutionImageForNativeSave,
+  previewImageUrl,
+  restoreFullResolutionImagePreview
 } from "../src/mediaAssets.js";
 
 test("thumbnail assets are display-only and cannot become draggable working media", () => {
@@ -79,4 +83,39 @@ test("thumbnail-only images do not expose a download target", () => {
     fullResolutionImageProps("/outputs/Test/thumbnails/full-resolution-preview.jpg"),
     {}
   );
+});
+
+test("native image context menus temporarily expose the full-resolution source", () => {
+  const attributes = new Map([
+    ["src", "/api/media-thumbnail?url=%2Foutputs%2FTest%2Ffull-resolution.png"],
+    ["data-full-resolution-url", "/outputs/Test/full-resolution.png"]
+  ]);
+  const image = {
+    dataset: { fullResolutionUrl: "/outputs/Test/full-resolution.png" },
+    getAttribute(name) {
+      return attributes.get(name) || "";
+    },
+    setAttribute(name, value) {
+      attributes.set(name, String(value));
+    },
+    removeAttribute(name) {
+      attributes.delete(name);
+    }
+  };
+
+  assert.equal(prepareFullResolutionImageForNativeSave(image), true);
+  assert.equal(attributes.get("src"), "/outputs/Test/full-resolution.png");
+  assert.equal(attributes.get(fullResolutionContextPreparedAttribute), "true");
+  assert.equal(
+    attributes.get(fullResolutionPreviewSourceAttribute),
+    "/api/media-thumbnail?url=%2Foutputs%2FTest%2Ffull-resolution.png"
+  );
+
+  assert.equal(restoreFullResolutionImagePreview(image), true);
+  assert.equal(
+    attributes.get("src"),
+    "/api/media-thumbnail?url=%2Foutputs%2FTest%2Ffull-resolution.png"
+  );
+  assert.equal(attributes.has(fullResolutionContextPreparedAttribute), false);
+  assert.equal(attributes.has(fullResolutionPreviewSourceAttribute), false);
 });

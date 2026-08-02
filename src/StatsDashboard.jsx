@@ -12,6 +12,7 @@ import {
 import { statsApi } from "./api/newtApi.js";
 import { estimateOpenAiImage2Cost, openAiImage2Costs, openAiImage2Quality } from "./openAiImage2.js";
 import { nanoBanana2Costs, normalizeNanoBanana2Resolution } from "./nanoBanana2.js";
+import { reve21CostPerImage } from "./reve21.js";
 
 const defaultPricing = {
   seedance: {
@@ -46,9 +47,8 @@ const defaultPricing = {
     cost: 0.06,
     styleReferenceCost: 0.065
   },
-  luma: {
-    photonCostPerMegapixel: 0.019,
-    ray2CostPerFiveSeconds540p: 0.5
+  reve21: {
+    costPerImage: reve21CostPerImage
   },
   hunyuan3DPro: {
     baseCost: 0.375,
@@ -492,6 +492,10 @@ function estimateItemCost(item, mediaType, pricing) {
   const modelKey = [item.modelName, settings.model, item.endpoint, item.mode].filter(Boolean).join(" ").toLowerCase();
 
   if (mediaType === "image") {
+    if (modelKey.includes("reve")) {
+      return pricing.reve21?.costPerImage ?? defaultPricing.reve21.costPerImage;
+    }
+
     if (modelKey.includes("qwen")) {
       return estimateMegapixelCost(item.remoteImage, 0.035);
     }
@@ -578,10 +582,6 @@ function estimateItemCost(item, mediaType, pricing) {
     const provider = String(item.provider || "").toLowerCase();
     const rate = provider.includes("fal") ? modelPricing.falCostPerSecond : modelPricing.googleCostPerSecond;
     return durationToSeconds(settings.duration) * rate;
-  }
-
-  if (modelKey.includes("luma") || modelKey.includes("luma-dream-machine") || modelKey.includes("luma-photon")) {
-    return mediaType === "image" ? estimateLumaPhotonStatsCost(item, pricing) : estimateLumaRay2StatsCost(item, settings, pricing);
   }
 
   if (modelKey.includes("wan-fun-control") || modelKey.includes("wan fun control")) {
@@ -708,21 +708,6 @@ function estimateSeedanceStatsCost(item, settings, pricing) {
   const dimensions = seedanceBillingDimensions(settings.resolution || item.cost?.resolution, settings.aspectRatio || item.cost?.aspectRatio);
   const billableUnits = (dimensions.width * dimensions.height * durationSeconds * billingFps) / 1024 / 1000;
   return billableUnits * unitRate;
-}
-
-function estimateLumaPhotonStatsCost(item, pricing) {
-  const lumaPricing = pricing.luma || defaultPricing.luma;
-  const megapixelCost = estimateMegapixelCost(item.remoteImage, lumaPricing.photonCostPerMegapixel);
-  return megapixelCost === null ? lumaPricing.photonCostPerMegapixel : megapixelCost;
-}
-
-function estimateLumaRay2StatsCost(item, settings, pricing) {
-  const lumaPricing = pricing.luma || defaultPricing.luma;
-  const seconds = durationToSeconds(settings.duration || item.cost?.durationSeconds || "5");
-  const durationMultiplier = seconds > 5 ? 2 : 1;
-  const resolution = String(settings.resolution || item.cost?.resolution || "540p").toLowerCase();
-  const resolutionMultiplier = resolution === "1080p" ? 4 : resolution === "720p" ? 2 : 1;
-  return lumaPricing.ray2CostPerFiveSeconds540p * durationMultiplier * resolutionMultiplier;
 }
 
 function seedanceBillingDimensions(resolution, aspectRatio) {

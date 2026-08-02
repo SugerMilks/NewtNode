@@ -244,6 +244,12 @@ function curveControlPoints(points = defaultCurvePoints) {
 
 function interpolatedCurveOutput(points, input) {
   if (points.length < 2) return input;
+  if (points.length === 2) {
+    const [start, end] = points;
+    const range = Math.max(1, end.input - start.input);
+    const t = clampCurveNumber((input - start.input) / range, 0, 1);
+    return Math.round(clampCurveNumber(start.output + (end.output - start.output) * t, 0, 255));
+  }
   let segmentIndex = 0;
   while (segmentIndex < points.length - 2 && input > points[segmentIndex + 1].input) {
     segmentIndex += 1;

@@ -119,7 +119,8 @@ export async function run3DModelGeneration({ node, imageViewUrls, workflowContex
   };
 }
 
-export async function runCharacterSheetGeneration({ node, prompt, portrait, wardrobe, workflowContext, characterTag }) {
+export async function runCharacterSheetGeneration({ node, prompt, portrait, wardrobe, workflowContext, characterTag, sheetKind = "image" }) {
+  const isVideoSheet = sheetKind === "video";
   const references = [
     { url: portrait.localUrl, label: "The Character portrait reference" },
     ...(wardrobe?.localUrl ? [{ url: wardrobe.localUrl, label: "Selected wardrobe sheet" }] : [])
@@ -133,7 +134,7 @@ export async function runCharacterSheetGeneration({ node, prompt, portrait, ward
     imagePromptLabels: references.map((item) => item.label),
     ...workflowContextPayload(workflowContext),
     nodeId: node.id,
-    nodeTitle: `${node.data.title || "Character"} Character Sheet`
+    nodeTitle: `${node.data.title || "Character"}${isVideoSheet ? " CU Video" : ""} Character Sheet`
   }, "Character sheet generation");
   if (!response.ok) throw new Error(data.error || "Character sheet generation failed.");
 
@@ -141,7 +142,7 @@ export async function runCharacterSheetGeneration({ node, prompt, portrait, ward
     url: data.image.localUrl,
     thumbnailUrl: data.image.thumbnailUrl || "",
     type: "image",
-    label: `@${characterTag} Character Sheet`,
+    label: `@${characterTag}${isVideoSheet ? " CU Video" : ""} Character Sheet`,
     fileName: data.image.fileName,
     text: data.text || "",
     cost: data.cost

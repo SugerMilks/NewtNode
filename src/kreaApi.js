@@ -7,8 +7,7 @@ export const kreaEndpoints = Object.freeze({
     "Nano Banana 2": "/generate/image/google/nano-banana-2",
     "Nano Banana Pro": "/generate/image/google/nano-banana-pro",
     "OpenAI Image 2": "/generate/image/openai/gpt-image-2",
-    "Krea 2 Large": "/generate/image/krea/krea-2/large",
-    "Luma Dream Machine": "/generate/image/luma/uni-1"
+    "Krea 2 Large": "/generate/image/krea/krea-2/large"
   }),
   video: Object.freeze({
     "Seedance 2.0": "/generate/video/bytedance/seedance-2",
@@ -28,8 +27,7 @@ const kreaImagePrices = Object.freeze({
   "Z-Image": Object.freeze({ "1K": 0.003 }),
   "Nano Banana 2": Object.freeze({ "1K": 0.08, "2K": 0.12, "4K": 0.16 }),
   "Nano Banana Pro": Object.freeze({ "1K": 0.15, "2K": 0.15, "4K": 0.3 }),
-  "Krea 2 Large": Object.freeze({ "1K": 0.06 }),
-  "Luma Dream Machine": Object.freeze({ "1K": 0.0404, "2K": 0.1, "4K": 0.1 })
+  "Krea 2 Large": Object.freeze({ "1K": 0.06 })
 });
 
 export function resolveFalKreaProvider({ falKey, kreaKey } = {}) {
@@ -99,18 +97,6 @@ export function buildKreaImageInput({
     });
   }
 
-  if (modelName === "Luma Dream Machine") {
-    const dimensions = dimensionsForAspectRatio(normalizedAspectRatio, resolutionScale(normalizedResolution));
-    return compact({
-      ...input,
-      width: dimensions.width,
-      height: dimensions.height,
-      mode: normalizedResolution === "1K" ? "standard" : "max",
-      output_format: "png",
-      style_images: refs.slice(0, 9).map((url) => ({ url, strength: 1 }))
-    });
-  }
-
   if (modelName === "Z-Image") {
     return compact({
       ...input,
@@ -157,8 +143,6 @@ export function estimateKreaImageCost({ modelName, resolution, referenceCount = 
     amountUsd = base + Math.max(0, Number(referenceCount) - 1) * 0.00315;
   } else if (modelName === "Krea 2 Large" && referenceCount > 0) {
     amountUsd = 0.065;
-  } else if (modelName === "Luma Dream Machine" && referenceCount > 0 && amountUsd != null) {
-    amountUsd += Math.min(9, Number(referenceCount)) * 0.003;
   }
 
   return {
@@ -242,12 +226,6 @@ function dimensionsForAspectRatio(value, longEdge) {
     width: Math.max(512, Math.round(width / 8) * 8),
     height: Math.max(512, Math.round(height / 8) * 8)
   };
-}
-
-function resolutionScale(value) {
-  if (value === "4K") return 4096;
-  if (value === "2K") return 2048;
-  return 1024;
 }
 
 function ratioNumber(value) {

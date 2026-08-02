@@ -25,14 +25,14 @@ test("current shared NewtNode models resolve to Krea endpoints", () => {
     "Nano Banana 2",
     "Nano Banana Pro",
     "OpenAI Image 2",
-    "Krea 2 Large",
-    "Luma Dream Machine"
+    "Krea 2 Large"
   ].forEach((name) => assert.equal(supportsKreaModel("image", name), true, name));
 
   assert.equal(kreaEndpointForModel("video", "Seedance 2.0"), "/generate/video/bytedance/seedance-2");
   assert.equal(kreaEndpointForModel("video", "Kling O3 Pro"), "/generate/video/kling/kling-3.0");
   assert.equal(kreaEndpointForModel("video", "Gemini Omni Flash"), "/generate/video/google/gemini-omni-flash");
   assert.equal(kreaEndpointForModel("model3d", "Hunyuan 3D 3.1 Pro"), "/generate/3d/tencent/hunyuan3d-3.1-pro");
+  assert.equal(supportsKreaModel("image", "REVE 2.1"), false);
 });
 
 test("OpenAI Image 2 Krea input preserves high quality, references, and output controls", () => {

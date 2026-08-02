@@ -5631,6 +5631,36 @@ video.newtnode-video-fallback {
 .character-sheet-view {
   display: grid;
   place-items: center;
+  position: relative;
+}
+
+.character-sheet-preview-switch {
+  position: absolute;
+  z-index: 2;
+  top: 8px;
+  right: 8px;
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 7px;
+  background: rgba(8, 8, 8, 0.86);
+  backdrop-filter: blur(8px);
+}
+
+.character-sheet-preview-switch button {
+  min-height: 25px;
+  padding: 0 8px;
+  border-radius: 5px;
+  color: rgba(244, 240, 232, 0.5);
+  background: transparent;
+  font-size: 10px;
+  font-weight: 760;
+}
+
+.character-sheet-preview-switch button.active {
+  color: #f4f0e8;
+  background: rgba(255, 255, 255, 0.12);
 }
 
 .character-sheet-drag-source {

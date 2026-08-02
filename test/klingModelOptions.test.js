@@ -67,5 +67,4 @@ test("unsupported video models never serialize a Film Director package", () => {
 
 test("removed video models are no longer selectable", () => {
   assert.equal(videoModelOptions.includes("Seedance 2.0 Fast"), false);
-  assert.equal(videoModelOptions.includes("Luma Dream Machine"), false);
 });

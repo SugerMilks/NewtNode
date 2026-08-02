@@ -31,6 +31,16 @@ import {
   nanoBanana2FalEditEndpoint as defaultNanoBanana2FalEditEndpoint,
   nanoBanana2FalTextEndpoint as defaultNanoBanana2FalTextEndpoint
 } from "../src/nanoBanana2.js";
+import {
+  buildReve21FalRequest,
+  estimateReve21ImageCost,
+  isReve21Model,
+  reve21AspectRatios,
+  reve21CostPerImage,
+  reve21FalEditEndpoint as defaultReve21FalEditEndpoint,
+  reve21FalRemixEndpoint as defaultReve21FalRemixEndpoint,
+  reve21FalTextEndpoint as defaultReve21FalTextEndpoint
+} from "../src/reve21.js";
 import { filmDirectorAdjacentCoverageIssue } from "../src/filmDirectorCoverage.js";
 import { filmDirectorCutLimit } from "../src/filmDirectorLimits.js";
 import { buildFilmDirectorRevisionPrompt } from "../src/filmDirectorRevision.js";
@@ -160,7 +170,6 @@ const krea2LargeStyleReferenceCost = Number(process.env.KREA_2_LARGE_IMAGE_STYLE
 const seedream5ProCostSmall = Number(process.env.SEEDREAM_5_PRO_COST_SMALL || 0.0675);
 const seedream5ProCost2K = Number(process.env.SEEDREAM_5_PRO_COST_2K || 0.135);
 const seedreamLayerSeparationCost = Number(process.env.SEEDREAM_LAYER_SEPARATION_COST || 0.05);
-const lumaPhotonCostPerMegapixel = Number(process.env.LUMA_PHOTON_COST_PER_MEGAPIXEL || 0.019);
 const hunyuan3DProBaseCost = Number(process.env.HUNYUAN_3D_PRO_BASE_COST || 0.375);
 const hunyuan3DProAddOnCost = Number(process.env.HUNYUAN_3D_PRO_ADD_ON_COST || 0.15);
 const nanoImageAspectRatios = ["21:9", "16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3", "4:5", "5:4"];
@@ -168,15 +177,14 @@ const openAiImageAspectRatios = nanoImageAspectRatios;
 const krea2AspectRatios = ["16:9", "1:1", "4:3", "3:2", "2.35:1", "4:5", "2:3", "9:16"];
 const krea2CreativityOptions = ["raw", "low", "medium", "high"];
 const storyboardAspectRatioOptions = ["16:9", "21:9", "9:16", "1:1"];
-const lumaImageAspectRatios = ["21:9", "16:9", "9:16", "1:1", "4:3", "3:4", "9:21"];
 const imageModelNames = {
   zImage: "Z-Image",
   seedream5Pro: "Seedream 5.0 Pro",
   nanoBanana2: "Nano Banana 2",
   nanoBananaPro: "Nano Banana Pro",
   openAiImage2: "OpenAI Image 2",
-  krea2Large: "Krea 2 Large",
-  lumaDreamMachine: "Luma Dream Machine"
+  reve21: "REVE 2.1",
+  krea2Large: "Krea 2 Large"
 };
 const imageModelOptions = [
   imageModelNames.zImage,
@@ -184,8 +192,8 @@ const imageModelOptions = [
   imageModelNames.nanoBanana2,
   imageModelNames.nanoBananaPro,
   imageModelNames.openAiImage2,
-  imageModelNames.krea2Large,
-  imageModelNames.lumaDreamMachine
+  imageModelNames.reve21,
+  imageModelNames.krea2Large
 ];
 const videoModelNames = {
   seedance: "Seedance 2.0",
@@ -214,6 +222,9 @@ const falNanoBanana2TextEndpoint = process.env.FAL_NANO_BANANA_2_ENDPOINT || def
 const falNanoBanana2EditEndpoint = process.env.FAL_NANO_BANANA_2_EDIT_ENDPOINT || defaultNanoBanana2FalEditEndpoint;
 const falZImageEndpoint = process.env.FAL_Z_IMAGE_ENDPOINT || "fal-ai/z-image/turbo";
 const falKrea2LargeEndpoint = process.env.FAL_KREA_2_LARGE_ENDPOINT || "krea/v2/large/text-to-image";
+const falReve21TextEndpoint = process.env.FAL_REVE_2_1_TEXT_ENDPOINT || defaultReve21FalTextEndpoint;
+const falReve21EditEndpoint = process.env.FAL_REVE_2_1_EDIT_ENDPOINT || defaultReve21FalEditEndpoint;
+const falReve21RemixEndpoint = process.env.FAL_REVE_2_1_REMIX_ENDPOINT || defaultReve21FalRemixEndpoint;
 const falSeedream5ProTextEndpoint = process.env.FAL_SEEDREAM_5_PRO_TEXT_ENDPOINT || "bytedance/seedream/v5/pro/text-to-image";
 const falSeedream5ProEditEndpoint = process.env.FAL_SEEDREAM_5_PRO_EDIT_ENDPOINT || "bytedance/seedream/v5/pro/edit";
 const falSeedreamLayerEndpoint = process.env.FAL_SEEDREAM_LAYER_ENDPOINT || "fal-ai/qwen-image-layered";
@@ -225,7 +236,6 @@ const falKlingO34kReferenceEndpoint = process.env.FAL_KLING_O3_4K_REFERENCE_ENDP
 const googleGeminiOmniModel = process.env.GOOGLE_GEMINI_OMNI_MODEL || defaultGeminiOmniGoogleModel;
 const falGeminiOmniTextEndpoint = process.env.FAL_GEMINI_OMNI_TEXT_ENDPOINT || defaultGeminiOmniFalTextEndpoint;
 const falGeminiOmniReferenceEndpoint = process.env.FAL_GEMINI_OMNI_REFERENCE_ENDPOINT || defaultGeminiOmniFalReferenceEndpoint;
-const falLumaPhotonEndpoint = process.env.FAL_LUMA_PHOTON_ENDPOINT || "fal-ai/luma-photon";
 const falTextRequestCost = Number(process.env.FAL_TEXT_REQUEST_COST || 0.001);
 const falVisionTextUnitCost = Number(process.env.FAL_VISION_TEXT_UNIT_COST || 0.01);
 const falVideoTextUnitCost = Number(process.env.FAL_VIDEO_TEXT_UNIT_COST || 0.01);
@@ -487,7 +497,6 @@ function buildHealthPayload() {
     falKlingO34kImageEndpoint,
     falKlingO34kReferenceEndpoint,
     falNanoBananaProEndpoint,
-    falLumaPhotonEndpoint,
     openAiKeyConfigured: Boolean(process.env.OPENAI_API_KEY || openAiTextApiKey),
     openAiTextKeyConfigured: Boolean(openAiTextApiKey),
     openAiImage2ViaFalConfigured: Boolean(process.env.FAL_KEY),
@@ -1099,10 +1108,6 @@ app.get("/api/stats", async (_req, res) => {
         costPerMegapixel: zImageCostPerMegapixel,
         currency: "USD"
       },
-      luma: {
-        photonCostPerMegapixel: lumaPhotonCostPerMegapixel,
-        currency: "USD"
-      },
       openAiImage2: {
         quality: openAiImage2Quality,
         costs: openAiImage2Costs,
@@ -1112,6 +1117,10 @@ app.get("/api/stats", async (_req, res) => {
       krea2Large: {
         cost: krea2LargeCost,
         styleReferenceCost: krea2LargeStyleReferenceCost,
+        currency: "USD"
+      },
+      reve21: {
+        costPerImage: reve21CostPerImage,
         currency: "USD"
       },
       hunyuan3DPro: {
@@ -2004,54 +2013,54 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
       });
     }
 
-    if (selectedModel.provider === "fal-luma-photon") {
+    if (selectedModel.provider === "fal-reve-2-1") {
       if (!process.env.FAL_KEY) {
-        return res.status(400).json({ error: "Missing FAL_KEY in .env." });
+        return res.status(400).json({ error: "REVE 2.1 requires an enabled Fal API key in Settings." });
       }
 
-      const lumaImage = await generateFalLumaPhoton({
+      const reveImage = await generateFalReve21({
         prompt,
         imagePromptUrls,
         imagePromptLabels,
         aspectRatio
       });
-      const output = await downloadImage(req, lumaImage.remoteImage.url, "luma-photon", lumaImage.remoteImage.content_type || lumaImage.remoteImage.mimeType);
-      const cost = estimateLumaPhotonCost({ aspectRatio, remoteImage: lumaImage.remoteImage, endpoint: lumaImage.endpoint });
+      const output = await downloadImage(req, reveImage.remoteImage.url, "reve-2-1", reveImage.remoteImage.content_type || reveImage.remoteImage.mimeType);
+      const cost = estimateReve21ImageCost({ endpoint: reveImage.endpoint });
 
       await appendHistory({
-        id: lumaImage.requestId || randomUUID(),
+        id: reveImage.requestId || randomUUID(),
         createdAt: new Date().toISOString(),
         mediaType: "image",
         provider: "fal.ai",
         modelName: selectedModel.displayName,
-        endpoint: lumaImage.endpoint,
-        mode: imagePromptUrls.length ? "Luma image edit" : "Luma image generation",
+        endpoint: reveImage.endpoint,
+        mode: "REVE 2.1 " + reveImage.mode,
         prompt,
-        submittedPrompt: lumaImage.submittedPrompt,
+        submittedPrompt: reveImage.submittedPrompt,
         project: projectFromBody(req.body),
         node: nodeFromBody(req.body),
         settings: {
           model: req.body.model || selectedModel.displayName,
           aspectRatio,
           requestedAspectRatio: requestedAspectRatio || aspectRatio,
-          resolution: req.body.resolution || "",
-          imagePromptCount: imagePromptUrls.length,
-          imagePromptLabels: cleanReferenceLabels
+          resolution: "4K",
+          imagePromptCount: reveImage.referenceCount,
+          imagePromptLabels: reveImage.referenceLabels
         },
         cost,
-        remoteImage: lumaImage.remoteImage,
+        remoteImage: reveImage.remoteImage,
         localImage: output.publicPath,
         localThumbnail: output.thumbnailPublicPath,
         outputFileName: output.fileName,
         outputBytes: output.bytes,
-        text: lumaImage.resultText || ""
+        text: reveImage.resultText || ""
       });
 
       return res.json({
-        text: lumaImage.resultText || "",
+        text: reveImage.resultText || "",
         cost,
         image: {
-          ...lumaImage.remoteImage,
+          ...reveImage.remoteImage,
           localUrl: output.publicPath,
           thumbnailUrl: output.thumbnailPublicPath,
           fileName: output.fileName,
@@ -9516,25 +9525,6 @@ function estimateSeedream5ProCost({ resolution, imageSize, layerSeparation = fal
   };
 }
 
-function estimateLumaPhotonCost({ aspectRatio, remoteImage = {}, endpoint }) {
-  const width = Number(remoteImage.width || remoteImage.metadata?.width || 0);
-  const height = Number(remoteImage.height || remoteImage.metadata?.height || 0);
-  const megapixels = width > 0 && height > 0 ? (width * height) / 1000000 : 1;
-
-  return {
-    amountUsd: roundCurrency(megapixels * lumaPhotonCostPerMegapixel),
-    currency: "USD",
-    unitRateUsd: lumaPhotonCostPerMegapixel,
-    units: roundUsageUnits(megapixels),
-    unit: "megapixel",
-    mediaType: "image",
-    aspectRatio,
-    pricingBasis: "Luma Photon fal.ai per-megapixel estimate",
-    pricingSource: "fal-model-page-2026-05-31",
-    endpoint
-  };
-}
-
 function estimateHunyuan3DProCost({ generateType, enablePbr, faceCount, inputImageCount = 1, endpoint }) {
   const customFaceCount = Number(faceCount) !== 500000;
   const multiView = Number(inputImageCount) > 1;
@@ -11107,19 +11097,19 @@ function resolveImageModel(model) {
     };
   }
 
+  if (isReve21Model(model)) {
+    return {
+      provider: "fal-reve-2-1",
+      displayName: imageModelNames.reve21,
+      id: falReve21TextEndpoint
+    };
+  }
+
   if (normalized.includes("krea") && normalized.includes("large")) {
     return {
       provider: "fal-krea-2-large",
       displayName: imageModelNames.krea2Large,
       id: falKrea2LargeEndpoint
-    };
-  }
-
-  if (normalized.includes("luma") || normalized.includes("photon")) {
-    return {
-      provider: "fal-luma-photon",
-      displayName: "Luma Dream Machine",
-      id: falLumaPhotonEndpoint
     };
   }
 
@@ -11397,8 +11387,8 @@ function normalizeImageAspectRatioForProvider(value, provider) {
 }
 
 function imageAspectRatiosForProvider(provider) {
+  if (provider === "fal-reve-2-1") return reve21AspectRatios;
   if (provider === "fal-krea-2-large") return krea2AspectRatios;
-  if (provider === "fal-luma-photon") return lumaImageAspectRatios;
   return provider === "fal-openai-image-2" ? openAiImageAspectRatios : nanoImageAspectRatios;
 }
 
@@ -12940,47 +12930,6 @@ async function generateFalZImage({ prompt, imagePromptUrls, imagePromptLabels, a
   };
 }
 
-async function generateFalLumaPhoton({ prompt, imagePromptUrls, imagePromptLabels, aspectRatio }) {
-  const imageInputs = [];
-
-  for (const [index, imagePromptUrl] of imagePromptUrls.entries()) {
-    const asset = await readLocalAsset(imagePromptUrl);
-    if (!asset.mimeType.startsWith("image/")) continue;
-    imageInputs.push({
-      ...asset,
-      label: cleanImagePromptLabel(imagePromptLabels[index])
-    });
-  }
-
-  const baseEndpoint = falLumaPhotonEndpoint.replace(/\/modify$/i, "");
-  const endpoint = imageInputs.length ? `${baseEndpoint}/modify` : baseEndpoint;
-  const submittedPrompt = promptWithReferenceLabels(prompt, imageInputs.slice(0, 1));
-  const input = {
-    prompt: submittedPrompt,
-    aspect_ratio: normalizeImageAspectRatioForProvider(aspectRatio, "fal-luma-photon")
-  };
-
-  if (imageInputs.length) {
-    input.image_url = await uploadImageInputToFal(imageInputs[0], 0);
-    input.strength = clampNumber(process.env.LUMA_PHOTON_MODIFY_STRENGTH || 0.8, 0, 1, 0.8);
-  }
-
-  const result = await subscribeFal(endpoint, { input, logs: true });
-  const remoteImage = firstFalImageResult(result?.data);
-
-  if (!remoteImage?.url) {
-    throw new Error("Fal returned no Luma Photon image URL.");
-  }
-
-  return {
-    endpoint,
-    requestId: result.requestId,
-    remoteImage,
-    submittedPrompt,
-    resultText: result?.data?.description || result?.data?.text || ""
-  };
-}
-
 async function generateFalKrea2Large({ prompt, imagePromptUrls, imagePromptLabels, aspectRatio, creativity }) {
   const imageInputs = [];
 
@@ -13022,6 +12971,50 @@ async function generateFalKrea2Large({ prompt, imagePromptUrls, imagePromptLabel
     creativity: normalizedCreativity,
     imageStyleReferenceCount: styleReferences.length,
     submittedPrompt: input.prompt,
+    resultText: result?.data?.description || result?.data?.text || result?.data?.prompt || ""
+  };
+}
+
+async function generateFalReve21({ prompt, imagePromptUrls, imagePromptLabels, aspectRatio }) {
+  const imageInputs = [];
+
+  for (const [index, imagePromptUrl] of imagePromptUrls.entries()) {
+    const asset = await readLocalAsset(imagePromptUrl);
+    if (!asset.mimeType.startsWith("image/")) continue;
+    imageInputs.push({
+      ...asset,
+      label: cleanImagePromptLabel(imagePromptLabels[index])
+    });
+  }
+
+  const references = imageInputs.slice(0, 8);
+  const imageUrls = await Promise.all(references.map(uploadImageInputToFal));
+  const request = buildReve21FalRequest({
+    prompt,
+    imageUrls,
+    imageLabels: references.map((item) => item.label),
+    aspectRatio
+  });
+  const endpoint = request.mode === "edit"
+    ? falReve21EditEndpoint
+    : request.mode === "remix"
+      ? falReve21RemixEndpoint
+      : falReve21TextEndpoint;
+  const result = await subscribeFal(endpoint, { input: request.input, logs: true });
+  const remoteImage = firstFalImageResult(result?.data);
+
+  if (!remoteImage?.url) {
+    throw new Error("Fal returned no REVE 2.1 image URL.");
+  }
+
+  return {
+    endpoint,
+    requestId: result?.requestId || result?.request_id || "",
+    remoteImage,
+    mode: request.mode,
+    referenceCount: request.referenceCount,
+    referenceLabels: request.referenceLabels,
+    submittedPrompt: request.submittedPrompt,
     resultText: result?.data?.description || result?.data?.text || result?.data?.prompt || ""
   };
 }

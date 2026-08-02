@@ -1,3 +1,5 @@
+export { reve21AspectRatios, reve21ResolutionOptions } from "./reve21.js";
+
 export const characterTraitOptions = ["serious", "pleasant", "happy", "angry", "sad", "silly", "confident", "content", "excited", "passionate", "fanatic", "anxious", "scared", "arrogant", "stubborn", "curious"];
 export const batchOptions = ["1", "2", "3", "4"];
 export const imageBatchOptions = Array.from({ length: 9 }, (_value, index) => String(index + 1));
@@ -8,8 +10,8 @@ export const imageModelNames = {
   nanoBanana2: "Nano Banana 2",
   nanoBananaPro: "Nano Banana Pro",
   openAiImage2: "OpenAI Image 2",
-  krea2Large: "Krea 2 Large",
-  lumaDreamMachine: "Luma Dream Machine"
+  reve21: "REVE 2.1",
+  krea2Large: "Krea 2 Large"
 };
 export const imageModelOptions = [
   imageModelNames.zImage,
@@ -17,14 +19,13 @@ export const imageModelOptions = [
   imageModelNames.nanoBanana2,
   imageModelNames.nanoBananaPro,
   imageModelNames.openAiImage2,
-  imageModelNames.krea2Large,
-  imageModelNames.lumaDreamMachine
+  imageModelNames.reve21,
+  imageModelNames.krea2Large
 ];
 export const nanoImageAspectRatios = ["21:9", "16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3", "4:5", "5:4"];
 export const openAiImageAspectRatios = nanoImageAspectRatios;
 export const krea2AspectRatios = ["16:9", "1:1", "4:3", "3:2", "2.35:1", "4:5", "2:3", "9:16"];
 export const krea2CreativityOptions = ["raw", "low", "medium", "high"];
-export const lumaImageAspectRatios = ["21:9", "16:9", "9:16", "1:1", "4:3", "3:4", "9:21"];
 export const imageResolutionOptions = ["2K", "1K", "4K"];
 export const seedream5ResolutionOptions = ["2K", "1K"];
 export const seedanceVideoDurationOptions = ["15 seconds", "10 seconds", "5 seconds"];
