@@ -84,6 +84,7 @@ import {
 import {
   defaultFrameItPoseId,
   defaultFrameItScene,
+  frameItGenerationPrompt,
   normalizeFrameItSavedPoses,
   normalizeFrameItScene
 } from "./frameItState.js";
@@ -129,6 +130,7 @@ import {
   characterVideoWardrobePrompt,
   preferredCharacterReferenceForVideo
 } from "./characterVideoSheets.js";
+import { characterSheetModelOptions, normalizeCharacterSheetModel } from "./characterSheetModels.js";
 import { normalizeOpenAiImage2Quality, openAiImage2Quality, openAiImage2QualityOptions } from "./openAiImage2.js";
 import { coverageMethods, coveragePreviewItems, coverageShotsForMethod, normalizeCoverageMethod } from "./coveragePresets.js";
 import {
@@ -206,6 +208,13 @@ import {
 import { isGeminiOmniModel } from "./geminiOmni.js";
 import { isNanoBanana2Model, nanoBanana2ResolutionOptions, normalizeNanoBanana2Resolution } from "./nanoBanana2.js";
 import { isReve21Model } from "./reve21.js";
+import {
+  analyzeColorLookPalette,
+  buildColorGradePrompt,
+  gradePresetNames,
+  gradePresetPrompts,
+  normalizeGradePresetName
+} from "./colorLook.js";
 import {
   clamp,
   clampContextMenuPosition,
@@ -1902,7 +1911,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     let nextSkillDirectorData = null;
     let nextVideoModelData = null;
     const cameraPresetChanged = ["shotPreset", "lensPreset", "typePreset"].some((key) => Object.prototype.hasOwnProperty.call(patch, key));
-    const styleOutputMaybeChanged = ["stylePreset", "customPaletteRgbText", "customPaletteColors", "customPalettePreviewUrl"].some((key) => Object.prototype.hasOwnProperty.call(patch, key));
+    const styleOutputMaybeChanged = ["stylePreset", "gradePreset", "customPaletteRgbText", "customPaletteColors", "customPalettePreviewUrl"].some((key) => Object.prototype.hasOwnProperty.call(patch, key));
     setNodes((current) => {
       const shouldUpdateConnectedPreviews = Array.isArray(patch.resultItems) && patch.resultItems.some((item) => item?.url);
       const nextNodes = current.map((node) =>
@@ -2167,6 +2176,128 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       loadOutputHistory();
     } catch (error) {
       updateNode(node.id, { status: "error", error: error.message });
+      throw error;
+    }
+  }
+
+  async function generateFrameItMedia(node, imageDataUrl, mode = "image") {
+    pushUndoSnapshot();
+    updateNode(node.id, { status: "uploading", error: "" });
+
+    try {
+      const frameItScene = normalizeFrameItScene(node.data.frameItScene);
+      const { response: guideResponse, data: guideData } = await nodeApi.composerFrame({
+        ...workflowRequestContext(),
+        imageDataUrl,
+        captureKind: "frame-it-guide",
+        nodeId: node.id,
+        nodeTitle: node.data.title,
+        aspectRatio: node.data.frameItAspectRatio || "16:9",
+        figureCount: frameItScene.figures.length
+      }, "Frame It guide");
+      if (!guideResponse.ok) throw new Error(guideData.error || "Frame It guide capture failed.");
+
+      updateNode(node.id, { status: "running", error: "" });
+      const prompt = frameItGenerationPrompt({
+        mode,
+        shotPresetId: node.data.frameItShotPreset,
+        subject: node.data.frameItSubjectPrompt,
+        environment: node.data.frameItEnvironmentPrompt,
+        style: node.data.frameItStylePrompt,
+        prompt: node.data.frameItPrompt,
+        cameraMotion: node.data.frameItCameraMotion,
+        useCharacterSheet: node.data.frameItCharacterSheet !== false,
+        useEnvironmentSheet: node.data.frameItEnvironmentSheet !== false
+      });
+      const workflowContext = workflowRequestContext();
+      let generatedItem;
+
+      if (mode === "video") {
+        const syntheticVideoNode = {
+          ...node,
+          data: {
+            ...node.data,
+            model: node.data.frameItVideoModel || enabledVideoModels[0] || videoModelNames.seedance,
+            duration: node.data.frameItDuration || "5 seconds",
+            resolution: node.data.frameItVideoResolution || "720p",
+            aspectRatio: node.data.frameItAspectRatio || "16:9",
+            generateAudio: false
+          }
+        };
+        const { response, data } = await nodeApi.generateVideo(buildVideoGenerationRequest({
+          node: syntheticVideoNode,
+          prompt,
+          workflowContext,
+          projectId,
+          projectName,
+          referenceImageUrls: [guideData.image.localUrl],
+          referenceImageLabels: ["Frame It camera, composition, and blocking guide"]
+        }), "Frame It video");
+        if (!response.ok) throw new Error(data.error || "Frame It video generation failed.");
+        generatedItem = {
+          id: `frame-it-result-${Date.now()}`,
+          url: data.video.localUrl,
+          thumbnailUrl: data.video.thumbnailUrl || "",
+          type: "video",
+          label: "Frame It video",
+          cost: data.cost
+        };
+      } else {
+        const model = node.data.frameItImageModel || enabledImageModels[0] || imageModelNames.openAiImage2;
+        const { response, data } = await nodeApi.generateImage({
+          prompt,
+          model,
+          aspectRatio: node.data.frameItAspectRatio || "16:9",
+          requestedAspectRatio: node.data.frameItAspectRatio || "16:9",
+          resolution: node.data.frameItImageResolution || "2K",
+          quality: openAiImage2Quality,
+          seedreamLayers: false,
+          imagePromptUrls: [guideData.image.localUrl],
+          imagePromptLabels: ["Frame It camera, composition, and blocking guide"],
+          ...workflowContextPayload(workflowContext),
+          nodeId: node.id,
+          nodeTitle: node.data.title
+        }, "Frame It image");
+        if (!response.ok) throw new Error(data.error || "Frame It image generation failed.");
+        const image = Array.isArray(data.images) && data.images.length ? data.images[0] : data.image;
+        if (!image?.localUrl) throw new Error("Frame It image generation returned no image.");
+        generatedItem = {
+          id: `frame-it-result-${Date.now()}`,
+          url: image.localUrl,
+          thumbnailUrl: image.thumbnailUrl || "",
+          type: "image",
+          label: "Frame It image",
+          cost: data.cost
+        };
+      }
+
+      const currentNode = nodesRef.current.find((item) => item.id === node.id) || node;
+      const existingGuides = existingResultItemsForNode(currentNode, "image");
+      const nextGuides = appendResultItems(existingGuides, [{
+        url: guideData.image.localUrl,
+        type: "image",
+        label: `Frame It guide ${existingGuides.length + 1}`,
+        fileName: guideData.image.fileName,
+        mimeType: guideData.image.mimeType,
+        cost: guideData.cost
+      }], "image");
+      const generatedItems = [...(Array.isArray(currentNode.data.frameItGeneratedItems) ? currentNode.data.frameItGeneratedItems : []), generatedItem].slice(-12);
+
+      updateNode(node.id, {
+        fileName: guideData.image.fileName,
+        mimeType: guideData.image.mimeType,
+        mediaType: "image",
+        resultUrl: guideData.image.localUrl,
+        resultItems: nextGuides,
+        selectedResultIndex: Math.max(0, nextGuides.length - 1),
+        frameItGeneratedItems: generatedItems,
+        status: "complete",
+        error: ""
+      });
+      setSaveStatus(`Frame It ${mode} created`);
+      loadOutputHistory();
+    } catch (error) {
+      updateNode(node.id, { status: "error", error: error.message || "Frame It generation failed." });
       throw error;
     }
   }
@@ -4571,8 +4702,12 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     }
 
     if (source?.type === "style") {
-      if ((source.data.stylePreset || "None") === "None") return "Choose a Style preset before connecting";
-      if ((source.data.stylePreset || "None") === "Custom Palette" && !customPalettePromptPiece(source.data)) return "Add palette colors before connecting";
+      if (!styleOutputEnabled(source.data)) return "Choose a Style or Grade before connecting";
+      if (
+        normalizeGradePresetName(source.data.gradePreset || "None") === "Custom"
+        && !customGradePromptPiece(source.data)
+        && (!source.data.stylePreset || source.data.stylePreset === "None")
+      ) return "Add custom grade colors before connecting";
       if (target.type === "imageModel" && to.port === "styleIn") return "";
       if (target.type === "text" && to.port === "styleIn") return "";
       if (target.type === "storyboard" && to.port === "styleIn") {
@@ -5686,6 +5821,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
               onPreviewLayoutExport={exportPreviewLayoutBoard}
               onOpenComposer={setComposerEditorNodeId}
               onFrameItCapture={captureFrameItFrame}
+              onFrameItGenerate={generateFrameItMedia}
               onCanvasPanStart={beginCanvasPan}
               running={node.data.status === "running"}
               transferCompiling={compilingTransferNodeId === node.id}
@@ -5972,6 +6108,7 @@ function NodeCard({
   onPreviewLayoutExport,
   onOpenComposer,
   onFrameItCapture,
+  onFrameItGenerate,
   onCanvasPanStart,
   running,
   transferCompiling,
@@ -6173,6 +6310,7 @@ function NodeCard({
         onPreviewLayoutExport={onPreviewLayoutExport}
         onOpenComposer={onOpenComposer}
         onFrameItCapture={onFrameItCapture}
+        onFrameItGenerate={onFrameItGenerate}
         onCanvasPanStart={onCanvasPanStart}
         transferCompiling={transferCompiling}
         imageModelOptions={imageModelOptions}
@@ -7056,6 +7194,7 @@ function NodeBody({
   onPreviewLayoutExport,
   onOpenComposer,
   onFrameItCapture,
+  onFrameItGenerate,
   onCanvasPanStart,
   incomingByNode,
   transferCompiling,
@@ -7171,12 +7310,15 @@ function NodeBody({
         }}
         onUpdate={onUpdate}
         onCapture={onFrameItCapture}
+        onGenerate={onFrameItGenerate}
         onCanvasPanStart={onCanvasPanStart}
         onUndoSnapshot={onUndoSnapshot}
         onResizeStart={onPreviewResizeStart}
         onConnectStart={onConnectStart}
         onDisconnectInput={onDisconnectInput}
         connectedPortKeys={connectedPortKeys}
+        imageModelOptions={imageModelOptions}
+        videoModelOptions={videoModelOptions}
       />
     );
   }
@@ -7366,6 +7508,18 @@ function NodeBody({
                     placeholder="Personal reference notes"
                     onChange={(event) => onUpdate(node.id, { characterReferenceNotes: event.target.value })}
                   />
+                </label>
+                <label className="character-section character-model-field">
+                  <span className="character-section-label">Sheet Model</span>
+                  <select
+                    value={normalizeCharacterSheetModel(node.data.characterSheetModel)}
+                    disabled={compiling || locked}
+                    onChange={(event) => onUpdate(node.id, { characterSheetModel: normalizeCharacterSheetModel(event.target.value) })}
+                  >
+                    {characterSheetModelOptions.map((model) => (
+                      <option key={model} value={model}>{model}</option>
+                    ))}
+                  </select>
                 </label>
                 <label className="character-section character-option-row">
                   <input
@@ -8253,29 +8407,52 @@ function NodeBody({
 
   if (node.type === "style") {
     const selectedPreset = node.data.stylePreset || "None";
-    const customPaletteSelected = selectedPreset === "Custom Palette";
+    const selectedGrade = normalizeGradePresetName(node.data.gradePreset || "None");
+    const customPaletteSelected = selectedGrade === "Custom";
     const paletteColors = normalizedCustomPaletteColors(node.data);
     const styleSelected = styleOutputEnabled(node.data);
+    const customGradeAnalysis = customPaletteSelected && paletteColors.length
+      ? analyzeColorLookPalette(paletteColors.map((color) => color.hex))
+      : null;
 
     async function handlePaletteImageUpload(files) {
       const file = firstAcceptedFile(files, "image");
       if (!file) return;
+      await handlePaletteImageSource({
+        sourceName: file.name,
+        extract: () => extractCustomPaletteFromFile(file)
+      });
+    }
+
+    async function handlePaletteOutputImport(item) {
+      const asset = assetFromOutputItem(item);
+      if (!asset || asset.mediaType !== "image" || !asset.localUrl) {
+        onUpdate(node.id, { customPaletteError: "Drop an image output to extract a grade." });
+        return;
+      }
+      await handlePaletteImageSource({
+        sourceName: asset.fileName || item.label || "NewtNode image",
+        extract: () => extractCustomPaletteFromUrl(asset.localUrl)
+      });
+    }
+
+    async function handlePaletteImageSource({ sourceName, extract }) {
       onUndoSnapshot?.();
       onUpdate(node.id, {
         customPaletteStatus: "extracting",
         customPaletteError: "",
-        customPaletteSourceName: file.name,
+        customPaletteSourceName: sourceName,
         customPalettePreviewUrl: "",
         customPaletteColors: [],
         customPaletteRgbText: ""
       });
       try {
-        const extracted = await extractCustomPaletteFromFile(file);
+        const extracted = await extract();
         const firstExtractedColor = extracted.colors?.[0]?.hex;
         onUpdate(node.id, {
           customPaletteStatus: "",
           customPaletteError: "",
-          customPaletteSourceName: file.name,
+          customPaletteSourceName: sourceName,
           customPalettePreviewUrl: extracted.previewUrl,
           customPaletteColors: extracted.colors,
           customPaletteRgbText: "",
@@ -8291,6 +8468,11 @@ function NodeBody({
 
     function handlePaletteDrop(event) {
       allowFileDrop(event);
+      const outputItem = outputItemFromDataTransfer(event.dataTransfer) || currentDraggedOutputItem();
+      if (outputItem?.type === "image") {
+        handlePaletteOutputImport(outputItem);
+        return;
+      }
       handlePaletteImageUpload(event.dataTransfer.files);
     }
 
@@ -8395,19 +8577,28 @@ function NodeBody({
           <OutputPortRow
             node={node}
             port={outputPort}
-            label={selectedPreset}
+            label={styleGradeLabel(node.data)}
             onConnectStart={onConnectStart}
             onDisconnectInput={onDisconnectInput}
             connectedPortKeys={connectedPortKeys}
           />
         ) : (
-          <div className="style-output-placeholder">{customPaletteSelected ? "Add palette colors to enable output" : "Choose style to enable output"}</div>
+          <div className="style-output-placeholder">{customPaletteSelected ? "Add grade colors to enable output" : "Choose style or grade to enable output"}</div>
         )}
 
         <div className="style-preset-row">
           <span>Style</span>
-          <select value={selectedPreset} onChange={(event) => onUpdate(node.id, { stylePreset: event.target.value, customPaletteError: "" })}>
+          <select value={selectedPreset} onChange={(event) => onUpdate(node.id, { stylePreset: event.target.value })}>
             {stylePresetNames.map((presetName) => (
+              <option key={presetName}>{presetName}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="style-preset-row">
+          <span>Grade</span>
+          <select value={selectedGrade} onChange={(event) => onUpdate(node.id, { gradePreset: event.target.value, customPaletteError: "" })}>
+            {gradePresetNames.map((presetName) => (
               <option key={presetName}>{presetName}</option>
             ))}
           </select>
@@ -8490,6 +8681,23 @@ function NodeBody({
                   ))}
                 </div>
               </>
+            )}
+            {customGradeAnalysis && (
+              <div className="custom-grade-analysis">
+                <div className="custom-grade-summary">
+                  <span>{customGradeAnalysis.temperature}</span>
+                  <span>{customGradeAnalysis.contrast} contrast</span>
+                  <span>{customGradeAnalysis.saturation}</span>
+                </div>
+                <div className="custom-grade-hex-list" aria-label="Optimized grade HEX values">
+                  {customGradeAnalysis.colors.map((color) => (
+                    <span key={color.hex} title={`${color.hex} RGB(${color.r}, ${color.g}, ${color.b})`}>
+                      <i style={{ "--swatch-color": color.hex }} />
+                      <code>{color.hex}</code>
+                    </span>
+                  ))}
+                </div>
+              </div>
             )}
             {node.data.customPaletteStatus === "extracting" && <small className="custom-palette-status">Extracting...</small>}
             {node.data.customPaletteError && <small className="upload-error">{node.data.customPaletteError}</small>}
@@ -11137,6 +11345,23 @@ function createDefaultNodeData(type, label, count) {
       frameItUseLimits: true,
       frameItSavedPoses: [],
       frameItSelectedPoseId: defaultFrameItPoseId,
+      frameItViewMode: "shot",
+      frameItShotPreset: "medium",
+      frameItShowShotLabel: false,
+      frameItCreateMode: "image",
+      frameItImageModel: imageModelNames.openAiImage2,
+      frameItVideoModel: videoModelNames.seedance,
+      frameItPrompt: "",
+      frameItSubjectPrompt: "",
+      frameItEnvironmentPrompt: "",
+      frameItStylePrompt: "",
+      frameItCharacterSheet: true,
+      frameItEnvironmentSheet: true,
+      frameItCameraMotion: "Static",
+      frameItDuration: "5 seconds",
+      frameItImageResolution: "2K",
+      frameItVideoResolution: "720p",
+      frameItGeneratedItems: [],
       frameItScale: 1
     };
   }
@@ -11151,6 +11376,7 @@ function createDefaultNodeData(type, label, count) {
       characterReferenceNotes: "",
       characterTraits: [],
       customCharacterTraits: "",
+      characterSheetModel: imageModelNames.openAiImage2,
       cinematicCharacterSheet: false,
       cuVideoGeneration: false,
       useCustomCharacterSheet: false,
@@ -11274,6 +11500,7 @@ function createDefaultNodeData(type, label, count) {
     return {
       title,
       stylePreset: "None",
+      gradePreset: "None",
       customPaletteRgbText: "",
       customPalettePicker: "#ddc631",
       customPaletteColors: [],
@@ -13729,7 +13956,7 @@ function promptPiecesForSource(source, { namedCharacterReferences = false } = {}
     const selectedPreset = source.data.stylePreset || "None";
     return [
       stylePresetPrompts[selectedPreset] || "",
-      selectedPreset === "Custom Palette" ? customPalettePromptPiece(source.data) : ""
+      gradePromptPiece(source.data)
     ].filter(Boolean);
   }
 
@@ -13748,7 +13975,11 @@ function promptPiecesForSource(source, { namedCharacterReferences = false } = {}
 
 async function extractCustomPaletteFromFile(file) {
   const dataUrl = await fileToDataUrl(file);
-  const image = await loadCanvasImage(dataUrl);
+  return extractCustomPaletteFromUrl(dataUrl);
+}
+
+async function extractCustomPaletteFromUrl(url) {
+  const image = await loadCanvasImage(url);
   const colors = extractDominantPaletteColors(image, 10);
   if (!colors.length) throw new Error("No usable colors found in that image.");
   return {
@@ -13879,17 +14110,33 @@ function uniqueCustomPaletteColors(colors = []) {
     });
 }
 
-function customPalettePromptPiece(data = {}) {
+function customGradePromptPiece(data = {}) {
   const colors = normalizedCustomPaletteColors(data);
   if (!colors.length) return "";
-  return `Utilize the hues and values: ${colors.map((color) => `${color.hex} RGB(${color.r}, ${color.g}, ${color.b}), hue ${color.hue} degrees, value ${color.value}%`).join("; ")}.`;
+  return buildColorGradePrompt({ palette: colors.map((color) => color.hex) });
+}
+
+function gradePromptPiece(data = {}) {
+  const selectedGrade = normalizeGradePresetName(data.gradePreset || "None");
+  if (selectedGrade === "Custom") return customGradePromptPiece(data);
+  return gradePresetPrompts[selectedGrade] || "";
 }
 
 function styleOutputEnabled(data = {}) {
   const selectedPreset = data.stylePreset || "None";
-  if (selectedPreset === "None") return false;
-  if (selectedPreset === "Custom Palette") return Boolean(customPalettePromptPiece(data));
-  return true;
+  const selectedGrade = normalizeGradePresetName(data.gradePreset || "None");
+  const hasStyle = selectedPreset !== "None";
+  const hasGrade = selectedGrade === "Custom" ? Boolean(customGradePromptPiece(data)) : selectedGrade !== "None";
+  return hasStyle || hasGrade;
+}
+
+function styleGradeLabel(data = {}) {
+  const style = data.stylePreset && data.stylePreset !== "None" ? data.stylePreset : "";
+  const grade = normalizeGradePresetName(data.gradePreset || "None");
+  const gradeLabel = grade === "Custom"
+    ? (customGradePromptPiece(data) ? "Custom Grade" : "")
+    : grade !== "None" ? grade : "";
+  return [style, gradeLabel].filter(Boolean).join(" + ") || "Style";
 }
 
 function customPaletteColorFromHex(value) {
@@ -14157,7 +14404,7 @@ function sourceLabel(source) {
   if (source.type === "model3d" && source.data.resultUrl) return source.data.title || "3D model";
   if (source.type === "transfer" && source.data.resultUrl) return "Style Reference";
   if (source.type === "character" && source.data.resultUrl) return `@${characterTag(source)}`;
-  if (source.type === "style") return (source.data.stylePreset || "None") === "None" ? "Style" : source.data.stylePreset;
+  if (source.type === "style") return styleGradeLabel(source.data);
   if (source.type === "utility" && source.data.resultUrl) return utilityResultType(source) === "video" ? "Utility video" : "Utility image";
   if (source.data.resultUrl) return source.data.resultUrl.split("/").pop();
   if (source.data.fileName) return source.data.fileName;
@@ -14527,6 +14774,7 @@ function normalizeCurrentNode(node) {
       characterWardrobes: Array.isArray(data.characterWardrobes) ? data.characterWardrobes : [],
       characterVoices: Array.isArray(data.characterVoices) ? data.characterVoices : [],
       characterTraits: Array.isArray(data.characterTraits) ? data.characterTraits : [],
+      characterSheetModel: normalizeCharacterSheetModel(data.characterSheetModel),
       characterSheetVariants,
       characterBatchProgress: null,
       characterTab: data.characterTab === "sheet" && data.resultUrl ? "sheet" : "build"
@@ -15567,11 +15815,13 @@ function normalizeCoverageData(data = {}) {
 function normalizeStyleData(data = {}) {
   const defaultData = createDefaultNodeData("style", data.title || "Style", 1);
   const customPaletteColors = normalizedCustomPaletteColors(data);
+  const legacyCustomPalette = data.stylePreset === "Custom Palette";
   return {
     ...defaultData,
     ...data,
     title: data.title || "Style",
-    stylePreset: normalizeStylePresetName(data.stylePreset || "None"),
+    stylePreset: normalizeStylePresetName(legacyCustomPalette ? "None" : data.stylePreset || "None"),
+    gradePreset: normalizeGradePresetName(data.gradePreset || (legacyCustomPalette ? "Custom" : "None")),
     customPaletteRgbText: String(data.customPaletteRgbText || ""),
     customPalettePicker: /^#[0-9a-f]{6}$/i.test(String(data.customPalettePicker || "")) ? data.customPalettePicker : "#ddc631",
     customPaletteColors,

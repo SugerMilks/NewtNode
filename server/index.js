@@ -78,6 +78,7 @@ import {
   kreaSeedanceEndpoint,
   resolveSeedanceRuntimeProvider
 } from "../src/kreaSeedance.js";
+import { mergeSeedanceDirectorReferences } from "../src/seedanceDirectorReferences.js";
 import {
   buildKreaImageInput,
   estimateKreaImageCost,
@@ -3733,10 +3734,15 @@ app.post("/api/node/generate-video", async (req, res) => {
 
     const startFrameUrl = firstLocalOutput(req.body.startFrameUrls);
     const endFrameUrl = firstLocalOutput(req.body.endFrameUrls);
-    const rawReferenceImageUrls = Array.isArray(req.body.referenceImageUrls) ? req.body.referenceImageUrls : [];
-    const rawReferenceImageLabels = Array.isArray(req.body.referenceImageLabels) ? req.body.referenceImageLabels : [];
-    const referenceImages = rawReferenceImageUrls
-      .map((url, index) => ({ url, label: rawReferenceImageLabels[index] }))
+    const filmDirector = req.body.filmDirector && typeof req.body.filmDirector === "object" ? req.body.filmDirector : null;
+    const directorReferences = Array.isArray(filmDirector?.references) ? filmDirector.references : [];
+    const mergedReferenceImages = mergeSeedanceDirectorReferences({
+      directUrls: Array.isArray(req.body.referenceImageUrls) ? req.body.referenceImageUrls : [],
+      directLabels: Array.isArray(req.body.referenceImageLabels) ? req.body.referenceImageLabels : [],
+      directorReferences
+    });
+    const referenceImages = mergedReferenceImages.urls
+      .map((url, index) => ({ url, label: mergedReferenceImages.labels[index] }))
       .filter(({ url }) => isLocalAssetUrl(url));
     const referenceImageUrls = referenceImages.map(({ url }) => url);
     const referenceImageNames = normalizeReferenceNames(referenceImages.map(({ label }) => label), referenceImageUrls.length);

@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { normalizeStylePresetName, stylePresetNames, stylePresetPrompts } from "../src/modelOptions.js";
+import { gradePresetNames, gradePresetPrompts, normalizeGradePresetName } from "../src/colorLook.js";
 
 const addedStylePresetNames = [
   "Cinematic Indie",
@@ -44,4 +45,15 @@ test("legacy Cinematic preset is removed and migrates to Cinematic Standard", ()
   assert.equal(stylePresetNames.includes("Cinematic"), false);
   assert.equal(Object.hasOwn(stylePresetPrompts, "Cinematic"), false);
   assert.equal(normalizeStylePresetName("Cinematic"), "Cinematic Standard");
+});
+
+test("Grade choices remain independent from Style choices", () => {
+  assert.equal(stylePresetNames.includes("Custom Palette"), false);
+  assert.deepEqual(gradePresetNames, [
+    "None", "Cool", "Warm", "Refn Beauty", "Spiky Nike", "Vintage Son", "Dusty Brothers",
+    "Moody Meadow", "Classy Kubric", "Coney Color", "Custom"
+  ]);
+  assert.match(gradePresetPrompts.Cool, /COLOR PALETTE:/);
+  assert.match(gradePresetPrompts.Warm, /COLOR PALETTE:/);
+  assert.equal(normalizeGradePresetName("Unknown"), "None");
 });

@@ -3,6 +3,67 @@ import { frameItPresetSnapshots } from "./frameItPresetSnapshots.js";
 
 export const frameItAspectRatios = ["16:9", "21:9", "4:3", "1:1", "9:16"];
 
+export const frameItViewModes = ["shot", "bird"];
+
+export const frameItShotPresets = [
+  {
+    id: "medium",
+    label: "Medium",
+    description: "Eye-level medium shot",
+    camera: { yaw: 0, pitch: 3, distance: 4.15, targetY: 1.38, fov: 31 }
+  },
+  {
+    id: "wide",
+    label: "Wide",
+    description: "Eye-level wide shot",
+    camera: { yaw: 0, pitch: 2, distance: 6.25, targetY: 1.3, fov: 35 }
+  },
+  {
+    id: "close-up",
+    label: "Close-Up",
+    description: "Portrait close-up",
+    camera: { yaw: 0, pitch: 2, distance: 2.45, targetY: 2.02, fov: 28 }
+  },
+  {
+    id: "low-angle",
+    label: "Low Angle",
+    description: "Low-angle medium-wide shot",
+    camera: { yaw: -8, pitch: -12, distance: 4.75, targetY: 1.5, fov: 27 }
+  },
+  {
+    id: "high-angle",
+    label: "High Angle",
+    description: "High-angle medium-wide shot",
+    camera: { yaw: 8, pitch: 24, distance: 5.5, targetY: 1.1, fov: 29 }
+  },
+  {
+    id: "over-shoulder",
+    label: "Over Shoulder",
+    description: "Over-the-shoulder two-person coverage",
+    camera: { yaw: -18, pitch: 4, distance: 4.15, targetY: 1.55, fov: 32 },
+    arrangement: "over-shoulder"
+  },
+  {
+    id: "two-shot",
+    label: "Two Shot",
+    description: "Balanced eye-level two shot",
+    camera: { yaw: 0, pitch: 3, distance: 5.35, targetY: 1.35, fov: 32 },
+    arrangement: "two-shot"
+  }
+];
+
+export const frameItCameraMotions = [
+  "Static",
+  "Slow push in",
+  "Slow pull back",
+  "Pan left",
+  "Pan right",
+  "Tilt up",
+  "Tilt down",
+  "Handheld drift",
+  "Orbit subject"
+];
+
 export const frameItFigureColors = [
   { id: "gray", label: "Gray", value: "#aeb8c4" },
   { id: "blue", label: "Blue", value: "#5f86c9" },
@@ -39,14 +100,14 @@ const frameItJointRanges = {
   hipsRot: { x: [-40, 50], y: [-60, 60], z: [-40, 40] },
   leftUpperArm: { x: [-75, 190], y: [-120, 120], z: [-55, 185] },
   rightUpperArm: { x: [-75, 190], y: [-120, 120], z: [-185, 55] },
-  leftLowerArm: { x: [-10, 160], y: [-90, 90], z: [-15, 15] },
-  rightLowerArm: { x: [-10, 160], y: [-90, 90], z: [-15, 15] },
+  leftLowerArm: { x: [-10, 170], y: [-90, 90], z: [-15, 15] },
+  rightLowerArm: { x: [-10, 170], y: [-90, 90], z: [-15, 15] },
   leftHandRot: { x: [-90, 90], y: [-90, 90], z: [-45, 45] },
   rightHandRot: { x: [-90, 90], y: [-90, 90], z: [-45, 45] },
   leftUpperLeg: { x: [-130, 55], y: [-70, 70], z: [-70, 70] },
   rightUpperLeg: { x: [-130, 55], y: [-70, 70], z: [-70, 70] },
-  leftLowerLeg: { x: [-10, 160], y: [-15, 15], z: [-15, 15] },
-  rightLowerLeg: { x: [-10, 160], y: [-15, 15], z: [-15, 15] },
+  leftLowerLeg: { x: [-10, 170], y: [-15, 15], z: [-15, 15] },
+  rightLowerLeg: { x: [-10, 170], y: [-15, 15], z: [-15, 15] },
   leftFootRot: { x: [-60, 50], y: [-40, 40], z: [-45, 45] },
   rightFootRot: { x: [-60, 50], y: [-40, 40], z: [-45, 45] }
 };
@@ -124,6 +185,78 @@ export function defaultFrameItScene() {
   };
 }
 
+export function normalizeFrameItViewMode(value) {
+  return frameItViewModes.includes(value) ? value : "shot";
+}
+
+export function frameItShotPreset(value) {
+  return frameItShotPresets.find((preset) => preset.id === value) || frameItShotPresets[0];
+}
+
+export function frameItShotPresetScene(scene, presetId) {
+  const normalizedScene = normalizeFrameItScene(scene);
+  const preset = frameItShotPreset(presetId);
+  let figures = normalizedScene.figures;
+
+  if (preset.arrangement === "two-shot") {
+    figures = ensureFrameItFigureCount(figures, 2).map((figure, index) => ({
+      ...figure,
+      x: index === 0 ? -0.62 : 0.62,
+      y: 0,
+      z: 0,
+      rotY: index === 0 ? -8 : 8
+    }));
+  }
+
+  if (preset.arrangement === "over-shoulder") {
+    figures = ensureFrameItFigureCount(figures, 2).map((figure, index) => ({
+      ...figure,
+      x: index === 0 ? -0.72 : 0.45,
+      y: 0,
+      z: index === 0 ? 0.55 : -0.2,
+      rotY: index === 0 ? -18 : 18
+    }));
+  }
+
+  const focusFigure = figures[0] || defaultFrameItFigure(1);
+  const camera = normalizeFrameItCamera({
+    ...normalizedScene.camera,
+    ...preset.camera,
+    targetX: preset.arrangement ? 0 : focusFigure.x,
+    targetY: (focusFigure.y || 0) + preset.camera.targetY,
+    targetZ: preset.arrangement ? 0 : focusFigure.z
+  });
+
+  return normalizeFrameItScene({ ...normalizedScene, camera, figures });
+}
+
+export function frameItGenerationPrompt({
+  mode = "image",
+  shotPresetId = "medium",
+  subject = "",
+  environment = "",
+  style = "",
+  prompt = "",
+  cameraMotion = "Static",
+  useCharacterSheet = true,
+  useEnvironmentSheet = true
+} = {}) {
+  const preset = frameItShotPreset(shotPresetId);
+  return [
+    `Use the provided Frame It guide image as a locked ${preset.description.toLowerCase()} camera-and-blocking blueprint.`,
+    "Preserve its camera position, lens perspective, crop, subject count, pose, spacing, eyelines, and screen direction.",
+    subject ? `Subject direction: ${subject}` : "Replace each neutral figure with a natural, production-ready human subject while preserving the exact pose and placement.",
+    environment ? `Environment direction: ${environment}` : "Build a coherent production environment around the blocking without changing the composition.",
+    style ? `Visual style: ${style}` : "Use polished cinematic naturalism, motivated lighting, and realistic materials.",
+    prompt ? `Creative brief: ${prompt}` : "",
+    useCharacterSheet ? "Maintain one consistent subject identity and wardrobe per figure across the frame." : "",
+    useEnvironmentSheet ? "Maintain coherent environment geometry, lighting direction, and production design." : "",
+    mode === "video" ? `Camera motion: ${cameraMotion}. Preserve the opening composition before executing this motion.` : "",
+    mode === "video" ? "Render natural body mechanics, grounded physics, and continuous screen direction." : "Render one production-ready cinematic still.",
+    "Do not reproduce mannequin materials, rig controls, transform gizmos, grids, guides, labels, interface elements, or the neutral floor unless the brief explicitly asks for them."
+  ].filter(Boolean).join("\n\n");
+}
+
 export function normalizeFrameItScene(scene = {}) {
   const fallback = defaultFrameItScene();
   const sourceFigures = Array.isArray(scene?.figures) && scene.figures.length ? scene.figures : fallback.figures;
@@ -182,7 +315,7 @@ export function normalizeFrameItCamera(camera = {}, fallback = defaultFrameItCam
     targetX: finiteNumber(camera.targetX, fallback.targetX),
     targetY: finiteNumber(camera.targetY, fallback.targetY),
     targetZ: finiteNumber(camera.targetZ, fallback.targetZ),
-    fov: clamp(finiteNumber(camera.fov, fallback.fov), 18, 80)
+    fov: clamp(finiteNumber(camera.fov, fallback.fov), 14, 90)
   };
 }
 
@@ -296,6 +429,42 @@ export function frameItUsesCameraWheel({ altKey = false, metaKey = false } = {})
   return Boolean(metaKey || altKey);
 }
 
+export function frameItDirectDragJoint(jointId) {
+  const parentJoint = {
+    leftLowerArm: "leftUpperArm",
+    leftHandRot: "leftLowerArm",
+    rightLowerArm: "rightUpperArm",
+    rightHandRot: "rightLowerArm",
+    leftLowerLeg: "leftUpperLeg",
+    leftFootRot: "leftLowerLeg",
+    rightLowerLeg: "rightUpperLeg",
+    rightFootRot: "rightLowerLeg"
+  };
+  return parentJoint[jointId] || jointId;
+}
+
+export function frameItJointDragRotation(jointId, startingRotation, dx, dy) {
+  if (/Lower(Arm|Leg)$/.test(jointId)) {
+    return {
+      x: startingRotation.x - dy * 0.62,
+      y: startingRotation.y + dx * 0.12,
+      z: startingRotation.z + dx * 0.22
+    };
+  }
+  if (/(Upper|Lower)(Arm|Leg)$/.test(jointId)) {
+    return {
+      x: startingRotation.x - dy * 0.42,
+      y: startingRotation.y + dx * 0.16,
+      z: startingRotation.z + dx * 0.46
+    };
+  }
+  return {
+    x: startingRotation.x - dy * 0.34,
+    y: startingRotation.y + dx * 0.38,
+    z: startingRotation.z + dx * 0.12
+  };
+}
+
 export function frameItApplyPose(figure, pose = {}, figurePatch = {}) {
   return normalizeFrameItFigure({
     ...figure,
@@ -321,6 +490,12 @@ function frameItClampJointValue(jointId, axis, value, useLimits) {
   if (!useLimits) return clamp(number, -360, 360);
   const { min, max } = frameItJointRange(jointId, axis, true);
   return clamp(number, min, max);
+}
+
+function ensureFrameItFigureCount(figures, count) {
+  const nextFigures = figures.map((figure) => ({ ...figure }));
+  while (nextFigures.length < count) nextFigures.push(defaultFrameItFigure(nextFigures.length + 1));
+  return nextFigures;
 }
 
 function normalizeHexColor(value, fallback) {

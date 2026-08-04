@@ -3,23 +3,30 @@ import assert from "node:assert/strict";
 import {
   defaultFrameItPoseId,
   defaultFrameItFigure,
+  defaultFrameItScene,
   frameItApplyPose,
   frameItCameraPointerGesture,
   frameItCaptureSize,
+  frameItDirectDragJoint,
   frameItFigureCompositionSnapshot,
   frameItFigureColors,
   frameItFigurePositionPatch,
   frameItFigureRotation,
   frameItFigureRotationPatch,
+  frameItGenerationPrompt,
+  frameItJointDragRotation,
   frameItJointPatch,
   frameItJointRange,
   frameItJointRenderRotation,
   frameItJointRotationFromGizmo,
   frameItPosePresets,
+  frameItShotPresetScene,
+  frameItShotPresets,
   frameItUsesCameraWheel,
   normalizeFrameItGizmoMode,
   normalizeFrameItSavedPoses,
-  normalizeFrameItScene
+  normalizeFrameItScene,
+  normalizeFrameItViewMode
 } from "../src/frameItState.js";
 import { frameItPresetSnapshots } from "../src/frameItPresetSnapshots.js";
 
@@ -31,7 +38,7 @@ test("Frame It normalizes camera, figures, and joint limits", () => {
 
   assert.equal(scene.camera.pitch, 82);
   assert.equal(scene.camera.distance, 14);
-  assert.equal(scene.camera.fov, 18);
+  assert.equal(scene.camera.fov, 14);
   assert.equal(scene.figures[0].id, "figure-a");
   assert.equal(scene.figures[0].name, "Lead");
   assert.equal(scene.figures[0].color, "#ff3366");
@@ -72,16 +79,16 @@ test("Frame It applies biological joint limits and exports native ratios", () =>
     leftLowerArmZ: 0
   });
   assert.deepEqual(frameItJointPatch("rightLowerLeg", { x: 190, y: 30, z: -30 }, true), {
-    rightLowerLegX: 160,
+    rightLowerLegX: 170,
     rightLowerLegY: 15,
     rightLowerLegZ: -15
   });
   assert.deepEqual(frameItJointRange("leftUpperLeg", "x", true), { min: -130, max: 55 });
-  assert.deepEqual(frameItJointRange("leftLowerLeg", "x", true), { min: -10, max: 160 });
+  assert.deepEqual(frameItJointRange("leftLowerLeg", "x", true), { min: -10, max: 170 });
   assert.deepEqual(frameItJointRange("leftUpperArm", "x", true), { min: -75, max: 190 });
   assert.deepEqual(frameItJointRange("leftUpperArm", "z", true), { min: -55, max: 185 });
   assert.deepEqual(frameItJointRange("rightUpperArm", "z", true), { min: -185, max: 55 });
-  assert.deepEqual(frameItJointRange("leftLowerArm", "x", true), { min: -10, max: 160 });
+  assert.deepEqual(frameItJointRange("leftLowerArm", "x", true), { min: -10, max: 170 });
   assert.deepEqual(frameItJointRange("leftLowerArm", "y", true), { min: -90, max: 90 });
   assert.deepEqual(frameItJointRenderRotation("leftUpperArm", { x: 45, y: 12, z: 30 }), { x: -45, y: 12, z: 30 });
   assert.deepEqual(frameItJointRenderRotation("rightLowerArm", { x: 90, y: 0, z: 0 }), { x: -90, y: 0, z: 0 });
@@ -204,6 +211,26 @@ test("Frame It reserves modified gestures for its camera and passes ordinary nav
   assert.equal(frameItUsesCameraWheel({}), false);
 });
 
+test("Frame It direct handles drive the parent limb and translate pointer motion into joint rotation", () => {
+  assert.equal(frameItDirectDragJoint("leftLowerArm"), "leftUpperArm");
+  assert.equal(frameItDirectDragJoint("rightHandRot"), "rightLowerArm");
+  assert.equal(frameItDirectDragJoint("leftFootRot"), "leftLowerLeg");
+  assert.equal(frameItDirectDragJoint("headRot"), "headRot");
+  const upperArmRotation = frameItJointDragRotation(
+    "leftUpperArm",
+    { x: 0, y: 0, z: 0 },
+    20,
+    -10
+  );
+  assert.equal(upperArmRotation.x, 4.2);
+  assert.equal(upperArmRotation.y, 3.2);
+  assert.ok(Math.abs(upperArmRotation.z - 9.2) < 1e-12);
+  assert.deepEqual(
+    frameItJointDragRotation("rightLowerArm", { x: 20, y: 1, z: 2 }, 10, -20),
+    { x: 32.4, y: 2.2, z: 4.2 }
+  );
+});
+
 test("Frame It maps C4D-style gizmo deltas back into logical joint rotations", () => {
   assert.deepEqual(
     frameItJointRotationFromGizmo("headRot", { x: 5, y: -10, z: 2 }, { x: 8, y: 4, z: -3 }, true),
@@ -217,4 +244,44 @@ test("Frame It maps C4D-style gizmo deltas back into logical joint rotations", (
   assert.equal(normalizeFrameItGizmoMode("figureRotate"), "figureRotate");
   assert.equal(normalizeFrameItGizmoMode("rotate"), "rotate");
   assert.equal(normalizeFrameItGizmoMode("bend"), "rotate");
+});
+
+test("Frame It v2 shot presets apply camera and multi-subject blocking", () => {
+  const baseScene = defaultFrameItScene();
+  const twoShot = frameItShotPresetScene(baseScene, "two-shot");
+  const overShoulder = frameItShotPresetScene(baseScene, "over-shoulder");
+
+  assert.deepEqual(frameItShotPresets.map((preset) => preset.id), [
+    "medium",
+    "wide",
+    "close-up",
+    "low-angle",
+    "high-angle",
+    "over-shoulder",
+    "two-shot"
+  ]);
+  assert.equal(twoShot.figures.length, 2);
+  assert.equal(twoShot.figures[0].x < 0, true);
+  assert.equal(twoShot.figures[1].x > 0, true);
+  assert.equal(overShoulder.figures.length, 2);
+  assert.notEqual(overShoulder.figures[0].z, overShoulder.figures[1].z);
+  assert.equal(normalizeFrameItViewMode("bird"), "bird");
+  assert.equal(normalizeFrameItViewMode("invalid"), "shot");
+});
+
+test("Frame It generation prompt treats the viewport as composition guidance", () => {
+  const prompt = frameItGenerationPrompt({
+    mode: "video",
+    shotPresetId: "low-angle",
+    subject: "A runner in a red jacket",
+    environment: "A wet city street at night",
+    style: "Muted neo-noir",
+    prompt: "The runner stops under a streetlight",
+    cameraMotion: "Slow push in"
+  });
+
+  assert.match(prompt, /low-angle medium-wide shot/i);
+  assert.match(prompt, /A runner in a red jacket/);
+  assert.match(prompt, /Slow push in/);
+  assert.match(prompt, /Do not reproduce mannequin materials/i);
 });

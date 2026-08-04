@@ -4,13 +4,13 @@ import {
   frameItAspectRatioNumber,
   frameItCameraPointerGesture,
   frameItCaptureSize,
-  frameItFigureRotation,
-  frameItFigureRotationPatch,
+  frameItDirectDragJoint,
+  frameItJointDragRotation,
+  frameItJointPatch,
   frameItJointRenderRotation,
   frameItJointRotation,
   frameItJointRotationFromGizmo,
   frameItUsesCameraWheel,
-  normalizeFrameItGizmoMode,
   normalizeFrameItScene
 } from "../frameItState.js";
 import {
@@ -24,7 +24,7 @@ import {
 } from "../threeRuntime.js";
 
 const frameItMannequinModelPath = "/models/frame-it-mannequin.glb";
-const frameItMannequinTargetHeight = 2.62;
+const frameItMannequinTargetHeight = 2.58;
 
 let frameItMannequinAsset = null;
 let frameItMannequinAssetPromise = null;
@@ -36,14 +36,14 @@ export const FrameItViewport = React.forwardRef(function FrameItViewport(
     aspectRatio,
     selectedFigureId,
     selectedJoint,
-    tool,
     showGrid,
     showFloor,
     showGuides,
+    showShotLabel,
+    shotLabel,
     useLimits,
     onSceneChange,
     onSelectionChange,
-    onToolChange,
     onInteractionStart,
     onCanvasPanStart
   },
@@ -59,22 +59,23 @@ export const FrameItViewport = React.forwardRef(function FrameItViewport(
   const transformControlsRef = React.useRef(null);
   const transformProxyRef = React.useRef(null);
   const transformSessionRef = React.useRef(null);
-  const dragRef = React.useRef(null);
+  const cameraDragRef = React.useRef(null);
+  const jointDragRef = React.useRef(null);
   const wheelSessionRef = React.useRef({ camera: null, timer: null });
   const stateRef = React.useRef({
     sceneData: normalizeFrameItScene(sceneData),
     aspectRatio,
     selectedFigureId,
     selectedJoint,
-    tool,
     showGrid,
     showFloor,
     showGuides,
+    showShotLabel,
+    shotLabel,
     useLimits
   });
   const onSceneChangeRef = React.useRef(onSceneChange);
   const onSelectionChangeRef = React.useRef(onSelectionChange);
-  const onToolChangeRef = React.useRef(onToolChange);
   const onInteractionStartRef = React.useRef(onInteractionStart);
   const onCanvasPanStartRef = React.useRef(onCanvasPanStart);
 
@@ -85,16 +86,16 @@ export const FrameItViewport = React.forwardRef(function FrameItViewport(
       aspectRatio,
       selectedFigureId,
       selectedJoint,
-      tool,
       showGrid,
       showFloor,
       showGuides,
+      showShotLabel,
+      shotLabel,
       useLimits
     };
     stateRef.current = nextState;
     onSceneChangeRef.current = onSceneChange;
     onSelectionChangeRef.current = onSelectionChange;
-    onToolChangeRef.current = onToolChange;
     onInteractionStartRef.current = onInteractionStart;
     onCanvasPanStartRef.current = onCanvasPanStart;
     if (threeReady) {
@@ -107,7 +108,7 @@ export const FrameItViewport = React.forwardRef(function FrameItViewport(
         renderFrameItCamera();
       }
     }
-  }, [sceneData, aspectRatio, selectedFigureId, selectedJoint, tool, showGrid, showFloor, showGuides, useLimits, onSceneChange, onSelectionChange, onToolChange, onInteractionStart, onCanvasPanStart, threeReady]);
+  }, [sceneData, aspectRatio, selectedFigureId, selectedJoint, showGrid, showFloor, showGuides, showShotLabel, shotLabel, useLimits, onSceneChange, onSelectionChange, onInteractionStart, onCanvasPanStart, threeReady]);
 
   React.useImperativeHandle(ref, () => ({
     capture() {
@@ -121,6 +122,12 @@ export const FrameItViewport = React.forwardRef(function FrameItViewport(
       const transformHelper = transformControlsRef.current?.getHelper?.();
       const transformWasVisible = transformHelper?.visible;
       if (transformHelper) transformHelper.visible = false;
+      const overlayVisibility = [];
+      scene.traverse((object) => {
+        if (!object.userData.frameItOverlayControl) return;
+        overlayVisibility.push([object, object.visible]);
+        object.visible = false;
+      });
       renderer.setSize(width, height, false);
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
@@ -130,21 +137,9 @@ export const FrameItViewport = React.forwardRef(function FrameItViewport(
       camera.aspect = currentAspect;
       camera.updateProjectionMatrix();
       if (transformHelper) transformHelper.visible = transformWasVisible;
+      overlayVisibility.forEach(([object, visible]) => { object.visible = visible; });
       renderer.render(scene, camera);
       return imageDataUrl;
-    },
-    setTool(nextTool) {
-      const normalizedTool = normalizeFrameItGizmoMode(nextTool);
-      const controls = transformControlsRef.current;
-      const helper = controls?.getHelper?.();
-      if (helper) helper.visible = false;
-      controls?.detach?.();
-      stateRef.current = { ...stateRef.current, tool: normalizedTool };
-      syncTransformGizmo();
-      const renderer = rendererRef.current;
-      const scene = sceneRef.current;
-      const camera = cameraRef.current;
-      if (renderer && scene && camera) renderer.render(scene, camera);
     }
   }), [threeReady]);
 
@@ -214,6 +209,11 @@ export const FrameItViewport = React.forwardRef(function FrameItViewport(
       pointer.y = -((event.clientY - rect.top) / Math.max(1, rect.height)) * 2 + 1;
       raycaster.setFromCamera(pointer, camera);
       const hits = raycaster.intersectObjects(scene.children, true);
+      const directHandleHit = hits.find((hit) => (
+        !hit.object.userData.frameItTransformHelper
+        && hit.object.userData.frameItDirectHandle
+      ));
+      if (directHandleHit) return directHandleHit;
       for (const hit of hits) {
         if (hit.object.userData.frameItTransformHelper) continue;
         if (hit.object.userData.frameItSelectable) return hit;
@@ -240,23 +240,16 @@ export const FrameItViewport = React.forwardRef(function FrameItViewport(
       const currentState = stateRef.current;
       const figure = currentState.sceneData.figures.find((item) => item.id === currentState.selectedFigureId);
       if (!figure) return;
-      const mode = currentState.tool === "translate"
-        ? "translate"
-        : currentState.tool === "figureRotate"
-          ? "figureRotate"
-          : "jointRotate";
       const jointObject = frameItJointObject(jointObjectsRef.current.get(`${figure.id}:${currentState.selectedJoint}`));
-      if (mode === "jointRotate" && !jointObject) return;
+      if (!jointObject) return;
       const transformObject = transformControls.object || transformProxy;
       onInteractionStartRef.current?.();
       transformSessionRef.current = {
-        mode,
+        mode: "jointRotate",
         figure: { ...figure },
         figureId: figure.id,
         jointId: currentState.selectedJoint,
-        startingRotation: mode === "figureRotate"
-          ? frameItFigureRotation(figure)
-          : frameItJointRotation(figure, currentState.selectedJoint),
+        startingRotation: frameItJointRotation(figure, currentState.selectedJoint),
         startTransformQuaternion: transformObject.quaternion.clone(),
         pendingScene: null
       };
@@ -266,37 +259,16 @@ export const FrameItViewport = React.forwardRef(function FrameItViewport(
       const session = transformSessionRef.current;
       if (!session) return;
       const transformObject = transformControls.object || transformProxy;
-      let nextFigure = { ...session.figure };
-      if (session.mode === "translate") {
-        nextFigure = {
-          ...nextFigure,
-          x: clamp(transformObject.position.x, -12, 12),
-          y: clamp(transformObject.position.y, -1.5, 4),
-          z: clamp(transformObject.position.z, -12, 12)
-        };
-        transformObject.position.set(nextFigure.x, nextFigure.y, nextFigure.z);
-      } else if (session.mode === "figureRotate") {
-        const rootEuler = new THREE.Euler().setFromQuaternion(transformObject.quaternion, "XYZ");
-        nextFigure = {
-          ...nextFigure,
-          ...frameItFigureRotationPatch({
-            x: radiansToDegrees(rootEuler.x),
-            y: radiansToDegrees(rootEuler.y),
-            z: radiansToDegrees(rootEuler.z)
-          })
-        };
-      } else {
-        const deltaQuaternion = session.startTransformQuaternion.clone().invert().multiply(transformObject.quaternion);
-        const deltaEuler = new THREE.Euler().setFromQuaternion(deltaQuaternion, "XYZ");
-        nextFigure = {
-          ...nextFigure,
-          ...frameItJointRotationFromGizmo(session.jointId, session.startingRotation, {
-            x: radiansToDegrees(deltaEuler.x),
-            y: radiansToDegrees(deltaEuler.y),
-            z: radiansToDegrees(deltaEuler.z)
-          }, stateRef.current.useLimits)
-        };
-      }
+      const deltaQuaternion = session.startTransformQuaternion.clone().invert().multiply(transformObject.quaternion);
+      const deltaEuler = new THREE.Euler().setFromQuaternion(deltaQuaternion, "XYZ");
+      const nextFigure = {
+        ...session.figure,
+        ...frameItJointRotationFromGizmo(session.jointId, session.startingRotation, {
+          x: radiansToDegrees(deltaEuler.x),
+          y: radiansToDegrees(deltaEuler.y),
+          z: radiansToDegrees(deltaEuler.z)
+        }, stateRef.current.useLimits)
+      };
       const nextScene = {
         ...stateRef.current.sceneData,
         figures: stateRef.current.sceneData.figures.map((item) => item.id === session.figureId ? nextFigure : item)
@@ -324,12 +296,13 @@ export const FrameItViewport = React.forwardRef(function FrameItViewport(
       renderer.domElement.focus();
       renderer.domElement.setPointerCapture?.(event.pointerId);
       onInteractionStartRef.current?.();
-      dragRef.current = {
+      cameraDragRef.current = {
         type: cameraGesture,
         pointerId: event.pointerId,
         startX: event.clientX,
         startY: event.clientY,
-        camera: { ...stateRef.current.sceneData.camera }
+        camera: { ...stateRef.current.sceneData.camera },
+        pendingCamera: null
       };
     }
 
@@ -349,10 +322,64 @@ export const FrameItViewport = React.forwardRef(function FrameItViewport(
       const jointId = hit.object.userData.jointId;
       const figure = stateRef.current.sceneData.figures.find((item) => item.id === figureId);
       if (!figure || !jointId) return;
-      onSelectionChangeRef.current?.({ figureId, jointId });
+      const drivenJointId = hit.object.userData.frameItDirectHandle ? frameItDirectDragJoint(jointId) : jointId;
+      onSelectionChangeRef.current?.({ figureId, jointId: drivenJointId });
+      if (hit.object.userData.frameItDirectHandle) {
+        onInteractionStartRef.current?.();
+        renderer.domElement.setPointerCapture?.(event.pointerId);
+        jointDragRef.current = {
+          pointerId: event.pointerId,
+          figure: { ...figure },
+          figureId,
+          jointId: drivenJointId,
+          startX: event.clientX,
+          startY: event.clientY,
+          startingRotation: frameItJointRotation(figure, drivenJointId),
+          pendingScene: null
+        };
+        const helper = transformControls.getHelper?.();
+        if (helper) helper.visible = false;
+      }
     }
 
     function handlePointerMove(event) {
+      const cameraDrag = cameraDragRef.current;
+      if (cameraDrag?.pointerId === event.pointerId) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        const dx = event.clientX - cameraDrag.startX;
+        const dy = event.clientY - cameraDrag.startY;
+        const nextCamera = cameraDrag.type === "orbit"
+          ? {
+              ...cameraDrag.camera,
+              yaw: cameraDrag.camera.yaw - dx * 0.35,
+              pitch: clamp(cameraDrag.camera.pitch + dy * 0.28, -82, 82)
+            }
+          : frameItPannedCamera(cameraDrag.camera, dx, dy);
+        cameraDrag.pendingCamera = nextCamera;
+        applyTransientCamera(nextCamera);
+        return;
+      }
+
+      const jointDrag = jointDragRef.current;
+      if (jointDrag?.pointerId === event.pointerId) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        const dx = event.clientX - jointDrag.startX;
+        const dy = event.clientY - jointDrag.startY;
+        const nextRotation = frameItJointDragRotation(jointDrag.jointId, jointDrag.startingRotation, dx, dy);
+        const nextFigure = {
+          ...jointDrag.figure,
+          ...frameItJointPatch(jointDrag.jointId, nextRotation, stateRef.current.useLimits)
+        };
+        const nextScene = {
+          ...stateRef.current.sceneData,
+          figures: stateRef.current.sceneData.figures.map((item) => item.id === jointDrag.figureId ? nextFigure : item)
+        };
+        jointDrag.pendingScene = nextScene;
+        applyTransientFigure(nextFigure, jointDrag.jointId);
+        return;
+      }
       if (transformControls.dragging && event.button !== -1) {
         const rect = renderer.domElement.getBoundingClientRect();
         transformControls.pointerMove({
@@ -361,68 +388,22 @@ export const FrameItViewport = React.forwardRef(function FrameItViewport(
           button: -1
         });
       }
-      const drag = dragRef.current;
-      if (!drag) return;
-      event.preventDefault();
-      event.stopPropagation();
-      const dx = event.clientX - drag.startX;
-      const dy = event.clientY - drag.startY;
-      if (drag.type === "orbit") {
-        const nextCamera = {
-          ...drag.camera,
-          yaw: drag.camera.yaw - dx * 0.35,
-          pitch: clamp(drag.camera.pitch + dy * 0.28, -82, 82)
-        };
-        applyTransientCamera(nextCamera);
-        drag.pendingCamera = nextCamera;
-        return;
-      }
-      if (drag.type === "pan") {
-        const scale = Math.max(0.001, drag.camera.distance * 0.0018);
-        const yaw = degreesToRadians(drag.camera.yaw);
-        const nextCamera = {
-          ...drag.camera,
-          targetX: drag.camera.targetX - Math.cos(yaw) * dx * scale,
-          targetZ: drag.camera.targetZ + Math.sin(yaw) * dx * scale,
-          targetY: drag.camera.targetY + dy * scale
-        };
-        applyTransientCamera(nextCamera);
-        drag.pendingCamera = nextCamera;
-        return;
-      }
     }
 
     function handlePointerUp(event) {
-      const drag = dragRef.current;
-      dragRef.current = null;
+      const cameraDrag = cameraDragRef.current;
+      if (cameraDrag?.pointerId === event.pointerId) {
+        cameraDragRef.current = null;
+        if (cameraDrag.pendingCamera) {
+          onSceneChangeRef.current?.({ ...stateRef.current.sceneData, camera: cameraDrag.pendingCamera });
+        }
+      }
+      const jointDrag = jointDragRef.current;
+      if (jointDrag?.pointerId === event.pointerId) {
+        jointDragRef.current = null;
+        if (jointDrag.pendingScene) onSceneChangeRef.current?.(jointDrag.pendingScene);
+      }
       if (renderer.domElement.hasPointerCapture?.(event.pointerId)) renderer.domElement.releasePointerCapture(event.pointerId);
-      if (drag?.pendingCamera) {
-        onSceneChangeRef.current?.({ ...stateRef.current.sceneData, camera: drag.pendingCamera });
-      }
-    }
-
-    function handleKeyDown(event) {
-      if (event.metaKey || event.ctrlKey || event.altKey || event.repeat) return;
-      const key = event.key.toLowerCase();
-      if (key === "r" || key === "e") {
-        event.preventDefault();
-        event.stopPropagation();
-        stateRef.current = { ...stateRef.current, tool: "rotate" };
-        syncTransformGizmo();
-        onToolChangeRef.current?.("rotate");
-      } else if (key === "g" || key === "w") {
-        event.preventDefault();
-        event.stopPropagation();
-        stateRef.current = { ...stateRef.current, tool: "translate" };
-        syncTransformGizmo();
-        onToolChangeRef.current?.("translate");
-      } else if (key === "f") {
-        event.preventDefault();
-        event.stopPropagation();
-        stateRef.current = { ...stateRef.current, tool: "figureRotate" };
-        syncTransformGizmo();
-        onToolChangeRef.current?.("figureRotate");
-      }
     }
 
     function handleWheel(event) {
@@ -434,10 +415,9 @@ export const FrameItViewport = React.forwardRef(function FrameItViewport(
         onInteractionStartRef.current?.();
         session.camera = { ...stateRef.current.sceneData.camera };
       }
-      const cameraData = session.camera;
       const nextCamera = {
-        ...cameraData,
-        distance: clamp(cameraData.distance + event.deltaY * 0.005, 1.5, 14)
+        ...session.camera,
+        distance: clamp(session.camera.distance + event.deltaY * 0.005, 1.5, 14)
       };
       session.camera = nextCamera;
       applyTransientCamera(nextCamera);
@@ -480,11 +460,10 @@ export const FrameItViewport = React.forwardRef(function FrameItViewport(
     transformControls.addEventListener("change", handleTransformChange);
     renderer.domElement.addEventListener("pointerdown", handleCameraPointerDown, true);
     renderer.domElement.addEventListener("pointerdown", handlePointerDown);
-    renderer.domElement.addEventListener("pointermove", handlePointerMove);
+    renderer.domElement.addEventListener("pointermove", handlePointerMove, true);
     renderer.domElement.addEventListener("pointerup", handlePointerUp);
     renderer.domElement.addEventListener("pointercancel", handlePointerUp);
     renderer.domElement.addEventListener("wheel", handleWheel, { passive: false });
-    renderer.domElement.addEventListener("keydown", handleKeyDown);
     renderFrameItViewport();
 
     return () => {
@@ -497,14 +476,15 @@ export const FrameItViewport = React.forwardRef(function FrameItViewport(
       transformControls.dispose();
       renderer.domElement.removeEventListener("pointerdown", handleCameraPointerDown, true);
       renderer.domElement.removeEventListener("pointerdown", handlePointerDown);
-      renderer.domElement.removeEventListener("pointermove", handlePointerMove);
+      renderer.domElement.removeEventListener("pointermove", handlePointerMove, true);
       renderer.domElement.removeEventListener("pointerup", handlePointerUp);
       renderer.domElement.removeEventListener("pointercancel", handlePointerUp);
       renderer.domElement.removeEventListener("wheel", handleWheel);
-      renderer.domElement.removeEventListener("keydown", handleKeyDown);
+      transformSessionRef.current = null;
+      cameraDragRef.current = null;
+      jointDragRef.current = null;
       if (wheelSessionRef.current.timer) window.clearTimeout(wheelSessionRef.current.timer);
       wheelSessionRef.current = { camera: null, timer: null };
-      transformSessionRef.current = null;
       scene.remove(transformHelper);
       scene.remove(transformProxy);
       disposeFrameItScene(scene);
@@ -564,7 +544,10 @@ export const FrameItViewport = React.forwardRef(function FrameItViewport(
     }
 
     data.figures.forEach((figure) => {
-      const object = createFrameItFigure(figure, jointObjectsRef.current);
+      const object = createFrameItFigure(figure, jointObjectsRef.current, {
+        figureId: stateRef.current.selectedFigureId,
+        jointId: stateRef.current.selectedJoint
+      });
       figureObjectsRef.current.set(figure.id, object);
       scene.add(object);
     });
@@ -604,6 +587,11 @@ export const FrameItViewport = React.forwardRef(function FrameItViewport(
     const state = stateRef.current;
     const figure = state.sceneData.figures.find((item) => item.id === state.selectedFigureId);
     const helper = controls.getHelper();
+    if (jointDragRef.current) {
+      controls.detach();
+      helper.visible = false;
+      return;
+    }
     if (!figure) {
       controls.detach();
       helper.visible = false;
@@ -612,47 +600,23 @@ export const FrameItViewport = React.forwardRef(function FrameItViewport(
 
     helper.visible = false;
     controls.detach();
-    const mode = state.tool === "translate"
-      ? "translate"
-      : state.tool === "figureRotate"
-        ? "figureRotate"
-        : "jointRotate";
-    controls.setMode(mode === "translate" ? "translate" : "rotate");
-    controls.setSpace(mode === "translate" ? "world" : "local");
-    controls.showXY = mode === "translate";
-    controls.showYZ = mode === "translate";
-    controls.showXZ = mode === "translate";
-    if (mode === "translate" || mode === "figureRotate") {
-      const figureObject = figureObjectsRef.current.get(figure.id);
-      if (!figureObject) {
-        controls.detach();
-        helper.visible = false;
-        return;
-      }
-      figureObject.updateWorldMatrix(true, false);
-      if (mode === "figureRotate") {
-        new THREE.Box3().setFromObject(figureObject).getCenter(proxy.position);
-        figureObject.getWorldQuaternion(proxy.quaternion);
-        proxy.scale.set(1, 1, 1);
-        proxy.updateMatrixWorld(true);
-        controls.attach(proxy);
-      } else {
-        controls.attach(figureObject);
-      }
-    } else {
-      const jointObject = frameItJointObject(jointObjectsRef.current.get(`${figure.id}:${state.selectedJoint}`));
-      if (!jointObject) {
-        controls.detach();
-        helper.visible = false;
-        return;
-      }
-      jointObject.updateWorldMatrix(true, false);
-      jointObject.getWorldPosition(proxy.position);
-      jointObject.getWorldQuaternion(proxy.quaternion);
-      proxy.scale.set(1, 1, 1);
-      proxy.updateMatrixWorld(true);
-      controls.attach(proxy);
+    controls.setMode("rotate");
+    controls.setSpace("local");
+    controls.showXY = false;
+    controls.showYZ = false;
+    controls.showXZ = false;
+    const jointObject = frameItJointObject(jointObjectsRef.current.get(`${figure.id}:${state.selectedJoint}`));
+    if (!jointObject) {
+      controls.detach();
+      helper.visible = false;
+      return;
     }
+    jointObject.updateWorldMatrix(true, false);
+    jointObject.getWorldPosition(proxy.position);
+    jointObject.getWorldQuaternion(proxy.quaternion);
+    proxy.scale.set(1, 1, 1);
+    proxy.updateMatrixWorld(true);
+    controls.attach(proxy);
     helper.visible = true;
   }
 
@@ -666,7 +630,8 @@ export const FrameItViewport = React.forwardRef(function FrameItViewport(
         style={{ aspectRatio: String(ratio), width: portraitWidth }}
       />
       {showGuides && <div className="frame-it-guides" style={{ aspectRatio: String(ratio), width: portraitWidth }} aria-hidden="true" />}
-      <div className="frame-it-camera-hint">Click body: select&nbsp;&nbsp; R: pose&nbsp;&nbsp; F: rotate figure&nbsp;&nbsp; G: move figure&nbsp;&nbsp; Option drag: orbit&nbsp;&nbsp; Command drag: pan</div>
+      {showShotLabel && <div className="frame-it-shot-label">{shotLabel || "Frame It"}</div>}
+      <div className="frame-it-camera-hint">Drag a joint to pose. Option-drag: orbit. Command-drag: pan. Command-scroll: zoom.</div>
     </div>
   );
 });
@@ -685,6 +650,17 @@ function positionFrameItCamera(camera, data) {
     data.targetZ + Math.cos(yaw) * horizontalDistance
   );
   camera.lookAt(data.targetX, data.targetY, data.targetZ);
+}
+
+function frameItPannedCamera(camera, dx, dy) {
+  const scale = Math.max(0.001, camera.distance * 0.0018);
+  const yaw = degreesToRadians(camera.yaw);
+  return {
+    ...camera,
+    targetX: camera.targetX - Math.cos(yaw) * dx * scale,
+    targetZ: camera.targetZ + Math.sin(yaw) * dx * scale,
+    targetY: camera.targetY + dy * scale
+  };
 }
 
 function loadFrameItMannequinAsset() {
@@ -709,9 +685,9 @@ function loadFrameItMannequinAsset() {
   return frameItMannequinAssetPromise;
 }
 
-function createFrameItFigure(figure, jointMap) {
+function createFrameItFigure(figure, jointMap, selection) {
   if (frameItMannequinAsset?.scene && cloneSkeleton) {
-    return createFrameItModelFigure(figure, jointMap, frameItMannequinAsset);
+    return createFrameItModelFigure(figure, jointMap, frameItMannequinAsset, selection);
   }
   return createFrameItProceduralFigure(figure, jointMap);
 }
@@ -726,7 +702,7 @@ function disableFrameItFreeRotateHandle(controls) {
   });
 }
 
-function createFrameItModelFigure(figure, jointMap, asset) {
+function createFrameItModelFigure(figure, jointMap, asset, selection) {
   const root = new THREE.Group();
   root.userData.frameItFigure = true;
   root.userData.figureId = figure.id;
@@ -753,41 +729,101 @@ function createFrameItModelFigure(figure, jointMap, asset) {
     jointMap.set(`${figure.id}:${jointId}`, controller);
     pendingControllers.push({ controller, jointId });
   };
-  const registerElbowController = (jointId, forearmName, handName) => {
-    const forearm = bones.get(forearmName);
-    const hand = bones.get(handName);
+  const registerElbowController = (jointId, forearmNames, handNames) => {
+    const forearm = firstFrameItBone(bones, forearmNames);
+    const hand = firstFrameItBone(bones, handNames);
     if (!forearm || !hand) return;
     const controller = createFrameItElbowController(forearm, hand);
     jointMap.set(`${figure.id}:${jointId}`, controller);
     pendingControllers.push({ controller, jointId });
   };
 
-  registerController("hipsRot", ["spine"]);
-  registerController("upperBodyRot", ["spine001", "spine002", "spine003"], true);
-  registerController("headRot", ["spine004", "spine005"], true);
-  registerController("leftUpperArm", ["upper_armL"], false, true);
-  registerElbowController("leftLowerArm", "forearmL", "handL");
-  registerController("leftHandRot", ["handL"], false, true);
-  registerController("rightUpperArm", ["upper_armR"], false, true);
-  registerElbowController("rightLowerArm", "forearmR", "handR");
-  registerController("rightHandRot", ["handR"], false, true);
-  registerController("leftUpperLeg", ["thighL"]);
-  registerController("leftLowerLeg", ["shinL"]);
-  registerController("leftFootRot", ["footL", "toeL"]);
-  registerController("rightUpperLeg", ["thighR"]);
-  registerController("rightLowerLeg", ["shinR"]);
-  registerController("rightFootRot", ["footR", "toeR"]);
+  registerController("hipsRot", ["spine", "Hips", "pelvis"].filter((name) => bones.has(name)).slice(0, 1));
+  registerController("upperBodyRot", ["spine.001", "spine.002", "spine.003", "spine001", "spine002", "spine003", "spine_01", "spine_02", "spine_03", "Abdomen", "Torso"].filter((name) => bones.has(name)), true);
+  registerController("headRot", ["spine.004", "spine.005", "spine004", "spine005", "spine_04", "spine_05", "neck_01", "neck_02", "head", "Neck", "Head"].filter((name) => bones.has(name)), true);
+  registerController("leftUpperArm", ["upper_arm.L", "upper_armL", "UpperArm.L", "UpperArmL", "upperarm_l"].filter((name) => bones.has(name)).slice(0, 1), false, true);
+  registerElbowController("leftLowerArm", ["forearm.L", "forearmL", "LowerArm.L", "LowerArmL", "lowerarm_l"], ["hand.L", "handL", "Fist.L", "FistL", "hand_l"]);
+  registerController("leftHandRot", ["hand.L", "handL", "Fist.L", "FistL", "hand_l"].filter((name) => bones.has(name)).slice(0, 1), false, true);
+  registerController("rightUpperArm", ["upper_arm.R", "upper_armR", "UpperArm.R", "UpperArmR", "upperarm_r"].filter((name) => bones.has(name)).slice(0, 1), false, true);
+  registerElbowController("rightLowerArm", ["forearm.R", "forearmR", "LowerArm.R", "LowerArmR", "lowerarm_r"], ["hand.R", "handR", "Fist.R", "FistR", "hand_r"]);
+  registerController("rightHandRot", ["hand.R", "handR", "Fist.R", "FistR", "hand_r"].filter((name) => bones.has(name)).slice(0, 1), false, true);
+  registerController("leftUpperLeg", ["thigh.L", "thighL", "UpperLeg.L", "UpperLegL", "thigh_l"].filter((name) => bones.has(name)).slice(0, 1));
+  registerController("leftLowerLeg", ["shin.L", "shinL", "LowerLeg.L", "LowerLegL", "calf_l"].filter((name) => bones.has(name)).slice(0, 1));
+  registerController("leftFootRot", ["foot.L", "footL", "toe.L", "toeL", "Foot.L", "FootL", "foot_l", "ball_l"].filter((name) => bones.has(name)));
+  registerController("rightUpperLeg", ["thigh.R", "thighR", "UpperLeg.R", "UpperLegR", "thigh_r"].filter((name) => bones.has(name)).slice(0, 1));
+  registerController("rightLowerLeg", ["shin.R", "shinR", "LowerLeg.R", "LowerLegR", "calf_r"].filter((name) => bones.has(name)).slice(0, 1));
+  registerController("rightFootRot", ["foot.R", "footR", "toe.R", "toeR", "Foot.R", "FootR", "foot_r", "ball_r"].filter((name) => bones.has(name)));
 
+  root.updateMatrixWorld(true);
   pendingControllers.forEach(({ controller, jointId }) => {
     controller.apply(frameItJointRenderRotation(jointId, frameItJointRotation(figure, jointId)));
+    addFrameItJointMarker(controller.primaryBone, figure, jointId, selection);
   });
 
   model.updateMatrixWorld(true);
   return root;
 }
 
+function firstFrameItBone(bones, names) {
+  return names.map((name) => bones.get(name)).find(Boolean) || null;
+}
+
+function addFrameItJointMarker(bone, figure, jointId, selection) {
+  if (!bone) return;
+  const selected = selection?.figureId === figure.id && selection?.jointId === jointId;
+  const color = frameItJointMarkerColor(jointId);
+  const worldRadius = selected ? 0.068 : 0.052;
+  bone.updateWorldMatrix(true, false);
+  const parentWorldScale = bone.getWorldScale(new THREE.Vector3());
+  const marker = new THREE.Mesh(
+    new THREE.SphereGeometry(1, 18, 14),
+    new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: selected ? 1 : 0.86,
+      depthTest: false,
+      depthWrite: false,
+      toneMapped: false
+    })
+  );
+  marker.name = `frame-it-joint-${jointId}`;
+  marker.renderOrder = 28;
+  marker.userData.frameItSelectable = true;
+  marker.userData.frameItOverlayControl = true;
+  marker.userData.figureId = figure.id;
+  marker.userData.jointId = jointId;
+  marker.userData.frameItDirectHandle = true;
+  marker.scale.set(
+    worldRadius / Math.max(0.001, Math.abs(parentWorldScale.x)),
+    worldRadius / Math.max(0.001, Math.abs(parentWorldScale.y)),
+    worldRadius / Math.max(0.001, Math.abs(parentWorldScale.z))
+  );
+  const hitTarget = new THREE.Mesh(
+    new THREE.SphereGeometry(1.75, 12, 10),
+    new THREE.MeshBasicMaterial({
+      transparent: true,
+      opacity: 0,
+      depthTest: false,
+      depthWrite: false
+    })
+  );
+  hitTarget.name = `${marker.name}-hit-target`;
+  hitTarget.userData.frameItSelectable = true;
+  hitTarget.userData.frameItDirectHandle = true;
+  hitTarget.userData.figureId = figure.id;
+  hitTarget.userData.jointId = jointId;
+  marker.add(hitTarget);
+  bone.add(marker);
+}
+
+function frameItJointMarkerColor(jointId) {
+  if (jointId === "headRot") return 0xb98be8;
+  if (jointId === "upperBodyRot" || jointId === "hipsRot") return 0xf1d25b;
+  return 0xf5a044;
+}
+
 function normalizeFrameItMannequin(model) {
-  model.rotation.y = -Math.PI / 2;
+  model.rotation.y = Math.PI / 2;
   model.updateMatrixWorld(true);
   const bounds = new THREE.Box3().setFromObject(model);
   const size = bounds.getSize(new THREE.Vector3());
@@ -925,22 +961,50 @@ function frameItJointFromSkinHit(hit) {
 function frameItJointForBoneName(name) {
   const value = String(name || "");
   const lowerValue = value.toLowerCase();
+  const compactValue = lowerValue.replace(/[^a-z0-9]/g, "");
   if (!value) return "";
+  if (lowerValue === "head" || lowerValue === "neck") return "headRot";
+  if (lowerValue === "torso" || lowerValue === "abdomen") return "upperBodyRot";
+  if (lowerValue === "hips") return "hipsRot";
+  if (lowerValue === "upperarm.l" || lowerValue === "shoulder.l") return "leftUpperArm";
+  if (lowerValue === "lowerarm.l") return "leftLowerArm";
+  if (lowerValue === "fist.l") return "leftHandRot";
+  if (lowerValue === "upperarm.r" || lowerValue === "shoulder.r") return "rightUpperArm";
+  if (lowerValue === "lowerarm.r") return "rightLowerArm";
+  if (lowerValue === "fist.r") return "rightHandRot";
+  if (lowerValue === "upperleg.l") return "leftUpperLeg";
+  if (lowerValue === "lowerleg.l") return "leftLowerLeg";
+  if (lowerValue === "foot.l") return "leftFootRot";
+  if (lowerValue === "upperleg.r") return "rightUpperLeg";
+  if (lowerValue === "lowerleg.r") return "rightLowerLeg";
+  if (lowerValue === "foot.r") return "rightFootRot";
   if (lowerValue === "spine005" || lowerValue === "spine004") return "headRot";
   if (/^spine00[1-3]$/.test(lowerValue)) return "upperBodyRot";
   if (lowerValue === "spine") return "hipsRot";
-  if (lowerValue === "upper_arml" || lowerValue === "shoulderl") return "leftUpperArm";
-  if (lowerValue === "forearml") return "leftLowerArm";
-  if (lowerValue === "handl" || /^(thumb|f_).+l$/.test(lowerValue)) return "leftHandRot";
-  if (lowerValue === "upper_armr" || lowerValue === "shoulderr") return "rightUpperArm";
-  if (lowerValue === "forearmr") return "rightLowerArm";
-  if (lowerValue === "handr" || /^(thumb|f_).+r$/.test(lowerValue)) return "rightHandRot";
-  if (lowerValue === "thighl" || lowerValue === "pelvisl") return "leftUpperLeg";
-  if (lowerValue === "shinl") return "leftLowerLeg";
-  if (lowerValue === "footl" || lowerValue === "toel" || lowerValue === "heel02l") return "leftFootRot";
-  if (lowerValue === "thighr" || lowerValue === "pelvisr") return "rightUpperLeg";
-  if (lowerValue === "shinr") return "rightLowerLeg";
-  if (lowerValue === "footr" || lowerValue === "toer" || lowerValue === "heel02r") return "rightFootRot";
+  if (["upper_arm.l", "upper_arml", "shoulderl"].includes(lowerValue)) return "leftUpperArm";
+  if (["forearm.l", "forearml"].includes(lowerValue)) return "leftLowerArm";
+  if (["hand.l", "handl"].includes(lowerValue) || /^(thumb|f_).+l$/.test(lowerValue)) return "leftHandRot";
+  if (["upper_arm.r", "upper_armr", "shoulderr"].includes(lowerValue)) return "rightUpperArm";
+  if (["forearm.r", "forearmr"].includes(lowerValue)) return "rightLowerArm";
+  if (["hand.r", "handr"].includes(lowerValue) || /^(thumb|f_).+r$/.test(lowerValue)) return "rightHandRot";
+  if (["thigh.l", "thighl", "pelvisl"].includes(lowerValue)) return "leftUpperLeg";
+  if (["shin.l", "shinl"].includes(lowerValue)) return "leftLowerLeg";
+  if (["foot.l", "footl", "toe.l", "toel", "heel02l"].includes(lowerValue)) return "leftFootRot";
+  if (["thigh.r", "thighr", "pelvisr"].includes(lowerValue)) return "rightUpperLeg";
+  if (["shin.r", "shinr"].includes(lowerValue)) return "rightLowerLeg";
+  if (["foot.r", "footr", "toe.r", "toer", "heel02r"].includes(lowerValue)) return "rightFootRot";
+  if (["upperarml", "shoulderl"].includes(compactValue)) return "leftUpperArm";
+  if (["lowerarml", "forearml"].includes(compactValue)) return "leftLowerArm";
+  if (["fistl", "handl"].includes(compactValue)) return "leftHandRot";
+  if (["upperarmr", "shoulderr"].includes(compactValue)) return "rightUpperArm";
+  if (["lowerarmr", "forearmr"].includes(compactValue)) return "rightLowerArm";
+  if (["fistr", "handr"].includes(compactValue)) return "rightHandRot";
+  if (["upperlegl", "thighl"].includes(compactValue)) return "leftUpperLeg";
+  if (["lowerlegl", "shinl", "calfl"].includes(compactValue)) return "leftLowerLeg";
+  if (["footl", "balll"].includes(compactValue)) return "leftFootRot";
+  if (["upperlegr", "thighr"].includes(compactValue)) return "rightUpperLeg";
+  if (["lowerlegr", "shinr", "calfr"].includes(compactValue)) return "rightLowerLeg";
+  if (["footr", "ballr"].includes(compactValue)) return "rightFootRot";
   return "";
 }
 

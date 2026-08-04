@@ -1,4 +1,5 @@
 import { nodeApi } from "../api/newtApi.js";
+import { characterSheetGenerationSettings } from "../characterSheetModels.js";
 import { workflowContextPayload } from "../workflowContext.js";
 
 export async function runImageModelGeneration({ node, prompt, aspectRatio, imagePromptItems, workflowContext, index }) {
@@ -176,15 +177,15 @@ export async function run3DModelGeneration({ node, imageViewUrls, workflowContex
 
 export async function runCharacterSheetGeneration({ node, prompt, portrait, wardrobe, workflowContext, characterTag, sheetKind = "image" }) {
   const isVideoSheet = sheetKind === "video";
+  const generationSettings = characterSheetGenerationSettings(node.data.characterSheetModel);
   const references = [
     { url: portrait.localUrl, label: "The Character portrait reference" },
     ...(wardrobe?.localUrl ? [{ url: wardrobe.localUrl, label: "Selected wardrobe sheet" }] : [])
   ];
   const { response, data } = await nodeApi.generateImage({
     prompt,
-    model: "OpenAI Image 2",
+    ...generationSettings,
     aspectRatio: "16:9",
-    resolution: "4K",
     imagePromptUrls: references.map((item) => item.url),
     imagePromptLabels: references.map((item) => item.label),
     ...workflowContextPayload(workflowContext),
