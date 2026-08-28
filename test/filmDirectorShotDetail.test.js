@@ -23,10 +23,16 @@ test("two- and three-shot plans carry fuller internal beats", () => {
   assert.ok(filmDirectorShotMinimumWords(3, 15) > 0);
 });
 
-test("multi-shot coverage keeps the existing concise contract", () => {
-  assert.match(filmDirectorShotDetailDirective(6, 15), /under 30 words/i);
-  assert.equal(filmDirectorShotMinimumWords(6, 15), 0);
-  assert.equal(filmDirectorShotDescriptionExample(6, 15), "one concise playable shot under 30 words");
+test("multi-shot coverage adds compact visual and continuity context", () => {
+  const directive = filmDirectorShotDetailDirective(6, 15);
+  assert.match(directive, /32-42 words/i);
+  assert.match(directive, /spatial or environment cue/i);
+  assert.match(directive, /ending state or editorial handoff/i);
+  assert.ok(filmDirectorShotMinimumWords(6, 15) > 0);
+  assert.equal(
+    filmDirectorShotDescriptionExample(6, 15),
+    "one compact playable shot with subject action, spatial context, camera behavior, and a clear ending handoff"
+  );
 });
 
 test("auto planning explains how detail should scale after choosing a cut count", () => {
@@ -34,4 +40,5 @@ test("auto planning explains how detail should scale after choosing a cut count"
   assert.match(directive, /After choosing recommendedShotCount/i);
   assert.match(directive, /For 1 CUT/i);
   assert.match(directive, /For 4 or more CUTS/i);
+  assert.match(directive, /32-42 words/i);
 });

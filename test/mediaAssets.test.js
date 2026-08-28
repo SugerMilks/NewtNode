@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   fullResolutionContextPreparedAttribute,
   fullResolutionImageProps,
+  fullResolutionImageUrl,
   fullResolutionPreviewSourceAttribute,
   fullResolutionOutputItem,
   isLocalDraggableMediaUrl,
@@ -62,6 +63,31 @@ test("existing thumbnails and remote images are preserved", () => {
     "/outputs/Test/thumbnails/full-resolution-preview.jpg"
   );
   assert.equal(previewImageUrl("https://example.com/image.png"), "https://example.com/image.png");
+});
+
+test("Preview image sources always resolve to full-resolution media", () => {
+  assert.equal(
+    fullResolutionImageUrl({
+      url: "/outputs/Test/thumbnails/full-resolution-preview.jpg",
+      fullResolutionUrl: "/outputs/Test/full-resolution.png",
+      thumbnailUrl: "/outputs/Test/thumbnails/full-resolution-preview.jpg"
+    }),
+    "/outputs/Test/full-resolution.png"
+  );
+  assert.equal(
+    fullResolutionImageUrl({
+      url: "/outputs/Test/full-resolution.png",
+      thumbnailUrl: "/outputs/Test/thumbnails/full-resolution-preview.jpg"
+    }),
+    "/outputs/Test/full-resolution.png"
+  );
+});
+
+test("thumbnail-only records cannot become Preview image sources", () => {
+  assert.equal(
+    fullResolutionImageUrl({ url: "/outputs/Test/thumbnails/full-resolution-preview.jpg" }),
+    ""
+  );
 });
 
 test("thumbnail context downloads point at the full-resolution image", () => {

@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { generationApi, historyApi, settingsApi } from "./api/newtApi.js";
 import { installClientDiagnostics, reportClientDiagnostic } from "./clientDiagnostics.js";
+import { installGenerationChimeUnlock, notifyGenerationTaskComplete } from "./generationChime.js";
 import { FullResolutionImageContextMenu } from "./components/FullResolutionImageContextMenu.jsx";
 import { fullResolutionImageProps, previewImageUrl } from "./mediaAssets.js";
 import {
@@ -46,6 +47,9 @@ import {
   openAiImageAspectRatios,
   reve21AspectRatios,
   reve21ResolutionOptions,
+  seedance25AspectRatioOptions,
+  seedance25DurationOptions,
+  seedance25ResolutionOptions,
   seedanceVideoAspectRatioOptions,
   seedanceVideoDurationOptions,
   seedanceVideoResolutionOptions,
@@ -59,9 +63,11 @@ import {
 import { isGeminiOmniModel } from "./geminiOmni.js";
 import { isNanoBanana2Model, nanoBanana2ResolutionOptions } from "./nanoBanana2.js";
 import { isReve21Model } from "./reve21.js";
+import { isSeedance25Model } from "./seedance25.js";
 import "./styles.css";
 
 installClientDiagnostics();
+installGenerationChimeUnlock();
 
 const NodeEditor = React.lazy(() => import("./NodeEditor.jsx"));
 const StatsDashboard = React.lazy(() => import("./StatsDashboard.jsx"));
@@ -267,6 +273,7 @@ function App() {
       setResult(successes);
       setStatus(successes.length ? "complete" : "error");
       setMessage(batchStatusMessage("video", count, successes.length, failures));
+      if (successes.length) notifyGenerationTaskComplete();
       await refreshHistory();
     } catch (error) {
       setStatus("error");
@@ -341,6 +348,7 @@ function App() {
           ? `${successes.length} Seedream output${successes.length === 1 ? "" : "s"} ready.`
           : batchStatusMessage("image", count, successes.length, failures)
       );
+      if (successes.length) notifyGenerationTaskComplete();
       await refreshHistory();
     } catch (error) {
       setImageStatus("error");
@@ -1037,6 +1045,16 @@ function formatKrea2Creativity(value) {
 }
 
 function videoSettingsForModel(model) {
+  if (isSeedance25Model(model)) {
+    return {
+      durations: seedance25DurationOptions.map(durationLabelToValue),
+      durationValues: seedance25DurationOptions.map(durationLabelToValue),
+      defaultDuration: "15",
+      resolutions: seedance25ResolutionOptions,
+      aspectRatios: seedance25AspectRatioOptions.map((option) => option.match(/\d+:\d+/)?.[0] || option.toLowerCase())
+    };
+  }
+
   if (isGeminiOmniModel(model)) {
     return {
       durations: geminiOmniDurationOptions.map(durationLabelToValue),
@@ -1112,12 +1130,13 @@ function isWan27VideoModel(model) {
 }
 
 function durationLabelToValue(value) {
+  if (String(value || "").trim().toLowerCase() === "auto") return "auto";
   return String(value || "").match(/\d+/)?.[0] || "5";
 }
 
 function durationToLabel(value) {
   const seconds = durationLabelToValue(value);
-  return value === "auto" ? "auto" : `${seconds} seconds`;
+  return seconds === "auto" ? "auto" : `${seconds} seconds`;
 }
 
 function durationValueToNumber(value) {

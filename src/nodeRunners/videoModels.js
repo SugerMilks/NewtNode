@@ -1,11 +1,100 @@
 import { workflowContextPayload } from "../workflowContext.js";
 import { isGeminiOmniModel } from "../geminiOmni.js";
+import {
+  geminiOmniDurationOptions,
+  geminiOmniAspectRatioOptions,
+  geminiOmniResolutionOptions,
+  klingO3ProAspectRatioOptions,
+  klingO3ProDurationOptions,
+  klingO34kResolutionOptions,
+  klingO3ProResolutionOptions,
+  seedance25DurationOptions,
+  seedance25AspectRatioOptions,
+  seedance25ResolutionOptions,
+  seedanceVideoAspectRatioOptions,
+  seedanceVideoDurationOptions,
+  seedanceVideoResolutionOptions
+} from "../modelOptions.js";
+import { isSeedance25Model } from "../seedance25.js";
 
 export function videoModelSupportsFilmDirector(model) {
   const normalized = String(model || "").toLowerCase();
   const isSeedance = normalized.includes("seedance");
   const isKlingO3 = normalized.includes("kling") && (normalized.includes("o3") || normalized.includes("03"));
   return isSeedance || isKlingO3 || isGeminiOmniModel(model);
+}
+
+export function filmDirectorVideoDuration(model, durationSeconds, fallback = "") {
+  const normalizedModel = String(model || "").toLowerCase();
+  const options = isGeminiOmniModel(model)
+    ? geminiOmniDurationOptions
+    : isSeedance25Model(model)
+      ? seedance25DurationOptions.filter((option) => option !== "Auto")
+    : normalizedModel.includes("kling") && (normalizedModel.includes("o3") || normalizedModel.includes("03"))
+      ? klingO3ProDurationOptions
+      : normalizedModel.includes("seedance")
+        ? seedanceVideoDurationOptions
+        : [];
+  if (!options.length) return fallback;
+
+  const requestedSeconds = Number.parseInt(String(durationSeconds || "").match(/\d+/)?.[0] || "", 10);
+  if (!Number.isFinite(requestedSeconds)) return options.includes(fallback) ? fallback : options[0];
+
+  const requestedLabel = `${requestedSeconds} seconds`;
+  if (options.includes(requestedLabel)) return requestedLabel;
+
+  return options.reduce((closest, option) => {
+    const optionSeconds = Number.parseInt(option, 10);
+    const closestSeconds = Number.parseInt(closest, 10);
+    const optionDistance = Math.abs(optionSeconds - requestedSeconds);
+    const closestDistance = Math.abs(closestSeconds - requestedSeconds);
+    return optionDistance < closestDistance || (optionDistance === closestDistance && optionSeconds < closestSeconds)
+      ? option
+      : closest;
+  }, options[0]);
+}
+
+export function filmDirectorVideoResolution(model, resolution, fallback = "") {
+  const normalizedModel = String(model || "").toLowerCase();
+  const options = isGeminiOmniModel(model)
+    ? geminiOmniResolutionOptions
+    : isSeedance25Model(model)
+      ? seedance25ResolutionOptions
+    : normalizedModel.includes("kling") && (normalizedModel.includes("o3") || normalizedModel.includes("03"))
+      ? normalizedModel.includes("4k") ? klingO34kResolutionOptions : klingO3ProResolutionOptions
+      : normalizedModel.includes("seedance")
+        ? seedanceVideoResolutionOptions
+        : [];
+  if (!options.length) return fallback;
+
+  const requested = String(resolution || "").trim().toLowerCase();
+  const exact = options.find((option) => option.toLowerCase() === requested);
+  if (exact) return exact;
+
+  const normalizedFallback = String(fallback || "").trim().toLowerCase();
+  return options.find((option) => option.toLowerCase() === normalizedFallback) || options[0];
+}
+
+export function filmDirectorVideoAspectRatio(model, aspectRatio, fallback = "") {
+  const normalizedModel = String(model || "").toLowerCase();
+  const options = isGeminiOmniModel(model)
+    ? geminiOmniAspectRatioOptions
+    : isSeedance25Model(model)
+      ? seedance25AspectRatioOptions.filter((option) => option !== "Auto")
+      : normalizedModel.includes("kling") && (normalizedModel.includes("o3") || normalizedModel.includes("03"))
+        ? klingO3ProAspectRatioOptions
+        : normalizedModel.includes("seedance")
+          ? seedanceVideoAspectRatioOptions
+          : [];
+  if (!options.length) return fallback;
+
+  const ratioFor = (value) => String(value || "").match(/\d+(?:\.\d+)?:\d+(?:\.\d+)?/)?.[0] || "";
+  const requested = ratioFor(aspectRatio);
+  const exact = options.find((option) => ratioFor(option) === requested);
+  if (exact) return exact;
+
+  const normalizedFallback = ratioFor(fallback);
+  return options.find((option) => ratioFor(option) === normalizedFallback) || options[0];
 }
 
 export function buildVideoGenerationRequest({
@@ -25,12 +114,19 @@ export function buildVideoGenerationRequest({
   referenceAudioUrls = [],
   filmDirector = null
 }) {
+  const activeFilmDirector = videoModelSupportsFilmDirector(node.data.model) ? filmDirector : null;
   return {
     prompt,
     model: node.data.model,
-    duration: node.data.duration,
-    resolution: node.data.resolution,
-    aspectRatio: node.data.aspectRatio,
+    duration: activeFilmDirector
+      ? filmDirectorVideoDuration(node.data.model, activeFilmDirector.durationSeconds, node.data.duration)
+      : node.data.duration,
+    resolution: activeFilmDirector
+      ? filmDirectorVideoResolution(node.data.model, activeFilmDirector.resolution, node.data.resolution)
+      : node.data.resolution,
+    aspectRatio: activeFilmDirector
+      ? filmDirectorVideoAspectRatio(node.data.model, activeFilmDirector.aspectRatio, node.data.aspectRatio)
+      : node.data.aspectRatio,
     generateAudio: node.data.generateAudio,
     klingCfgScale: node.data.klingCfgScale ?? 0.5,
     negativePrompt: node.data.negativePrompt || "",
@@ -45,7 +141,7 @@ export function buildVideoGenerationRequest({
     referenceVideoUrls,
     referenceVideoLabels,
     referenceAudioUrls,
-    filmDirector: videoModelSupportsFilmDirector(node.data.model) ? filmDirector : null,
+    filmDirector: activeFilmDirector,
     wan27Reference: {
       negativePrompt: node.data.negativePrompt || "",
       multiShots: Boolean(node.data.multiShots)

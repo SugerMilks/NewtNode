@@ -816,6 +816,7 @@ function inferModelName(item, mediaType) {
   if (mediaType === "image") return "Nano Banana Pro";
   if (mediaType === "text") return item.settings?.model || "Text processing";
   if (mediaType === "model3d") return "Hunyuan 3D 3.1 Pro";
+  if (String(item.endpoint || "").includes("seedance-2.5")) return "Seedance 2.5";
   return item.settings?.speed === "fast" || String(item.endpoint || "").includes("/fast/") ? "Seedance 2.0 Fast" : "Seedance 2.0";
 }
 

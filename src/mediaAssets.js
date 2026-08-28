@@ -65,9 +65,9 @@ export function previewImageUrl(itemOrUrl, thumbnailUrl = "") {
   return `/api/media-thumbnail?url=${encodeURIComponent(sourceUrl)}`;
 }
 
-export function fullResolutionImageProps(itemOrUrl, fileName = "") {
+export function fullResolutionImageUrl(itemOrUrl) {
   const item = itemOrUrl && typeof itemOrUrl === "object" ? itemOrUrl : null;
-  const sourceUrl = [
+  return [
     item?.fullResolutionUrl,
     item?.originalUrl,
     item?.resultUrl,
@@ -76,7 +76,12 @@ export function fullResolutionImageProps(itemOrUrl, fileName = "") {
     item ? "" : itemOrUrl
   ]
     .map((candidate) => String(candidate || "").trim())
-    .find((candidate) => candidate && !isLocalThumbnailUrl(candidate));
+    .find((candidate) => candidate && !isLocalThumbnailUrl(candidate)) || "";
+}
+
+export function fullResolutionImageProps(itemOrUrl, fileName = "") {
+  const item = itemOrUrl && typeof itemOrUrl === "object" ? itemOrUrl : null;
+  const sourceUrl = fullResolutionImageUrl(itemOrUrl);
 
   if (!sourceUrl) return {};
 

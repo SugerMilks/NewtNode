@@ -1,5 +1,5 @@
 import React from "react";
-import { Box, Check, ChevronLeft, ChevronRight, Crop, Download, FileAudio, FileImage, Film, FlipHorizontal, FlipVertical, ImagePlus, Loader2, Paintbrush, PanelRightClose, Plus, RefreshCw, RotateCw, Sun, Type, Video, X } from "lucide-react";
+import { Box, Check, ChevronLeft, ChevronRight, Crop, Download, FileAudio, FileImage, Film, FlipHorizontal, FlipVertical, ImagePlus, PanelRightClose, Plus, RefreshCw, RotateCw, Sun, Type, Video, X } from "lucide-react";
 import { capitalizeMediaType, finishOutputItemDragData, fullResolutionImageProps, outputDragMime as defaultOutputDragMime, previewImageUrl, setOutputItemDragData } from "../mediaAssets.js";
 import { normalizedResultItems, resultDownloadFileName } from "../mediaResults.js";
 
@@ -195,8 +195,6 @@ const defaultTextOverlay = {
   color: "#f4f0e8",
   font: "Inter"
 };
-const defaultPaintPrompt = "";
-const defaultPaintBrushSize = 42;
 const maxCurvePoints = 7;
 const curvePreviewMaxEdge = 1400;
 
@@ -381,9 +379,6 @@ export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onResto
   const imageEditorRef = React.useRef(null);
   const cropDragRef = React.useRef(null);
   const textDragRef = React.useRef(null);
-  const paintCanvasRef = React.useRef(null);
-  const paintMaskDataCanvasRef = React.useRef(null);
-  const paintDragRef = React.useRef(null);
   const curveGraphRef = React.useRef(null);
   const curveDragRef = React.useRef(null);
   const curvePreviewUrlRef = React.useRef("");
@@ -403,10 +398,6 @@ export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onResto
   const [curvePoints, setCurvePoints] = React.useState(defaultCurvePoints);
   const [textMode, setTextMode] = React.useState(false);
   const [textOverlay, setTextOverlay] = React.useState(defaultTextOverlay);
-  const [paintMode, setPaintMode] = React.useState(false);
-  const [paintPrompt, setPaintPrompt] = React.useState(defaultPaintPrompt);
-  const [paintBrushSize, setPaintBrushSize] = React.useState(defaultPaintBrushSize);
-  const [paintHasMask, setPaintHasMask] = React.useState(false);
   const [curvePreviewUrl, setCurvePreviewUrl] = React.useState("");
   const [tonePreviewUrl, setTonePreviewUrl] = React.useState("");
   const [displayItem, setDisplayItem] = React.useState(item);
@@ -415,7 +406,6 @@ export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onResto
   const KindIcon = displayItem.type === "video" ? Film : displayItem.type === "audio" ? FileAudio : displayItem.type === "model3d" ? Box : FileImage;
   const label = displayItem.label || displayItem.fileName || `${capitalizeMediaType(displayItem.type)} preview`;
   const canEditImage = displayItem.type === "image" && ["previewLayout", "storyboardFrame", "nodeResult"].includes(displayItem.editContext?.type) && typeof onApplyImageEdit === "function";
-  const inpaintBusy = editBusy && paintMode;
 
   React.useEffect(() => {
     activeItemRef.current = displayItem;
@@ -463,15 +453,10 @@ export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onResto
       setToneMode(false);
       setCurvesMode(false);
       setTextMode(false);
-      setPaintMode(false);
       setCropRect(defaultCropRect);
       setToneAdjustments(defaultToneAdjustments);
       setCurvePoints(defaultCurvePoints);
       setTextOverlay(defaultTextOverlay);
-      setPaintPrompt(defaultPaintPrompt);
-      setPaintBrushSize(defaultPaintBrushSize);
-      setPaintHasMask(false);
-      clearPaintMask();
       return true;
     } catch (error) {
       setEditError(error.message || "Could not restore layout image.");
@@ -533,11 +518,6 @@ export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onResto
       applyEdit({ type: "text", overlay });
       return true;
     }
-    if (paintMode) {
-      if (!paintHasMask || !paintPrompt.trim()) return false;
-      applyPaintEdit();
-      return true;
-    }
     if (toneMode) {
       applyEdit({
         type: "tone",
@@ -583,7 +563,7 @@ export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onResto
 
     window.addEventListener("keydown", handleKeyDown, true);
     return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, [canEditImage, cropMode, cropRect, curvePoints, curvesMode, editBusy, onClose, onRestoreImageEdit, paintHasMask, paintMode, paintPrompt, textMode, textOverlay, toneAdjustments, toneMode]);
+  }, [canEditImage, cropMode, cropRect, curvePoints, curvesMode, editBusy, onClose, onRestoreImageEdit, textMode, textOverlay, toneAdjustments, toneMode]);
 
   React.useEffect(() => {
     setCropMode(false);
@@ -594,11 +574,6 @@ export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onResto
     setCurvePoints(defaultCurvePoints);
     setTextMode(false);
     setTextOverlay(defaultTextOverlay);
-    setPaintMode(false);
-    setPaintPrompt(defaultPaintPrompt);
-    setPaintBrushSize(defaultPaintBrushSize);
-    setPaintHasMask(false);
-    clearPaintMask();
     setCurvePreviewUrl("");
     setTonePreviewUrl("");
     setDisplayItem(item);
@@ -686,21 +661,6 @@ export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onResto
     if (tonePreviewUrlRef.current) URL.revokeObjectURL(tonePreviewUrlRef.current);
   }, []);
 
-  React.useEffect(() => {
-    if (!paintMode) return undefined;
-    let frame = window.requestAnimationFrame(() => resizePaintCanvas(false));
-    const target = imageEditorRef.current;
-    const observer = typeof ResizeObserver !== "undefined" && target
-      ? new ResizeObserver(() => resizePaintCanvas(true))
-      : null;
-    observer?.observe(target);
-
-    return () => {
-      window.cancelAnimationFrame(frame);
-      observer?.disconnect();
-    };
-  }, [paintMode, displayItem.url]);
-
   function cropPointerPoint(event) {
     const bounds = imageEditorRef.current?.getBoundingClientRect();
     if (!bounds?.width || !bounds?.height) return null;
@@ -781,171 +741,6 @@ export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onResto
     if (event.currentTarget.hasPointerCapture?.(drag.pointerId)) {
       event.currentTarget.releasePointerCapture(drag.pointerId);
     }
-  }
-
-  function resizePaintCanvas(preserve = true) {
-    const canvas = paintCanvasRef.current;
-    const bounds = imageEditorRef.current?.getBoundingClientRect();
-    if (!canvas || !bounds?.width || !bounds?.height) return;
-    const pixelRatio = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
-    const width = Math.max(1, Math.round(bounds.width * pixelRatio));
-    const height = Math.max(1, Math.round(bounds.height * pixelRatio));
-    if (canvas.width !== width || canvas.height !== height) {
-      canvas.width = width;
-      canvas.height = height;
-    }
-    redrawPaintDisplayCanvas();
-  }
-
-  function clearPaintMask() {
-    const canvas = paintCanvasRef.current;
-    const context = canvas?.getContext("2d");
-    if (canvas && context) context.clearRect(0, 0, canvas.width, canvas.height);
-    const dataCanvas = paintMaskDataCanvasRef.current;
-    const dataContext = dataCanvas?.getContext("2d");
-    if (dataCanvas && dataContext) dataContext.clearRect(0, 0, dataCanvas.width, dataCanvas.height);
-    setPaintHasMask(false);
-  }
-
-  function previewPaintImageElement() {
-    return imageEditorRef.current?.querySelector("img") || null;
-  }
-
-  function ensurePaintMaskDataCanvas() {
-    const image = previewPaintImageElement();
-    const width = Math.max(1, Math.round(image?.naturalWidth || image?.width || 0));
-    const height = Math.max(1, Math.round(image?.naturalHeight || image?.height || 0));
-    if (!width || !height) return null;
-    let canvas = paintMaskDataCanvasRef.current;
-    if (!canvas) {
-      canvas = document.createElement("canvas");
-      paintMaskDataCanvasRef.current = canvas;
-    }
-    if (canvas.width !== width || canvas.height !== height) {
-      canvas.width = width;
-      canvas.height = height;
-    }
-    return canvas;
-  }
-
-  function redrawPaintDisplayCanvas() {
-    const displayCanvas = paintCanvasRef.current;
-    const dataCanvas = paintMaskDataCanvasRef.current;
-    const context = displayCanvas?.getContext("2d");
-    if (!displayCanvas || !context) return;
-    context.clearRect(0, 0, displayCanvas.width, displayCanvas.height);
-    if (dataCanvas?.width && dataCanvas?.height) {
-      context.drawImage(dataCanvas, 0, 0, displayCanvas.width, displayCanvas.height);
-    }
-  }
-
-  function paintCanvasPoint(event) {
-    const image = previewPaintImageElement();
-    const bounds = image?.getBoundingClientRect();
-    if (!image || !bounds?.width || !bounds?.height) return null;
-    const naturalWidth = image.naturalWidth || image.width || bounds.width;
-    const naturalHeight = image.naturalHeight || image.height || bounds.height;
-    const displayX = event.clientX - bounds.left;
-    const displayY = event.clientY - bounds.top;
-    return {
-      displayX,
-      displayY,
-      naturalX: displayX * (naturalWidth / bounds.width),
-      naturalY: displayY * (naturalHeight / bounds.height),
-      displayWidth: bounds.width,
-      naturalWidth
-    };
-  }
-
-  function drawPaintStroke(from, to) {
-    const dataCanvas = ensurePaintMaskDataCanvas();
-    const context = dataCanvas?.getContext("2d");
-    if (!dataCanvas || !context || !from?.displayWidth) return;
-    const scale = from.naturalWidth / from.displayWidth;
-    context.save();
-    context.globalCompositeOperation = "source-over";
-    context.lineWidth = Math.max(4, paintBrushSize * scale);
-    context.lineCap = "round";
-    context.lineJoin = "round";
-    context.strokeStyle = "#ead42c";
-    context.shadowBlur = 0;
-    context.beginPath();
-    context.moveTo(from.naturalX, from.naturalY);
-    context.lineTo(to.naturalX, to.naturalY);
-    context.stroke();
-    context.restore();
-    redrawPaintDisplayCanvas();
-    setPaintHasMask(true);
-  }
-
-  function startPaintStroke(event) {
-    event.preventDefault();
-    event.stopPropagation();
-    resizePaintCanvas(true);
-    const point = paintCanvasPoint(event);
-    if (!point) return;
-    paintDragRef.current = { pointerId: event.pointerId, point };
-    drawPaintStroke(point, point);
-    event.currentTarget.setPointerCapture?.(event.pointerId);
-  }
-
-  function handlePaintStroke(event) {
-    const drag = paintDragRef.current;
-    if (!drag) return;
-    event.preventDefault();
-    event.stopPropagation();
-    const point = paintCanvasPoint(event);
-    if (!point) return;
-    drawPaintStroke(drag.point, point);
-    paintDragRef.current = { ...drag, point };
-  }
-
-  function stopPaintStroke(event) {
-    const drag = paintDragRef.current;
-    if (!drag) return;
-    event.preventDefault();
-    event.stopPropagation();
-    paintDragRef.current = null;
-    if (event.currentTarget.hasPointerCapture?.(drag.pointerId)) {
-      event.currentTarget.releasePointerCapture(drag.pointerId);
-    }
-  }
-
-  function createPaintMaskDataUrl() {
-    const dataCanvas = paintMaskDataCanvasRef.current;
-    if (!dataCanvas || !dataCanvas.width || !dataCanvas.height || !paintHasMask) return "";
-    const width = dataCanvas.width;
-    const height = dataCanvas.height;
-    const maskCanvas = document.createElement("canvas");
-    maskCanvas.width = Math.max(1, Math.round(width));
-    maskCanvas.height = Math.max(1, Math.round(height));
-    const context = maskCanvas.getContext("2d", { willReadFrequently: true });
-    if (!context) return "";
-    context.fillStyle = "#000";
-    context.fillRect(0, 0, maskCanvas.width, maskCanvas.height);
-    context.drawImage(dataCanvas, 0, 0, maskCanvas.width, maskCanvas.height);
-    const imageData = context.getImageData(0, 0, maskCanvas.width, maskCanvas.height);
-    for (let index = 0; index < imageData.data.length; index += 4) {
-      const luminance = (imageData.data[index] + imageData.data[index + 1] + imageData.data[index + 2]) / 3;
-      const masked = luminance > 24;
-      imageData.data[index] = masked ? 255 : 0;
-      imageData.data[index + 1] = masked ? 255 : 0;
-      imageData.data[index + 2] = masked ? 255 : 0;
-      imageData.data[index + 3] = 255;
-    }
-    context.putImageData(imageData, 0, 0);
-    return maskCanvas.toDataURL("image/png");
-  }
-
-  function applyPaintEdit() {
-    const maskDataUrl = createPaintMaskDataUrl();
-    if (!maskDataUrl || !paintPrompt.trim()) return;
-    applyEdit({
-      type: "inpaint",
-      prompt: paintPrompt.trim(),
-      maskDataUrl,
-      resolution: "2K"
-    });
   }
 
   function curvePointFromEvent(event) {
@@ -1186,15 +981,10 @@ export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onResto
       setToneAdjustments(defaultToneAdjustments);
       setCurvePoints(defaultCurvePoints);
       setTextOverlay(defaultTextOverlay);
-      setPaintPrompt(defaultPaintPrompt);
-      setPaintBrushSize(defaultPaintBrushSize);
-      setPaintHasMask(false);
-      clearPaintMask();
       setCropMode(false);
       setToneMode(false);
       setCurvesMode(false);
       setTextMode(false);
-      setPaintMode(false);
     } catch (error) {
       setEditError(error.message || "Could not update layout image.");
     } finally {
@@ -1206,7 +996,7 @@ export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onResto
     <div className="output-lightbox-backdrop" role="presentation" onPointerDown={(event) => {
       if (event.target === event.currentTarget) onClose();
     }}>
-      <section className={`output-lightbox ${displayItem.type} ${curvesMode || toneMode || textMode || paintMode ? "curves-open" : ""}`} role="dialog" aria-modal="true" aria-label={label} onPointerDown={(event) => event.stopPropagation()}>
+      <section className={`output-lightbox ${displayItem.type} ${curvesMode || toneMode || textMode ? "curves-open" : ""}`} role="dialog" aria-modal="true" aria-label={label} onPointerDown={(event) => event.stopPropagation()}>
         <header>
           <span>
             <KindIcon size={15} />
@@ -1219,43 +1009,31 @@ export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onResto
                   setCurvesMode(false);
                   setToneMode(false);
                   setTextMode(false);
-                  setPaintMode(false);
                   setCropMode((value) => !value);
                 }} disabled={editBusy} title="Crop image" aria-label="Crop image">
                   <Crop size={15} />
                 </button>
-                <button type="button" onClick={() => applyEdit({ type: "flipHorizontal" })} disabled={editBusy || cropMode || curvesMode || toneMode || textMode || paintMode} title="Flip horizontal" aria-label="Flip horizontal">
+                <button type="button" onClick={() => applyEdit({ type: "flipHorizontal" })} disabled={editBusy || cropMode || curvesMode || toneMode || textMode} title="Flip horizontal" aria-label="Flip horizontal">
                   <FlipHorizontal size={15} />
                 </button>
-                <button type="button" onClick={() => applyEdit({ type: "flipVertical" })} disabled={editBusy || cropMode || curvesMode || toneMode || textMode || paintMode} title="Flip vertical" aria-label="Flip vertical">
+                <button type="button" onClick={() => applyEdit({ type: "flipVertical" })} disabled={editBusy || cropMode || curvesMode || toneMode || textMode} title="Flip vertical" aria-label="Flip vertical">
                   <FlipVertical size={15} />
                 </button>
-                <button type="button" onClick={() => applyEdit({ type: "rotateClockwise" })} disabled={editBusy || cropMode || curvesMode || toneMode || textMode || paintMode} title="Rotate 90 degrees clockwise" aria-label="Rotate 90 degrees clockwise">
+                <button type="button" onClick={() => applyEdit({ type: "rotateClockwise" })} disabled={editBusy || cropMode || curvesMode || toneMode || textMode} title="Rotate 90 degrees clockwise" aria-label="Rotate 90 degrees clockwise">
                   <RotateCw size={15} />
                 </button>
                 <button type="button" className={textMode ? "active" : ""} onClick={() => {
                   setCropMode(false);
                   setCurvesMode(false);
                   setToneMode(false);
-                  setPaintMode(false);
                   setTextMode((value) => !value);
                 }} disabled={editBusy} title="Text overlay" aria-label="Text overlay">
                   <Type size={15} />
-                </button>
-                <button type="button" className={paintMode ? "active" : ""} onClick={() => {
-                  setCropMode(false);
-                  setCurvesMode(false);
-                  setToneMode(false);
-                  setTextMode(false);
-                  setPaintMode((value) => !value);
-                }} disabled={editBusy} title="Inpaint with brush" aria-label="Inpaint with brush">
-                  <Paintbrush size={15} />
                 </button>
                 <button type="button" className={toneMode ? "active" : ""} onClick={() => {
                   setCropMode(false);
                   setCurvesMode(false);
                   setTextMode(false);
-                  setPaintMode(false);
                   setToneMode((value) => !value);
                 }} disabled={editBusy} title="Adjust brightness, contrast, saturation, and curves" aria-label="Adjust brightness, contrast, saturation, and curves">
                   <Sun size={15} />
@@ -1282,21 +1060,6 @@ export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onResto
                       setTextMode(false);
                       resetTextOverlay();
                     }} disabled={editBusy} title="Cancel text overlay" aria-label="Cancel text overlay">
-                      <X size={15} />
-                    </button>
-                  </>
-                )}
-                {paintMode && (
-                  <>
-                    <button type="button" className="crop-apply" onClick={applyPaintEdit} disabled={editBusy || !paintHasMask || !paintPrompt.trim()} title="Apply inpaint edit" aria-label="Apply inpaint edit">
-                      {inpaintBusy ? <Loader2 size={15} className="spin" /> : <Check size={15} />}
-                    </button>
-                    <button type="button" onClick={() => {
-                      setPaintMode(false);
-                      setPaintPrompt(defaultPaintPrompt);
-                      setPaintBrushSize(defaultPaintBrushSize);
-                      clearPaintMask();
-                    }} disabled={editBusy} title="Cancel inpaint edit" aria-label="Cancel inpaint edit">
                       <X size={15} />
                     </button>
                   </>
@@ -1462,39 +1225,9 @@ export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onResto
             <button type="button" onClick={resetTextOverlay} disabled={editBusy}>Reset</button>
           </div>
         )}
-        {canEditImage && paintMode && (
-          <div className="output-paint-panel">
-            <label className="output-paint-prompt">
-              <span>Edit prompt</span>
-              <textarea
-                value={paintPrompt}
-                placeholder="Remove car, add dog, change shirt color..."
-                rows={2}
-                maxLength={260}
-                onChange={(event) => setPaintPrompt(event.target.value)}
-                disabled={editBusy}
-              />
-            </label>
-            <label className="output-paint-slider">
-              <span>Brush</span>
-              <input
-                type="range"
-                min="8"
-                max="120"
-                step="1"
-                value={paintBrushSize}
-                onChange={(event) => setPaintBrushSize(Number(event.target.value) || defaultPaintBrushSize)}
-                disabled={editBusy}
-              />
-              <output>{Math.round(paintBrushSize)}</output>
-            </label>
-            <button type="button" onClick={clearPaintMask} disabled={editBusy || !paintHasMask}>Clear mask</button>
-            <small>{paintHasMask ? "Masked area ready" : "Paint the area to revise"}</small>
-          </div>
-        )}
         <div className="output-lightbox-stage">
           {displayItem.type === "image" && (
-            <div className={`output-lightbox-image-editor ${cropMode ? "cropping" : ""} ${textMode ? "texting" : ""} ${paintMode ? "painting" : ""}`} ref={imageEditorRef}>
+            <div className={`output-lightbox-image-editor ${cropMode ? "cropping" : ""} ${textMode ? "texting" : ""}`} ref={imageEditorRef}>
               <img src={toneMode && tonePreviewUrl ? tonePreviewUrl : displayItem.url} alt={label} onError={useNewtNodeImageFallback} />
               {textMode && normalizedTextOverlay(textOverlay).text.trim() && (
                 <div
@@ -1512,23 +1245,6 @@ export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onResto
                   onPointerCancel={stopTextDrag}
                 >
                   {textOverlay.text}
-                </div>
-              )}
-              {paintMode && (
-                <canvas
-                  ref={paintCanvasRef}
-                  className="output-paint-mask"
-                  onPointerDown={startPaintStroke}
-                  onPointerMove={handlePaintStroke}
-                  onPointerUp={stopPaintStroke}
-                  onPointerCancel={stopPaintStroke}
-                  aria-label="Paint inpaint mask"
-                />
-              )}
-              {inpaintBusy && (
-                <div className="output-inpaint-busy" role="status" aria-live="polite">
-                  <Loader2 size={18} className="spin" />
-                  <span>Generating edit</span>
                 </div>
               )}
               {cropMode && (

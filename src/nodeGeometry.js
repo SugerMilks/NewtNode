@@ -1,4 +1,37 @@
 export const contextMenuSize = { width: 190, height: 420, inset: 8 };
+export const plainTextNodeSizeLimits = {
+  defaultWidth: 310,
+  defaultHeight: 206,
+  minWidth: 240,
+  minHeight: 176,
+  maxWidth: 1200,
+  maxHeight: 1200
+};
+
+export function normalizePlainTextNodeSize(data = {}, fallback = {}) {
+  const width = Number(data.textNodeWidth);
+  const height = Number(data.textNodeHeight);
+  return {
+    width: clamp(
+      Number.isFinite(width) ? width : positiveDimension(fallback.width, plainTextNodeSizeLimits.defaultWidth),
+      plainTextNodeSizeLimits.minWidth,
+      plainTextNodeSizeLimits.maxWidth
+    ),
+    height: clamp(
+      Number.isFinite(height) ? height : positiveDimension(fallback.height, plainTextNodeSizeLimits.defaultHeight),
+      plainTextNodeSizeLimits.minHeight,
+      plainTextNodeSizeLimits.maxHeight
+    )
+  };
+}
+
+export function resizePlainTextNode(startSize = {}, delta = {}) {
+  const normalizedStart = normalizePlainTextNodeSize({}, startSize);
+  return {
+    width: Math.round(clamp(normalizedStart.width + (Number(delta.x) || 0), plainTextNodeSizeLimits.minWidth, plainTextNodeSizeLimits.maxWidth)),
+    height: Math.round(clamp(normalizedStart.height + (Number(delta.y) || 0), plainTextNodeSizeLimits.minHeight, plainTextNodeSizeLimits.maxHeight))
+  };
+}
 
 export function estimatedNodeWidth(type) {
   if (type === "frameIt") return 980;
@@ -25,11 +58,12 @@ export function estimatedNodeHeight(type) {
 }
 
 export function estimatedNodeRect(node, padding = 0) {
+  const plainTextSize = node?.type === "plainText" ? normalizePlainTextNodeSize(node.data) : null;
   return {
     left: Number(node?.x || 0) - padding,
     top: Number(node?.y || 0) - padding,
-    right: Number(node?.x || 0) + estimatedNodeWidth(node?.type) + padding,
-    bottom: Number(node?.y || 0) + estimatedNodeHeight(node?.type) + padding
+    right: Number(node?.x || 0) + (plainTextSize?.width || estimatedNodeWidth(node?.type)) + padding,
+    bottom: Number(node?.y || 0) + (plainTextSize?.height || estimatedNodeHeight(node?.type)) + padding
   };
 }
 

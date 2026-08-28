@@ -76,13 +76,15 @@ export function dedupeEdges(edges) {
 }
 
 export function clearStaleRunningState(node) {
-  if (node.data?.status !== "running") return node;
+  const staleStatus = node.data?.status;
+  if (staleStatus !== "running" && staleStatus !== "compiling") return node;
 
   return {
     ...node,
     data: {
       ...node.data,
-      status: node.data.resultUrl ? "complete" : "ready"
+      status: staleStatus === "compiling" ? "ready" : node.data.resultUrl ? "complete" : "ready",
+      ...(staleStatus === "compiling" ? { characterBatchProgress: null } : {})
     }
   };
 }

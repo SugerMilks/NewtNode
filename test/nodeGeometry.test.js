@@ -4,7 +4,9 @@ import {
   clamp,
   clampContextMenuPosition,
   graphBoundsForNodes,
+  normalizePlainTextNodeSize,
   positiveModulo,
+  resizePlainTextNode,
   rectsOverlap
 } from "../src/nodeGeometry.js";
 
@@ -28,4 +30,17 @@ test("clamp helpers bound values predictably", () => {
   assert.equal(clamp(-4, 0, 10), 0);
   assert.equal(positiveModulo(-3, 28), 25);
   assert.deepEqual(clampContextMenuPosition(500, -20, { width: 320, height: 180 }, { width: 100, height: 80, inset: 8 }), { x: 212, y: 8 });
+});
+
+test("plain Text node dimensions resize independently and stay within usable limits", () => {
+  assert.deepEqual(normalizePlainTextNodeSize({ textNodeWidth: 520, textNodeHeight: 340 }), { width: 520, height: 340 });
+  assert.deepEqual(resizePlainTextNode({ width: 520, height: 340 }, { x: 120, y: -40 }), { width: 640, height: 300 });
+  assert.deepEqual(resizePlainTextNode({ width: 250, height: 180 }, { x: -500, y: -500 }), { width: 240, height: 176 });
+});
+
+test("graphBoundsForNodes includes persisted plain Text node dimensions", () => {
+  assert.deepEqual(
+    graphBoundsForNodes([{ type: "plainText", x: 25, y: 35, data: { textNodeWidth: 640, textNodeHeight: 420 } }]),
+    { left: 25, top: 35, right: 665, bottom: 455 }
+  );
 });

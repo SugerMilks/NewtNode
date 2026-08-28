@@ -96,7 +96,6 @@ function localApiRouteKey(path) {
   if (path.includes("color-id-matte")) return "colorIdMatte";
   if (path.includes("composer-frame")) return "composerFrame";
   if (path.includes("composer-poses")) return "composerPoses";
-  if (path.includes("preview-inpaint")) return "previewInpaint";
   if (path.includes("run-skill-director")) return "skillDirector";
   if (path.includes("storyboard-qc")) return "storyboardQc";
   if (path.includes("generate-3d")) return "generate3d";
@@ -220,10 +219,6 @@ export const nodeApi = {
 
   generateImage(body, label = "Image generation") {
     return fetchJsonApi("/api/node/generate-image", jsonBody(body), label);
-  },
-
-  previewInpaint(body, label = "Preview inpainting") {
-    return fetchJsonApi("/api/node/preview-inpaint", jsonBody(body), label);
   },
 
   planStoryboard(body, label = "Storyboard planning") {

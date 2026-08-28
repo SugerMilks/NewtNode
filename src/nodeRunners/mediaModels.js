@@ -94,10 +94,10 @@ export async function runAutoAspectGeneration({
 
   const { response, data } = await nodeApi.generateImage({
     prompt,
-    model: node.data.model || "OpenAI Image 2",
+    model: node.data.autoAspectModel || node.data.model || "OpenAI Image 2",
     aspectRatio,
     requestedAspectRatio: aspectRatio,
-    resolution: node.data.resolution || "2K",
+    resolution: node.data.autoAspectResolution || node.data.resolution || "2K",
     imagePromptUrls: [sourceImageUrl],
     imagePromptLabels: ["Original image to reformat"],
     ...workflowContextPayload(workflowContext),

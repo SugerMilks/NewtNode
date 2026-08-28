@@ -55,3 +55,17 @@ test("older saved characters without a CU sheet remain video-compatible", () => 
   assert.equal(reference.url, "/outputs/character-blue-image.png");
   assert.equal(reference.usesCuVideoSheet, false);
 });
+
+test("a selected custom sheet is passed to video generation without deleting generated variants", () => {
+  const node = characterNode();
+  node.data.activeCharacterSheetId = "custom:client-sheet";
+  node.data.characterCustomSheets = [{
+    id: "client-sheet",
+    fileName: "Client Sheet.png",
+    localUrl: "/uploads/client-sheet.png"
+  }];
+  const reference = preferredCharacterReferenceForVideo(node);
+  assert.equal(reference.url, "/uploads/client-sheet.png");
+  assert.equal(reference.usesCuVideoSheet, false);
+  assert.equal(node.data.characterSheetVariants.length, 2);
+});

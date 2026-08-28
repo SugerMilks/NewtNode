@@ -20,11 +20,25 @@ export function resolveSeedanceRuntimeProvider({ falKey, kreaKey } = {}) {
   return resolveFalKreaProvider({ falKey, kreaKey });
 }
 
-export function kreaSeedanceEndpoint() {
-  return kreaEndpointForModel("video", "Seedance 2.0");
+export function kreaSeedanceEndpoint(modelName = "Seedance 2.0") {
+  return kreaEndpointForModel("video", modelName);
 }
 
-export function estimateKreaSeedanceCost({ durationSeconds, resolution, hasVideoReference }) {
+export function estimateKreaSeedanceCost({ modelName = "Seedance 2.0", durationSeconds, resolution, hasVideoReference }) {
+  if (modelName === "Seedance 2.5") {
+    return {
+      amountUsd: null,
+      currency: "USD",
+      unitRateUsd: null,
+      units: Math.max(1, Number(durationSeconds) || 5),
+      unit: "second",
+      mediaType: "video",
+      resolution,
+      durationSeconds: Math.max(1, Number(durationSeconds) || 5),
+      pricingBasis: "Krea Seedance 2.5 cost is reported by Krea after generation",
+      pricingSource: "krea-runtime"
+    };
+  }
   const normalizedResolution = kreaSeedanceRates.standard[resolution] ? resolution : "720p";
   const rate = kreaSeedanceRates.standard[normalizedResolution][
     hasVideoReference ? "withVideoReference" : "withoutVideoReference"

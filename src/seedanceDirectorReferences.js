@@ -1,4 +1,5 @@
 export const seedanceImageReferenceLimit = 9;
+export const seedance25ImageReferenceLimit = 30;
 
 export function mergeSeedanceDirectorReferences({
   directUrls = [],

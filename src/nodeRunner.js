@@ -57,6 +57,11 @@ export function ensureRunSuccesses(successes, failures, fallbackMessage) {
 }
 
 export function isRunnableNode(node) {
+  if (
+    node?.type === "utility" &&
+    node?.data?.utilityMode === "image" &&
+    String(node?.data?.utilityImageModel || "").toLowerCase().replace(/[^a-z0-9]/g, "") === "frameit"
+  ) return false;
   return ["text", "skillDirector", "imageModel", "videoModel", "utility", "model3d", "storyboard", "autoAspect", "coverage"].includes(node.type);
 }
 

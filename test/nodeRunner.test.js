@@ -18,6 +18,19 @@ test("Coverage participates in batch graph runs as an image-stage node", () => {
   assert.equal(runStageLabel(node.type), "coverage");
 });
 
+test("Frame It remains a manual capture tool when hosted by Utility", () => {
+  assert.equal(isRunnableNode({
+    id: "frame-it",
+    type: "utility",
+    data: { utilityMode: "image", utilityImageModel: "Frame It" }
+  }), false);
+  assert.equal(isRunnableNode({
+    id: "model-3d",
+    type: "utility",
+    data: { utilityMode: "image", utilityImageModel: "3D" }
+  }), true);
+});
+
 test("runRunnableNodesByDependencyOrder respects dependency order and stage priority", async () => {
   const nodes = [
     { id: "video", type: "videoModel", data: {} },

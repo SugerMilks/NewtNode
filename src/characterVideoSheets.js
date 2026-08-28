@@ -29,13 +29,8 @@ export const characterVideoWardrobePrompt =
 export const characterVideoCustomSheetWardrobePrompt =
   "Wardrobe rule: preserve exactly the one selected outfit visible in the supplied completed character sheet. Reconstruct its clothing, footwear, fit, materials, colors, and styling consistently in both body panels and the visible neckline of the portrait. Do not introduce alternate clothing or a wardrobe comparison.";
 
-const defaultWardrobeId = "__default-wardrobe__";
-
-export function activeCharacterSheetVariant(data = {}) {
-  const targetId = data.activeWardrobeId || defaultWardrobeId;
-  const variants = Array.isArray(data.characterSheetVariants) ? data.characterSheetVariants : [];
-  return variants.find((variant) => variant?.wardrobeId === targetId) || variants[0] || null;
-}
+export { activeCharacterSheetVariant } from "./characterSheetLibrary.js";
+import { activeCharacterSheetVariant } from "./characterSheetLibrary.js";
 
 export function characterVideoSheetForNode(node) {
   if (!node?.data?.cuVideoGeneration) return null;

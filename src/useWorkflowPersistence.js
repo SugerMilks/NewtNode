@@ -89,7 +89,7 @@ export function useWorkflowPersistence({
     appendWorkflowRequestContextToForm(form, { projectId, projectName, savedProjectName, selectedProjectName, projectPackagePath }, overrides);
   }
 
-  async function loadProjects() {
+  async function loadProjects({ reportError = true } = {}) {
     try {
       const projectList = await workflowApi.listSummary();
       setProjects(projectList);
@@ -98,7 +98,7 @@ export function useWorkflowPersistence({
         if (currentProject?.name) setSavedProjectName(currentProject.name);
       }
     } catch (error) {
-      setSaveStatus(error.message);
+      if (reportError) setSaveStatus(error.message);
     }
   }
 
@@ -239,8 +239,6 @@ export function useWorkflowPersistence({
       setProjectPackagePath(nextPackagePath);
       const savedPath = workflowDisplayPath(project);
       setWorkflowFilePath(savedPath);
-      setSaveStatus(savedPath ? `Saved ${savedPath}` : shouldCreateNewProject ? "Saved as new workflow" : "Saved");
-      await loadProjects();
       markWorkflowClean({
         nodes: saveNodes,
         edges,
@@ -248,6 +246,8 @@ export function useWorkflowPersistence({
         projectName: project.name,
         projectPackagePath: nextPackagePath
       });
+      setSaveStatus(savedPath ? `Saved ${savedPath}` : shouldCreateNewProject ? "Saved as new workflow" : "Saved");
+      void loadProjects({ reportError: false });
       return true;
     } catch (error) {
       setSaveStatus(error.message);

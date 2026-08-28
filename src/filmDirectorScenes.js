@@ -8,6 +8,8 @@ const sceneStateKeys = [
   "shotCount",
   "skillDurationSeconds",
   "durationSeconds",
+  "skillResolution",
+  "skillAspectRatio",
   "styleDirection",
   "motionBrief",
   "motionDirection",
@@ -28,7 +30,8 @@ const sceneStateKeys = [
   "lastRunShotCount",
   "lastRunDurationSeconds",
   "lastRunActualShotCount",
-  "lastRunReferenceSetup"
+  "lastRunReferenceSetup",
+  "lastRunReferenceTags"
 ];
 
 const defaultLocks = {
@@ -61,6 +64,8 @@ function sceneDefaults(sceneName = "") {
     shotCount: "3",
     skillDurationSeconds: "15",
     durationSeconds: "15",
+    skillResolution: "720p",
+    skillAspectRatio: "16:9",
     styleDirection: "",
     motionBrief: "",
     motionDirection: "",
@@ -81,7 +86,8 @@ function sceneDefaults(sceneName = "") {
     lastRunShotCount: "",
     lastRunDurationSeconds: "",
     lastRunActualShotCount: 0,
-    lastRunReferenceSetup: ""
+    lastRunReferenceSetup: "",
+    lastRunReferenceTags: []
   };
 }
 
@@ -229,4 +235,82 @@ export function filmDirectorReferencedTags(data = {}) {
 export function filmDirectorUsesReferenceTag(data = {}, tag = "") {
   const normalized = String(tag || "").replace(/^@+/, "").trim().toLowerCase();
   return Boolean(normalized && filmDirectorReferencedTags(data).has(normalized));
+}
+
+export function filmDirectorOutputReferencedTags(dataOrPrompt = {}) {
+  const source = typeof dataOrPrompt === "string"
+    ? dataOrPrompt
+    : String(dataOrPrompt?.resultText || "");
+  const tags = new Set();
+  for (const match of source.matchAll(/@([A-Za-z0-9][A-Za-z0-9_-]*)/g)) {
+    tags.add(match[1].toLowerCase());
+  }
+  return tags;
+}
+
+export function filmDirectorOutputUsesReferenceTag(dataOrPrompt = {}, tag = "") {
+  const normalized = normalizedReferenceTag(tag);
+  return Boolean(normalized && filmDirectorOutputReferencedTags(dataOrPrompt).has(normalized));
+}
+
+export function filterFilmDirectorReferencesForOutput(references = [], dataOrPrompt = {}) {
+  return (Array.isArray(references) ? references : []).filter((reference) => (
+    filmDirectorOutputUsesReferenceTag(dataOrPrompt, reference?.tag)
+  ));
+}
+
+function filmDirectorReferenceText(data = {}) {
+  return [
+    data.sceneOverview,
+    data.text,
+    data.motionDirection,
+    data.motionBrief,
+    data.shotList,
+    data.shotListNotes,
+    data.resultText,
+    data.skillDirectorRevisionNotes
+  ]
+    .filter(Boolean)
+    .join("\n")
+    .toLowerCase();
+}
+
+function normalizedReferenceTag(value = "") {
+  return String(value || "").replace(/^@+/, "").trim().toLowerCase();
+}
+
+function textContainsReferenceName(text = "", value = "") {
+  const normalized = normalizedReferenceTag(value)
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+  if (!normalized) return false;
+  const escaped = normalized.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
+  return new RegExp(`(?:^|[^a-z0-9])${escaped}(?=$|[^a-z0-9])`, "i").test(text);
+}
+
+export function filmDirectorUsesReference(data = {}, {
+  tag = "",
+  label = "",
+  type = "image",
+  categoryCount = 0,
+  useSavedTags = true
+} = {}) {
+  const normalizedTag = normalizedReferenceTag(tag);
+  if (!normalizedTag) return false;
+
+  const savedTags = new Set(
+    (Array.isArray(data.lastRunReferenceTags) ? data.lastRunReferenceTags : [])
+      .map(normalizedReferenceTag)
+      .filter(Boolean)
+  );
+  if (useSavedTags && savedTags.has(normalizedTag)) return true;
+  if (filmDirectorUsesReferenceTag(data, normalizedTag)) return true;
+
+  const text = filmDirectorReferenceText(data);
+  if (textContainsReferenceName(text, normalizedTag) || textContainsReferenceName(text, label)) return true;
+
+  if (type === "character" && Number(categoryCount) === 1) {
+    return /\b(character|person|subject|actor|patient|doctor|nurse|ceo|man|woman|boy|girl|child|kid|he|she|him|her|they|them)\b/i.test(text);
+  }
+  return false;
 }

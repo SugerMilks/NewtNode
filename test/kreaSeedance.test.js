@@ -15,6 +15,7 @@ test("Seedance prefers Fal and falls back to Krea", () => {
 
 test("Krea Seedance uses the standard endpoint", () => {
   assert.equal(kreaSeedanceEndpoint(), "/generate/video/bytedance/seedance-2");
+  assert.equal(kreaSeedanceEndpoint("Seedance 2.5"), "/generate/video/bytedance/seedance-2-5");
 });
 
 test("Krea Seedance pricing uses resolution and video-reference tier", () => {

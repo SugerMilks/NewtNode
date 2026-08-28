@@ -44,4 +44,8 @@ test("dedupeEdges and clearStaleRunningState preserve load-safe graph state", ()
   assert.equal(dedupeEdges([edge, { ...edge, id: "b" }]).length, 1);
   assert.deepEqual(clearStaleRunningState({ id: "n", data: { status: "running", resultUrl: "" } }).data.status, "ready");
   assert.deepEqual(clearStaleRunningState({ id: "n", data: { status: "running", resultUrl: "/outputs/a.png" } }).data.status, "complete");
+  assert.deepEqual(
+    clearStaleRunningState({ id: "character", type: "character", data: { status: "compiling", characterBatchProgress: { completed: 1, total: 2 } } }).data,
+    { status: "ready", characterBatchProgress: null }
+  );
 });

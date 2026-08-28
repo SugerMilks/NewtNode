@@ -1,4 +1,15 @@
 export { reve21AspectRatios, reve21ResolutionOptions } from "./reve21.js";
+import {
+  seedance25AspectRatioOptions,
+  seedance25DurationOptions,
+  seedance25ModelName,
+  seedance25ResolutionOptions
+} from "./seedance25.js";
+export {
+  seedance25AspectRatioOptions,
+  seedance25DurationOptions,
+  seedance25ResolutionOptions
+} from "./seedance25.js";
 
 export const characterTraitOptions = ["serious", "pleasant", "happy", "angry", "sad", "silly", "confident", "content", "excited", "passionate", "fanatic", "anxious", "scared", "arrogant", "stubborn", "curious"];
 export const batchOptions = ["1", "2", "3", "4"];
@@ -28,7 +39,7 @@ export const krea2AspectRatios = ["16:9", "1:1", "4:3", "3:2", "2.35:1", "4:5", 
 export const krea2CreativityOptions = ["raw", "low", "medium", "high"];
 export const imageResolutionOptions = ["2K", "1K", "4K"];
 export const seedream5ResolutionOptions = ["2K", "1K"];
-export const seedanceVideoDurationOptions = ["15 seconds", "10 seconds", "5 seconds"];
+export const seedanceVideoDurationOptions = Array.from({ length: 12 }, (_value, index) => `${index + 4} seconds`);
 export const seedanceVideoResolutionOptions = ["720p", "480p", "1080p", "4k"];
 export const seedanceVideoAspectRatioOptions = ["16:9 (Landscape)", "21:9", "9:16 (Portrait)", "1:1"];
 export const klingO3ProDurationOptions = Array.from({ length: 13 }, (_value, index) => `${index + 3} seconds`);
@@ -138,6 +149,7 @@ export const qwenCameraDefaults = {
 
 export const videoModelNames = {
   seedance: "Seedance 2.0",
+  seedance25: seedance25ModelName,
   klingO3Pro: "Kling O3 Pro",
   klingO34k: "Kling O3 4K",
   geminiOmni: "Gemini Omni Flash",
@@ -149,6 +161,7 @@ export const videoModelNames = {
 };
 export const videoModelOptions = [
   videoModelNames.seedance,
+  videoModelNames.seedance25,
   videoModelNames.klingO3Pro,
   videoModelNames.klingO34k,
   videoModelNames.geminiOmni,
@@ -208,6 +221,9 @@ export const model3DDescription =
   "Generates a GLB 3D model from connected view images. Front is required; Back, Left, Right, Top, Bottom, Left Front, and Right Front are optional.";
 
 export const utilityImageModelNames = {
+  autoAspect: "Auto Aspect",
+  frameIt: "Frame It",
+  model3d: "3D",
   colorIdMatte: "Color ID Matte",
   qwenCameraEdit: "Qwen Camera Edit",
   stillFrame: "Grab Still Frame",
@@ -285,6 +301,9 @@ export const wanVaceSamplerOptions = ["unipc", "dpm++", "euler"];
 export const wanVaceAccelerationOptions = ["regular", "low", "none"];
 
 export const utilityModelDescriptions = {
+  [utilityImageModelNames.autoAspect]: "Reframes one connected image into multiple selected aspect ratios while preserving its visual identity.",
+  [utilityImageModelNames.frameIt]: "Builds a poseable multi-figure composition and outputs the framed camera view as an image guide.",
+  [utilityImageModelNames.model3d]: model3DDescription,
   [utilityImageModelNames.colorIdMatte]: "Creates a black and white ID matte from pixels matching a picked source-image color.",
   [utilityImageModelNames.qwenCameraEdit]: "Reframes a connected image with Qwen camera controls.",
   [utilityImageModelNames.stillFrame]: "Extracts a still PNG frame from a connected video locally, without an API call.",

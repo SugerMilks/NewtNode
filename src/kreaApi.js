@@ -11,6 +11,7 @@ export const kreaEndpoints = Object.freeze({
   }),
   video: Object.freeze({
     "Seedance 2.0": "/generate/video/bytedance/seedance-2",
+    "Seedance 2.5": "/generate/video/bytedance/seedance-2-5",
     "Kling O3 Pro": "/generate/video/kling/kling-3.0",
     "Kling O3 4K": "/generate/video/kling/kling-3.0",
     "Gemini Omni Flash": "/generate/video/google/gemini-omni-flash"
@@ -42,6 +43,67 @@ export function kreaEndpointForModel(kind, modelName) {
 
 export function supportsKreaModel(kind, modelName) {
   return Boolean(kreaEndpointForModel(kind, modelName));
+}
+
+export function shouldRetryKreaJobLookup({
+  status,
+  attempt,
+  transientAttempt = attempt,
+  maxGraceAttempts = 15,
+  maxTransientAttempts = 5
+} = {}) {
+  const normalizedStatus = Number(status);
+  if (normalizedStatus === 404) return Number(attempt) < Number(maxGraceAttempts);
+  return [408, 425, 429, 500, 502, 503, 504, 524].includes(normalizedStatus)
+    && Number(transientAttempt) < Number(maxTransientAttempts);
+}
+
+export function kreaErrorMessage(data, fallback = "Krea request failed.") {
+  const error = data?.error;
+  const directMessage = [
+    error?.message,
+    typeof error === "string" ? error : "",
+    data?.message,
+    data?.detail
+  ]
+    .map((value) => String(value || "").trim())
+    .find(Boolean);
+  if (directMessage && directMessage !== "[object Object]") {
+    if (looksLikeHtml(directMessage)) {
+      const status = Number(data?._httpStatus) || htmlStatusCode(directMessage);
+      if (status === 524 || /timeout occurred/i.test(directMessage)) {
+        return `${fallback} Krea timed out while confirming or checking the generation (HTTP 524). The job may still be processing in Krea; check Krea history before retrying to avoid a duplicate charge.`;
+      }
+      return `${fallback} Krea returned an unexpected HTML error page${status ? ` (HTTP ${status})` : ""}. Please retry after a moment.`;
+    }
+    return directMessage;
+  }
+
+  const code = String(error?.code || "").trim();
+  const jobId = String(data?.job_id || "").trim();
+  if (code === "internal") {
+    return [
+      fallback,
+      `Krea reported an internal provider error${jobId ? ` for job ${jobId}` : ""}.`,
+      "The request was accepted, but video processing failed upstream. Retry once; if it repeats, switch the provider or video model."
+    ].join(" ");
+  }
+  if (code) {
+    return `${fallback} Krea error: ${code}${jobId ? ` (job ${jobId})` : ""}.`;
+  }
+
+  return fallback;
+}
+
+function looksLikeHtml(value) {
+  return /<!doctype\s+html|<html\b|<head\b|<body\b/i.test(String(value || ""));
+}
+
+function htmlStatusCode(value) {
+  const text = String(value || "");
+  const match = text.match(/(?:\||>|\s)(4\d\d|5\d\d)\s*:\s*[^<]*(?:<|$)/i)
+    || text.match(/\b(?:HTTP\s*)?(4\d\d|5\d\d)\b/i);
+  return Number(match?.[1]) || 0;
 }
 
 export function buildKreaImageInput({

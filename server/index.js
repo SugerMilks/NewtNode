@@ -47,14 +47,25 @@ import {
   reve21FalTextEndpoint as defaultReve21FalTextEndpoint
 } from "../src/reve21.js";
 import { filmDirectorAdjacentCoverageIssue } from "../src/filmDirectorCoverage.js";
+import { normalizeFilmDirectorAspectRatio } from "../src/filmDirectorAspectRatios.js";
+import { normalizeFilmDirectorDuration } from "../src/filmDirectorDurations.js";
 import { filmDirectorCutLimit } from "../src/filmDirectorLimits.js";
-import { buildFilmDirectorRevisionPrompt } from "../src/filmDirectorRevision.js";
+import {
+  buildFilmDirectorRevisionPrompt,
+  filmDirectorRevisionActiveReferenceTags
+} from "../src/filmDirectorRevision.js";
+import { filterFilmDirectorReferencesForOutput } from "../src/filmDirectorScenes.js";
+import { normalizeFilmDirectorResolution } from "../src/filmDirectorResolutions.js";
 import {
   filmDirectorShotDescriptionExample,
   filmDirectorShotDetailDirective,
   filmDirectorShotMaxCharsPerCut,
   filmDirectorShotMinimumWords
 } from "../src/filmDirectorShotDetail.js";
+import {
+  compactFilmDirectorStyleDirection,
+  filmDirectorStyleDirectionDirective
+} from "../src/filmDirectorStyle.js";
 import {
   buildGeminiOmniPrompt,
   geminiOmniFalReferenceEndpoint as defaultGeminiOmniFalReferenceEndpoint,
@@ -74,23 +85,44 @@ import {
   restoreKlingDirectorPrompt
 } from "../src/klingDirectorPromptOptimization.js";
 import {
+  llmProviderUnavailableMessage,
+  resolveLlmProvider
+} from "../src/llmProviders.js";
+import {
   estimateKreaSeedanceCost,
   kreaSeedanceEndpoint,
   resolveSeedanceRuntimeProvider
 } from "../src/kreaSeedance.js";
-import { mergeSeedanceDirectorReferences } from "../src/seedanceDirectorReferences.js";
+import {
+  mergeSeedanceDirectorReferences,
+  seedance25ImageReferenceLimit,
+  seedanceImageReferenceLimit
+} from "../src/seedanceDirectorReferences.js";
+import {
+  estimateSeedance25FalCost,
+  isSeedance25Model,
+  normalizeSeedance25AspectRatio,
+  normalizeSeedance25Duration,
+  normalizeSeedance25Resolution,
+  seedance25FalEndpoint,
+  seedance25ModelName,
+  seedance25ReferenceLimits
+} from "../src/seedance25.js";
 import {
   buildKreaImageInput,
   estimateKreaImageCost,
   estimateKreaKlingCost,
   extractKreaJobResultUrl,
   kreaApiBaseUrl,
+  kreaErrorMessage,
   kreaEndpointForModel,
   normalizeKreaImageResolution,
   resolveFalKreaProvider,
+  shouldRetryKreaJobLookup,
   supportsKreaModel
 } from "../src/kreaApi.js";
 import { storyboardBoardGridForAspect } from "../src/storyboardBoardLayout.js";
+import { resolveSmartTextFalModel, resolveSmartTextOpenAiModel } from "../src/smartTextModel.js";
 import {
   storyboardDirectorExpansionInstruction,
   storyboardDirectorFramePlan
@@ -174,6 +206,7 @@ const happyHorse1080pCostPerSecond = Number(process.env.HAPPY_HORSE_1080P_COST_P
 const seedanceBillingFps = Number(process.env.SEEDANCE_BILLING_FPS || 24);
 const seedanceStandardCostPerThousandTokens = Number(process.env.SEEDANCE_STANDARD_COST_PER_1000_TOKENS || 0.014);
 const seedance4KCostPerThousandTokens = Number(process.env.SEEDANCE_4K_COST_PER_1000_TOKENS || 0.008);
+const seedanceEndUserId = String(process.env.SEEDANCE_END_USER_ID || "newtnode-local-user").trim();
 const klingO3ProCostPerSecond = Number(process.env.KLING_O3_PRO_COST_PER_SECOND || 0.112);
 const klingO3ProAudioCostPerSecond = Number(process.env.KLING_O3_PRO_AUDIO_COST_PER_SECOND || 0.14);
 const klingO34kCostPerSecond = Number(process.env.KLING_O3_4K_COST_PER_SECOND || 0.42);
@@ -214,6 +247,7 @@ const imageModelOptions = [
 ];
 const videoModelNames = {
   seedance: "Seedance 2.0",
+  seedance25: seedance25ModelName,
   klingO3Pro: "Kling O3 Pro",
   klingO34k: "Kling O3 4K",
   geminiOmni: "Gemini Omni Flash",
@@ -223,6 +257,7 @@ const videoModelNames = {
 };
 const videoModelOptions = [
   videoModelNames.seedance,
+  videoModelNames.seedance25,
   videoModelNames.klingO3Pro,
   videoModelNames.klingO34k,
   videoModelNames.geminiOmni,
@@ -286,18 +321,21 @@ const patinaMapCostPerMegapixel = 0.01;
 const falUtilityImageTimeoutMs = Math.max(30000, Number(process.env.FAL_UTILITY_IMAGE_TIMEOUT_MS) || 180000);
 const klingReferenceMaximumBytes = 9.5 * 1024 * 1024;
 const imageGenerationConcurrency = clampInteger(process.env.NEWTNODE_IMAGE_GENERATION_CONCURRENCY, 1, 6, 3);
-const openAiTextModel = process.env.OPENAI_TEXT_MODEL || "gpt-5.6-luna";
+const openAiTextModel = resolveSmartTextOpenAiModel(process.env);
 let openAiTextApiKey = process.env.OPENAI_TEXT_API_KEY || process.env.OPENAI_API_KEY;
-const textLlmProvider = String(process.env.TEXT_LLM_PROVIDER || "fal").toLowerCase();
-const falTextModel = process.env.FAL_TEXT_MODEL || "google/gemini-2.5-flash";
+const preferredTextLlmProvider = String(process.env.TEXT_LLM_PROVIDER || "fal").toLowerCase();
+const falTextModel = resolveSmartTextFalModel(process.env);
 const skillDirectorLlmEndpoint = "openrouter/router";
 const skillDirectorFalModel = process.env.FILM_DIRECTOR_FAL_MODEL || process.env.SKILL_DIRECTOR_FAL_MODEL || "openai/gpt-5.6-sol";
 const skillDirectorVisionFalModel = process.env.FILM_DIRECTOR_VISION_FAL_MODEL || process.env.SKILL_DIRECTOR_VISION_FAL_MODEL || skillDirectorFalModel;
+const skillDirectorOpenAiModel = process.env.FILM_DIRECTOR_OPENAI_MODEL || process.env.SKILL_DIRECTOR_OPENAI_MODEL || "gpt-5.6-sol";
 const klingDirectorPromptFalModel = process.env.KLING_DIRECTOR_PROMPT_MODEL || "openai/gpt-5.6-luna";
-const storyboardVisionTextModel = process.env.STORYBOARD_QC_FAL_MODEL || "openai/gpt-5.6-terra";
-const falVisionTextModel = process.env.FAL_VISION_TEXT_MODEL || "google/gemini-2.5-flash";
-const falVisionTextFallbackModel = process.env.FAL_VISION_TEXT_FALLBACK_MODEL || "google/gemini-2.5-flash";
-const falVideoTextModel = process.env.FAL_VIDEO_TEXT_MODEL || "google/gemini-2.5-flash";
+const storyboardFalModel = process.env.STORYBOARD_FAL_MODEL || "openai/gpt-5.6-sol";
+const storyboardOpenAiModel = process.env.STORYBOARD_OPENAI_MODEL || "gpt-5.6-sol";
+const storyboardVisionFalModel = process.env.STORYBOARD_VISION_FAL_MODEL || process.env.STORYBOARD_QC_FAL_MODEL || storyboardFalModel;
+const storyboardVisionOpenAiModel = process.env.STORYBOARD_VISION_OPENAI_MODEL || storyboardOpenAiModel;
+const falVisionTextModel = process.env.FAL_VISION_TEXT_MODEL || "openai/gpt-5.6-luna";
+const falVideoTextModel = process.env.FAL_VIDEO_TEXT_MODEL || "openai/gpt-5.6-luna";
 const sam3SegmentationModelsEnabled = false; // Flip back to true when revisiting SAM 3 segmentation.
 const birefnetModelOptions = ["General Use (Light)", "General Use (Light 2K)", "General Use (Heavy)", "Matting", "Portrait", "General Use (Dynamic)"];
 const birefnetResolutionOptions = ["1024x1024", "2048x2048", "2304x2304"];
@@ -407,7 +445,7 @@ const upload = multer({
   storage,
   limits: {
     fileSize: 200 * 1024 * 1024,
-    files: 11
+    files: 32
   }
 });
 
@@ -479,7 +517,6 @@ function buildHealthPayload() {
       wanVaceInpainting: true,
       composerFrame: true,
       composerPoses: true,
-      previewInpaint: true,
       apiJsonErrors: true,
       voidFrameValidation: true,
       sam3VideoMaskOutput: true,
@@ -517,11 +554,16 @@ function buildHealthPayload() {
     openAiKeyConfigured: Boolean(process.env.OPENAI_API_KEY || openAiTextApiKey),
     openAiTextKeyConfigured: Boolean(openAiTextApiKey),
     openAiImage2ViaFalConfigured: Boolean(process.env.FAL_KEY),
-    textLlmProvider,
+    textLlmProvider: activeLlmProvider(),
+    preferredTextLlmProvider,
     falTextModel,
     skillDirectorFalModel,
     skillDirectorVisionFalModel,
-    storyboardVisionTextModel,
+    skillDirectorOpenAiModel,
+    storyboardFalModel,
+    storyboardOpenAiModel,
+    storyboardVisionFalModel,
+    storyboardVisionOpenAiModel,
     falVisionTextModel,
     falVideoTextModel,
     imageGenerationConcurrency,
@@ -1338,7 +1380,7 @@ app.get("/api/saved-workflows/:fileName", async (req, res) => {
 app.post("/api/saved-workflows", async (req, res) => {
   await timedApi("workflows:save", async () => {
     try {
-      const workflows = await readSavedWorkflows({ includeAll: true });
+      const workflows = await readSavedWorkflowSummaryFiles();
       const now = new Date().toISOString();
       const id = String(req.body.id || randomUUID()).trim();
       const name = String(req.body.name || "Untitled node project").trim() || "Untitled node project";
@@ -1658,7 +1700,7 @@ app.post("/api/node/process-text", async (req, res) => {
       return res.status(400).json({ error: "Text is required." });
     }
 
-    const result = textLlmProvider === "openai" ? await processTextWithOpenAi({ text, textInputs, imageInputs, videoInputs }) : await processTextWithFal({ text, textInputs, imageInputs, videoInputs });
+    const result = await processTextWithLlm({ text, textInputs, imageInputs, videoInputs });
     const cost = estimateTextProcessingCost({ provider: result.provider, usage: result.usage, helperUsages: result.helperUsages, imageInputs, videoInputs });
     const usageRecord = result.usage || result.helperUsages?.length ? { request: result.usage || null, helpers: result.helperUsages || [] } : null;
 
@@ -1695,7 +1737,7 @@ app.post("/api/node/process-text", async (req, res) => {
     });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ error: error.message || "Text processing failed." });
+    res.status(error.status || 500).json({ error: error.message || "Text processing failed." });
   }
 });
 
@@ -1717,6 +1759,8 @@ app.post("/api/node/run-skill-director", async (req, res) => {
     const styleInputs = normalizedMediaInputs(req.body.styleInputs, "style");
     const shotCount = normalizeSkillDirectorShotCount(req.body.shotCount || req.body.sceneCount || "3");
     const durationSeconds = normalizeSkillDirectorDurationSeconds(req.body.durationSeconds || req.body.sceneDuration || "15");
+    const resolution = normalizeFilmDirectorResolution(req.body.resolution);
+    const aspectRatio = normalizeFilmDirectorAspectRatio(req.body.aspectRatio);
     const requestedCuts = requestedSkillDirectorShotCount(shotCount);
     const cutLimit = filmDirectorCutLimit(durationSeconds);
     if (["build", "shotList"].includes(action) && requestedCuts && requestedCuts > cutLimit) {
@@ -1731,7 +1775,7 @@ app.post("/api/node/run-skill-director", async (req, res) => {
       return res.status(400).json({ error: "Add a scene overview or connect scene references before running Film Director." });
     }
 
-    const result = await runSkillDirectorWithFal({
+    const result = await runFilmDirector({
       action,
       sceneName,
       sceneOverview,
@@ -1747,7 +1791,9 @@ app.post("/api/node/run-skill-director", async (req, res) => {
       elementInputs,
       styleInputs,
       shotCount,
-      durationSeconds
+      durationSeconds,
+      resolution,
+      aspectRatio
     });
     const allImageInputs = [...characterInputs, ...locationInputs, ...elementInputs, ...styleInputs];
     const billedImageInputs = action === "revise" ? [] : allImageInputs;
@@ -1773,6 +1819,8 @@ app.post("/api/node/run-skill-director", async (req, res) => {
         shotCount: result.shotCount || shotCount,
         resolvedShotCount: result.resolvedShotCount,
         durationSeconds: result.durationSeconds || durationSeconds,
+        resolution: result.resolution || resolution,
+        aspectRatio: result.aspectRatio || aspectRatio,
         actualShotCount: result.actualShotCount,
         referenceSetup: result.referenceSetup,
         shotListNotes: result.shotListNotes,
@@ -1799,8 +1847,11 @@ app.post("/api/node/run-skill-director", async (req, res) => {
       shotCount: result.shotCount,
       resolvedShotCount: result.resolvedShotCount,
       durationSeconds: result.durationSeconds,
+      resolution: result.resolution || resolution,
+      aspectRatio: result.aspectRatio || aspectRatio,
       actualShotCount: result.actualShotCount,
       referenceSetup: result.referenceSetup,
+      referenceTags: Array.isArray(result.referenceTags) ? result.referenceTags : undefined,
       styleDirection: result.styleDirection,
       motionDirection: result.motionDirection,
       shotList: result.shotList,
@@ -2443,6 +2494,11 @@ async function runKreaImageModel(
     requestedAspectRatio
   }
 ) {
+  const kreaApiKey = String(process.env.KREA_API_KEY || "").trim();
+  if (!kreaApiKey) {
+    return res.status(400).json({ error: "Krea is disabled or its API key is missing in Settings." });
+  }
+
   if (selectedModel.displayName === imageModelNames.seedream5Pro && Boolean(req.body.seedreamLayers)) {
     return res.status(400).json({
       error: "Seedream Layers currently requires Fal. Disable Layers or enable Fal; standard Seedream generation works through Krea."
@@ -2454,7 +2510,7 @@ async function runKreaImageModel(
     return res.status(400).json({ error: `${selectedModel.displayName} is not available through Krea.` });
   }
 
-  const referenceUrls = await Promise.all(imagePromptUrls.map(uploadLocalOutputToKrea));
+  const referenceUrls = await Promise.all(imagePromptUrls.map((url) => uploadLocalOutputToKrea(url, kreaApiKey)));
   const submittedPrompt = promptWithReferenceLabels(
     prompt,
     imagePromptUrls.map((url, index) => ({
@@ -2475,7 +2531,8 @@ async function runKreaImageModel(
   const result = await runKreaGeneration({
     endpoint,
     input,
-    label: selectedModel.displayName
+    label: selectedModel.displayName,
+    apiKey: kreaApiKey
   });
   const remoteUrl = extractKreaJobResultUrl(result.job);
   if (!remoteUrl) {
@@ -2562,8 +2619,8 @@ app.post("/api/node/storyboard-plan", async (req, res) => {
     const directorShotList = String(req.body.directorShotList || "").trim();
     const directorFramePlan = storyboardDirectorFramePlan(directorShotList, 35);
     const requestedFrameCount = directorFramePlan.frameCount || normalizeStoryboardFrameCount(req.body.frameCount);
-    const plan = process.env.GOOGLE_API_KEY
-      ? await generateStoryboardPlanWithGemini({
+    const plan = activeLlmProvider()
+      ? await generateStoryboardPlanWithOpenAi({
         sceneDescription,
         frameCount: requestedFrameCount,
         characters: Array.isArray(req.body.characters) ? req.body.characters : [],
@@ -2596,8 +2653,8 @@ app.post("/api/node/storyboard-qc", async (req, res) => {
       return res.status(400).json({ error: "Storyboard frame URL is required." });
     }
 
-    const qc = process.env.FAL_KEY
-      ? await reviewStoryboardFrameWithFal({
+    const qcProvider = activeLlmProvider();
+    const qcInput = {
         sourceUrl,
         previousFrameUrl: String(req.body.previousFrameUrl || "").trim(),
         spatialAnchorUrl: String(req.body.spatialAnchorUrl || "").trim(),
@@ -2607,8 +2664,10 @@ app.post("/api/node/storyboard-qc", async (req, res) => {
         shot: String(req.body.shot || "").trim(),
         angle: String(req.body.angle || "").trim(),
         notes: String(req.body.notes || "").trim()
-      })
-      : storyboardQcPass("Storyboard QC skipped because FAL_KEY is not configured.");
+      };
+    const qc = qcProvider
+      ? await reviewStoryboardFrameWithOpenAi(qcInput)
+      : storyboardQcPass("Storyboard QC needs an enabled Fal or OpenAI API key.");
 
     res.json({ qc });
   } catch (error) {
@@ -2788,112 +2847,6 @@ app.post("/api/node/storyboard-export-board", async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: error.message || "Storyboard board export failed." });
-  }
-});
-
-app.post("/api/node/preview-inpaint", async (req, res) => {
-  try {
-    const prompt = String(req.body.prompt || "").trim();
-    const sourceUrl = String(req.body.sourceUrl || "").trim();
-    const maskDataUrl = String(req.body.maskDataUrl || "").trim();
-    if (!prompt) {
-      return res.status(400).json({ error: "Describe the edit before running inpaint." });
-    }
-    if (!isLocalAssetUrl(sourceUrl)) {
-      return res.status(400).json({ error: "A local Preview image is required for inpainting." });
-    }
-    if (!maskDataUrl) {
-      return res.status(400).json({ error: "Paint a mask before running inpaint." });
-    }
-    if (!resolveFalKreaProvider({ falKey: process.env.FAL_KEY, kreaKey: process.env.KREA_API_KEY })) {
-      return res.status(400).json({ error: "Preview inpainting needs an enabled Fal or Krea API key in Settings." });
-    }
-
-    const source = await readLocalAsset(sourceUrl);
-    if (!source.mimeType.startsWith("image/")) {
-      return res.status(400).json({ error: "Preview inpainting only supports image assets." });
-    }
-    const mask = imageDataUrlAsset(maskDataUrl, "inpaint-mask.png");
-    const sourceDimensions = imageDimensionsFromBuffer(source.buffer, source.mimeType) || {};
-    const aspectRatio = closestAspectRatio(
-      positiveNumber(sourceDimensions.width) && positiveNumber(sourceDimensions.height)
-        ? sourceDimensions.width / sourceDimensions.height
-        : aspectRatioNumber("16:9"),
-      openAiImageAspectRatios
-    );
-    const inpaintPrompt = [
-      "Edit the original image using the provided black and white inpainting mask. Treat the black area as locked image content.",
-      "The white painted area is the only approximate region allowed to change. Preserve the black area outside the mask exactly in composition, lighting, texture, identity, camera, and style.",
-      `User edit direction: ${prompt}`,
-      "If the user asks to remove, erase, clean up, or paint out an object, fully remove the selected subject and its visible edge artifacts or shadows inside the mask, then reconstruct the hidden background with believable continuity.",
-      "Blend the edit naturally into the original image, matching lighting, perspective, texture, camera quality, style, and scale.",
-      "Do not redesign the whole image, do not change unmasked subjects, and do not add unrelated elements outside the masked region."
-    ].join(" ");
-    const openAiImage = await generateOpenAiImage2FromInputs({
-      prompt: inpaintPrompt,
-      imageInputs: [
-        { ...source, label: "Original image to preserve" },
-        { ...mask, label: "Inpainting mask: white area is editable, black area must remain unchanged" }
-      ],
-      aspectRatio,
-      resolution: req.body.resolution || "2K"
-    });
-    const output = await downloadImage(req, openAiImage.remoteImage.url, "preview-inpaint", openAiImage.remoteImage.content_type || openAiImage.remoteImage.mimeType);
-    const cost = openAiImage.provider === "Krea"
-      ? estimateKreaImageCost({
-          modelName: imageModelNames.openAiImage2,
-          resolution: req.body.resolution || "2K",
-          referenceCount: 2
-        })
-      : estimateOpenAiImage2Cost({
-          resolution: req.body.resolution || "2K",
-          size: openAiImage.size,
-          quality: openAiImage.quality,
-          endpoint: openAiImage.endpoint
-        });
-
-    await appendHistory({
-      id: randomUUID(),
-      createdAt: new Date().toISOString(),
-      mediaType: "image",
-      provider: openAiImage.provider,
-      modelName: imageModelNames.openAiImage2,
-      endpoint: openAiImage.endpoint,
-      mode: "Preview masked image edit",
-      prompt,
-      submittedPrompt: openAiImage.submittedPrompt,
-      project: projectFromBody(req.body),
-      node: nodeFromBody(req.body),
-      settings: {
-        model: imageModelNames.openAiImage2,
-        aspectRatio,
-        resolution: req.body.resolution || "2K",
-        imageSize: openAiImage.size,
-        quality: openAiImage.quality,
-        imagePromptCount: 2,
-        imagePromptLabels: ["Original image to preserve", "Inpainting mask"]
-      },
-      cost,
-      remoteImage: openAiImage.remoteImage,
-      localImage: output.publicPath,
-      outputFileName: output.fileName,
-      outputBytes: output.bytes,
-      text: openAiImage.resultText || ""
-    });
-
-    return res.json({
-      text: openAiImage.resultText || "",
-      cost,
-      image: {
-        ...openAiImage.remoteImage,
-        localUrl: output.publicPath,
-        fileName: output.fileName,
-        mimeType: output.mimeType
-      }
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(error.status || 500).json({ error: error.message || "Preview inpainting failed." });
   }
 });
 
@@ -3732,14 +3685,22 @@ app.post("/api/node/generate-video", async (req, res) => {
       });
     }
 
+    const seedance25 = isSeedance25Model(selectedVideoModel.displayName);
+    const imageReferenceLimit = seedance25 ? seedance25ImageReferenceLimit : seedanceImageReferenceLimit;
+    const videoReferenceLimit = seedance25 ? seedance25ReferenceLimits.videos : 3;
+    const audioReferenceLimit = seedance25 ? seedance25ReferenceLimits.audio : 3;
     const startFrameUrl = firstLocalOutput(req.body.startFrameUrls);
     const endFrameUrl = firstLocalOutput(req.body.endFrameUrls);
     const filmDirector = req.body.filmDirector && typeof req.body.filmDirector === "object" ? req.body.filmDirector : null;
-    const directorReferences = Array.isArray(filmDirector?.references) ? filmDirector.references : [];
+    const directorReferences = filterFilmDirectorReferencesForOutput(
+      filmDirector?.references,
+      filmDirector?.finalPrompt || prompt
+    );
     const mergedReferenceImages = mergeSeedanceDirectorReferences({
       directUrls: Array.isArray(req.body.referenceImageUrls) ? req.body.referenceImageUrls : [],
       directLabels: Array.isArray(req.body.referenceImageLabels) ? req.body.referenceImageLabels : [],
-      directorReferences
+      directorReferences,
+      limit: imageReferenceLimit
     });
     const referenceImages = mergedReferenceImages.urls
       .map((url, index) => ({ url, label: mergedReferenceImages.labels[index] }))
@@ -3750,14 +3711,19 @@ app.post("/api/node/generate-video", async (req, res) => {
     const rawReferenceVideoLabels = Array.isArray(req.body.referenceVideoLabels) ? req.body.referenceVideoLabels : [];
     const referenceVideos = rawReferenceVideoUrls
       .map((url, index) => ({ url, label: rawReferenceVideoLabels[index] }))
-      .filter(({ url }) => isLocalAssetUrl(url));
+      .filter(({ url }) => isLocalAssetUrl(url))
+      .slice(0, videoReferenceLimit);
     const referenceVideoUrls = referenceVideos.map(({ url }) => url);
     const referenceVideoNames = normalizeReferenceNames(referenceVideos.map(({ label }) => label), referenceVideoUrls.length, "Video");
-    const referenceAudioUrls = Array.isArray(req.body.referenceAudioUrls) ? req.body.referenceAudioUrls.filter(isLocalAssetUrl) : [];
+    const referenceAudioUrls = Array.isArray(req.body.referenceAudioUrls)
+      ? req.body.referenceAudioUrls.filter(isLocalAssetUrl).slice(0, audioReferenceLimit)
+      : [];
     const seedanceResolutionOptions = ["480p", "720p", "1080p", "4k"];
-    const resolution = normalizeChoice(req.body.resolution, seedanceResolutionOptions, "720p");
-    const duration = normalizeDuration(req.body.duration);
-    const aspectRatio = normalizeAspectRatio(req.body.aspectRatio);
+    const resolution = seedance25
+      ? normalizeSeedance25Resolution(req.body.resolution)
+      : normalizeChoice(req.body.resolution, seedanceResolutionOptions, "720p");
+    const duration = seedance25 ? normalizeSeedance25Duration(req.body.duration) : normalizeDuration(req.body.duration);
+    const aspectRatio = seedance25 ? normalizeSeedance25AspectRatio(req.body.aspectRatio) : normalizeAspectRatio(req.body.aspectRatio);
     const generateAudio = Boolean(req.body.generateAudio);
     const runtimeProvider = resolveSeedanceRuntimeProvider({
       falKey: process.env.FAL_KEY,
@@ -3766,6 +3732,7 @@ app.post("/api/node/generate-video", async (req, res) => {
     if (!runtimeProvider) {
       return res.status(400).json({ error: "Seedance needs an enabled Fal or Krea API key in Settings." });
     }
+    const kreaApiKey = runtimeProvider === "krea" ? String(process.env.KREA_API_KEY || "").trim() : "";
 
     let routeKind = "text-to-video";
     if (startFrameUrl) {
@@ -3776,10 +3743,10 @@ app.post("/api/node/generate-video", async (req, res) => {
 
     const submittedPrompt =
       routeKind === "reference-to-video"
-        ? rewriteReferenceMentions(prompt, {
+        ? rewriteSeedanceReferenceMentions(prompt, {
             imageNames: referenceImageNames,
             videoNames: referenceVideoNames
-          })
+          }, { bracketed: seedance25 })
         : prompt;
     let endpoint;
     let requestId;
@@ -3796,6 +3763,7 @@ app.post("/api/node/generate-video", async (req, res) => {
         aspect_ratio: aspectRatio,
         generate_audio: generateAudio
       };
+      if (seedance25) input.end_user_id = seedanceEndUserId;
 
       if (routeKind === "image-to-video") {
         input.image_url = await uploadLocalOutputToFal(startFrameUrl);
@@ -3805,46 +3773,51 @@ app.post("/api/node/generate-video", async (req, res) => {
       if (routeKind === "reference-to-video") {
         if (referenceImageUrls.length) input.image_urls = await Promise.all(referenceImageUrls.map(uploadLocalOutputToFal));
         if (referenceVideoUrls.length) input.video_urls = await Promise.all(referenceVideoUrls.map(uploadLocalOutputToFal));
-        if (referenceAudioUrls.length) input.audio_urls = await Promise.all(referenceAudioUrls.slice(0, 3).map(uploadLocalOutputToFal));
+        if (referenceAudioUrls.length) input.audio_urls = await Promise.all(referenceAudioUrls.map(uploadLocalOutputToFal));
       }
 
-      endpoint = `bytedance/seedance-2.0/${routeKind}`;
+      endpoint = seedance25 ? seedance25FalEndpoint(routeKind) : `bytedance/seedance-2.0/${routeKind}`;
       const result = await subscribeFal(endpoint, { input, logs: true });
       requestId = result.requestId;
       resultSeed = result?.data?.seed ?? null;
       remoteVideo = result?.data?.video;
       providerName = "fal.ai";
-      cost = estimateSeedanceCost({ duration, resolution, aspectRatio, endpoint, routeKind });
+      cost = seedance25
+        ? estimateSeedance25FalCost({ duration, resolution, hasVideoReference: referenceVideoUrls.length > 0 })
+        : estimateSeedanceCost({ duration, resolution, aspectRatio, endpoint, routeKind });
+      cost.aspectRatio = aspectRatio;
+      cost.routeKind = routeKind;
 
       if (!remoteVideo?.url) {
         return res.status(502).json({ error: "Fal returned no video URL.", raw: result?.data });
       }
     } else {
-      endpoint = kreaSeedanceEndpoint();
+      endpoint = kreaSeedanceEndpoint(selectedVideoModel.displayName);
       const input = {
         prompt: submittedPrompt,
         resolution,
-        duration: durationToSeconds(duration),
+        duration: duration === "auto" ? "auto" : durationToSeconds(duration),
         aspect_ratio: aspectRatio,
         generate_audio: generateAudio
       };
 
       if (routeKind === "image-to-video") {
-        input.start_image = await uploadLocalOutputToKrea(startFrameUrl);
-        if (endFrameUrl) input.end_image = await uploadLocalOutputToKrea(endFrameUrl);
+        input.start_image = await uploadLocalOutputToKrea(startFrameUrl, kreaApiKey);
+        if (endFrameUrl) input.end_image = await uploadLocalOutputToKrea(endFrameUrl, kreaApiKey);
       }
 
       if (routeKind === "reference-to-video") {
-        if (referenceImageUrls.length) input.reference_images = await Promise.all(referenceImageUrls.slice(0, 9).map(uploadLocalOutputToKrea));
-        if (referenceVideoUrls.length) input.reference_videos = await Promise.all(referenceVideoUrls.slice(0, 3).map(uploadLocalOutputToKrea));
-        if (referenceAudioUrls.length) input.reference_audios = await Promise.all(referenceAudioUrls.slice(0, 3).map(uploadLocalOutputToKrea));
+        if (referenceImageUrls.length) input.reference_images = await Promise.all(referenceImageUrls.map((url) => uploadLocalOutputToKrea(url, kreaApiKey)));
+        if (referenceVideoUrls.length) input.reference_videos = await Promise.all(referenceVideoUrls.map((url) => uploadLocalOutputToKrea(url, kreaApiKey)));
+        if (referenceAudioUrls.length) input.reference_audios = await Promise.all(referenceAudioUrls.map((url) => uploadLocalOutputToKrea(url, kreaApiKey)));
       }
 
-      const kreaResult = await runKreaSeedanceGeneration({ endpoint, input });
+      const kreaResult = await runKreaSeedanceGeneration({ endpoint, input, apiKey: kreaApiKey });
       requestId = kreaResult.requestId;
       remoteVideo = kreaResult.remoteVideo;
       providerName = "Krea";
       cost = estimateKreaSeedanceCost({
+        modelName: selectedVideoModel.displayName,
         durationSeconds: durationToSeconds(duration),
         resolution,
         hasVideoReference: referenceVideoUrls.length > 0
@@ -3859,7 +3832,7 @@ app.post("/api/node/generate-video", async (req, res) => {
       createdAt: new Date().toISOString(),
       mediaType: "video",
       provider: providerName,
-      modelName: "Seedance 2.0",
+      modelName: selectedVideoModel.displayName,
       endpoint,
       mode: routeKindLabel(routeKind),
       prompt,
@@ -3893,7 +3866,7 @@ app.post("/api/node/generate-video", async (req, res) => {
       seed: resultSeed,
       endpoint,
       provider: providerName,
-      modelName: "Seedance 2.0",
+      modelName: selectedVideoModel.displayName,
       submittedPrompt,
       cost,
       video: {
@@ -3914,7 +3887,10 @@ async function runGeminiOmniVideo(req, res, { prompt, selectedVideoModel }) {
   const generateAudio = req.body.generateAudio !== false;
   const startFrameUrl = firstLocalOutput(req.body.startFrameUrls);
   const filmDirector = req.body.filmDirector && typeof req.body.filmDirector === "object" ? req.body.filmDirector : null;
-  const directorReferences = Array.isArray(filmDirector?.references) ? filmDirector.references : [];
+  const directorReferences = filterFilmDirectorReferencesForOutput(
+    filmDirector?.references,
+    filmDirector?.finalPrompt || prompt
+  );
   const rawReferenceImageUrls = Array.isArray(req.body.referenceImageUrls) ? req.body.referenceImageUrls : [];
   const rawReferenceImageLabels = Array.isArray(req.body.referenceImageLabels) ? req.body.referenceImageLabels : [];
   const rawCharacterUrls = Array.isArray(req.body.characterReferenceUrls) ? req.body.characterReferenceUrls : [];
@@ -4183,7 +4159,10 @@ async function runKlingO3Video(req, res, { prompt, selectedVideoModel, variant =
   const startFrameUrl = firstLocalOutput(req.body.startFrameUrls);
   const endFrameUrl = firstLocalOutput(req.body.endFrameUrls);
   const filmDirector = req.body.filmDirector && typeof req.body.filmDirector === "object" ? req.body.filmDirector : null;
-  const directorReferences = Array.isArray(filmDirector?.references) ? filmDirector.references : [];
+  const directorReferences = filterFilmDirectorReferencesForOutput(
+    filmDirector?.references,
+    filmDirector?.finalPrompt || prompt
+  );
   const directorTagForUrl = new Map(
     directorReferences.filter((item) => item?.url && item?.tag).map((item) => [item.url, cleanReferenceName(item.tag)])
   );
@@ -4418,6 +4397,10 @@ async function runKreaKlingO3Video(
     klingDirectorOptimization
   }
 ) {
+  const kreaApiKey = String(process.env.KREA_API_KEY || "").trim();
+  if (!kreaApiKey) {
+    return res.status(400).json({ error: "Krea is disabled or its API key is missing in Settings." });
+  }
   const is4k = variant === "4k";
   const endpoint = kreaEndpointForModel("video", selectedVideoModel.displayName);
   const input = {
@@ -4426,8 +4409,8 @@ async function runKreaKlingO3Video(
     duration: durationSeconds,
     generate_audio: generateAudio,
     mode: is4k ? "4k" : "pro",
-    start_image: startFrameUrl ? await uploadLocalOutputToKrea(startFrameUrl) : undefined,
-    end_image: endFrameUrl ? await uploadLocalOutputToKrea(endFrameUrl) : undefined,
+    start_image: startFrameUrl ? await uploadLocalOutputToKrea(startFrameUrl, kreaApiKey) : undefined,
+    end_image: endFrameUrl ? await uploadLocalOutputToKrea(endFrameUrl, kreaApiKey) : undefined,
     multi_prompt: multiPrompt.length
       ? multiPrompt.map((item) => ({
           prompt: String(item.prompt || "").slice(0, 512),
@@ -4435,7 +4418,7 @@ async function runKreaKlingO3Video(
         }))
       : undefined
   };
-  const result = await runKreaGeneration({ endpoint, input, label: selectedVideoModel.displayName });
+  const result = await runKreaGeneration({ endpoint, input, label: selectedVideoModel.displayName, apiKey: kreaApiKey });
   const videoUrl = extractKreaJobResultUrl(result.job);
   if (!videoUrl) {
     throw httpError(502, `Krea completed ${selectedVideoModel.displayName} but returned no video URL.`, { body: result.job });
@@ -4584,15 +4567,15 @@ async function optimizeKlingFilmDirectorMultiPrompt(multiPrompt = []) {
 
   const protectedPrompts = multiPrompt.map((item) => protectKlingDirectorPrompt(item.prompt));
   try {
-    const data = await subscribeFal(skillDirectorLlmEndpoint, {
-      input: {
-        model: klingDirectorPromptFalModel,
-        prompt: buildKlingDirectorOptimizationPrompt(protectedPrompts),
-        system_prompt: klingDirectorOptimizationSystemPrompt()
-      },
-      logs: true
-    }, { route: "kling-film-director-prompt-optimization", model: klingDirectorPromptFalModel });
-    const optimizedPrompts = parseKlingDirectorOptimizations(extractFalText(data), protectedPrompts);
+    const result = await runTextLlm({
+      prompt: buildKlingDirectorOptimizationPrompt(protectedPrompts),
+      systemPrompt: klingDirectorOptimizationSystemPrompt(),
+      falModel: klingDirectorPromptFalModel,
+      openAiModel: openAiTextModel,
+      responseMimeType: "application/json",
+      route: "kling-film-director-prompt-optimization"
+    });
+    const optimizedPrompts = parseKlingDirectorOptimizations(result.text, protectedPrompts);
     const optimizedMultiPrompt = multiPrompt.map((item, index) => ({
       ...item,
       prompt: clipKlingDirectorPrompt(
@@ -5954,7 +5937,7 @@ app.post(
   upload.fields([
     { name: "startFrame", maxCount: 1 },
     { name: "endFrame", maxCount: 1 },
-    { name: "references", maxCount: 9 }
+    { name: "references", maxCount: 30 }
   ]),
   async (req, res) => {
     try {
@@ -5962,6 +5945,8 @@ app.post(
       if (!prompt) {
         return res.status(400).json({ error: "Prompt is required." });
       }
+      const selectedVideoModel = resolveVideoModel(req.body.model);
+      const seedance25 = isSeedance25Model(selectedVideoModel.displayName);
 
       const runtimeProvider = resolveSeedanceRuntimeProvider({
         falKey: process.env.FAL_KEY,
@@ -5973,7 +5958,7 @@ app.post(
 
       const startFrame = req.files?.startFrame?.[0];
       const endFrame = req.files?.endFrame?.[0];
-      const references = req.files?.references || [];
+      const references = (req.files?.references || []).slice(0, seedance25 ? seedance25ReferenceLimits.images : seedanceImageReferenceLimit);
       const referenceNames = parseReferenceNames(req.body.referenceNames, references.length);
 
       if (endFrame && !startFrame) {
@@ -5981,14 +5966,22 @@ app.post(
       }
 
       const seedanceResolutionOptions = ["480p", "720p", "1080p", "4k"];
-      const resolution = normalizeChoice(req.body.resolution, seedanceResolutionOptions, "720p");
-      const duration = normalizeChoice(req.body.duration, ["auto", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15"], "15");
-      const aspectRatio = normalizeChoice(req.body.aspectRatio, ["auto", "21:9", "16:9", "4:3", "1:1", "3:4", "9:16"], "21:9");
+      const resolution = seedance25
+        ? normalizeSeedance25Resolution(req.body.resolution)
+        : normalizeChoice(req.body.resolution, seedanceResolutionOptions, "720p");
+      const duration = seedance25
+        ? normalizeSeedance25Duration(req.body.duration)
+        : normalizeChoice(req.body.duration, ["auto", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15"], "15");
+      const aspectRatio = seedance25
+        ? normalizeSeedance25AspectRatio(req.body.aspectRatio)
+        : normalizeChoice(req.body.aspectRatio, ["auto", "21:9", "16:9", "4:3", "1:1", "3:4", "9:16"], "21:9");
       const generateAudio = String(req.body.generateAudio ?? "true") === "true";
       const seed = req.body.seed ? Number(req.body.seed) : undefined;
 
-      const route = resolveRoute({ startFrame, references });
-      const promptForFal = route.kind === "reference-to-video" ? rewriteReferenceMentions(prompt, referenceNames) : prompt;
+      const route = resolveRoute({ startFrame, references, modelName: selectedVideoModel.displayName });
+      const promptForFal = route.kind === "reference-to-video"
+        ? rewriteSeedanceReferenceMentions(prompt, referenceNames, { bracketed: seedance25 })
+        : prompt;
       const uploadedFiles = [];
       let endpoint;
       let requestId;
@@ -6005,6 +5998,7 @@ app.post(
           aspect_ratio: aspectRatio,
           generate_audio: generateAudio
         };
+        if (seedance25) input.end_user_id = seedanceEndUserId;
         if (Number.isInteger(seed)) input.seed = seed;
 
         if (route.kind === "image-to-video") {
@@ -6042,7 +6036,11 @@ app.post(
         resultSeed = result?.data?.seed ?? resultSeed;
         remoteVideo = result?.data?.video;
         providerName = "fal.ai";
-        cost = estimateSeedanceCost({ duration, resolution, aspectRatio, endpoint, routeKind: route.kind });
+        cost = seedance25
+          ? estimateSeedance25FalCost({ duration, resolution, hasVideoReference: false })
+          : estimateSeedanceCost({ duration, resolution, aspectRatio, endpoint, routeKind: route.kind });
+        cost.aspectRatio = aspectRatio;
+        cost.routeKind = route.kind;
         if (!remoteVideo?.url) {
           return res.status(502).json({ error: "Fal returned no video URL.", raw: result?.data });
         }
@@ -6050,7 +6048,7 @@ app.post(
         const input = {
           prompt: promptForFal,
           resolution,
-          duration: durationToSeconds(duration),
+          duration: duration === "auto" ? "auto" : durationToSeconds(duration),
           aspect_ratio: aspectRatio,
           generate_audio: generateAudio
         };
@@ -6069,7 +6067,7 @@ app.post(
 
         if (route.kind === "reference-to-video") {
           const imageUrls = [];
-          for (const reference of references.slice(0, 9)) {
+          for (const reference of references) {
             const referenceUrl = await uploadToKrea(reference);
             imageUrls.push(referenceUrl);
             uploadedFiles.push({ role: "reference", name: referenceNames[imageUrls.length - 1], local: reference.filename, url: referenceUrl });
@@ -6077,12 +6075,13 @@ app.post(
           input.reference_images = imageUrls;
         }
 
-        endpoint = kreaSeedanceEndpoint();
+        endpoint = kreaSeedanceEndpoint(selectedVideoModel.displayName);
         const result = await runKreaSeedanceGeneration({ endpoint, input });
         requestId = result.requestId;
         remoteVideo = result.remoteVideo;
         providerName = "Krea";
         cost = estimateKreaSeedanceCost({
+          modelName: selectedVideoModel.displayName,
           durationSeconds: durationToSeconds(duration),
           resolution,
           hasVideoReference: false
@@ -6097,7 +6096,7 @@ app.post(
         createdAt: new Date().toISOString(),
         mediaType: "video",
         provider: providerName,
-        modelName: "Seedance 2.0",
+        modelName: selectedVideoModel.displayName,
         prompt,
         submittedPrompt: promptForFal,
         endpoint,
@@ -6130,6 +6129,7 @@ app.post(
         seed: resultSeed,
         endpoint,
         provider: providerName,
+        modelName: selectedVideoModel.displayName,
         mode: route.label,
         cost,
         video: {
@@ -6158,12 +6158,13 @@ httpServer.on("error", (error) => {
   console.error("NewtNode server failed to start.", error);
 });
 
-function resolveRoute({ startFrame, references }) {
+function resolveRoute({ startFrame, references, modelName = "Seedance 2.0" }) {
+  const seedance25 = isSeedance25Model(modelName);
   if (startFrame) {
     return {
       kind: "image-to-video",
       label: "Image to video",
-      endpoint: "bytedance/seedance-2.0/image-to-video"
+      endpoint: seedance25 ? seedance25FalEndpoint("image-to-video") : "bytedance/seedance-2.0/image-to-video"
     };
   }
 
@@ -6171,14 +6172,14 @@ function resolveRoute({ startFrame, references }) {
     return {
       kind: "reference-to-video",
       label: "Reference to video",
-      endpoint: "bytedance/seedance-2.0/reference-to-video"
+      endpoint: seedance25 ? seedance25FalEndpoint("reference-to-video") : "bytedance/seedance-2.0/reference-to-video"
     };
   }
 
   return {
     kind: "text-to-video",
     label: "Text to video",
-    endpoint: "bytedance/seedance-2.0/text-to-video"
+    endpoint: seedance25 ? seedance25FalEndpoint("text-to-video") : "bytedance/seedance-2.0/text-to-video"
   };
 }
 
@@ -6250,6 +6251,12 @@ function rewriteReferenceMentions(prompt, referenceNames) {
   return prompt.replace(/@([A-Za-z0-9_-]+)/g, (fullMatch, name) => mentionMap.get(name.toLowerCase()) || fullMatch);
 }
 
+function rewriteSeedanceReferenceMentions(prompt, referenceNames, { bracketed = false } = {}) {
+  const rewritten = rewriteReferenceMentions(prompt, referenceNames);
+  if (!bracketed) return rewritten;
+  return rewritten.replace(/@(Image|Video)(\d+)/g, "[$1$2]");
+}
+
 function cleanReferenceName(value) {
   return String(value || "")
     .replace(/^@+/, "")
@@ -6259,7 +6266,7 @@ function cleanReferenceName(value) {
 
 function cleanImagePromptLabel(value) {
   return String(value || "")
-    .replace(/[^A-Za-z0-9_. -]/g, "")
+    .replace(/[^@A-Za-z0-9_. -]/g, "")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 80);
@@ -6552,6 +6559,12 @@ async function copyWorkflowAssetsToPackage(graph, workflowId, packagePath) {
   const urlMap = new Map();
   const manifest = [];
   const usedTargets = new Set();
+  const previousManifest = await readJsonFile(workflowPackageManifestPath(packagePath), null);
+  const previousAssetsBySource = new Map(
+    (Array.isArray(previousManifest?.assets) ? previousManifest.assets : [])
+      .filter((asset) => asset?.source && asset?.relativePath && !asset?.missing)
+      .map((asset) => [asset.source, asset])
+  );
 
   for (const publicPath of urls) {
     try {
@@ -6570,11 +6583,30 @@ async function copyWorkflowAssetsToPackage(graph, workflowId, packagePath) {
         continue;
       }
 
-      const targetName = uniquePackageAssetName(source.fileName, usedTargets);
-      const relativePath = path.join(assetGroup, targetName);
+      const sourceMetadata = await stat(source.filePath);
+      const previousAsset = previousAssetsBySource.get(publicPath);
+      const reusableRelativePath = safeRelativeAssetPath(previousAsset?.relativePath);
+      const reusableTargetPath = reusableRelativePath ? path.join(packagePath, reusableRelativePath) : "";
+      const reusableTargetMetadata = reusableTargetPath ? await stat(reusableTargetPath).catch(() => null) : null;
+      const previousSourceMetadataMatches =
+        Number(previousAsset?.sourceSize) === sourceMetadata.size &&
+        Number(previousAsset?.sourceMtimeMs) === sourceMetadata.mtimeMs;
+      const legacyManifestAssetMatches =
+        previousAsset?.sourceSize == null &&
+        previousAsset?.sourceMtimeMs == null &&
+        reusableTargetMetadata?.size === sourceMetadata.size;
+      const canReusePreviousAsset = Boolean(
+        reusableTargetMetadata &&
+        (previousSourceMetadataMatches || legacyManifestAssetMatches)
+      );
+      const targetName = canReusePreviousAsset
+        ? path.basename(reusableRelativePath)
+        : uniquePackageAssetName(source.fileName, usedTargets);
+      const relativePath = canReusePreviousAsset ? reusableRelativePath : path.join(assetGroup, targetName);
       const targetPath = path.join(packagePath, relativePath);
+      usedTargets.add(targetName.toLowerCase());
       await mkdir(path.dirname(targetPath), { recursive: true });
-      if (path.resolve(source.filePath) !== path.resolve(targetPath)) await copyFile(source.filePath, targetPath);
+      if (!canReusePreviousAsset && path.resolve(source.filePath) !== path.resolve(targetPath)) await copyFile(source.filePath, targetPath);
       const packagedUrl = workflowPackagePublicPath(workflowId, relativePath);
       urlMap.set(publicPath, packagedUrl);
       manifest.push({
@@ -6582,7 +6614,9 @@ async function copyWorkflowAssetsToPackage(graph, workflowId, packagePath) {
         url: packagedUrl,
         relativePath: relativePath.split(path.sep).join("/"),
         group: assetGroup,
-        fileName: targetName
+        fileName: targetName,
+        sourceSize: sourceMetadata.size,
+        sourceMtimeMs: sourceMetadata.mtimeMs
       });
     } catch (error) {
       manifest.push({
@@ -9712,7 +9746,7 @@ function estimateTextProcessingCost({ provider, usage = null, helperUsages = [],
       units: 1,
       unit: "request",
       mediaType: "text",
-      pricingBasis: "OpenAI text usage recorded, but local token-to-price estimate is not configured",
+      pricingBasis: `${provider || "Direct LLM"} text usage recorded, but a local token-to-price estimate is not configured`,
       pricingSource: "usage-no-local-pricing"
     };
   }
@@ -9729,7 +9763,7 @@ function estimateTextProcessingCost({ provider, usage = null, helperUsages = [],
     units: 1,
     unit: "request",
     mediaType: "text",
-    pricingBasis: normalizedProvider === "fal" ? "fal.ai OpenRouter request estimate plus media helper calls" : "No local token estimate for OpenAI text",
+    pricingBasis: normalizedProvider === "fal" ? "fal.ai OpenRouter request estimate plus media helper calls" : "No local token estimate for direct LLM text",
     pricingSource: "configured-pricing-v1"
   };
 }
@@ -9879,8 +9913,7 @@ function normalizeSkillDirectorShotCount(value) {
 }
 
 function normalizeSkillDirectorDurationSeconds(value) {
-  const count = Number.parseInt(String(value || "15"), 10);
-  return ["5", "10", "15", "20", "30"].includes(String(count)) ? String(count) : "15";
+  return normalizeFilmDirectorDuration(value);
 }
 
 function skillDirectorDurationLabel(durationSeconds = "15") {
@@ -9904,42 +9937,185 @@ function buildTextProcessingPrompt({ text, textInputs, imageDescriptions = [], v
     .join("\n\n");
 }
 
-async function processTextWithFal({ text, textInputs, imageInputs, videoInputs }) {
-  if (!process.env.FAL_KEY) {
-    throw new Error("Missing FAL_KEY in .env.");
+function activeLlmProvider(preferredProvider = preferredTextLlmProvider) {
+  return resolveLlmProvider({
+    preferredProvider,
+    falKey: process.env.FAL_KEY,
+    openAiKey: openAiTextApiKey
+  });
+}
+
+function requireActiveLlmProvider(preferredProvider = preferredTextLlmProvider) {
+  const provider = activeLlmProvider(preferredProvider);
+  if (provider) return provider;
+  throw httpError(400, llmProviderUnavailableMessage({ kreaKey: process.env.KREA_API_KEY }));
+}
+
+async function runTextLlm({
+  prompt,
+  systemPrompt = "",
+  preferredProvider = preferredTextLlmProvider,
+  falModel = falTextModel,
+  openAiModel = openAiTextModel,
+  responseMimeType = "text/plain",
+  reasoningEffort = "low",
+  route = "text-llm"
+}) {
+  const provider = requireActiveLlmProvider(preferredProvider);
+
+  if (provider === "fal") {
+    const data = await subscribeFal(skillDirectorLlmEndpoint, {
+      input: {
+        model: falModel,
+        prompt,
+        system_prompt: systemPrompt
+      },
+      logs: true
+    }, { route, model: falModel });
+    const text = extractFalText(data).trim();
+    if (!text) throw new Error("fal returned no text.");
+    return {
+      text,
+      model: falModel,
+      provider: "fal",
+      endpoint: skillDirectorLlmEndpoint,
+      usage: falResultUsage(data)
+    };
   }
 
-  const model = falTextModel;
+  if (provider === "openai") {
+    const response = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${openAiTextApiKey}`
+      },
+      body: JSON.stringify({
+        model: openAiModel,
+        instructions: systemPrompt,
+        input: prompt,
+        reasoning: { effort: reasoningEffort }
+      })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw httpError(response.status, data?.error?.message || "OpenAI text generation failed.", { raw: data });
+    const text = extractOpenAiResponseText(data).trim();
+    if (!text) throw new Error("OpenAI returned no text.");
+    return {
+      text,
+      model: openAiModel,
+      provider: "OpenAI",
+      endpoint: openAiModel,
+      usage: data.usage || null
+    };
+  }
+
+  throw httpError(500, `Unsupported LLM provider: ${provider}`);
+}
+
+async function runMediaDescriptionLlm({
+  inputs = [],
+  mediaType = "image",
+  prompt,
+  systemPrompt = "Return only useful prompt context. Do not use markdown.",
+  preferredProvider = preferredTextLlmProvider,
+  falModel = falVisionTextModel,
+  openAiModel = openAiTextModel,
+  responseMimeType = "text/plain",
+  reasoningEffort = "low",
+  route = "media-description"
+}) {
+  if (!inputs.length) return { text: "", usages: [], provider: "", model: "", endpoint: "" };
+  const provider = requireActiveLlmProvider(preferredProvider);
+
+  if (provider === "fal") {
+    const mediaUrls = await Promise.all(inputs.map((item) => localAssetToFalUrl(item.url)));
+    const endpoint = mediaType === "video" ? "openrouter/router/video" : "openrouter/router/vision";
+    const inputKey = mediaType === "video" ? "video_urls" : "image_urls";
+    const data = await subscribeFal(endpoint, {
+      input: {
+        [inputKey]: mediaUrls,
+        prompt,
+        system_prompt: systemPrompt,
+        model: falModel
+      },
+      logs: true
+    }, { route, model: falModel });
+    return {
+      text: extractFalText(data).trim(),
+      usages: [falResultUsage(data)].filter(Boolean),
+      provider: "fal",
+      model: falModel,
+      endpoint
+    };
+  }
+
+  if (provider === "openai") {
+    const content = [{ type: "input_text", text: prompt }];
+    for (const item of inputs) {
+      if (mediaType !== "image") {
+        content.push({ type: "input_text", text: `${item.label || "Video reference"}: ${item.url}` });
+        continue;
+      }
+      const asset = await readLocalAsset(item.url);
+      if (item.label) content.push({ type: "input_text", text: item.label });
+      content.push({
+        type: "input_image",
+        image_url: `data:${asset.mimeType || "image/png"};base64,${asset.buffer.toString("base64")}`
+      });
+    }
+    const response = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${openAiTextApiKey}`
+      },
+      body: JSON.stringify({
+        model: openAiModel,
+        instructions: systemPrompt,
+        input: [{ role: "user", content }],
+        reasoning: { effort: reasoningEffort }
+      })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw httpError(response.status, data?.error?.message || "OpenAI media analysis failed.", { raw: data });
+    return {
+      text: extractOpenAiResponseText(data).trim(),
+      usages: [data.usage].filter(Boolean),
+      provider: "OpenAI",
+      model: openAiModel,
+      endpoint: openAiModel
+    };
+  }
+
+  throw httpError(500, `Unsupported LLM provider: ${provider}`);
+}
+
+async function processTextWithLlm({ text, textInputs, imageInputs, videoInputs }) {
   const imageContext = await describeImageInputs(imageInputs);
   const videoContext = await describeVideoInputs(videoInputs);
   const prompt = buildTextProcessingPrompt({ text, textInputs, imageDescriptions: imageContext.descriptions, videoDescriptions: videoContext.descriptions });
-  const data = await subscribeFal("openrouter/router", {
-    input: {
-      model,
-      prompt,
-      system_prompt: textProcessingInstructions()
-    },
-    logs: true
+  const result = await runTextLlm({
+    prompt,
+    systemPrompt: textProcessingInstructions(),
+    falModel: falTextModel,
+    openAiModel: openAiTextModel,
+    route: "smart-text"
   });
-  const outputText = extractFalText(data).trim();
-
-  if (!outputText) {
-    throw new Error("fal returned no text.");
-  }
 
   return {
-    text: outputText,
-    model,
-    provider: "fal",
-    endpoint: "openrouter/router",
+    text: result.text,
+    model: result.model,
+    provider: result.provider,
+    endpoint: result.endpoint,
     submittedPrompt: prompt,
-    usage: falResultUsage(data),
+    usage: result.usage,
     helperUsages: [...imageContext.usages, ...videoContext.usages]
   };
 }
 
 const skillDirectorSceneRules =
-  "Scene rules: cinematic naturalism, premium live-action realism, motivated light, cine lens language, grounded acting, real physics, no subtitles, no music, continuity, 24fps smooth motion, environmental SFX, natural ambience.";
+  "Scene rules: Absolutely no music, no music score, no audio effects. Cinematic naturalism, premium live-action realism, motivated light, cine lens language, grounded acting, real physics, no subtitles, no music, continuity, 24fps smooth motion, environmental sounds, natural ambience.";
 const skillDirectorFinalPromptMaxChars = 7000;
 
 function skillDirectorSystemPrompt() {
@@ -10042,7 +10218,10 @@ function composeSkillDirectorFinalPrompt({ referenceLines = [], styleDirection =
   const seenInstructions = new Set(skillDirectorInstructionUnits(skillDirectorSceneRules).map(skillDirectorInstructionKey));
   const continuityNotes = skillDirectorContinuityNotesForFinal(shotListNotes);
   const cameraDirection = skillDirectorCameraDirectionForFinal(motionDirection);
-  const cleanStyle = dedupeSkillDirectorInstructions(cleanSkillDirectorMoodBoardReferences(styleDirection), seenInstructions);
+  const cleanStyle = dedupeSkillDirectorInstructions(
+    compactFilmDirectorStyleDirection(cleanSkillDirectorMoodBoardReferences(styleDirection)),
+    seenInstructions
+  );
   const cleanCamera = dedupeSkillDirectorInstructions(cameraDirection, seenInstructions);
   const cleanContinuity = dedupeSkillDirectorInstructions(continuityNotes, seenInstructions);
   const finalShotCount = largestSkillDirectorCutNumber(shotList);
@@ -10364,7 +10543,7 @@ function skillDirectorShotPlanIssues(plan, shotCount, durationSeconds = "15", ch
   return issues;
 }
 
-async function repairSkillDirectorShotPlan({ outputText, shotCount, durationSeconds, prompt, model, issues }) {
+async function repairSkillDirectorShotPlan({ outputText, shotCount, durationSeconds, prompt, model, issues, activeReferenceTags = null }) {
   const repairShotCount = requestedSkillDirectorShotCount(shotCount) || largestSkillDirectorCutNumber(outputText) || "Auto";
   const repairPrompt = [
     `Repair this ${skillDirectorDurationLabel(durationSeconds)} Film Director shot plan.`,
@@ -10374,6 +10553,11 @@ async function repairSkillDirectorShotPlan({ outputText, shotCount, durationSeco
     filmDirectorShotDetailDirective(repairShotCount, durationSeconds),
     "Fix these validation failures:",
     issues.map((issue) => `- ${issue}`).join("\n"),
+    Array.isArray(activeReferenceTags)
+      ? activeReferenceTags.length
+        ? `Only these reference tags remain active: ${activeReferenceTags.join(", ")}. Remove every other @tag and its asset-specific direction from the repaired plan.`
+        : "No connected reference assets remain active. Remove every @tag and its asset-specific direction from the repaired plan."
+      : "",
     "Preserve the story, connected @tags, major actions, spatial geography, screen direction, prop states, lighting, wardrobe, and emotional progression.",
     "Give neighboring shots distinct editorial purposes. Do not use markdown or add keys outside the schema.",
     "Original planning context:",
@@ -10381,21 +10565,30 @@ async function repairSkillDirectorShotPlan({ outputText, shotCount, durationSeco
     "Draft to repair:",
     outputText
   ].filter(Boolean).join("\n\n");
-  const data = await subscribeFal(skillDirectorLlmEndpoint, {
-    input: {
-      model,
-      prompt: repairPrompt,
-      system_prompt: skillDirectorSystemPrompt()
-    },
-    logs: true
+  const result = await runTextLlm({
+    prompt: repairPrompt,
+    systemPrompt: skillDirectorSystemPrompt(),
+    falModel: model || skillDirectorFalModel,
+    openAiModel: skillDirectorOpenAiModel,
+    responseMimeType: "application/json",
+    reasoningEffort: "high",
+    route: "film-director-shot-repair"
   });
   return {
-    text: stripSkillDirectorFences(extractFalText(data)) || outputText,
-    usage: falResultUsage(data)
+    text: stripSkillDirectorFences(result.text) || outputText,
+    usage: result.usage
   };
 }
 
-async function validateAndRepairSkillDirectorShotPlan({ outputText, shotCount, durationSeconds, prompt, model, characterTags = [] }) {
+async function validateAndRepairSkillDirectorShotPlan({
+  outputText,
+  shotCount,
+  durationSeconds,
+  prompt,
+  model,
+  characterTags = [],
+  activeReferenceTags = null
+}) {
   let nextText = outputText;
   const usages = [];
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -10408,7 +10601,8 @@ async function validateAndRepairSkillDirectorShotPlan({ outputText, shotCount, d
       durationSeconds,
       prompt,
       model,
-      issues
+      issues,
+      activeReferenceTags
     });
     nextText = repaired.text || nextText;
     if (repaired.usage) usages.push(repaired.usage);
@@ -10456,8 +10650,8 @@ function buildSkillDirectorPrompt({
   if (action === "style") {
     return [
       "Generate the Film Director Style Direction.",
-      'Return strict JSON only: {"styleDirection":"one production-ready paragraph"}',
-      "Describe cinematic look, tone, pacing, lighting mood, color behavior, texture, atmosphere, image quality, color grade, and performance texture.",
+      'Return strict JSON only: {"styleDirection":"one concise literal visual brief"}',
+      filmDirectorStyleDirectionDirective(),
       "If a visual style reference is connected, use it only to infer abstract visual qualities.",
       "Do not mention or name the style reference. Do not describe, name, or reuse any objects, elements, locations, subjects, people, props, compositions, or story content found inside that reference.",
       styleDirection ? `Existing editable Style Direction. Preserve useful user edits and revise only where the current scene context requires:\n${styleDirection}` : "",
@@ -10510,7 +10704,7 @@ function buildSkillDirectorPrompt({
     "MOTION_DIRECTION:",
     "SHOT_LIST:",
     "",
-    "STYLE_DIRECTION should describe the cinematic look, tone, pacing, lighting mood, color behavior, and performance texture. If a visual style reference is connected, use it only to describe the style direction, not as literal scene content.",
+    `STYLE_DIRECTION: ${filmDirectorStyleDirectionDirective()} If a visual style reference is connected, use it only to infer abstract visual qualities, not literal scene content.`,
     "MOTION_DIRECTION is the Camera Direction block and should translate the user's camera brief into clear coverage, framing, lens feel, blocking, and movement instructions.",
     "SHOT_LIST must include Continuity ledger, Must-have shots or actions, and then the exact requested number of CUT sections.",
     "Keep Continuity ledger and Must-have shots to one compact line each.",
@@ -10541,7 +10735,7 @@ function buildSkillDirectorPrompt({
     .join("\n\n");
 }
 
-async function runSkillDirectorWithFal({
+async function runFilmDirector({
   action = "build",
   sceneName,
   sceneOverview,
@@ -10557,12 +10751,10 @@ async function runSkillDirectorWithFal({
   elementInputs = [],
   styleInputs = [],
   shotCount = "3",
-  durationSeconds = "15"
+  durationSeconds = "15",
+  resolution = "720p",
+  aspectRatio = "16:9"
 }) {
-  if (!process.env.FAL_KEY) {
-    throw new Error("Missing FAL_KEY in .env.");
-  }
-
   const model = skillDirectorFalModel;
   const anonymizedStyleInputs = styleInputs.map((item, index) => ({
     ...item,
@@ -10597,6 +10789,8 @@ async function runSkillDirectorWithFal({
       helperUsages: [],
       shotCount,
       durationSeconds,
+      resolution,
+      aspectRatio,
       actualShotCount: largestSkillDirectorCutNumber(shotList || finalPrompt),
       resolvedShotCount: largestSkillDirectorCutNumber(shotList || finalPrompt) || requestedSkillDirectorShotCount(shotCount) || 0,
       referenceSetup: skillDirectorReferenceSetupFromLines(referenceLines),
@@ -10613,6 +10807,8 @@ async function runSkillDirectorWithFal({
       revisionNotes,
       durationLabel: skillDirectorDurationLabel(durationSeconds),
       durationSeconds,
+      resolution,
+      aspectRatio,
       currentCutCount,
       sceneName,
       referenceSetup: skillDirectorReferenceSetupFromLines(referenceLines),
@@ -10631,16 +10827,17 @@ async function runSkillDirectorWithFal({
       throw new Error("Add revision notes before updating the Film Director output.");
     }
 
-    const data = await subscribeFal(skillDirectorLlmEndpoint, {
-      input: {
-        model,
-        prompt: revisionPrompt,
-        system_prompt: skillDirectorSystemPrompt()
-      },
-      logs: true
+    const llmResult = await runTextLlm({
+      prompt: revisionPrompt,
+      systemPrompt: skillDirectorSystemPrompt(),
+      falModel: model,
+      openAiModel: skillDirectorOpenAiModel,
+      responseMimeType: "application/json",
+      reasoningEffort: "high",
+      route: "film-director-revision"
     });
-    const outputText = stripSkillDirectorFences(extractFalText(data));
-    if (!outputText) throw new Error("fal returned no Film Director revision.");
+    const outputText = stripSkillDirectorFences(llmResult.text);
+    if (!outputText) throw new Error("Film Director returned no revision.");
 
     const structuredOutput = skillDirectorStructuredObject(outputText);
     const revisedSceneName = skillDirectorStructuredValue(
@@ -10650,31 +10847,65 @@ async function runSkillDirectorWithFal({
     const requestedRevisedDuration = String(
       skillDirectorStructuredNumber(structuredOutput, ["durationSeconds", "duration_seconds", "duration"])
     );
-    const revisedDurationSeconds = ["5", "10", "15", "20", "30"].includes(requestedRevisedDuration)
-      ? requestedRevisedDuration
-      : durationSeconds;
-    const validatedOutput = await validateAndRepairSkillDirectorShotPlan({
-      outputText,
-      shotCount: "Auto",
-      durationSeconds: revisedDurationSeconds,
-      prompt: revisionPrompt,
-      model,
-      characterTags: characterInputs.map((item) => item.tag).filter(Boolean)
-    });
-    const revisedPlan = validatedOutput.plan || skillDirectorShotPlanFromOutput(outputText);
-    const revisedStyleDirection = cleanSkillDirectorMoodBoardReferences(
-      skillDirectorStructuredValue(structuredOutput, ["styleDirection", "style_direction", "style"]) || styleDirection
+    const revisedDurationSeconds = normalizeFilmDirectorDuration(requestedRevisedDuration, durationSeconds);
+    const revisedResolution = normalizeFilmDirectorResolution(
+      skillDirectorStructuredValue(structuredOutput, ["resolution", "videoResolution", "video_resolution"]),
+      resolution
     );
+    const revisedAspectRatio = normalizeFilmDirectorAspectRatio(
+      skillDirectorStructuredValue(structuredOutput, ["aspectRatio", "aspect_ratio", "ratio"]),
+      aspectRatio
+    );
+    const revisedStyleDirection = compactFilmDirectorStyleDirection(cleanSkillDirectorMoodBoardReferences(
+      skillDirectorStructuredValue(structuredOutput, ["styleDirection", "style_direction", "style"]) || styleDirection
+    ));
     const revisedMotionDirection = cleanSkillDirectorMoodBoardReferences(
       skillDirectorStructuredValue(structuredOutput, ["cameraDirection", "camera_direction", "motionDirection", "motion_direction"]) || motionDirection
     );
     const revisedSceneOverview = cleanSkillDirectorMoodBoardReferences(
       skillDirectorStructuredValue(structuredOutput, ["sceneOverview", "scene_overview", "overview"]) || sceneOverview
     );
+    const availableReferenceInputs = [...characterInputs, ...locationInputs, ...elementInputs];
+    const revisedReferenceTags = filmDirectorRevisionActiveReferenceTags(
+      structuredOutput || {},
+      availableReferenceInputs.map((item) => item.tag).filter(Boolean),
+      [
+        revisedStyleDirection,
+        revisedMotionDirection,
+        revisedSceneOverview,
+        JSON.stringify(structuredOutput?.cuts || []),
+        skillDirectorStructuredValue(structuredOutput, ["continuityLedger", "continuity_ledger", "continuity"]),
+        skillDirectorStructuredValue(structuredOutput, ["mustHaveActions", "must_have_actions", "mustHaveShots", "must_have_shots"])
+      ].filter(Boolean).join("\n")
+    );
+    const revisedReferenceTagKeys = new Set(
+      revisedReferenceTags.map((tag) => String(tag).replace(/^@+/, "").toLowerCase())
+    );
+    const referenceRemainsActive = (item) => revisedReferenceTagKeys.has(
+      String(item?.tag || "").replace(/^@+/, "").toLowerCase()
+    );
+    const revisedCharacterInputs = characterInputs.filter(referenceRemainsActive);
+    const revisedLocationInputs = locationInputs.filter(referenceRemainsActive);
+    const revisedElementInputs = elementInputs.filter(referenceRemainsActive);
+    const revisedReferenceLines = skillDirectorSceneReferenceLines({
+      characterInputs: revisedCharacterInputs,
+      locationInputs: revisedLocationInputs,
+      elementInputs: revisedElementInputs
+    });
+    const validatedOutput = await validateAndRepairSkillDirectorShotPlan({
+      outputText,
+      shotCount: "Auto",
+      durationSeconds: revisedDurationSeconds,
+      prompt: revisionPrompt,
+      model,
+      characterTags: revisedCharacterInputs.map((item) => item.tag).filter(Boolean),
+      activeReferenceTags: revisedReferenceTags
+    });
+    const revisedPlan = validatedOutput.plan || skillDirectorShotPlanFromOutput(outputText);
     const revisedShotList = revisedPlan.shotList || shotList;
     const revisedShotListNotes = revisedPlan.shotListNotes || shotListNotes;
     const finalPrompt = composeSkillDirectorFinalPrompt({
-      referenceLines,
+      referenceLines: revisedReferenceLines,
       styleDirection: revisedStyleDirection,
       motionDirection: revisedMotionDirection,
       shotList: revisedShotList,
@@ -10685,18 +10916,21 @@ async function runSkillDirectorWithFal({
     return {
       action,
       text: finalPrompt,
-      model,
-      provider: "fal",
-      endpoint: skillDirectorLlmEndpoint,
+      model: llmResult.model,
+      provider: llmResult.provider,
+      endpoint: llmResult.endpoint,
       submittedPrompt: revisionPrompt,
-      usage: falResultUsage(data),
+      usage: llmResult.usage,
       helperUsages: validatedOutput.usages || [],
       shotCount: actualShotCount ? String(actualShotCount) : shotCount,
       durationSeconds: revisedDurationSeconds,
+      resolution: revisedResolution,
+      aspectRatio: revisedAspectRatio,
       actualShotCount,
       resolvedShotCount: actualShotCount,
       sceneName: revisedSceneName,
-      referenceSetup: skillDirectorReferenceSetupFromLines(referenceLines),
+      referenceSetup: skillDirectorReferenceSetupFromLines(revisedReferenceLines),
+      referenceTags: revisedReferenceTags,
       styleDirection: revisedStyleDirection,
       motionDirection: revisedMotionDirection,
       sceneOverview: revisedSceneOverview,
@@ -10722,17 +10956,20 @@ async function runSkillDirectorWithFal({
     styleInputs: anonymizedStyleInputs,
     shotCount,
     durationSeconds,
+    resolution,
+    aspectRatio,
     imageDescriptions: imageContext.descriptions
   });
-  const data = await subscribeFal(skillDirectorLlmEndpoint, {
-    input: {
-      model,
-      prompt,
-      system_prompt: skillDirectorSystemPrompt()
-    },
-    logs: true
+  const llmResult = await runTextLlm({
+    prompt,
+    systemPrompt: skillDirectorSystemPrompt(),
+    falModel: model,
+    openAiModel: skillDirectorOpenAiModel,
+    responseMimeType: action === "style" || action === "motion" || action === "shotList" ? "application/json" : "text/plain",
+    reasoningEffort: "high",
+    route: `film-director-${String(action || "build").toLowerCase()}`
   });
-  const initialOutputText = stripSkillDirectorFences(extractFalText(data));
+  const initialOutputText = stripSkillDirectorFences(llmResult.text);
   let outputText = initialOutputText;
   const helperUsages = [];
   let validatedShotPlan = null;
@@ -10751,15 +10988,15 @@ async function runSkillDirectorWithFal({
   }
 
   if (!outputText) {
-    throw new Error("fal returned no Film Director text.");
+    throw new Error("Film Director returned no text.");
   }
 
   const structuredOutput = skillDirectorStructuredObject(outputText);
-  const generatedStyleDirection = cleanSkillDirectorMoodBoardReferences(
+  const generatedStyleDirection = compactFilmDirectorStyleDirection(cleanSkillDirectorMoodBoardReferences(
     action === "style"
       ? skillDirectorStructuredValue(structuredOutput, ["styleDirection", "style_direction", "style"]) || extractSkillDirectorBlock(outputText, "STYLE_DIRECTION") || outputText || styleDirection || ""
       : styleDirection || ""
-  );
+  ));
   const generatedMotionDirection = cleanSkillDirectorMoodBoardReferences(
     action === "motion"
       ? skillDirectorStructuredValue(structuredOutput, ["cameraDirection", "camera_direction", "motionDirection", "motion_direction"]) || extractSkillDirectorBlock(outputText, "MOTION_DIRECTION") || outputText || motionDirection || ""
@@ -10792,14 +11029,16 @@ async function runSkillDirectorWithFal({
           : action === "shotList"
             ? generatedShotList
             : "",
-    model,
-    provider: "fal",
-    endpoint: skillDirectorLlmEndpoint,
+    model: llmResult.model,
+    provider: llmResult.provider,
+    endpoint: llmResult.endpoint,
     submittedPrompt: prompt,
-    usage: falResultUsage(data),
+    usage: llmResult.usage,
     helperUsages: [...imageContext.usages, ...helperUsages].filter(Boolean),
     shotCount,
     durationSeconds,
+    resolution,
+    aspectRatio,
     actualShotCount,
     resolvedShotCount,
     referenceSetup: skillDirectorReferenceSetupFromLines(referenceLines),
@@ -10810,52 +11049,6 @@ async function runSkillDirectorWithFal({
   };
 }
 
-async function processTextWithOpenAi({ text, textInputs, imageInputs, videoInputs }) {
-  if (!openAiTextApiKey) {
-    throw new Error("Missing OPENAI_TEXT_API_KEY in .env.");
-  }
-
-  const model = openAiTextModel;
-  const prompt = buildTextProcessingPrompt({
-    text,
-    textInputs,
-    imageDescriptions: imageInputs.map((item, index) => `Image ${index + 1} (${item.label}): ${item.url}`),
-    videoDescriptions: videoInputs.map((item, index) => `Video ${index + 1} (${item.label}): ${item.url}`)
-  });
-  const response = await fetch("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${openAiTextApiKey}`
-    },
-    body: JSON.stringify({
-      model,
-      instructions: textProcessingInstructions(),
-      input: prompt
-    })
-  });
-  const data = await response.json();
-
-  if (!response.ok) {
-    throw new Error(data?.error?.message || "Text processing failed.");
-  }
-
-  const outputText = extractOpenAiResponseText(data).trim();
-  if (!outputText) {
-    throw new Error("OpenAI returned no text.");
-  }
-
-  return {
-    text: outputText,
-    model,
-    provider: "OpenAI",
-    endpoint: model,
-    submittedPrompt: prompt,
-    usage: data.usage || null,
-    helperUsages: []
-  };
-}
-
 function textProcessingInstructions() {
   return "Process the available text, image, and video context for use in a creative node workflow. Improve clarity, specificity, and usefulness while preserving the user's intent.";
 }
@@ -10863,7 +11056,6 @@ function textProcessingInstructions() {
 async function describeImageInputs(imageInputs) {
   if (!imageInputs.length) return { descriptions: [], usages: [] };
 
-  const imageUrls = await Promise.all(imageInputs.map((item) => localAssetToFalUrl(item.url)));
   const referenceLabels = imageInputs
     .map((item, index) => {
       const typeLabel =
@@ -10880,18 +11072,27 @@ async function describeImageInputs(imageInputs) {
     })
     .join("\n");
   const typeInstructions = [...new Set(imageInputs.map((item) => skillDirectorVisionInstructionForType(item.type)).filter(Boolean))].join("\n");
-  const data = await describeImagesWithFalVision(imageUrls, falVisionTextModel, referenceLabels, typeInstructions);
-  const description = extractFalText(data).trim();
+  const result = await runMediaDescriptionLlm({
+    inputs: imageInputs,
+    mediaType: "image",
+    prompt: [
+      referenceLabels ? `Use these image labels while describing the connected references:\n${referenceLabels}` : "",
+      typeInstructions || "Describe these images as concise visual prompt context."
+    ].filter(Boolean).join("\n\n"),
+    falModel: falVisionTextModel,
+    openAiModel: openAiTextModel,
+    route: "smart-text-image-analysis"
+  });
+  const description = result.text;
   return {
     descriptions: description ? [`Connected images: ${description}`] : [],
-    usages: [falResultUsage(data)].filter(Boolean)
+    usages: result.usages
   };
 }
 
 async function describeFilmDirectorImageInputs(imageInputs) {
   if (!imageInputs.length) return { descriptions: [], usages: [] };
 
-  const imageUrls = await Promise.all(imageInputs.map((item) => localAssetToFalUrl(item.url)));
   const referenceLabels = imageInputs
     .map((item, index) => `Image ${index + 1}: ${item.tag || item.label || `@Reference${index + 1}`} | type: ${item.type || "image"}`)
     .join("\n");
@@ -10900,14 +11101,20 @@ async function describeFilmDirectorImageInputs(imageInputs) {
     'Return strict JSON only: {"assets":[{"tag":"@ExactTag","description":"concise production-useful visual description"}]}.',
     "Return one asset object for every image, in the same order. Preserve each supplied @tag exactly. Do not blend details between assets. Do not use markdown or add keys outside the schema."
   ].join("\n");
-  const data = await describeImagesWithFalVision(
-    imageUrls,
-    skillDirectorVisionFalModel,
-    referenceLabels,
-    typeInstructions,
-    ""
-  );
-  const rawText = extractFalText(data).trim();
+  const result = await runMediaDescriptionLlm({
+    inputs: imageInputs,
+    mediaType: "image",
+    prompt: [
+      `Use these image labels while describing the connected references:\n${referenceLabels}`,
+      typeInstructions
+    ].join("\n\n"),
+    falModel: skillDirectorVisionFalModel,
+    openAiModel: skillDirectorOpenAiModel,
+    responseMimeType: "application/json",
+    reasoningEffort: "high",
+    route: "film-director-visual-analysis"
+  });
+  const rawText = result.text;
   const parsed = skillDirectorStructuredObject(rawText);
   const parsedAssets = Array.isArray(parsed?.assets) ? parsed.assets : [];
   const descriptions = imageInputs.map((item, index) => {
@@ -10921,7 +11128,7 @@ async function describeFilmDirectorImageInputs(imageInputs) {
 
   return {
     descriptions: descriptions.length ? descriptions : rawText ? [`Connected visual analysis: ${rawText}`] : [],
-    usages: [falResultUsage(data)].filter(Boolean)
+    usages: result.usages
   };
 }
 
@@ -10941,51 +11148,21 @@ function skillDirectorVisionInstructionForType(type) {
   return "Describe these images as concise visual prompt context. Focus on subject, setting, composition, camera, lighting, palette, mood, materials, and any important details.";
 }
 
-async function describeImagesWithFalVision(imageUrls, model, referenceLabels = "", typeInstructions = "", fallbackModel = falVisionTextFallbackModel) {
-  const input = {
-    image_urls: imageUrls,
-    prompt: [
-      referenceLabels ? `Use these image labels while describing the connected references:\n${referenceLabels}` : "",
-      typeInstructions || "Describe these images as concise visual prompt context. Focus on subject, setting, composition, camera, lighting, palette, mood, materials, and any important details."
-    ]
-      .filter(Boolean)
-      .join("\n\n"),
-    system_prompt: "Return only useful prompt context. Do not use markdown.",
-    model
-  };
-
-  try {
-    return await subscribeFal("openrouter/router/vision", { input, logs: true });
-  } catch (error) {
-    if (!fallbackModel || fallbackModel === model) throw error;
-    console.warn(`Fal vision model ${model} failed; retrying with ${fallbackModel}.`, error?.message || error);
-    return subscribeFal("openrouter/router/vision", {
-      input: {
-        ...input,
-        model: fallbackModel
-      },
-      logs: true
-    });
-  }
-}
-
 async function describeVideoInputs(videoInputs) {
   if (!videoInputs.length) return { descriptions: [], usages: [] };
 
-  const videoUrls = await Promise.all(videoInputs.map((item) => localAssetToFalUrl(item.url)));
-  const data = await subscribeFal("openrouter/router/video", {
-    input: {
-      video_urls: videoUrls,
-      prompt: "Describe these videos as concise visual prompt context. Focus on subjects, actions, setting, camera movement, lighting, style, mood, and any useful continuity details.",
-      system_prompt: "Return only useful prompt context. Do not use markdown.",
-      model: falVideoTextModel
-    },
-    logs: true
+  const result = await runMediaDescriptionLlm({
+    inputs: videoInputs,
+    mediaType: "video",
+    prompt: "Describe these videos as concise visual prompt context. Focus on subjects, actions, setting, camera movement, lighting, style, mood, and any useful continuity details.",
+    falModel: falVideoTextModel,
+    openAiModel: openAiTextModel,
+    route: "smart-text-video-analysis"
   });
-  const description = extractFalText(data).trim();
+  const description = result.text;
   return {
     descriptions: description ? [`Connected videos: ${description}`] : [],
-    usages: [falResultUsage(data)].filter(Boolean)
+    usages: result.usages
   };
 }
 
@@ -11390,6 +11567,14 @@ function resolveUtilityVideoModel(model) {
 
 function resolveVideoModel(model) {
   const normalized = String(model || "").toLowerCase();
+  if (isSeedance25Model(normalized)) {
+    return {
+      provider: "fal-seedance",
+      displayName: seedance25ModelName,
+      id: "bytedance/seedance-2.5/",
+      speed: "seedance-2.5"
+    };
+  }
   if (normalized.includes("gemini") && normalized.includes("omni")) {
     return {
       provider: "google-gemini-omni",
@@ -11643,8 +11828,7 @@ function normalizeStoryboardFrameCount(value) {
   return Math.min(35, Math.max(1, Number.isFinite(parsed) ? parsed : 6));
 }
 
-async function generateStoryboardPlanWithGemini({ sceneDescription, frameCount, characters = [], locations = [], props = [], notes = "", directorShotList = "" }) {
-  const model = process.env.STORYBOARD_TEXT_MODEL || "gemini-2.5-flash";
+async function generateStoryboardPlanWithOpenAi({ sceneDescription, frameCount, characters = [], locations = [], props = [], notes = "", directorShotList = "" }) {
   const directorExpansionInstruction = storyboardDirectorExpansionInstruction(directorShotList, 35);
   const characterSummary = characters
     .map((character, index) => `Character ${index + 1}: ${character.name || character.tag || "Unnamed"}${character.tag ? ` (@${character.tag})` : ""}`)
@@ -11728,50 +11912,17 @@ ${directorExpansionInstruction
     ? `Create at least the per-CUT keyframes listed above, targeting ${frameCount} storyboard frames. You may add a frame only when the visual logic clearly requires another distinct state, but do not reduce a listed multi-frame CUT to one frame. Preserve every CUT, keep multi-frame CUTS contiguous, and never exceed 35 frames.`
     : `Create ${frameCount} frames unless the scene absolutely requires fewer or more, with a hard limit of 35 frames.`}`;
 
-  const text = await generateGeminiText({
-    model,
+  const result = await runTextLlm({
     prompt,
-    responseMimeType: "application/json"
+    systemPrompt: "You are NewtNode's senior storyboard director. Return only valid JSON and prioritize editorial logic, continuity, blocking, and production-useful frame prompts.",
+    falModel: storyboardFalModel,
+    openAiModel: storyboardOpenAiModel,
+    responseMimeType: "application/json",
+    reasoningEffort: "high",
+    route: "storyboard-plan"
   });
 
-  return parseStoryboardPlanJson(text);
-}
-
-async function generateGeminiText({ model, prompt, responseMimeType = "text/plain" }) {
-  return generateGeminiTextFromParts({
-    model,
-    parts: [{ text: prompt }],
-    responseMimeType
-  });
-}
-
-async function generateGeminiTextFromParts({ model, parts, responseMimeType = "text/plain", temperature = 0.45 }) {
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-goog-api-key": process.env.GOOGLE_API_KEY
-    },
-    body: JSON.stringify({
-      contents: [
-        {
-          parts
-        }
-      ],
-      generationConfig: {
-        temperature,
-        responseMimeType
-      }
-    })
-  });
-
-  const data = await response.json();
-  if (!response.ok) {
-    throw httpError(response.status, data?.error?.message || "Gemini text generation failed.", { raw: data });
-  }
-
-  const parsed = extractGeminiImageData(data);
-  return parsed.text || "";
+  return parseStoryboardPlanJson(result.text);
 }
 
 function parseStoryboardPlanJson(text) {
@@ -11868,27 +12019,6 @@ function normalizeStoryboardQcResult(result = {}) {
   };
 }
 
-async function storyboardQcInlineImagePart(publicPath, label, { required = false } = {}) {
-  if (!publicPath) return [];
-  try {
-    const asset = await readLocalAsset(publicPath);
-    if (!String(asset.mimeType || "").startsWith("image/")) return [];
-    return [
-      { text: `${label}:` },
-      {
-        inlineData: {
-          mimeType: asset.mimeType || "image/png",
-          data: asset.buffer.toString("base64")
-        }
-      }
-    ];
-  } catch (error) {
-    if (required) throw error;
-    console.warn(`Storyboard QC skipped optional image ${label}:`, error.message);
-    return [];
-  }
-}
-
 function storyboardQcReviewPrompt({
   sceneDescription = "",
   framePrompt = "",
@@ -11946,21 +12076,7 @@ Return this exact JSON shape:
 If failing, set severity to "major", pass to false, shouldRetry to true, and write correctionPrompt as direct image-generation instructions under 80 words.`;
 }
 
-async function storyboardQcFalImageUrl(publicPath, label, { required = false } = {}) {
-  if (!publicPath) return null;
-  try {
-    return {
-      label,
-      url: await localAssetToFalUrl(publicPath)
-    };
-  } catch (error) {
-    if (required) throw error;
-    console.warn(`Storyboard QC skipped optional image ${label}:`, error.message);
-    return null;
-  }
-}
-
-async function reviewStoryboardFrameWithFal({
+async function reviewStoryboardFrameWithOpenAi({
   sourceUrl,
   previousFrameUrl = "",
   spatialAnchorUrl = "",
@@ -11971,13 +12087,12 @@ async function reviewStoryboardFrameWithFal({
   angle = "",
   notes = ""
 } = {}) {
-  const imageEntries = (await Promise.all([
-    storyboardQcFalImageUrl(sourceUrl, "Generated frame to review", { required: true }),
-    storyboardQcFalImageUrl(previousFrameUrl, "Previous approved frame for continuity"),
-    storyboardQcFalImageUrl(spatialAnchorUrl, "Spatial anchor frame for room geography")
-  ])).filter(Boolean);
-  if (!imageEntries.length) return storyboardQcPass("No readable image was available for QC.");
-
+  const inputs = [
+    sourceUrl ? { url: sourceUrl, label: "Generated frame to review" } : null,
+    previousFrameUrl ? { url: previousFrameUrl, label: "Previous approved frame for continuity" } : null,
+    spatialAnchorUrl ? { url: spatialAnchorUrl, label: "Spatial anchor frame for room geography" } : null
+  ].filter(Boolean);
+  if (!inputs.length) return storyboardQcPass("No readable image was available for QC.");
   const prompt = storyboardQcReviewPrompt({
     sceneDescription,
     framePrompt,
@@ -11985,64 +12100,20 @@ async function reviewStoryboardFrameWithFal({
     shot,
     angle,
     notes,
-    imageLabels: imageEntries.map((entry) => entry.label)
+    imageLabels: inputs.map((item) => item.label)
   });
-
-  const data = await subscribeFal("openrouter/router/vision", {
-    input: {
-      image_urls: imageEntries.map((entry) => entry.url),
-      prompt,
-      system_prompt: "Return only valid JSON for storyboard quality control. Do not use markdown.",
-      model: storyboardVisionTextModel
-    },
-    logs: true
-  });
-
-  return normalizeStoryboardQcResult(parseStoryboardPlanJson(extractFalText(data)));
-}
-
-async function reviewStoryboardFrameWithGemini({
-  sourceUrl,
-  previousFrameUrl = "",
-  spatialAnchorUrl = "",
-  sceneDescription = "",
-  framePrompt = "",
-  frameNumber = 1,
-  shot = "",
-  angle = "",
-  notes = ""
-} = {}) {
-  const parts = [{
-    text: storyboardQcReviewPrompt({
-      sceneDescription,
-      framePrompt,
-      frameNumber,
-      shot,
-      angle,
-      notes,
-      imageLabels: [
-        "Generated frame to review",
-        previousFrameUrl ? "Previous approved frame for continuity" : "",
-        spatialAnchorUrl ? "Spatial anchor frame for room geography" : ""
-      ].filter(Boolean)
-    })
-  }];
-
-  const imageParts = [
-    ...(await storyboardQcInlineImagePart(sourceUrl, "Generated frame to review", { required: true })),
-    ...(await storyboardQcInlineImagePart(previousFrameUrl, "Previous approved frame for continuity")),
-    ...(await storyboardQcInlineImagePart(spatialAnchorUrl, "Spatial anchor frame for room geography"))
-  ];
-  if (!imageParts.length) return storyboardQcPass("No readable image was available for QC.");
-
-  const text = await generateGeminiTextFromParts({
-    model: process.env.STORYBOARD_VISION_TEXT_MODEL || process.env.STORYBOARD_TEXT_MODEL || "gemini-2.5-flash",
-    parts: [...parts, ...imageParts],
+  const result = await runMediaDescriptionLlm({
+    inputs,
+    mediaType: "image",
+    prompt,
+    systemPrompt: "Return only valid JSON for storyboard quality control. Do not use markdown.",
+    falModel: storyboardVisionFalModel,
+    openAiModel: storyboardVisionOpenAiModel,
     responseMimeType: "application/json",
-    temperature: 0.18
+    reasoningEffort: "high",
+    route: "storyboard-qc"
   });
-
-  return normalizeStoryboardQcResult(parseStoryboardPlanJson(text));
+  return normalizeStoryboardQcResult(parseStoryboardPlanJson(result.text));
 }
 
 function fallbackStoryboardPlan(sceneDescription = "", frameCount = 6) {
@@ -12079,7 +12150,7 @@ function storyboardExportFrameExtension(fileName = "") {
 
 async function storyboardExportDescriptions({ sceneName = "Storyboard", sceneDescription = "", frames = [] } = {}) {
   const fallback = frames.map(storyboardFrameDescriptionFallback);
-  if (!process.env.GOOGLE_API_KEY) return fallback;
+  if (!activeLlmProvider()) return fallback;
 
   try {
     const frameText = frames.map((frame, index) => [
@@ -12090,9 +12161,12 @@ async function storyboardExportDescriptions({ sceneName = "Storyboard", sceneDes
       frame.notes ? `Continuity note: ${frame.notes}` : "",
       [frame.shot, frame.lens, frame.angle].filter(Boolean).join(", ")
     ].filter(Boolean).join("\n")).join("\n\n");
-    const text = await generateGeminiText({
-      model: process.env.STORYBOARD_TEXT_MODEL || "gemini-2.5-flash",
+    const result = await runTextLlm({
+      falModel: storyboardFalModel,
+      openAiModel: storyboardOpenAiModel,
       responseMimeType: "application/json",
+      reasoningEffort: "high",
+      route: "storyboard-export-captions",
       prompt: `Create concise production-board descriptions as strict JSON only. Do not include markdown fences.
 
 Scene: ${sceneName}
@@ -12110,7 +12184,7 @@ Return this exact JSON shape:
 
 Descriptions must be in the same order as the frames. Keep each caption short, complete, readable, and useful below a storyboard panel. Each caption must be a finished sentence or finished noun phrase. Never end with an article, preposition, conjunction, adjective, or unfinished phrase.`
     });
-    const parsed = parseStoryboardPlanJson(text);
+    const parsed = parseStoryboardPlanJson(result.text);
     const descriptions = Array.isArray(parsed.descriptions) ? parsed.descriptions : [];
     return frames.map((frame, index) => {
       const rawGenerated = String(descriptions[index] || "").trim();
@@ -12126,15 +12200,14 @@ Descriptions must be in the same order as the frames. Keep each caption short, c
 
 async function storyboardExportVisualDescriptions({ sceneName = "Storyboard", sceneDescription = "", frames = [] } = {}) {
   const fallback = frames.map(storyboardFrameDescriptionFallback);
-  if (!process.env.GOOGLE_API_KEY) return fallback;
+  if (!activeLlmProvider()) return fallback;
 
   const descriptions = [...fallback];
   const batchSize = 4;
 
   for (let batchStart = 0; batchStart < frames.length; batchStart += batchSize) {
     const batch = frames.slice(batchStart, batchStart + batchSize);
-    const parts = [{
-      text: `Write concise storyboard PDF captions from the attached frame images as strict JSON only. Do not include markdown fences.
+    const prompt = `Write concise storyboard PDF captions from the attached frame images as strict JSON only. Do not include markdown fences.
 
 Scene: ${sceneName}
 Scene brief: ${sceneDescription || "None"}
@@ -12151,21 +12224,18 @@ Rules:
 - Describe the visible action, subject, or story beat in each image.
 - Keep each caption short, complete, readable, and useful below a storyboard panel.
 - Do not mention file names, model names, image IDs, generated images, placeholders, or frame numbers.
-- Never end with an article, preposition, conjunction, adjective, or unfinished phrase.`
-    }];
+- Never end with an article, preposition, conjunction, adjective, or unfinished phrase.`;
     const readableFrames = [];
 
     for (const [offset, frame] of batch.entries()) {
       try {
         const asset = await readLocalAsset(frame.sourceUrl);
         if (!String(asset.mimeType || "").startsWith("image/")) continue;
-        readableFrames.push({ frame, index: batchStart + offset });
-        parts.push({ text: `Frame ${batchStart + offset + 1}:` });
-        parts.push({
-          inlineData: {
-            mimeType: asset.mimeType || "image/png",
-            data: asset.buffer.toString("base64")
-          }
+        readableFrames.push({
+          frame,
+          index: batchStart + offset,
+          url: frame.sourceUrl,
+          label: `Frame ${batchStart + offset + 1}`
         });
       } catch (error) {
         console.warn(`Storyboard visual caption skipped frame ${batchStart + offset + 1}:`, error.message);
@@ -12175,13 +12245,18 @@ Rules:
     if (!readableFrames.length) continue;
 
     try {
-      const text = await generateGeminiTextFromParts({
-        model: process.env.STORYBOARD_VISION_TEXT_MODEL || process.env.STORYBOARD_TEXT_MODEL || "gemini-2.5-flash",
-        parts,
+      const result = await runMediaDescriptionLlm({
+        inputs: readableFrames,
+        mediaType: "image",
+        prompt,
+        systemPrompt: "Return only valid JSON with concise production-board captions in the supplied frame order.",
+        falModel: storyboardVisionFalModel,
+        openAiModel: storyboardVisionOpenAiModel,
         responseMimeType: "application/json",
-        temperature: 0.28
+        reasoningEffort: "high",
+        route: "storyboard-export-visual-captions"
       });
-      const parsed = parseStoryboardPlanJson(text);
+      const parsed = parseStoryboardPlanJson(result.text);
       const generatedDescriptions = Array.isArray(parsed.descriptions) ? parsed.descriptions : [];
       readableFrames.forEach(({ index }, localIndex) => {
         const rawGenerated = String(generatedDescriptions[localIndex] || "").trim();
@@ -13128,7 +13203,7 @@ async function generateFalReve21({ prompt, imagePromptUrls, imagePromptLabels, a
 }
 
 function httpError(status, message, extra = {}) {
-  return Object.assign(new Error(message), {
+  return Object.assign(new Error(publicErrorDetail(message) || "Request failed."), {
     status,
     ...extra
   });
@@ -13170,6 +13245,10 @@ async function generateKreaOpenAiImage2FromInputs({
   resolution,
   quality: requestedQuality
 }) {
+  const kreaApiKey = String(process.env.KREA_API_KEY || "").trim();
+  if (!kreaApiKey) {
+    throw httpError(400, "Krea is disabled or its API key is missing in Settings.");
+  }
   const modelName = imageModelNames.openAiImage2;
   const endpoint = kreaEndpointForModel("image", modelName);
   const quality = normalizeOpenAiImage2Quality(requestedQuality);
@@ -13180,7 +13259,7 @@ async function generateKreaOpenAiImage2FromInputs({
       fileName: image.fileName || `reference-${index + 1}${extension}`,
       buffer: image.buffer,
       mimeType: image.mimeType
-    });
+    }, kreaApiKey);
   }));
   const normalizedResolution = normalizeKreaImageResolution(modelName, resolution);
   const input = buildKreaImageInput({
@@ -13191,7 +13270,7 @@ async function generateKreaOpenAiImage2FromInputs({
     resolution: normalizedResolution,
     quality
   });
-  const result = await runKreaGeneration({ endpoint, input, label: modelName });
+  const result = await runKreaGeneration({ endpoint, input, label: modelName, apiKey: kreaApiKey });
   const remoteUrl = extractKreaJobResultUrl(result.job);
   if (!remoteUrl) {
     throw httpError(502, "Krea completed OpenAI Image 2 but returned no image URL.", { body: result.job });
@@ -13531,21 +13610,22 @@ async function uploadLocalOutputToFal(publicPath) {
   return fal.storage.upload(falFile);
 }
 
-async function uploadLocalOutputToKrea(publicPath) {
+async function uploadLocalOutputToKrea(publicPath, apiKey = process.env.KREA_API_KEY) {
   const { fileName, buffer, mimeType } = await readLocalAsset(publicPath);
-  return uploadAssetBufferToKrea({ fileName, buffer, mimeType });
+  return uploadAssetBufferToKrea({ fileName, buffer, mimeType }, apiKey);
 }
 
-async function uploadToKrea(file) {
+async function uploadToKrea(file, apiKey = process.env.KREA_API_KEY) {
   return uploadAssetBufferToKrea({
     fileName: file.originalname,
     buffer: await readFile(file.path),
     mimeType: file.mimetype || "application/octet-stream"
-  });
+  }, apiKey);
 }
 
-async function uploadAssetBufferToKrea({ fileName, buffer, mimeType }) {
-  if (!process.env.KREA_API_KEY) {
+async function uploadAssetBufferToKrea({ fileName, buffer, mimeType }, apiKey = process.env.KREA_API_KEY) {
+  const requestApiKey = String(apiKey || "").trim();
+  if (!requestApiKey) {
     throw httpError(400, "Krea is disabled or its API key is missing in Settings.");
   }
 
@@ -13554,7 +13634,7 @@ async function uploadAssetBufferToKrea({ fileName, buffer, mimeType }) {
   form.append("description", "NewtNode generation reference");
   const response = await fetch(`${kreaApiBaseUrl}/assets`, {
     method: "POST",
-    headers: kreaAuthorizationHeaders(),
+    headers: kreaAuthorizationHeaders(requestApiKey),
     body: form
   });
   const data = await responseJson(response);
@@ -13568,8 +13648,8 @@ async function uploadAssetBufferToKrea({ fileName, buffer, mimeType }) {
   return data.image_url;
 }
 
-async function runKreaSeedanceGeneration({ endpoint, input }) {
-  const result = await runKreaGeneration({ endpoint, input, label: "Seedance" });
+async function runKreaSeedanceGeneration({ endpoint, input, apiKey }) {
+  const result = await runKreaGeneration({ endpoint, input, label: "Seedance", apiKey });
   const videoUrl = extractKreaJobResultUrl(result.job);
   if (!videoUrl) {
     throw httpError(502, "Krea completed the Seedance job but returned no video URL.", { body: result.job });
@@ -13585,14 +13665,15 @@ async function runKreaSeedanceGeneration({ endpoint, input }) {
   };
 }
 
-async function runKreaGeneration({ endpoint, input, label = "generation" }) {
-  if (!process.env.KREA_API_KEY) {
+async function runKreaGeneration({ endpoint, input, label = "generation", apiKey = process.env.KREA_API_KEY }) {
+  const requestApiKey = String(apiKey || "").trim();
+  if (!requestApiKey) {
     throw httpError(400, "Krea is disabled or its API key is missing in Settings.");
   }
   const response = await fetch(`${kreaApiBaseUrl}${endpoint}`, {
     method: "POST",
     headers: {
-      ...kreaAuthorizationHeaders(),
+      ...kreaAuthorizationHeaders(requestApiKey),
       "Content-Type": "application/json"
     },
     body: JSON.stringify(input)
@@ -13609,21 +13690,42 @@ async function runKreaGeneration({ endpoint, input, label = "generation" }) {
 
   return {
     requestId: jobId,
-    job: await waitForKreaJob(jobId, label)
+    job: await waitForKreaJob(jobId, label, requestApiKey)
   };
 }
 
-async function waitForKreaJob(jobId, label = "generation") {
+async function waitForKreaJob(jobId, label = "generation", apiKey = process.env.KREA_API_KEY) {
+  const requestApiKey = String(apiKey || "").trim();
   const maxAttempts = 600;
+  let transientFailures = 0;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     if (attempt > 0) await delay(2000);
-    const response = await fetch(`${kreaApiBaseUrl}/jobs/${encodeURIComponent(jobId)}`, {
-      headers: kreaAuthorizationHeaders()
-    });
+    let response;
+    try {
+      response = await fetch(`${kreaApiBaseUrl}/jobs/${encodeURIComponent(jobId)}`, {
+        headers: kreaAuthorizationHeaders(requestApiKey)
+      });
+    } catch (error) {
+      transientFailures += 1;
+      if (transientFailures <= 5) continue;
+      throw httpError(502, `Krea temporarily lost the connection while checking the ${label} job. The job may still be processing in Krea. Please check Krea history before retrying.`, {
+        cause: error
+      });
+    }
     const job = await responseJson(response);
     if (!response.ok) {
+      transientFailures += 1;
+      if (shouldRetryKreaJobLookup({ status: response.status, attempt, transientAttempt: transientFailures - 1 })) continue;
+      if (response.status === 404) {
+        throw httpError(
+          502,
+          `Krea could not retrieve the ${label} job with the API key that submitted it. The key may have been revoked or the job may have expired. Please retry the generation.`,
+          { body: job }
+        );
+      }
       throw httpError(response.status, kreaErrorMessage(job, `Krea could not read the ${label} job status.`), { body: job });
     }
+    transientFailures = 0;
 
     if (job?.status === "completed") return job;
     if (job?.status === "failed" || job?.status === "cancelled") {
@@ -13634,8 +13736,8 @@ async function waitForKreaJob(jobId, label = "generation") {
   throw httpError(504, `Krea ${label} generation timed out after 20 minutes.`);
 }
 
-function kreaAuthorizationHeaders() {
-  return { Authorization: `Bearer ${process.env.KREA_API_KEY}` };
+function kreaAuthorizationHeaders(apiKey = process.env.KREA_API_KEY) {
+  return { Authorization: `Bearer ${String(apiKey || "").trim()}` };
 }
 
 async function responseJson(response) {
@@ -13644,12 +13746,11 @@ async function responseJson(response) {
   try {
     return JSON.parse(text);
   } catch {
-    return { error: text.slice(0, 1000) };
+    return {
+      _httpStatus: Number(response.status) || 0,
+      error: text.slice(0, 4000)
+    };
   }
-}
-
-function kreaErrorMessage(data, fallback) {
-  return String(data?.error?.message || data?.error || data?.message || data?.detail || fallback).trim();
 }
 
 async function uploadKlingReferenceImageToFal(publicPath) {

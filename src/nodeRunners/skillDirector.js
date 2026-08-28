@@ -1,5 +1,5 @@
 import { nodeApi } from "../api/newtApi.js";
-import { filmDirectorUsesReferenceTag } from "../filmDirectorScenes.js";
+import { filmDirectorUsesReference } from "../filmDirectorScenes.js";
 import { workflowContextPayload } from "../workflowContext.js";
 
 export async function runSkillDirectorNode({
@@ -13,6 +13,9 @@ export async function runSkillDirectorNode({
   const characterInputs = connectedCharacterInputItems(incoming.characterIn, sourceLabel, node.data.skillReferenceNotes || {});
   const locationInputs = connectedMediaInputItems(incoming.locationIn, "location", sourceLabel, node.data.skillReferenceNotes || {});
   const elementInputs = connectedMediaInputItems(incoming.imageIn, "element", sourceLabel, node.data.skillReferenceNotes || {});
+  const activeCharacterInputs = activeSceneReferenceItems(characterInputs, node.data, action, "character");
+  const activeLocationInputs = activeSceneReferenceItems(locationInputs, node.data, action, "location");
+  const activeElementInputs = activeSceneReferenceItems(elementInputs, node.data, action, "element");
   const { response, data } = await nodeApi.runSkillDirector({
     action,
     sceneName: node.data.sceneName,
@@ -24,13 +27,15 @@ export async function runSkillDirectorNode({
     shotListNotes: node.data.shotListNotes,
     revisionNotes: node.data.skillDirectorRevisionNotes,
     currentFinalPrompt: node.data.resultText,
-    characterInputs: activeSceneReferenceItems(characterInputs, node.data, action),
-    locationInputs: activeSceneReferenceItems(locationInputs, node.data, action),
-    elementInputs: activeSceneReferenceItems(elementInputs, node.data, action),
+    characterInputs: activeCharacterInputs,
+    locationInputs: activeLocationInputs,
+    elementInputs: activeElementInputs,
     styleInputs: connectedMediaInputItems(incoming.styleIn, "style", sourceLabel, node.data.skillReferenceNotes || {}),
     videoInputs: [],
     shotCount: node.data.skillShotCount || node.data.skillSceneCount || node.data.shotCount || "3",
     durationSeconds: node.data.skillDurationSeconds || node.data.durationSeconds || "15",
+    resolution: node.data.skillResolution || "720p",
+    aspectRatio: node.data.skillAspectRatio || "16:9",
     ...workflowContextPayload(workflowContext),
     nodeId: node.id,
     nodeTitle: node.data.title
@@ -46,6 +51,8 @@ export async function runSkillDirectorNode({
     shotCount: data.shotCount || "",
     resolvedShotCount: data.resolvedShotCount || data.actualShotCount || 0,
     durationSeconds: data.durationSeconds || node.data.skillDurationSeconds || node.data.durationSeconds || "15",
+    resolution: data.resolution || node.data.skillResolution || "720p",
+    aspectRatio: data.aspectRatio || node.data.skillAspectRatio || "16:9",
     actualShotCount: data.actualShotCount || 0,
     sceneName: Object.prototype.hasOwnProperty.call(data, "sceneName") ? data.sceneName : node.data.sceneName || "",
     referenceSetup: data.referenceSetup || "",
@@ -54,20 +61,31 @@ export async function runSkillDirectorNode({
     shotList: data.shotList || "",
     shotListNotes: data.shotListNotes || "",
     sceneOverview: data.sceneOverview || node.data.sceneOverview || "",
-    revisionSummary: data.revisionSummary || ""
+    revisionSummary: data.revisionSummary || "",
+    referenceTags: action === "style"
+      ? undefined
+      : Array.isArray(data.referenceTags)
+        ? data.referenceTags
+        : [...activeCharacterInputs, ...activeLocationInputs, ...activeElementInputs].map((item) => item.tag).filter(Boolean)
   };
 }
 
-function activeSceneReferenceItems(items = [], data = {}, action = "build") {
+function activeSceneReferenceItems(items = [], data = {}, action = "build", type = "image") {
   if (action === "style") return [];
-  return items.filter((item) => filmDirectorUsesReferenceTag(data, item.tag));
+  return items.filter((item) => filmDirectorUsesReference(data, {
+    tag: item.tag,
+    label: item.label,
+    type,
+    categoryCount: items.length,
+    useSavedTags: ["build", "revise"].includes(action)
+  }));
 }
 
 function connectedCharacterInputItems(items = [], sourceLabel, referenceNotes = {}) {
   return items
     .map(({ source }) => {
       if (!source.data.locked || !source.data.activated || !source.data.resultUrl) return null;
-      const label = sourceLabel(source);
+      const label = source.data.characterName || source.data.title || sourceLabel(source);
       const referenceKey = `${source.id}:${source.data.resultUrl || source.data.fileName || ""}`;
       return {
         url: source.data.resultUrl,

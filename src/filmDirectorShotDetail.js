@@ -15,10 +15,10 @@ function clamp(value, minimum, maximum) {
 function scaledWordRange(shotCount, durationSeconds) {
   const durationScale = clamp(Math.sqrt(normalizeDurationSeconds(durationSeconds) / 15), 0.78, 1.35);
   const baseRange = shotCount === 1
-    ? [48, 72]
+    ? [52, 76]
     : shotCount === 2
-      ? [32, 50]
-      : [26, 40];
+      ? [36, 54]
+      : [30, 44];
   return baseRange.map((value) => Math.round(value * durationScale));
 }
 
@@ -36,7 +36,7 @@ export function filmDirectorShotDetailProfile(shotCount = "Auto", durationSecond
         "For 1 CUT, write one sustained master take that carries the full scene: include the opening composition and geography, ordered blocking and performance beats, motivated camera or framing evolution, important prop or environment interaction, and the ending composition or final hold.",
         "For 2 CUTS, give each shot a complete beginning, development, and clean handoff to the other shot.",
         "For 3 CUTS, give each shot a clear internal action progression and editorial handoff.",
-        "For 4 or more CUTS, keep each description to one concise playable sentence, ideally under 30 words."
+        "For 4 or more CUTS, write one compact playable sentence of about 32-42 words that identifies the active subject, readable action, useful spatial or environment context, motivated camera behavior, and the ending state or handoff."
       ].join(" ")
     };
   }
@@ -73,10 +73,14 @@ export function filmDirectorShotDetailProfile(shotCount = "Auto", durationSecond
 
   return {
     mode: "coverage",
-    exampleDescription: "one concise playable shot under 30 words",
-    minimumWords: 0,
-    maxCharsPerCut: 420,
-    directive: "Keep each CUT description to one concise playable sentence, ideally under 30 words."
+    exampleDescription: "one compact playable shot with subject action, spatial context, camera behavior, and a clear ending handoff",
+    minimumWords: 24,
+    maxCharsPerCut: 520,
+    directive: [
+      "Write each CUT as one compact playable sentence of about 32-42 words.",
+      "Include the active subject and readable action, one useful spatial or environment cue, motivated camera behavior, and the ending state or editorial handoff.",
+      "Preserve connected asset tags and concrete continuity details, but do not repeat general style language or pad the shot with redundant adjectives."
+    ].join(" ")
   };
 }
 

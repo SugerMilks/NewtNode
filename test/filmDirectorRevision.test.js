@@ -4,6 +4,7 @@ import {
   appendFilmDirectorRevisionHistory,
   appendFilmDirectorRevisionVersionHistory,
   buildFilmDirectorRevisionPrompt,
+  filmDirectorRevisionActiveReferenceTags,
   filmDirectorRevisionStatePatch,
   updateFilmDirectorRevisionVersionSnapshot
 } from "../src/filmDirectorRevision.js";
@@ -13,6 +14,8 @@ test("Film Director revision prompts preserve the package while prioritizing use
     revisionNotes: "Remove the dialogue from CUT 2 and make CUT 3 a wide shot.",
     durationLabel: "15-second",
     durationSeconds: "15",
+    resolution: "1080p",
+    aspectRatio: "21:9",
     currentCutCount: 3,
     sceneName: "Coffee Shop",
     referenceSetup: "@Kim = Character reference.",
@@ -23,13 +26,48 @@ test("Film Director revision prompts preserve the package while prioritizing use
 
   assert.match(prompt, /USER REVISION NOTES:\nRemove the dialogue from CUT 2/);
   assert.match(prompt, /Preserve the current 3 CUT sections unless the user explicitly asks/);
-  assert.match(prompt, /Keep all connected @tags exactly as written/);
+  assert.match(prompt, /Keep every still-active connected @tag exactly as written/);
+  assert.match(prompt, /activeReferenceTags/);
   assert.match(prompt, /Current final output:\nExisting final output/);
   assert.match(prompt, /each shot must carry more of the scene/i);
   assert.match(prompt, /removing or adding a shot must update recommendedShotCount/i);
   assert.match(prompt, /tighter framing or camera movement must update both cameraDirection/i);
   assert.match(prompt, /"sceneName":"complete revised scene name"/);
   assert.match(prompt, /"durationSeconds":"15"/);
+  assert.match(prompt, /"resolution":"720p"/);
+  assert.match(prompt, /"aspectRatio":"16:9"/);
+  assert.match(prompt, /Current resolution:\n1080p/);
+  assert.match(prompt, /Current aspect ratio:\n21:9/);
+});
+
+test("Film Director revisions remove inactive reference tags from the authoritative manifest", () => {
+  const tags = filmDirectorRevisionActiveReferenceTags(
+    { activeReferenceTags: ["@Kim", "@Kitchen"] },
+    ["@Kim", "@Steve", "@Kitchen", "@CoffeeCup"],
+    "@Steve and @CoffeeCup appear only in stale prose."
+  );
+
+  assert.deepEqual(tags, ["@Kim", "@Kitchen"]);
+});
+
+test("Film Director revisions infer active tags when an older response omits the manifest", () => {
+  const tags = filmDirectorRevisionActiveReferenceTags(
+    {},
+    ["@Kim", "@Steve", "@Kitchen"],
+    "@Kim crosses @Kitchen."
+  );
+
+  assert.deepEqual(tags, ["@Kim", "@Kitchen"]);
+});
+
+test("Film Director revisions can explicitly remove every connected reference", () => {
+  const tags = filmDirectorRevisionActiveReferenceTags(
+    { activeReferenceTags: [] },
+    ["@Kim", "@Kitchen"],
+    "Old text still contains @Kim and @Kitchen."
+  );
+
+  assert.deepEqual(tags, []);
 });
 
 test("single-shot Film Director revisions preserve a fully directed sustained take", () => {
@@ -60,6 +98,8 @@ test("Film Director revision state updates every dependent node section atomical
     {
       sceneName: "Old Scene",
       skillDurationSeconds: "15",
+      skillResolution: "1080p",
+      skillAspectRatio: "16:9",
       skillShotCount: "6",
       styleDirection: "Old style",
       motionDirection: "Old camera",
@@ -71,6 +111,8 @@ test("Film Director revision state updates every dependent node section atomical
     {
       sceneName: "New Scene",
       durationSeconds: "10",
+      resolution: "4K",
+      aspectRatio: "9:16",
       resolvedShotCount: 4,
       styleDirection: "New style",
       motionDirection: "New camera",
@@ -83,6 +125,8 @@ test("Film Director revision state updates every dependent node section atomical
 
   assert.equal(patch.sceneName, "New Scene");
   assert.equal(patch.skillDurationSeconds, "10");
+  assert.equal(patch.skillResolution, "4K");
+  assert.equal(patch.skillAspectRatio, "9:16");
   assert.equal(patch.skillShotCount, "4");
   assert.equal(patch.shotCount, "4");
   assert.equal(patch.styleDirection, "New style");
@@ -95,6 +139,16 @@ test("Film Director revision state updates every dependent node section atomical
   assert.equal(patch.resultText, "New final prompt");
   assert.deepEqual(patch.skillDirectorLocks, { setup: true, style: true, motion: true, scene: true, shotList: true });
   assert.equal(patch.skillDirectorBuilt, true);
+});
+
+test("Film Director revisions preserve newly supported intermediate durations", () => {
+  const patch = filmDirectorRevisionStatePatch(
+    { skillDurationSeconds: "15" },
+    { durationSeconds: "7" }
+  );
+
+  assert.equal(patch.skillDurationSeconds, "7");
+  assert.equal(patch.durationSeconds, "7");
 });
 
 test("Film Director version history preserves the original and complete revision snapshots", () => {

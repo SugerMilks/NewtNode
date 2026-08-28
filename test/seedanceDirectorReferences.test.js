@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   mergeSeedanceDirectorReferences,
+  seedance25ImageReferenceLimit,
   seedanceImageReferenceLimit
 } from "../src/seedanceDirectorReferences.js";
 
@@ -47,4 +48,15 @@ test("Seedance direct references remain unchanged without a Film Director packag
     urls: ["/outputs/image-a.png", "/outputs/image-b.png"],
     labels: ["ImageA", "ImageB"]
   });
+});
+
+test("Seedance 2.5 can retain up to thirty image references", () => {
+  const directorReferences = Array.from({ length: 35 }, (_value, index) => ({
+    tag: `@Asset${index + 1}`,
+    url: `/outputs/asset-${index + 1}.png`
+  }));
+  const result = mergeSeedanceDirectorReferences({ directorReferences, limit: seedance25ImageReferenceLimit });
+
+  assert.equal(result.urls.length, 30);
+  assert.equal(result.labels.at(-1), "@Asset30");
 });
