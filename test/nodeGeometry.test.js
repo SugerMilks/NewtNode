@@ -4,10 +4,12 @@ import {
   clamp,
   clampContextMenuPosition,
   graphBoundsForNodes,
+  localPortPointFromRects,
   normalizePlainTextNodeSize,
   positiveModulo,
   resizePlainTextNode,
-  rectsOverlap
+  rectsOverlap,
+  scenePortPoint
 } from "../src/nodeGeometry.js";
 
 test("graphBoundsForNodes uses estimated node dimensions", () => {
@@ -43,4 +45,16 @@ test("graphBoundsForNodes includes persisted plain Text node dimensions", () => 
     graphBoundsForNodes([{ type: "plainText", x: 25, y: 35, data: { textNodeWidth: 640, textNodeHeight: 420 } }]),
     { left: 25, top: 35, right: 665, bottom: 455 }
   );
+});
+
+test("port geometry remains attached to a node independently of the viewport", () => {
+  const localPoint = localPortPointFromRects(
+    { left: 718, top: 434, width: 16, height: 16 },
+    { left: 480, top: 320, width: 248, height: 240 },
+    0.8
+  );
+
+  assert.deepEqual(localPoint, { x: 307.5, y: 152.5 });
+  assert.deepEqual(scenePortPoint({ x: 900, y: -120 }, localPoint), { x: 1207.5, y: 32.5 });
+  assert.deepEqual(scenePortPoint({ x: 1040, y: 35 }, localPoint), { x: 1347.5, y: 187.5 });
 });

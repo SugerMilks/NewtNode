@@ -3,14 +3,30 @@ import test from "node:test";
 import {
   addFilmDirectorScene,
   filterFilmDirectorReferencesForOutput,
+  filmDirectorCanAddAssetWhileSetupLocked,
   filmDirectorOutputUsesReferenceTag,
   filmDirectorReferencedTags,
   filmDirectorSceneTabs,
   filmDirectorUsesReference,
   filmDirectorUsesReferenceTag,
+  isFilmDirectorSceneTransitionPatch,
   removeFilmDirectorScene,
   switchFilmDirectorScene
 } from "../src/filmDirectorScenes.js";
+
+test("Film Director keeps reusable asset inputs available while setup is locked", () => {
+  assert.equal(filmDirectorCanAddAssetWhileSetupLocked("characterIn"), true);
+  assert.equal(filmDirectorCanAddAssetWhileSetupLocked("locationIn"), true);
+  assert.equal(filmDirectorCanAddAssetWhileSetupLocked("imageIn"), true);
+  assert.equal(filmDirectorCanAddAssetWhileSetupLocked("styleIn"), false);
+});
+
+test("Film Director scene transitions preserve existing output connections", () => {
+  const nextScene = addFilmDirectorScene({ sceneName: "Scene 1", skillDirectorBuilt: true, resultText: "CUT 1" });
+
+  assert.equal(isFilmDirectorSceneTransitionPatch(nextScene), true);
+  assert.equal(isFilmDirectorSceneTransitionPatch({ skillDirectorBuilt: false, resultText: "" }), false);
+});
 
 test("Film Director scene tabs preserve independent scene packages", () => {
   const firstScene = {
@@ -19,8 +35,10 @@ test("Film Director scene tabs preserve independent scene packages", () => {
     text: "@Kim enters @Kitchen.",
     shotList: "CUT 1 — @Kim enters.",
     resultText: "Opening final prompt",
+    skillVideoModel: "Kling O3 Pro",
     skillResolution: "1080p",
     skillAspectRatio: "9:16",
+    skillDirectorAudioMode: "full",
     lastRunReferenceTags: ["@Kim", "@Kitchen"],
     skillDirectorBuilt: true
   };
@@ -43,8 +61,10 @@ test("Film Director scene tabs preserve independent scene packages", () => {
   const restoredFirstScene = switchFilmDirectorScene(editedSecondScene, "scene-1");
   assert.equal(restoredFirstScene.sceneName, "Opening");
   assert.equal(restoredFirstScene.resultText, "Opening final prompt");
+  assert.equal(restoredFirstScene.skillVideoModel, "Kling O3 Pro");
   assert.equal(restoredFirstScene.skillResolution, "1080p");
   assert.equal(restoredFirstScene.skillAspectRatio, "9:16");
+  assert.equal(restoredFirstScene.skillDirectorAudioMode, "full");
   assert.deepEqual(restoredFirstScene.lastRunReferenceTags, ["@Kim", "@Kitchen"]);
 
   const restoredSecondScene = switchFilmDirectorScene(

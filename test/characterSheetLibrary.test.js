@@ -77,3 +77,26 @@ test("legacy override does not appear twice when it was stored as a generated va
   assert.equal(choices[0].source, "custom");
   assert.equal(choices[0].item.localUrl, legacyUrl);
 });
+
+test("the neutral generated foundation is labeled as Base Identity", () => {
+  const choices = characterSheetChoices({
+    characterSheetVariants: [{
+      wardrobeId: "__default-wardrobe__",
+      wardrobeFileName: "Default black wardrobe",
+      generated: { url: "/outputs/base.png" }
+    }]
+  });
+  assert.equal(choices[0].label, "Base Identity");
+  assert.equal(choices[0].isBase, true);
+});
+
+test("a locally restored Base Identity remains selectable", () => {
+  const choices = characterSheetChoices({
+    characterSheetVariants: [{
+      wardrobeId: "__default-wardrobe__",
+      generated: { localUrl: "/outputs/restored-base.png" }
+    }]
+  });
+  assert.equal(choices.length, 1);
+  assert.equal(choices[0].item.url, "/outputs/restored-base.png");
+});

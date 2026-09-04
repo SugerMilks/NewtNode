@@ -2,7 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  buildKreaMiniMaxH3Input,
   buildKreaImageInput,
+  estimateKreaMiniMaxH3Cost,
   estimateKreaKlingCost,
   extractKreaJobResultUrl,
   extractKreaJobResultUrls,
@@ -57,8 +59,6 @@ test("Krea internal job failures retain actionable provider details", () => {
 
 test("current shared NewtNode models resolve to Krea endpoints", () => {
   [
-    "Z-Image",
-    "Seedream 5.0 Pro",
     "Nano Banana 2",
     "Nano Banana Pro",
     "OpenAI Image 2",
@@ -67,10 +67,38 @@ test("current shared NewtNode models resolve to Krea endpoints", () => {
 
   assert.equal(kreaEndpointForModel("video", "Seedance 2.0"), "/generate/video/bytedance/seedance-2");
   assert.equal(kreaEndpointForModel("video", "Seedance 2.5"), "/generate/video/bytedance/seedance-2-5");
+  assert.equal(kreaEndpointForModel("video", "MiniMax H3"), "/generate/video/minimax/hailuo-3");
   assert.equal(kreaEndpointForModel("video", "Kling O3 Pro"), "/generate/video/kling/kling-3.0");
-  assert.equal(kreaEndpointForModel("video", "Gemini Omni Flash"), "/generate/video/google/gemini-omni-flash");
   assert.equal(kreaEndpointForModel("model3d", "Hunyuan 3D 3.1 Pro"), "/generate/3d/tencent/hunyuan3d-3.1-pro");
   assert.equal(supportsKreaModel("image", "REVE 2.1"), false);
+});
+
+test("MiniMax H3 Krea input matches the current unified endpoint schema", () => {
+  assert.deepEqual(buildKreaMiniMaxH3Input({
+    prompt: "Image 1 crosses toward Video 1",
+    startImage: "https://example.com/start.png",
+    endImage: "https://example.com/end.png",
+    referenceImages: Array.from({ length: 12 }, (_value, index) => `https://example.com/image-${index}.png`),
+    referenceVideos: Array.from({ length: 5 }, (_value, index) => `https://example.com/video-${index}.mp4`),
+    referenceAudios: Array.from({ length: 4 }, (_value, index) => `https://example.com/audio-${index}.wav`),
+    aspectRatio: "Adaptive",
+    duration: "15 seconds"
+  }), {
+    prompt: "Image 1 crosses toward Video 1",
+    start_image: "https://example.com/start.png",
+    end_image: "https://example.com/end.png",
+    aspect_ratio: "adaptive",
+    reference_images: Array.from({ length: 9 }, (_value, index) => `https://example.com/image-${index}.png`),
+    reference_videos: Array.from({ length: 3 }, (_value, index) => `https://example.com/video-${index}.mp4`),
+    reference_audios: Array.from({ length: 3 }, (_value, index) => `https://example.com/audio-${index}.wav`),
+    duration: 15
+  });
+});
+
+test("MiniMax H3 Krea cost follows the current output and reference rates", () => {
+  const cost = estimateKreaMiniMaxH3Cost({ durationSeconds: 10, referenceImageCount: 7 });
+  assert.equal(cost.amountUsd, 1.449);
+  assert.equal(cost.referenceImageCostUsd, 0.084);
 });
 
 test("OpenAI Image 2 Krea input preserves high quality, references, and output controls", () => {
@@ -90,17 +118,7 @@ test("OpenAI Image 2 Krea input preserves high quality, references, and output c
   });
 });
 
-test("Seedream and Krea 2 adapt references to their provider-specific fields", () => {
-  const seedream = buildKreaImageInput({
-    modelName: "Seedream 5.0 Pro",
-    prompt: "Editorial portrait",
-    referenceUrls: ["https://example.com/style.png"],
-    aspectRatio: "9:16",
-    resolution: "2K"
-  });
-  assert.deepEqual(seedream.style_images, [{ url: "https://example.com/style.png", strength: 1 }]);
-  assert.ok(seedream.height > seedream.width);
-
+test("Krea 2 adapts references to its provider-specific fields", () => {
   const krea = buildKreaImageInput({
     modelName: "Krea 2 Large",
     prompt: "Campaign frame",

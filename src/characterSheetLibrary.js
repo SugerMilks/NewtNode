@@ -111,7 +111,7 @@ export function characterSheetChoices(data = {}) {
     customSheets.flatMap((sheet) => [sheet.localUrl, sheet.url].filter(Boolean))
   );
   const generated = (Array.isArray(data.characterSheetVariants) ? data.characterSheetVariants : [])
-    .filter((variant) => variant?.generated?.url)
+    .filter((variant) => variant?.generated?.url || variant?.generated?.localUrl)
     .filter((variant) => {
       const generatedUrl = variant.generated.localUrl || variant.generated.url;
       return !customUrls.has(generatedUrl);
@@ -119,9 +119,15 @@ export function characterSheetChoices(data = {}) {
     .map((variant) => ({
       id: generatedCharacterSheetId(variant.wardrobeId),
       source: "generated",
-      label: variant.wardrobeFileName || "Generated character sheet",
+      isBase: variant.wardrobeId === characterDefaultWardrobeId || Boolean(variant.isBase),
+      label: variant.wardrobeId === characterDefaultWardrobeId || variant.isBase
+        ? "Base Identity"
+        : variant.wardrobeFileName || "Generated character sheet",
       variant,
-      item: variant.generated
+      item: {
+        ...variant.generated,
+        url: variant.generated.url || variant.generated.localUrl
+      }
     }));
   const custom = customSheets
     .map((sheet) => {

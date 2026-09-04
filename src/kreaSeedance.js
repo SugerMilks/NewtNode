@@ -13,6 +13,11 @@ const kreaSeedanceRates = Object.freeze({
     "720p": Object.freeze({ withVideoReference: 0.1911, withoutVideoReference: 0.3186 }),
     "1080p": Object.freeze({ withVideoReference: 0.4301, withoutVideoReference: 0.7168 }),
     "4k": Object.freeze({ withVideoReference: 1.7203, withoutVideoReference: 2.8671 })
+  }),
+  seedance25: Object.freeze({
+    "480p": Object.freeze({ withVideoReference: 0.0645, withoutVideoReference: 0.1078 }),
+    "720p": Object.freeze({ withVideoReference: 0.1452, withoutVideoReference: 0.2427 }),
+    "1080p": Object.freeze({ withVideoReference: 0.2572, withoutVideoReference: 0.4299 })
   })
 });
 
@@ -25,22 +30,10 @@ export function kreaSeedanceEndpoint(modelName = "Seedance 2.0") {
 }
 
 export function estimateKreaSeedanceCost({ modelName = "Seedance 2.0", durationSeconds, resolution, hasVideoReference }) {
-  if (modelName === "Seedance 2.5") {
-    return {
-      amountUsd: null,
-      currency: "USD",
-      unitRateUsd: null,
-      units: Math.max(1, Number(durationSeconds) || 5),
-      unit: "second",
-      mediaType: "video",
-      resolution,
-      durationSeconds: Math.max(1, Number(durationSeconds) || 5),
-      pricingBasis: "Krea Seedance 2.5 cost is reported by Krea after generation",
-      pricingSource: "krea-runtime"
-    };
-  }
-  const normalizedResolution = kreaSeedanceRates.standard[resolution] ? resolution : "720p";
-  const rate = kreaSeedanceRates.standard[normalizedResolution][
+  const pricingTier = modelName === "Seedance 2.5" ? "seedance25" : "standard";
+  const rates = kreaSeedanceRates[pricingTier];
+  const normalizedResolution = rates[resolution] ? resolution : "720p";
+  const rate = rates[normalizedResolution][
     hasVideoReference ? "withVideoReference" : "withoutVideoReference"
   ];
   const seconds = Math.max(1, Number(durationSeconds) || 5);
@@ -54,8 +47,10 @@ export function estimateKreaSeedanceCost({ modelName = "Seedance 2.0", durationS
     mediaType: "video",
     resolution: normalizedResolution,
     durationSeconds: seconds,
-    pricingBasis: `Krea Seedance 2 standard per-second estimate (${hasVideoReference ? "with" : "without"} video reference)`,
-    pricingSource: "krea-api-pricing-2026-07-12"
+    pricingBasis: `Krea ${modelName === "Seedance 2.5" ? "Seedance 2.5" : "Seedance 2 standard"} per-second estimate (${hasVideoReference ? "with" : "without"} video reference)`,
+    pricingSource: modelName === "Seedance 2.5"
+      ? "krea-api-pricing-2026-08-29"
+      : "krea-api-pricing-2026-07-12"
   };
 }
 

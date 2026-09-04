@@ -1,5 +1,19 @@
 export const filmDirectorSceneLimit = 24;
 
+const persistentAssetInputPorts = new Set(["characterIn", "locationIn", "imageIn"]);
+
+export function filmDirectorCanAddAssetWhileSetupLocked(portId = "") {
+  return persistentAssetInputPorts.has(String(portId || ""));
+}
+
+export function isFilmDirectorSceneTransitionPatch(patch = {}) {
+  return Boolean(
+    patch
+    && typeof patch === "object"
+    && Object.prototype.hasOwnProperty.call(patch, "skillDirectorActiveSceneId")
+  );
+}
+
 const sceneStateKeys = [
   "sceneName",
   "sceneOverview",
@@ -8,17 +22,30 @@ const sceneStateKeys = [
   "shotCount",
   "skillDurationSeconds",
   "durationSeconds",
+  "skillVideoModel",
   "skillResolution",
   "skillAspectRatio",
+  "skillDirectorAudioMode",
   "styleDirection",
   "motionBrief",
   "motionDirection",
   "shotList",
   "shotListNotes",
+  "skillDirectorShotListSourceSignature",
+  "skillDirectorLockedStyleInputSignature",
+  "skillDirectorLockedAssetInputSignature",
+  "skillDirectorLockedInputManifest",
+  "skillDirectorLockedInputManifestInitialized",
   "resultText",
+  "skillDirectorOutputStale",
   "skillDirectorLocks",
+  "skillDirectorStaleStages",
   "skillDirectorCollapsed",
   "skillDirectorBuilt",
+  "skillDirectorRebuildAfterShotList",
+  "skillDirectorRebuildAfterStyle",
+  "skillDirectorRefreshAfterStyle",
+  "skillDirectorRefreshShotListAfterMotion",
   "skillPreviewOpen",
   "skillDirectorRevisionOpen",
   "skillDirectorRevisionNotes",
@@ -64,17 +91,30 @@ function sceneDefaults(sceneName = "") {
     shotCount: "3",
     skillDurationSeconds: "15",
     durationSeconds: "15",
+    skillVideoModel: "",
     skillResolution: "720p",
     skillAspectRatio: "16:9",
+    skillDirectorAudioMode: "production",
     styleDirection: "",
     motionBrief: "",
     motionDirection: "",
     shotList: "",
     shotListNotes: "",
+    skillDirectorShotListSourceSignature: "",
+    skillDirectorLockedStyleInputSignature: "",
+    skillDirectorLockedAssetInputSignature: "",
+    skillDirectorLockedInputManifest: [],
+    skillDirectorLockedInputManifestInitialized: false,
     resultText: "",
+    skillDirectorOutputStale: false,
     skillDirectorLocks: { ...defaultLocks },
+    skillDirectorStaleStages: {},
     skillDirectorCollapsed: { ...defaultCollapsed },
     skillDirectorBuilt: false,
+    skillDirectorRebuildAfterShotList: false,
+    skillDirectorRebuildAfterStyle: false,
+    skillDirectorRefreshAfterStyle: "",
+    skillDirectorRefreshShotListAfterMotion: false,
     skillPreviewOpen: false,
     skillDirectorRevisionOpen: false,
     skillDirectorRevisionNotes: "",
@@ -99,6 +139,7 @@ export function filmDirectorSceneSnapshot(data = {}, fallbackName = "") {
   });
   snapshot.sceneName = String(snapshot.sceneName || fallbackName || "");
   snapshot.skillDirectorLocks = { ...defaultLocks, ...(snapshot.skillDirectorLocks || {}) };
+  snapshot.skillDirectorStaleStages = { ...(snapshot.skillDirectorStaleStages || {}) };
   snapshot.skillDirectorCollapsed = { ...defaultCollapsed, ...(snapshot.skillDirectorCollapsed || {}) };
   snapshot.skillDirectorRevisionHistory = Array.isArray(snapshot.skillDirectorRevisionHistory)
     ? snapshot.skillDirectorRevisionHistory

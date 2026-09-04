@@ -5,19 +5,28 @@ import {
   seedance25ModelName,
   seedance25ResolutionOptions
 } from "./seedance25.js";
+import {
+  minimaxH3AspectRatioOptions,
+  minimaxH3DurationOptions,
+  minimaxH3ModelName,
+  minimaxH3ResolutionOptions
+} from "./minimaxH3.js";
 export {
   seedance25AspectRatioOptions,
   seedance25DurationOptions,
   seedance25ResolutionOptions
 } from "./seedance25.js";
+export {
+  minimaxH3AspectRatioOptions,
+  minimaxH3DurationOptions,
+  minimaxH3ResolutionOptions
+} from "./minimaxH3.js";
 
 export const characterTraitOptions = ["serious", "pleasant", "happy", "angry", "sad", "silly", "confident", "content", "excited", "passionate", "fanatic", "anxious", "scared", "arrogant", "stubborn", "curious"];
 export const batchOptions = ["1", "2", "3", "4"];
 export const imageBatchOptions = Array.from({ length: 9 }, (_value, index) => String(index + 1));
 export const imageModelAutoAspectRatio = "Auto";
 export const imageModelNames = {
-  zImage: "Z-Image",
-  seedream5Pro: "Seedream 5.0 Pro",
   nanoBanana2: "Nano Banana 2",
   nanoBananaPro: "Nano Banana Pro",
   openAiImage2: "OpenAI Image 2",
@@ -25,8 +34,6 @@ export const imageModelNames = {
   krea2Large: "Krea 2 Large"
 };
 export const imageModelOptions = [
-  imageModelNames.zImage,
-  imageModelNames.seedream5Pro,
   imageModelNames.nanoBanana2,
   imageModelNames.nanoBananaPro,
   imageModelNames.openAiImage2,
@@ -38,7 +45,6 @@ export const openAiImageAspectRatios = nanoImageAspectRatios;
 export const krea2AspectRatios = ["16:9", "1:1", "4:3", "3:2", "2.35:1", "4:5", "2:3", "9:16"];
 export const krea2CreativityOptions = ["raw", "low", "medium", "high"];
 export const imageResolutionOptions = ["2K", "1K", "4K"];
-export const seedream5ResolutionOptions = ["2K", "1K"];
 export const seedanceVideoDurationOptions = Array.from({ length: 12 }, (_value, index) => `${index + 4} seconds`);
 export const seedanceVideoResolutionOptions = ["720p", "480p", "1080p", "4k"];
 export const seedanceVideoAspectRatioOptions = ["16:9 (Landscape)", "21:9", "9:16 (Portrait)", "1:1"];
@@ -48,10 +54,6 @@ export const klingO3ProAspectRatioOptions = ["16:9", "9:16", "1:1"];
 export const klingO34kDurationOptions = klingO3ProDurationOptions;
 export const klingO34kResolutionOptions = ["4K"];
 export const klingO34kAspectRatioOptions = klingO3ProAspectRatioOptions;
-export const geminiOmniDurationOptions = Array.from({ length: 8 }, (_value, index) => `${index + 3} seconds`);
-export const geminiOmniResolutionOptions = ["720p"];
-export const geminiOmniAspectRatioOptions = ["16:9", "9:16"];
-export const happyHorseDurationOptions = Array.from({ length: 13 }, (_value, index) => `${index + 3} seconds`);
 export const voidVideoFrameOptions = [69, 77, 85, 93, 101, 109, 117, 125, 133, 141, 149, 157, 165, 173, 181, 189, 197];
 
 export const stylePresetPrompts = {
@@ -152,11 +154,8 @@ export const videoModelNames = {
   seedance25: seedance25ModelName,
   klingO3Pro: "Kling O3 Pro",
   klingO34k: "Kling O3 4K",
-  geminiOmni: "Gemini Omni Flash",
-  happyHorse: "Happy Horse",
+  minimaxH3: minimaxH3ModelName,
   wanFunControl: "Wan Fun Control",
-  wan27Reference: "Wan 2.7 Reference-to-Video",
-  aurora: "Creatify Aurora",
   sam3Video: "SAM 3 Video"
 };
 export const videoModelOptions = [
@@ -164,14 +163,11 @@ export const videoModelOptions = [
   videoModelNames.seedance25,
   videoModelNames.klingO3Pro,
   videoModelNames.klingO34k,
-  videoModelNames.geminiOmni,
-  videoModelNames.wan27Reference,
-  videoModelNames.happyHorse,
-  videoModelNames.aurora
+  videoModelNames.minimaxH3
 ];
-export const videoWorkspaceModelOptions = videoModelOptions.filter((model) => model !== videoModelNames.aurora);
+export const videoWorkspaceModelOptions = [...videoModelOptions];
 export const defaultModelPreferences = {
-  image: Object.fromEntries(imageModelOptions.map((model) => [model, model === imageModelNames.zImage])),
+  image: Object.fromEntries(imageModelOptions.map((model) => [model, model === imageModelNames.openAiImage2])),
   video: Object.fromEntries(videoModelOptions.map((model) => [model, true]))
 };
 export function normalizeModelPreferences(value = {}) {
@@ -180,7 +176,7 @@ export function normalizeModelPreferences(value = {}) {
   const image = Object.fromEntries(imageModelOptions.map((model) => [model, Boolean(incomingImage[model] ?? defaultModelPreferences.image[model])]));
   const video = Object.fromEntries(videoModelOptions.map((model) => [model, Boolean(incomingVideo[model] ?? defaultModelPreferences.video[model])]));
 
-  if (!Object.values(image).some(Boolean)) image[imageModelNames.zImage] = true;
+  if (!Object.values(image).some(Boolean)) image[imageModelNames.openAiImage2] = true;
   if (!Object.values(video).some(Boolean)) video[videoModelNames.seedance] = true;
 
   return { image, video };
@@ -195,14 +191,11 @@ export function enabledVideoModelOptions(preferences, { workspaceOnly = false } 
   return options.filter((model) => normalized.video[model]);
 }
 export function firstEnabledImageModel(preferences) {
-  return enabledImageModelOptions(preferences)[0] || imageModelNames.zImage;
+  return enabledImageModelOptions(preferences)[0] || imageModelNames.openAiImage2;
 }
 export function firstEnabledVideoModel(preferences, { workspaceOnly = false } = {}) {
   return enabledVideoModelOptions(preferences, { workspaceOnly })[0] || videoModelNames.seedance;
 }
-export const wan27ReferenceDurationOptions = ["2 seconds", "3 seconds", "4 seconds", "5 seconds", "6 seconds", "7 seconds", "8 seconds", "9 seconds", "10 seconds"];
-export const wan27ReferenceResolutionOptions = ["1080p", "720p"];
-export const wan27ReferenceAspectRatioOptions = ["16:9", "9:16", "1:1", "4:3", "3:4"];
 
 export const model3DNames = {
   hunyuanPro: "Hunyuan 3D 3.1 Pro"

@@ -2,8 +2,6 @@ export const kreaApiBaseUrl = "https://api.krea.ai";
 
 export const kreaEndpoints = Object.freeze({
   image: Object.freeze({
-    "Z-Image": "/generate/image/z-image/z-image",
-    "Seedream 5.0 Pro": "/generate/image/bytedance/seedream-5-pro",
     "Nano Banana 2": "/generate/image/google/nano-banana-2",
     "Nano Banana Pro": "/generate/image/google/nano-banana-pro",
     "OpenAI Image 2": "/generate/image/openai/gpt-image-2",
@@ -12,9 +10,9 @@ export const kreaEndpoints = Object.freeze({
   video: Object.freeze({
     "Seedance 2.0": "/generate/video/bytedance/seedance-2",
     "Seedance 2.5": "/generate/video/bytedance/seedance-2-5",
+    "MiniMax H3": "/generate/video/minimax/hailuo-3",
     "Kling O3 Pro": "/generate/video/kling/kling-3.0",
-    "Kling O3 4K": "/generate/video/kling/kling-3.0",
-    "Gemini Omni Flash": "/generate/video/google/gemini-omni-flash"
+    "Kling O3 4K": "/generate/video/kling/kling-3.0"
   }),
   model3d: Object.freeze({
     "Hunyuan 3D 3.1 Pro": "/generate/3d/tencent/hunyuan3d-3.1-pro"
@@ -25,7 +23,6 @@ export const kreaEndpoints = Object.freeze({
 });
 
 const kreaImagePrices = Object.freeze({
-  "Z-Image": Object.freeze({ "1K": 0.003 }),
   "Nano Banana 2": Object.freeze({ "1K": 0.08, "2K": 0.12, "4K": 0.16 }),
   "Nano Banana Pro": Object.freeze({ "1K": 0.15, "2K": 0.15, "4K": 0.3 }),
   "Krea 2 Large": Object.freeze({ "1K": 0.06 })
@@ -139,16 +136,6 @@ export function buildKreaImageInput({
     });
   }
 
-  if (modelName === "Seedream 5.0 Pro") {
-    const dimensions = dimensionsForAspectRatio(normalizedAspectRatio, normalizedResolution === "2K" ? 2048 : 1536);
-    return compact({
-      ...input,
-      width: dimensions.width,
-      height: dimensions.height,
-      style_images: refs.slice(0, 10).map((url) => ({ url, strength: 1 }))
-    });
-  }
-
   if (modelName === "Krea 2 Large") {
     return compact({
       ...input,
@@ -156,15 +143,6 @@ export function buildKreaImageInput({
       aspect_ratio: normalizedAspectRatio,
       resolution: "1K",
       creativity: normalizeChoice(creativity, ["raw", "low", "medium", "high"], "raw")
-    });
-  }
-
-  if (modelName === "Z-Image") {
-    return compact({
-      ...input,
-      aspect_ratio: normalizedAspectRatio,
-      resolution: "1K",
-      image_url: refs[0] || undefined
     });
   }
 
@@ -178,17 +156,14 @@ export function buildKreaImageInput({
 
 export function normalizeKreaImageResolution(modelName, value) {
   const requested = String(value || "2K").toUpperCase();
-  if (modelName === "Z-Image" || modelName === "Krea 2 Large") return "1K";
-  if (modelName === "Seedream 5.0 Pro") return requested === "1K" ? "1.5K" : "2K";
+  if (modelName === "Krea 2 Large") return "1K";
   return normalizeChoice(requested, ["1K", "2K", "4K"], "2K");
 }
 
 export function normalizeKreaImageAspectRatio(modelName, value) {
   const ratio = String(value || "16:9").match(/\d+(?:\.\d+)?:\d+(?:\.\d+)?/)?.[0] || "16:9";
   const options =
-    modelName === "Z-Image"
-      ? ["1:1", "4:3", "2:3", "16:9", "9:16"]
-      : modelName === "Krea 2 Large"
+    modelName === "Krea 2 Large"
         ? ["1:1", "4:3", "3:2", "16:9", "2.35:1", "4:5", "2:3", "9:16"]
         : modelName === "OpenAI Image 2"
           ? ["16:9", "2:1", "3:2", "4:3", "1:1", "3:4", "2:3", "1:2", "9:16"]
@@ -200,10 +175,7 @@ export function estimateKreaImageCost({ modelName, resolution, referenceCount = 
   const normalizedResolution = normalizeKreaImageResolution(modelName, resolution);
   let amountUsd = kreaImagePrices[modelName]?.[normalizedResolution] ?? null;
 
-  if (modelName === "Seedream 5.0 Pro") {
-    const base = normalizedResolution === "2K" ? 0.0945 : 0.0473;
-    amountUsd = base + Math.max(0, Number(referenceCount) - 1) * 0.00315;
-  } else if (modelName === "Krea 2 Large" && referenceCount > 0) {
+  if (modelName === "Krea 2 Large" && referenceCount > 0) {
     amountUsd = 0.065;
   }
 
@@ -243,6 +215,57 @@ export function estimateKreaKlingCost({ durationSeconds, generateAudio, mode }) 
   };
 }
 
+export function buildKreaMiniMaxH3Input({
+  prompt,
+  startImage,
+  endImage,
+  referenceImages = [],
+  referenceVideos = [],
+  referenceAudios = [],
+  aspectRatio = "16:9",
+  duration = 5
+} = {}) {
+  const durationSeconds = Number(String(duration || "").match(/\d+/)?.[0]) || 5;
+  return compact({
+    prompt: String(prompt || "").trim(),
+    start_image: startImage || undefined,
+    end_image: endImage || undefined,
+    aspect_ratio: normalizeKreaMiniMaxH3AspectRatio(aspectRatio),
+    reference_images: referenceImages.filter(Boolean).slice(0, 9),
+    reference_videos: referenceVideos.filter(Boolean).slice(0, 3),
+    reference_audios: referenceAudios.filter(Boolean).slice(0, 3),
+    duration: Math.min(15, Math.max(5, Math.round(durationSeconds)))
+  });
+}
+
+export function normalizeKreaMiniMaxH3AspectRatio(value) {
+  const normalized = String(value || "16:9").trim().toLowerCase();
+  return ["adaptive", "21:9", "16:9", "4:3", "1:1", "3:4", "9:16"].includes(normalized)
+    ? normalized
+    : "16:9";
+}
+
+export function estimateKreaMiniMaxH3Cost({ durationSeconds, referenceImageCount = 0 } = {}) {
+  const requestedSeconds = Number(String(durationSeconds || "").match(/\d+/)?.[0]) || 5;
+  const seconds = Math.min(15, Math.max(5, Math.round(requestedSeconds)));
+  const additionalReferenceImages = Math.max(0, Math.min(9, Number(referenceImageCount) || 0) - 5);
+  const unitRateUsd = 0.1365;
+  const referenceImageCostUsd = additionalReferenceImages * 0.042;
+  return {
+    amountUsd: roundCurrency(seconds * unitRateUsd + referenceImageCostUsd),
+    currency: "USD",
+    unitRateUsd,
+    units: seconds,
+    unit: "second",
+    mediaType: "video",
+    durationSeconds: seconds,
+    additionalReferenceImages,
+    referenceImageCostUsd: roundCurrency(referenceImageCostUsd),
+    pricingBasis: "Krea MiniMax H3 output seconds plus reference images beyond the first five",
+    pricingSource: "krea-openapi-2026-08-30"
+  };
+}
+
 export function extractKreaJobResultUrls(job) {
   const urls = job?.result?.urls;
   if (typeof urls === "string" && urls.trim()) return [urls.trim()];
@@ -277,17 +300,6 @@ function compact(value) {
 function normalizeChoice(value, options, fallback) {
   const normalized = String(value || "").toLowerCase();
   return options.find((option) => option.toLowerCase() === normalized) || fallback;
-}
-
-function dimensionsForAspectRatio(value, longEdge) {
-  const [left, right] = String(value || "1:1").split(":").map(Number);
-  const ratio = left > 0 && right > 0 ? left / right : 1;
-  const width = ratio >= 1 ? longEdge : longEdge * ratio;
-  const height = ratio >= 1 ? longEdge / ratio : longEdge;
-  return {
-    width: Math.max(512, Math.round(width / 8) * 8),
-    height: Math.max(512, Math.round(height / 8) * 8)
-  };
 }
 
 function ratioNumber(value) {

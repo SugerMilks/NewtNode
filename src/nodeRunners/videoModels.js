@@ -1,9 +1,5 @@
 import { workflowContextPayload } from "../workflowContext.js";
-import { isGeminiOmniModel } from "../geminiOmni.js";
 import {
-  geminiOmniDurationOptions,
-  geminiOmniAspectRatioOptions,
-  geminiOmniResolutionOptions,
   klingO3ProAspectRatioOptions,
   klingO3ProDurationOptions,
   klingO34kResolutionOptions,
@@ -16,18 +12,24 @@ import {
   seedanceVideoResolutionOptions
 } from "../modelOptions.js";
 import { isSeedance25Model } from "../seedance25.js";
+import { filmDirectorGenerateAudio, normalizeFilmDirectorAudioMode } from "../filmDirectorAudio.js";
+import {
+  normalizeFilmDirectorVideoModel,
+  videoModelSupportsFilmDirector
+} from "../filmDirectorVideoModels.js";
+import {
+  isMiniMaxH3Model,
+  minimaxH3AspectRatioOptions,
+  minimaxH3DurationOptions,
+  minimaxH3ResolutionOptions
+} from "../minimaxH3.js";
 
-export function videoModelSupportsFilmDirector(model) {
-  const normalized = String(model || "").toLowerCase();
-  const isSeedance = normalized.includes("seedance");
-  const isKlingO3 = normalized.includes("kling") && (normalized.includes("o3") || normalized.includes("03"));
-  return isSeedance || isKlingO3 || isGeminiOmniModel(model);
-}
+export { videoModelSupportsFilmDirector };
 
 export function filmDirectorVideoDuration(model, durationSeconds, fallback = "") {
   const normalizedModel = String(model || "").toLowerCase();
-  const options = isGeminiOmniModel(model)
-    ? geminiOmniDurationOptions
+  const options = isMiniMaxH3Model(model)
+    ? minimaxH3DurationOptions
     : isSeedance25Model(model)
       ? seedance25DurationOptions.filter((option) => option !== "Auto")
     : normalizedModel.includes("kling") && (normalizedModel.includes("o3") || normalizedModel.includes("03"))
@@ -56,8 +58,8 @@ export function filmDirectorVideoDuration(model, durationSeconds, fallback = "")
 
 export function filmDirectorVideoResolution(model, resolution, fallback = "") {
   const normalizedModel = String(model || "").toLowerCase();
-  const options = isGeminiOmniModel(model)
-    ? geminiOmniResolutionOptions
+  const options = isMiniMaxH3Model(model)
+    ? minimaxH3ResolutionOptions
     : isSeedance25Model(model)
       ? seedance25ResolutionOptions
     : normalizedModel.includes("kling") && (normalizedModel.includes("o3") || normalizedModel.includes("03"))
@@ -77,8 +79,8 @@ export function filmDirectorVideoResolution(model, resolution, fallback = "") {
 
 export function filmDirectorVideoAspectRatio(model, aspectRatio, fallback = "") {
   const normalizedModel = String(model || "").toLowerCase();
-  const options = isGeminiOmniModel(model)
-    ? geminiOmniAspectRatioOptions
+  const options = isMiniMaxH3Model(model)
+    ? minimaxH3AspectRatioOptions.filter((option) => option !== "Adaptive")
     : isSeedance25Model(model)
       ? seedance25AspectRatioOptions.filter((option) => option !== "Auto")
       : normalizedModel.includes("kling") && (normalizedModel.includes("o3") || normalizedModel.includes("03"))
@@ -97,6 +99,11 @@ export function filmDirectorVideoAspectRatio(model, aspectRatio, fallback = "") 
   return options.find((option) => ratioFor(option) === normalizedFallback) || options[0];
 }
 
+export function filmDirectorVideoGenerateAudio(audioMode, fallback = true) {
+  if (!String(audioMode || "").trim()) return fallback !== false;
+  return filmDirectorGenerateAudio(normalizeFilmDirectorAudioMode(audioMode));
+}
+
 export function buildVideoGenerationRequest({
   node,
   prompt,
@@ -112,22 +119,28 @@ export function buildVideoGenerationRequest({
   referenceVideoUrls = [],
   referenceVideoLabels = [],
   referenceAudioUrls = [],
+  referenceAudioLabels = [],
   filmDirector = null
 }) {
   const activeFilmDirector = videoModelSupportsFilmDirector(node.data.model) ? filmDirector : null;
+  const model = activeFilmDirector
+    ? normalizeFilmDirectorVideoModel(activeFilmDirector.videoModel, node.data.model)
+    : node.data.model;
   return {
     prompt,
-    model: node.data.model,
+    model,
     duration: activeFilmDirector
-      ? filmDirectorVideoDuration(node.data.model, activeFilmDirector.durationSeconds, node.data.duration)
+      ? filmDirectorVideoDuration(model, activeFilmDirector.durationSeconds, node.data.duration)
       : node.data.duration,
     resolution: activeFilmDirector
-      ? filmDirectorVideoResolution(node.data.model, activeFilmDirector.resolution, node.data.resolution)
+      ? filmDirectorVideoResolution(model, activeFilmDirector.resolution, node.data.resolution)
       : node.data.resolution,
     aspectRatio: activeFilmDirector
-      ? filmDirectorVideoAspectRatio(node.data.model, activeFilmDirector.aspectRatio, node.data.aspectRatio)
+      ? filmDirectorVideoAspectRatio(model, activeFilmDirector.aspectRatio, node.data.aspectRatio)
       : node.data.aspectRatio,
-    generateAudio: node.data.generateAudio,
+    generateAudio: activeFilmDirector
+      ? filmDirectorVideoGenerateAudio(activeFilmDirector.audioMode, node.data.generateAudio !== false)
+      : node.data.generateAudio,
     klingCfgScale: node.data.klingCfgScale ?? 0.5,
     negativePrompt: node.data.negativePrompt || "",
     seed: node.data.seed || "",
@@ -141,11 +154,8 @@ export function buildVideoGenerationRequest({
     referenceVideoUrls,
     referenceVideoLabels,
     referenceAudioUrls,
+    referenceAudioLabels,
     filmDirector: activeFilmDirector,
-    wan27Reference: {
-      negativePrompt: node.data.negativePrompt || "",
-      multiShots: Boolean(node.data.multiShots)
-    },
     wanFunControl: {
       preprocessVideo: node.data.preprocessVideo !== false,
       preprocessType: node.data.preprocessType || "depth",

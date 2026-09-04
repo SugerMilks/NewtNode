@@ -5,6 +5,7 @@ import {
   characterVideoSheetPrompt,
   preferredCharacterReferenceForVideo
 } from "../src/characterVideoSheets.js";
+import { characterVideoIdentityContinuityPrompt, characterVideoWardrobeEditPrompt } from "../src/characterSheetWorkflow.js";
 
 function characterNode({ enabled = true, includeVideo = true } = {}) {
   return {
@@ -36,6 +37,13 @@ test("CU video sheet prompt fixes the requested three-panel layout and off-camer
   assert.match(characterVideoSheetPrompt, /approximately 15 degrees away/i);
   assert.match(characterVideoSheetPrompt, /must not look into the lens/i);
   assert.match(characterVideoSheetPrompt, /mouth slightly open/i);
+});
+
+test("CU generation keeps the original portrait as the likeness authority", () => {
+  assert.match(characterVideoIdentityContinuityPrompt, /Original Character Portrait is the sole authority/i);
+  assert.match(characterVideoIdentityContinuityPrompt, /Do not average, reinterpret, replace/i);
+  assert.match(characterVideoWardrobeEditPrompt, /Original Character Portrait is the sole authority/i);
+  assert.match(characterVideoWardrobeEditPrompt, /Matching Full Character Sheet/i);
 });
 
 test("video generation prefers the active wardrobe CU sheet when enabled", () => {

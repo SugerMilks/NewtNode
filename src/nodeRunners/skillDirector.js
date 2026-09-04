@@ -1,5 +1,7 @@
 import { nodeApi } from "../api/newtApi.js";
 import { filmDirectorUsesReference } from "../filmDirectorScenes.js";
+import { filmDirectorShotListDraftsForRequest, filmDirectorShotListSourceSignature, filmDirectorStageDraftForRequest } from "../filmDirectorStageLocks.js";
+import { normalizeFilmDirectorAudioMode } from "../filmDirectorAudio.js";
 import { workflowContextPayload } from "../workflowContext.js";
 
 export async function runSkillDirectorNode({
@@ -16,15 +18,18 @@ export async function runSkillDirectorNode({
   const activeCharacterInputs = activeSceneReferenceItems(characterInputs, node.data, action, "character");
   const activeLocationInputs = activeSceneReferenceItems(locationInputs, node.data, action, "location");
   const activeElementInputs = activeSceneReferenceItems(elementInputs, node.data, action, "element");
+  const requestDrafts = filmDirectorShotListDraftsForRequest(action, node.data);
   const { response, data } = await nodeApi.runSkillDirector({
     action,
     sceneName: node.data.sceneName,
     sceneOverview: node.data.sceneOverview ?? node.data.text,
     motionBrief: node.data.motionBrief || node.data.motionDirection,
-    styleDirection: node.data.styleDirection,
+    styleDirection: action === "style"
+      ? filmDirectorStageDraftForRequest("style", node.data.styleDirection, node.data)
+      : node.data.styleDirection,
     motionDirection: node.data.motionDirection,
-    shotList: node.data.shotList,
-    shotListNotes: node.data.shotListNotes,
+    shotList: requestDrafts.shotList,
+    shotListNotes: requestDrafts.shotListNotes,
     revisionNotes: node.data.skillDirectorRevisionNotes,
     currentFinalPrompt: node.data.resultText,
     characterInputs: activeCharacterInputs,
@@ -34,8 +39,10 @@ export async function runSkillDirectorNode({
     videoInputs: [],
     shotCount: node.data.skillShotCount || node.data.skillSceneCount || node.data.shotCount || "3",
     durationSeconds: node.data.skillDurationSeconds || node.data.durationSeconds || "15",
+    videoModel: node.data.skillVideoModel || "",
     resolution: node.data.skillResolution || "720p",
     aspectRatio: node.data.skillAspectRatio || "16:9",
+    audioMode: normalizeFilmDirectorAudioMode(node.data.skillDirectorAudioMode),
     ...workflowContextPayload(workflowContext),
     nodeId: node.id,
     nodeTitle: node.data.title
@@ -51,8 +58,10 @@ export async function runSkillDirectorNode({
     shotCount: data.shotCount || "",
     resolvedShotCount: data.resolvedShotCount || data.actualShotCount || 0,
     durationSeconds: data.durationSeconds || node.data.skillDurationSeconds || node.data.durationSeconds || "15",
+    videoModel: Object.prototype.hasOwnProperty.call(data, "videoModel") ? data.videoModel : node.data.skillVideoModel || "",
     resolution: data.resolution || node.data.skillResolution || "720p",
     aspectRatio: data.aspectRatio || node.data.skillAspectRatio || "16:9",
+    audioMode: normalizeFilmDirectorAudioMode(data.audioMode, node.data.skillDirectorAudioMode || "production"),
     actualShotCount: data.actualShotCount || 0,
     sceneName: Object.prototype.hasOwnProperty.call(data, "sceneName") ? data.sceneName : node.data.sceneName || "",
     referenceSetup: data.referenceSetup || "",
@@ -66,7 +75,8 @@ export async function runSkillDirectorNode({
       ? undefined
       : Array.isArray(data.referenceTags)
         ? data.referenceTags
-        : [...activeCharacterInputs, ...activeLocationInputs, ...activeElementInputs].map((item) => item.tag).filter(Boolean)
+        : [...activeCharacterInputs, ...activeLocationInputs, ...activeElementInputs].map((item) => item.tag).filter(Boolean),
+    shotListSourceSignature: action === "shotList" ? filmDirectorShotListSourceSignature(node.data) : ""
   };
 }
 

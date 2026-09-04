@@ -99,6 +99,21 @@ export function pointInRect(rect, point) {
   return point.x >= rect.left && point.x <= rect.right && point.y >= rect.top && point.y <= rect.bottom;
 }
 
+export function localPortPointFromRects(portRect, nodeRect, renderedScale = 1) {
+  const scale = Number.isFinite(renderedScale) && renderedScale > 0 ? renderedScale : 1;
+  return {
+    x: (portRect.left + portRect.width / 2 - nodeRect.left) / scale,
+    y: (portRect.top + portRect.height / 2 - nodeRect.top) / scale
+  };
+}
+
+export function scenePortPoint(node, localPoint) {
+  return {
+    x: Number(node?.x || 0) + Number(localPoint?.x || 0),
+    y: Number(node?.y || 0) + Number(localPoint?.y || 0)
+  };
+}
+
 export function groupToRect(group) {
   return {
     left: group.x,

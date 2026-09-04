@@ -14,8 +14,10 @@ test("Film Director revision prompts preserve the package while prioritizing use
     revisionNotes: "Remove the dialogue from CUT 2 and make CUT 3 a wide shot.",
     durationLabel: "15-second",
     durationSeconds: "15",
+    videoModel: "Kling O3 Pro",
     resolution: "1080p",
     aspectRatio: "21:9",
+    audioMode: "silent",
     currentCutCount: 3,
     sceneName: "Coffee Shop",
     referenceSetup: "@Kim = Character reference.",
@@ -34,10 +36,14 @@ test("Film Director revision prompts preserve the package while prioritizing use
   assert.match(prompt, /tighter framing or camera movement must update both cameraDirection/i);
   assert.match(prompt, /"sceneName":"complete revised scene name"/);
   assert.match(prompt, /"durationSeconds":"15"/);
+  assert.match(prompt, /"videoModel":"Seedance 2\.5"/);
   assert.match(prompt, /"resolution":"720p"/);
   assert.match(prompt, /"aspectRatio":"16:9"/);
+  assert.match(prompt, /"audioMode":"production"/);
   assert.match(prompt, /Current resolution:\n1080p/);
+  assert.match(prompt, /Current video model:\nKling O3 Pro/);
   assert.match(prompt, /Current aspect ratio:\n21:9/);
+  assert.match(prompt, /Current audio mode:\nsilent/);
 });
 
 test("Film Director revisions remove inactive reference tags from the authoritative manifest", () => {
@@ -98,8 +104,10 @@ test("Film Director revision state updates every dependent node section atomical
     {
       sceneName: "Old Scene",
       skillDurationSeconds: "15",
+      skillVideoModel: "Seedance 2.0",
       skillResolution: "1080p",
       skillAspectRatio: "16:9",
+      skillDirectorAudioMode: "production",
       skillShotCount: "6",
       styleDirection: "Old style",
       motionDirection: "Old camera",
@@ -111,8 +119,10 @@ test("Film Director revision state updates every dependent node section atomical
     {
       sceneName: "New Scene",
       durationSeconds: "10",
+      videoModel: "MiniMax H3",
       resolution: "4K",
       aspectRatio: "9:16",
+      audioMode: "silent",
       resolvedShotCount: 4,
       styleDirection: "New style",
       motionDirection: "New camera",
@@ -125,8 +135,10 @@ test("Film Director revision state updates every dependent node section atomical
 
   assert.equal(patch.sceneName, "New Scene");
   assert.equal(patch.skillDurationSeconds, "10");
+  assert.equal(patch.skillVideoModel, "MiniMax H3");
   assert.equal(patch.skillResolution, "4K");
   assert.equal(patch.skillAspectRatio, "9:16");
+  assert.equal(patch.skillDirectorAudioMode, "silent");
   assert.equal(patch.skillShotCount, "4");
   assert.equal(patch.shotCount, "4");
   assert.equal(patch.styleDirection, "New style");

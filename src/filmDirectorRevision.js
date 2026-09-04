@@ -12,6 +12,11 @@ import {
 } from "./filmDirectorAspectRatios.js";
 import { filmDirectorResolutionOptions, normalizeFilmDirectorResolution } from "./filmDirectorResolutions.js";
 import { filmDirectorStyleDirectionDirective } from "./filmDirectorStyle.js";
+import { filmDirectorAudioModeOptions, normalizeFilmDirectorAudioMode } from "./filmDirectorAudio.js";
+import {
+  filmDirectorVideoModelOptions,
+  normalizeFilmDirectorVideoModel
+} from "./filmDirectorVideoModels.js";
 
 export const filmDirectorRevisionHistoryLimit = 25;
 const filmDirectorRevisionReferenceKeys = ["activeReferenceTags", "active_reference_tags"];
@@ -19,8 +24,10 @@ const filmDirectorRevisionSnapshotKeys = [
   "sceneName",
   "skillDurationSeconds",
   "durationSeconds",
+  "skillVideoModel",
   "skillResolution",
   "skillAspectRatio",
+  "skillDirectorAudioMode",
   "skillShotCount",
   "shotCount",
   "skillReferenceNotes",
@@ -31,10 +38,18 @@ const filmDirectorRevisionSnapshotKeys = [
   "text",
   "shotList",
   "shotListNotes",
+  "skillDirectorShotListSourceSignature",
+  "skillDirectorLockedStyleInputSignature",
+  "skillDirectorLockedAssetInputSignature",
+  "skillDirectorLockedInputManifest",
+  "skillDirectorLockedInputManifestInitialized",
   "resultText",
   "skillDirectorLocks",
   "skillDirectorCollapsed",
   "skillDirectorBuilt",
+  "skillDirectorRebuildAfterStyle",
+  "skillDirectorRefreshAfterStyle",
+  "skillDirectorRefreshShotListAfterMotion",
   "skillPreviewOpen",
   "lastRunModel",
   "lastRunSkillName",
@@ -49,8 +64,10 @@ export function buildFilmDirectorRevisionPrompt({
   revisionNotes = "",
   durationLabel = "15-second",
   durationSeconds = "15",
+  videoModel = "",
   resolution = "720p",
   aspectRatio = "16:9",
+  audioMode = "production",
   currentCutCount = 0,
   sceneName = "",
   referenceSetup = "",
@@ -72,24 +89,29 @@ export function buildFilmDirectorRevisionPrompt({
     "Examples: removing or adding a shot must update recommendedShotCount, renumber every CUT, and revise continuity; tighter framing or camera movement must update both cameraDirection and the affected CUT fields; a style note must update only the visual appearance in styleDirection and any directly dependent visual language.",
     "Keep each section inside its job: styleDirection owns the visible cinematic treatment, emotional tone, and performance texture; cameraDirection owns camera behavior and framing strategy; sceneOverview owns story and action; cuts own shot-specific execution. Never copy camera movement, blocking, action choreography, plot summary, or poetic non-literal story language into styleDirection.",
     filmDirectorStyleDirectionDirective(),
-    "Scene name, duration, resolution, and aspect ratio may change only when the user explicitly requests them. If duration changes, rebalance pacing and CUT count for the new duration.",
+    "Scene name, video model, duration, resolution, aspect ratio, and audio mode may change only when the user explicitly requests them. If duration changes, rebalance pacing and CUT count for the new duration.",
+    `videoModel must be one of ${filmDirectorVideoModelOptions.join(", ")}. Otherwise preserve the current video model.`,
     `durationSeconds must be one of ${filmDirectorDurationPromptList()}. Otherwise preserve the current duration.`,
     `resolution must be one of ${filmDirectorResolutionOptions.join(", ")}. Otherwise preserve the current resolution.`,
     `aspectRatio must be one of ${filmDirectorAspectRatioPromptList()}. Otherwise preserve the current aspect ratio.`,
+    `audioMode must be one of ${filmDirectorAudioModeOptions.map((option) => option.value).join(", ")}. Otherwise preserve the current audio mode.`,
+    "Use production for dialogue or room tone without music, full for an unrestricted native soundtrack, and silent when the user requests no audio at all.",
     "Keep every still-active connected @tag exactly as written. Do not rename or invent tagged assets. When the user removes an asset from the scene, remove that tag from every revised field and from activeReferenceTags.",
     "activeReferenceTags must contain exactly the connected @tags still used by the revised scene. Omit unused or removed assets, even if they remain physically connected. Return an empty array when the revised scene uses no connected assets.",
     currentCutCount
       ? `Preserve the current ${currentCutCount} CUT sections unless the user explicitly asks to add, remove, combine, or restructure shots.`
       : "Preserve the current shot structure unless the user explicitly asks to change it.",
     "Return strict JSON only with this exact shape:",
-    `{"changeSummary":"one short sentence","sceneName":"complete revised scene name","durationSeconds":"15","resolution":"720p","aspectRatio":"16:9","activeReferenceTags":["@ExactConnectedTag"],"styleDirection":"concise literal visual treatment only","cameraDirection":"complete revised camera direction","sceneOverview":"complete revised scene overview","recommendedShotCount":3,"continuityLedger":"one compact line","mustHaveActions":"one compact line","cuts":[{"number":1,"shotFrame":"WS","cameraMovement":"Static","shotType":"Over-the-Shoulder","description":"${filmDirectorShotDescriptionExample(currentCutCount, durationSeconds)}"}]}`,
+    `{"changeSummary":"one short sentence","sceneName":"complete revised scene name","videoModel":"Seedance 2.5","durationSeconds":"15","resolution":"720p","aspectRatio":"16:9","audioMode":"production","activeReferenceTags":["@ExactConnectedTag"],"styleDirection":"concise literal visual treatment only","cameraDirection":"complete revised camera direction","sceneOverview":"complete revised scene overview","recommendedShotCount":3,"continuityLedger":"one compact line","mustHaveActions":"one compact line","cuts":[{"number":1,"shotFrame":"WS","cameraMovement":"Static","shotType":"Over-the-Shoulder","description":"${filmDirectorShotDescriptionExample(currentCutCount, durationSeconds)}"}]}`,
     shotLogic,
     filmDirectorShotDetailDirective(currentCutCount || "Auto", durationSeconds),
     "Do not return a partial patch. Return the complete revised values so NewtNode can replace the finished package safely. Do not use markdown or add keys outside the schema.",
     `USER REVISION NOTES:\n${notes}`,
     sceneName ? `Scene name:\n${sceneName}` : "",
+    `Current video model:\n${normalizeFilmDirectorVideoModel(videoModel) || "Connected Model"}`,
     `Current resolution:\n${normalizeFilmDirectorResolution(resolution)}`,
     `Current aspect ratio:\n${normalizeFilmDirectorAspectRatio(aspectRatio)}`,
+    `Current audio mode:\n${normalizeFilmDirectorAudioMode(audioMode)}`,
     referenceSetup ? `Locked reference setup:\n${referenceSetup}` : "",
     styleDirection ? `Current Style Direction:\n${styleDirection}` : "",
     cameraDirection ? `Current Camera Direction:\n${cameraDirection}` : "",
@@ -149,8 +171,10 @@ export function filmDirectorRevisionStatePatch(current = {}, result = {}) {
     : currentShotCount;
   const currentDuration = current.skillDurationSeconds || current.durationSeconds || "15";
   const nextDuration = normalizeFilmDirectorDuration(result.durationSeconds, currentDuration);
+  const nextVideoModel = normalizeFilmDirectorVideoModel(result.videoModel, current.skillVideoModel || "");
   const nextResolution = normalizeFilmDirectorResolution(result.resolution, current.skillResolution || "720p");
   const nextAspectRatio = normalizeFilmDirectorAspectRatio(result.aspectRatio, current.skillAspectRatio || "16:9");
+  const nextAudioMode = normalizeFilmDirectorAudioMode(result.audioMode, current.skillDirectorAudioMode || "production");
   const finalPrompt = revisionString(result, "text", current.resultText);
   const sceneOverview = revisionString(result, "sceneOverview", current.sceneOverview ?? current.text);
   const cameraDirection = revisionString(result, "motionDirection", current.motionDirection ?? current.motionBrief);
@@ -159,8 +183,10 @@ export function filmDirectorRevisionStatePatch(current = {}, result = {}) {
     sceneName: revisionString(result, "sceneName", current.sceneName),
     skillDurationSeconds: nextDuration,
     durationSeconds: nextDuration,
+    skillVideoModel: nextVideoModel,
     skillResolution: nextResolution,
     skillAspectRatio: nextAspectRatio,
+    skillDirectorAudioMode: nextAudioMode,
     skillShotCount: nextShotCount,
     shotCount: nextShotCount,
     styleDirection: revisionString(result, "styleDirection", current.styleDirection),

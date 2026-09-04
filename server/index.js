@@ -57,6 +57,12 @@ import {
 import { filterFilmDirectorReferencesForOutput } from "../src/filmDirectorScenes.js";
 import { normalizeFilmDirectorResolution } from "../src/filmDirectorResolutions.js";
 import {
+  filmDirectorAudioPolicyPrompt,
+  filmDirectorVisualSceneRules,
+  normalizeFilmDirectorAudioMode
+} from "../src/filmDirectorAudio.js";
+import { normalizeFilmDirectorVideoModel } from "../src/filmDirectorVideoModels.js";
+import {
   filmDirectorShotDescriptionExample,
   filmDirectorShotDetailDirective,
   filmDirectorShotMaxCharsPerCut,
@@ -66,16 +72,6 @@ import {
   compactFilmDirectorStyleDirection,
   filmDirectorStyleDirectionDirective
 } from "../src/filmDirectorStyle.js";
-import {
-  buildGeminiOmniPrompt,
-  geminiOmniFalReferenceEndpoint as defaultGeminiOmniFalReferenceEndpoint,
-  geminiOmniFalTextEndpoint as defaultGeminiOmniFalTextEndpoint,
-  geminiOmniGoogleModel as defaultGeminiOmniGoogleModel,
-  normalizeGeminiOmniAspectRatio,
-  normalizeGeminiOmniDuration,
-  shouldFallbackGeminiOmniToFal,
-  uniqueGeminiOmniReferences
-} from "../src/geminiOmni.js";
 import {
   buildKlingDirectorOptimizationPrompt,
   clipKlingDirectorPrompt,
@@ -109,9 +105,22 @@ import {
   seedance25ReferenceLimits
 } from "../src/seedance25.js";
 import {
+  estimateMiniMaxH3FalCost,
+  isMiniMaxH3Model,
+  miniMaxH3FalEndpoint,
+  minimaxH3ModelName,
+  minimaxH3ReferenceLimits,
+  normalizeMiniMaxH3AspectRatio,
+  normalizeMiniMaxH3Duration,
+  normalizeMiniMaxH3Resolution,
+  rewriteMiniMaxH3ReferenceMentions
+} from "../src/minimaxH3.js";
+import {
+  buildKreaMiniMaxH3Input,
   buildKreaImageInput,
   estimateKreaImageCost,
   estimateKreaKlingCost,
+  estimateKreaMiniMaxH3Cost,
   extractKreaJobResultUrl,
   kreaApiBaseUrl,
   kreaErrorMessage,
@@ -200,9 +209,7 @@ const defaultApiProviderPreferences = Object.freeze({
 const ffmpegBinaryPath = process.env.FFMPEG_PATH || ffmpegStaticPath || "ffmpeg";
 const ffprobeBinaryPath = process.env.FFPROBE_PATH || ffprobeStatic?.path || "ffprobe";
 const port = Number(process.env.PORT || 3336);
-const seedanceStandardCostPerSecond = Number(process.env.SEEDANCE_STANDARD_COST_PER_SECOND || 0.3034);
-const happyHorse720pCostPerSecond = Number(process.env.HAPPY_HORSE_720P_COST_PER_SECOND || 0.14);
-const happyHorse1080pCostPerSecond = Number(process.env.HAPPY_HORSE_1080P_COST_PER_SECOND || 0.28);
+const seedanceStandardCostPerSecond = Number(process.env.SEEDANCE_STANDARD_COST_PER_SECOND || 0.3024);
 const seedanceBillingFps = Number(process.env.SEEDANCE_BILLING_FPS || 24);
 const seedanceStandardCostPerThousandTokens = Number(process.env.SEEDANCE_STANDARD_COST_PER_1000_TOKENS || 0.014);
 const seedance4KCostPerThousandTokens = Number(process.env.SEEDANCE_4K_COST_PER_1000_TOKENS || 0.008);
@@ -210,16 +217,10 @@ const seedanceEndUserId = String(process.env.SEEDANCE_END_USER_ID || "newtnode-l
 const klingO3ProCostPerSecond = Number(process.env.KLING_O3_PRO_COST_PER_SECOND || 0.112);
 const klingO3ProAudioCostPerSecond = Number(process.env.KLING_O3_PRO_AUDIO_COST_PER_SECOND || 0.14);
 const klingO34kCostPerSecond = Number(process.env.KLING_O3_4K_COST_PER_SECOND || 0.42);
-const geminiOmniGoogleCostPerSecond = Number(process.env.GEMINI_OMNI_GOOGLE_COST_PER_SECOND || 0.1);
-const geminiOmniFalCostPerSecond = Number(process.env.GEMINI_OMNI_FAL_COST_PER_SECOND || 0.13);
 const nanoBananaCost1K2K = Number(process.env.NANO_BANANA_IMAGE_COST_1K_2K || 0.15);
 const nanoBananaCost4K = Number(process.env.NANO_BANANA_IMAGE_COST_4K || 0.3);
-const zImageCostPerMegapixel = Number(process.env.Z_IMAGE_COST_PER_MEGAPIXEL || 0.005);
 const krea2LargeCost = Number(process.env.KREA_2_LARGE_IMAGE_COST || 0.06);
 const krea2LargeStyleReferenceCost = Number(process.env.KREA_2_LARGE_IMAGE_STYLE_REFERENCE_COST || 0.065);
-const seedream5ProCostSmall = Number(process.env.SEEDREAM_5_PRO_COST_SMALL || 0.0675);
-const seedream5ProCost2K = Number(process.env.SEEDREAM_5_PRO_COST_2K || 0.135);
-const seedreamLayerSeparationCost = Number(process.env.SEEDREAM_LAYER_SEPARATION_COST || 0.05);
 const hunyuan3DProBaseCost = Number(process.env.HUNYUAN_3D_PRO_BASE_COST || 0.375);
 const hunyuan3DProAddOnCost = Number(process.env.HUNYUAN_3D_PRO_ADD_ON_COST || 0.15);
 const nanoImageAspectRatios = ["21:9", "16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3", "4:5", "5:4"];
@@ -228,8 +229,6 @@ const krea2AspectRatios = ["16:9", "1:1", "4:3", "3:2", "2.35:1", "4:5", "2:3", 
 const krea2CreativityOptions = ["raw", "low", "medium", "high"];
 const storyboardAspectRatioOptions = ["16:9", "21:9", "9:16", "1:1"];
 const imageModelNames = {
-  zImage: "Z-Image",
-  seedream5Pro: "Seedream 5.0 Pro",
   nanoBanana2: "Nano Banana 2",
   nanoBananaPro: "Nano Banana Pro",
   openAiImage2: "OpenAI Image 2",
@@ -237,8 +236,6 @@ const imageModelNames = {
   krea2Large: "Krea 2 Large"
 };
 const imageModelOptions = [
-  imageModelNames.zImage,
-  imageModelNames.seedream5Pro,
   imageModelNames.nanoBanana2,
   imageModelNames.nanoBananaPro,
   imageModelNames.openAiImage2,
@@ -250,49 +247,35 @@ const videoModelNames = {
   seedance25: seedance25ModelName,
   klingO3Pro: "Kling O3 Pro",
   klingO34k: "Kling O3 4K",
-  geminiOmni: "Gemini Omni Flash",
-  wan27Reference: "Wan 2.7 Reference-to-Video",
-  happyHorse: "Happy Horse",
-  aurora: "Creatify Aurora"
+  minimaxH3: minimaxH3ModelName
 };
 const videoModelOptions = [
   videoModelNames.seedance,
   videoModelNames.seedance25,
   videoModelNames.klingO3Pro,
   videoModelNames.klingO34k,
-  videoModelNames.geminiOmni,
-  videoModelNames.wan27Reference,
-  videoModelNames.happyHorse,
-  videoModelNames.aurora
+  videoModelNames.minimaxH3
 ];
 const defaultModelPreferences = {
-  image: Object.fromEntries(imageModelOptions.map((model) => [model, model === imageModelNames.zImage])),
+  image: Object.fromEntries(imageModelOptions.map((model) => [model, model === imageModelNames.openAiImage2])),
   video: Object.fromEntries(videoModelOptions.map((model) => [model, true]))
 };
 const falNanoBananaProEndpoint = process.env.FAL_NANO_BANANA_PRO_ENDPOINT || "fal-ai/nano-banana-pro";
 const falNanoBanana2TextEndpoint = process.env.FAL_NANO_BANANA_2_ENDPOINT || defaultNanoBanana2FalTextEndpoint;
 const falNanoBanana2EditEndpoint = process.env.FAL_NANO_BANANA_2_EDIT_ENDPOINT || defaultNanoBanana2FalEditEndpoint;
-const falZImageEndpoint = process.env.FAL_Z_IMAGE_ENDPOINT || "fal-ai/z-image/turbo";
 const falKrea2LargeEndpoint = process.env.FAL_KREA_2_LARGE_ENDPOINT || "krea/v2/large/text-to-image";
 const falReve21TextEndpoint = process.env.FAL_REVE_2_1_TEXT_ENDPOINT || defaultReve21FalTextEndpoint;
 const falReve21EditEndpoint = process.env.FAL_REVE_2_1_EDIT_ENDPOINT || defaultReve21FalEditEndpoint;
 const falReve21RemixEndpoint = process.env.FAL_REVE_2_1_REMIX_ENDPOINT || defaultReve21FalRemixEndpoint;
-const falSeedream5ProTextEndpoint = process.env.FAL_SEEDREAM_5_PRO_TEXT_ENDPOINT || "bytedance/seedream/v5/pro/text-to-image";
-const falSeedream5ProEditEndpoint = process.env.FAL_SEEDREAM_5_PRO_EDIT_ENDPOINT || "bytedance/seedream/v5/pro/edit";
-const falSeedreamLayerEndpoint = process.env.FAL_SEEDREAM_LAYER_ENDPOINT || "fal-ai/qwen-image-layered";
 const falKlingO3ProTextEndpoint = process.env.FAL_KLING_O3_PRO_TEXT_ENDPOINT || "fal-ai/kling-video/o3/pro/text-to-video";
 const falKlingO3ProReferenceEndpoint = process.env.FAL_KLING_O3_PRO_REFERENCE_ENDPOINT || "fal-ai/kling-video/o3/pro/reference-to-video";
 const falKlingO34kTextEndpoint = process.env.FAL_KLING_O3_4K_TEXT_ENDPOINT || "fal-ai/kling-video/o3/4k/text-to-video";
 const falKlingO34kImageEndpoint = process.env.FAL_KLING_O3_4K_IMAGE_ENDPOINT || "fal-ai/kling-video/o3/4k/image-to-video";
 const falKlingO34kReferenceEndpoint = process.env.FAL_KLING_O3_4K_REFERENCE_ENDPOINT || "fal-ai/kling-video/o3/4k/reference-to-video";
-const googleGeminiOmniModel = process.env.GOOGLE_GEMINI_OMNI_MODEL || defaultGeminiOmniGoogleModel;
-const falGeminiOmniTextEndpoint = process.env.FAL_GEMINI_OMNI_TEXT_ENDPOINT || defaultGeminiOmniFalTextEndpoint;
-const falGeminiOmniReferenceEndpoint = process.env.FAL_GEMINI_OMNI_REFERENCE_ENDPOINT || defaultGeminiOmniFalReferenceEndpoint;
 const falTextRequestCost = Number(process.env.FAL_TEXT_REQUEST_COST || 0.001);
 const falVisionTextUnitCost = Number(process.env.FAL_VISION_TEXT_UNIT_COST || 0.01);
 const falVideoTextUnitCost = Number(process.env.FAL_VIDEO_TEXT_UNIT_COST || 0.01);
 const wanFunControlCostPerSecond = 0.1;
-const wan27ReferenceVideoCostPerSecond = Number(process.env.WAN_2_7_REFERENCE_VIDEO_COST_PER_SECOND || 0.1);
 const wanVaceCostPerSecond = {
   "480p": 0.04,
   "580p": 0.06,
@@ -303,8 +286,6 @@ const voidVideoInpaintingPass2Cost = 0.05;
 const voidVideoInpaintingSam3QuadMaskCost = 0.05;
 const sam3ImageCostPerRequest = 0.005;
 const sam3VideoCostPer16Frames = 0.005;
-const aurora480pCostPerSecond = 0.07;
-const aurora720pCostPerSecond = 0.14;
 const bytedanceUpscalerCostPerSecond = {
   "1080p": 0.0072,
   "2k": 0.0144,
@@ -541,10 +522,6 @@ function buildHealthPayload() {
     apiKeysFound,
     apiKeyStatus: apiKeysFound ? "API keys configured" : "No API keys found",
     googleImageModelsUseGoogleDirect: Boolean(process.env.GOOGLE_API_KEY),
-    falZImageEndpoint,
-    falSeedream5ProTextEndpoint,
-    falSeedream5ProEditEndpoint,
-    falSeedreamLayerEndpoint,
     falKlingO3ProTextEndpoint,
     falKlingO3ProReferenceEndpoint,
     falKlingO34kTextEndpoint,
@@ -944,7 +921,7 @@ function normalizeModelPreferences(value = {}) {
   const image = Object.fromEntries(imageModelOptions.map((model) => [model, Boolean(incomingImage[model] ?? defaultModelPreferences.image[model])]));
   const video = Object.fromEntries(videoModelOptions.map((model) => [model, Boolean(incomingVideo[model] ?? defaultModelPreferences.video[model])]));
 
-  if (!Object.values(image).some(Boolean)) image[imageModelNames.zImage] = true;
+  if (!Object.values(image).some(Boolean)) image[imageModelNames.openAiImage2] = true;
   if (!Object.values(video).some(Boolean)) video[videoModelNames.seedance] = true;
 
   return { image, video };
@@ -1215,14 +1192,12 @@ app.get("/api/stats", async (_req, res) => {
         costPerSecond: klingO34kCostPerSecond,
         currency: "USD"
       },
-      geminiOmni: {
-        googleCostPerSecond: geminiOmniGoogleCostPerSecond,
-        falCostPerSecond: geminiOmniFalCostPerSecond,
-        currency: "USD"
-      },
-      happyHorse: {
-        costPerSecond720p: happyHorse720pCostPerSecond,
-        costPerSecond1080p: happyHorse1080pCostPerSecond,
+      minimaxH3: {
+        costPerSecond480P: 0.05,
+        costPerSecond768P: 0.08,
+        costPerSecond2K: 0.13,
+        costPerSecond4K: 0.16,
+        extraReferenceImageCost: 0.08,
         currency: "USD"
       },
       nanoBananaPro: {
@@ -1235,10 +1210,6 @@ app.get("/api/stats", async (_req, res) => {
         cost1K: estimateNanoBanana2Cost("1K"),
         cost2K: estimateNanoBanana2Cost("2K"),
         cost4K: estimateNanoBanana2Cost("4K"),
-        currency: "USD"
-      },
-      zImage: {
-        costPerMegapixel: zImageCostPerMegapixel,
         currency: "USD"
       },
       openAiImage2: {
@@ -1298,11 +1269,6 @@ app.get("/api/stats", async (_req, res) => {
         },
         sam3Video: {
           costPer16Frames: sam3VideoCostPer16Frames,
-          currency: "USD"
-        },
-        aurora: {
-          costPerSecond480p: aurora480pCostPerSecond,
-          costPerSecond720p: aurora720pCostPerSecond,
           currency: "USD"
         },
         bytedanceUpscaler: {
@@ -1759,8 +1725,10 @@ app.post("/api/node/run-skill-director", async (req, res) => {
     const styleInputs = normalizedMediaInputs(req.body.styleInputs, "style");
     const shotCount = normalizeSkillDirectorShotCount(req.body.shotCount || req.body.sceneCount || "3");
     const durationSeconds = normalizeSkillDirectorDurationSeconds(req.body.durationSeconds || req.body.sceneDuration || "15");
+    const videoModel = normalizeFilmDirectorVideoModel(req.body.videoModel);
     const resolution = normalizeFilmDirectorResolution(req.body.resolution);
     const aspectRatio = normalizeFilmDirectorAspectRatio(req.body.aspectRatio);
+    const audioMode = normalizeFilmDirectorAudioMode(req.body.audioMode);
     const requestedCuts = requestedSkillDirectorShotCount(shotCount);
     const cutLimit = filmDirectorCutLimit(durationSeconds);
     if (["build", "shotList"].includes(action) && requestedCuts && requestedCuts > cutLimit) {
@@ -1792,8 +1760,10 @@ app.post("/api/node/run-skill-director", async (req, res) => {
       styleInputs,
       shotCount,
       durationSeconds,
+      videoModel,
       resolution,
-      aspectRatio
+      aspectRatio,
+      audioMode
     });
     const allImageInputs = [...characterInputs, ...locationInputs, ...elementInputs, ...styleInputs];
     const billedImageInputs = action === "revise" ? [] : allImageInputs;
@@ -1819,8 +1789,10 @@ app.post("/api/node/run-skill-director", async (req, res) => {
         shotCount: result.shotCount || shotCount,
         resolvedShotCount: result.resolvedShotCount,
         durationSeconds: result.durationSeconds || durationSeconds,
+        videoModel: result.videoModel || videoModel,
         resolution: result.resolution || resolution,
         aspectRatio: result.aspectRatio || aspectRatio,
+        audioMode: result.audioMode || audioMode,
         actualShotCount: result.actualShotCount,
         referenceSetup: result.referenceSetup,
         shotListNotes: result.shotListNotes,
@@ -1847,8 +1819,10 @@ app.post("/api/node/run-skill-director", async (req, res) => {
       shotCount: result.shotCount,
       resolvedShotCount: result.resolvedShotCount,
       durationSeconds: result.durationSeconds,
+      videoModel: result.videoModel || videoModel,
       resolution: result.resolution || resolution,
       aspectRatio: result.aspectRatio || aspectRatio,
+      audioMode: result.audioMode || audioMode,
       actualShotCount: result.actualShotCount,
       referenceSetup: result.referenceSetup,
       referenceTags: Array.isArray(result.referenceTags) ? result.referenceTags : undefined,
@@ -1942,155 +1916,6 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
       });
     }
 
-    if (selectedModel.provider === "fal-z-image") {
-      if (!process.env.FAL_KEY) {
-        return res.status(400).json({ error: "Missing FAL_KEY in .env." });
-      }
-
-      const zImage = await generateFalZImage({
-        prompt,
-        imagePromptUrls,
-        imagePromptLabels,
-        aspectRatio,
-        resolution: req.body.resolution
-      });
-      const output = await downloadImage(req, zImage.remoteImage.url, "z-image", zImage.remoteImage.content_type || zImage.remoteImage.mimeType);
-      const cost = estimateZImageCost({ endpoint: zImage.endpoint, resolution: zImage.resolution, imageSize: zImage.imageSize });
-
-      await appendHistory({
-        id: zImage.requestId || randomUUID(),
-        createdAt: new Date().toISOString(),
-        mediaType: "image",
-        provider: "fal.ai",
-        modelName: selectedModel.displayName,
-        endpoint: zImage.endpoint,
-        mode: imagePromptUrls.length ? "Z-Image generation with reference" : "Z-Image generation",
-        prompt,
-        submittedPrompt: zImage.submittedPrompt,
-        project: projectFromBody(req.body),
-        node: nodeFromBody(req.body),
-        settings: {
-          model: req.body.model || selectedModel.displayName,
-          aspectRatio,
-          requestedAspectRatio: requestedAspectRatio || aspectRatio,
-          resolution: zImage.resolution,
-          imageSize: zImage.imageSize,
-          imagePromptCount: imagePromptUrls.length,
-          imagePromptLabels: cleanReferenceLabels
-        },
-        cost,
-        remoteImage: zImage.remoteImage,
-        localImage: output.publicPath,
-        localThumbnail: output.thumbnailPublicPath,
-        outputFileName: output.fileName,
-        outputBytes: output.bytes,
-        text: zImage.resultText || ""
-      });
-
-      return res.json({
-        text: zImage.resultText || "",
-        cost,
-        image: {
-          ...zImage.remoteImage,
-          localUrl: output.publicPath,
-          thumbnailUrl: output.thumbnailPublicPath,
-          fileName: output.fileName,
-          mimeType: output.mimeType
-        }
-      });
-    }
-
-    if (selectedModel.provider === "fal-seedream-5-pro") {
-      if (!process.env.FAL_KEY) {
-        return res.status(400).json({ error: "Missing FAL_KEY in .env." });
-      }
-
-      const seedreamImage = await generateFalSeedream5Pro({
-        prompt,
-        imagePromptUrls,
-        imagePromptLabels,
-        aspectRatio,
-        resolution: req.body.resolution,
-        layerSeparation: Boolean(req.body.seedreamLayers)
-      });
-      const downloadedImages = [];
-      for (const [index, remoteImage] of seedreamImage.remoteImages.entries()) {
-        downloadedImages.push({
-          remoteImage,
-          output: await downloadImage(
-            req,
-            remoteImage.url,
-            seedreamImage.layerSeparation
-              ? index === 0 ? "seedream-5-composite" : `seedream-5-layer-${index}`
-              : "seedream-5-pro",
-            remoteImage.content_type || remoteImage.mimeType
-          )
-        });
-      }
-
-      const cost = estimateSeedream5ProCost({
-        resolution: seedreamImage.resolution,
-        imageSize: seedreamImage.imageSize,
-        layerSeparation: seedreamImage.layerSeparation
-      });
-      for (const [index, item] of downloadedImages.entries()) {
-        await appendHistory({
-          id: `${seedreamImage.requestId || randomUUID()}-${index + 1}`,
-          createdAt: new Date().toISOString(),
-          mediaType: "image",
-          provider: "fal.ai",
-          modelName: selectedModel.displayName,
-          endpoint: item.remoteImage.endpoint || seedreamImage.endpoint,
-          mode: seedreamImage.layerSeparation
-            ? index === 0
-              ? "Seedream flattened composition"
-              : `Transparent layer ${index} of ${Math.max(0, downloadedImages.length - 1)}`
-            : imagePromptUrls.length ? "Seedream image edit" : "Seedream image generation",
-          prompt,
-          submittedPrompt: seedreamImage.submittedPrompt,
-          project: projectFromBody(req.body),
-          node: nodeFromBody(req.body),
-          settings: {
-            model: req.body.model || selectedModel.displayName,
-            aspectRatio,
-            requestedAspectRatio: requestedAspectRatio || aspectRatio,
-            resolution: seedreamImage.resolution,
-            imageSize: seedreamImage.imageSize,
-            imagePromptCount: imagePromptUrls.length,
-            imagePromptLabels: cleanReferenceLabels,
-            layerSeparation: seedreamImage.layerSeparation,
-            layerIndex: seedreamImage.layerSeparation && index > 0 ? index : null,
-            layerCount: seedreamImage.layerSeparation ? Math.max(0, downloadedImages.length - 1) : null
-          },
-          cost: index === 0 ? cost : null,
-          remoteImage: item.remoteImage,
-          localImage: item.output.publicPath,
-          localThumbnail: item.output.thumbnailPublicPath,
-          outputFileName: item.output.fileName,
-          outputBytes: item.output.bytes,
-          text: seedreamImage.resultText || ""
-        });
-      }
-
-      const images = downloadedImages.map(({ remoteImage, output }, index) => ({
-        ...remoteImage,
-        localUrl: output.publicPath,
-        thumbnailUrl: output.thumbnailPublicPath,
-        fileName: output.fileName,
-        mimeType: output.mimeType,
-        label: seedreamImage.layerSeparation ? index === 0 ? "Composite" : `Layer ${index}` : `Image ${index + 1}`,
-        layerIndex: seedreamImage.layerSeparation && index > 0 ? index : null
-      }));
-
-      return res.json({
-        text: seedreamImage.resultText || "",
-        cost,
-        image: images[0],
-        images,
-        layerSeparation: seedreamImage.layerSeparation
-      });
-    }
-
     if (selectedModel.provider === "fal-openai-image-2") {
       if (!process.env.FAL_KEY) {
         return res.status(400).json({ error: "Missing FAL_KEY in .env." });
@@ -2102,7 +1927,8 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
         imagePromptLabels,
         aspectRatio,
         resolution: req.body.resolution,
-        quality: req.body.quality
+        quality: req.body.quality,
+        editMaskDataUrl: req.body.editMaskDataUrl
       });
       const output = await downloadImage(req, openAiImage.remoteImage.url, "openai-image-2", openAiImage.remoteImage.content_type || openAiImage.remoteImage.mimeType);
 
@@ -2132,7 +1958,8 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
           imageSize: openAiImage.size,
           quality: openAiImage.quality,
           imagePromptCount: imagePromptUrls.length,
-          imagePromptLabels: cleanReferenceLabels
+          imagePromptLabels: cleanReferenceLabels,
+          maskedEdit: Boolean(req.body.editMaskDataUrl)
         },
         cost,
         remoteImage: openAiImage.remoteImage,
@@ -2497,12 +2324,6 @@ async function runKreaImageModel(
   const kreaApiKey = String(process.env.KREA_API_KEY || "").trim();
   if (!kreaApiKey) {
     return res.status(400).json({ error: "Krea is disabled or its API key is missing in Settings." });
-  }
-
-  if (selectedModel.displayName === imageModelNames.seedream5Pro && Boolean(req.body.seedreamLayers)) {
-    return res.status(400).json({
-      error: "Seedream Layers currently requires Fal. Disable Layers or enable Fal; standard Seedream generation works through Krea."
-    });
   }
 
   const endpoint = kreaEndpointForModel("image", selectedModel.displayName);
@@ -3616,13 +3437,6 @@ app.post("/api/node/generate-video", async (req, res) => {
 
     const selectedVideoModel = resolveVideoModel(req.body.model);
 
-    if (selectedVideoModel.provider === "google-gemini-omni") {
-      if (!process.env.GOOGLE_API_KEY && !process.env.FAL_KEY && !process.env.KREA_API_KEY) {
-        return res.status(400).json({ error: "Gemini Omni Flash needs an enabled Google, Fal, or Krea API key in Settings." });
-      }
-      return runGeminiOmniVideo(req, res, { prompt, selectedVideoModel });
-    }
-
     if (selectedVideoModel.provider === "disabled") {
       return res.status(400).json({ error: `${selectedVideoModel.displayName} is temporarily disabled.` });
     }
@@ -3645,6 +3459,10 @@ app.post("/api/node/generate-video", async (req, res) => {
       return runKlingO3Video(req, res, { prompt, selectedVideoModel, variant: "4k" });
     }
 
+    if (selectedVideoModel.provider === "fal-minimax-h3") {
+      return runMiniMaxH3Video(req, res, { prompt, selectedVideoModel });
+    }
+
     if (selectedVideoModel.provider === "fal-wan-fun-control") {
       return runWanFunControlVideo(req, res, {
         prompt,
@@ -3653,35 +3471,10 @@ app.post("/api/node/generate-video", async (req, res) => {
       });
     }
 
-    if (selectedVideoModel.provider === "fal-wan-2-7-reference-to-video") {
-      return runWan27ReferenceVideo(req, res, {
-        prompt,
-        referenceImageUrls: Array.isArray(req.body.referenceImageUrls) ? req.body.referenceImageUrls.filter(isLocalAssetUrl) : [],
-        referenceVideoUrls: Array.isArray(req.body.referenceVideoUrls) ? req.body.referenceVideoUrls.filter(isLocalAssetUrl) : [],
-        selectedVideoModel
-      });
-    }
-
-    if (selectedVideoModel.provider === "fal-aurora") {
-      return runAuroraVideo(req, res, {
-        prompt,
-        referenceImageUrls: Array.isArray(req.body.referenceImageUrls) ? req.body.referenceImageUrls.filter(isLocalAssetUrl) : [],
-        referenceAudioUrls: Array.isArray(req.body.referenceAudioUrls) ? req.body.referenceAudioUrls.filter(isLocalAssetUrl) : []
-      });
-    }
-
     if (selectedVideoModel.provider === "fal-sam3-video") {
       return runSam3VideoSegmentation(req, res, {
         prompt,
         referenceVideoUrls: Array.isArray(req.body.referenceVideoUrls) ? req.body.referenceVideoUrls.filter(isLocalAssetUrl) : []
-      });
-    }
-
-    if (selectedVideoModel.provider === "fal-happy-horse") {
-      return runHappyHorseReferenceVideo(req, res, {
-        prompt,
-        referenceImageUrls: Array.isArray(req.body.referenceImageUrls) ? req.body.referenceImageUrls.filter(isLocalAssetUrl) : [],
-        selectedVideoModel
       });
     }
 
@@ -3784,7 +3577,14 @@ app.post("/api/node/generate-video", async (req, res) => {
       providerName = "fal.ai";
       cost = seedance25
         ? estimateSeedance25FalCost({ duration, resolution, hasVideoReference: referenceVideoUrls.length > 0 })
-        : estimateSeedanceCost({ duration, resolution, aspectRatio, endpoint, routeKind });
+        : estimateSeedanceCost({
+            duration,
+            resolution,
+            aspectRatio,
+            endpoint,
+            routeKind,
+            hasVideoReference: referenceVideoUrls.length > 0
+          });
       cost.aspectRatio = aspectRatio;
       cost.routeKind = routeKind;
 
@@ -3880,273 +3680,6 @@ app.post("/api/node/generate-video", async (req, res) => {
     sendApiError(res, error, "Video generation failed.");
   }
 });
-
-async function runGeminiOmniVideo(req, res, { prompt, selectedVideoModel }) {
-  const durationSeconds = normalizeGeminiOmniDuration(req.body.duration);
-  const aspectRatio = normalizeGeminiOmniAspectRatio(req.body.aspectRatio);
-  const generateAudio = req.body.generateAudio !== false;
-  const startFrameUrl = firstLocalOutput(req.body.startFrameUrls);
-  const filmDirector = req.body.filmDirector && typeof req.body.filmDirector === "object" ? req.body.filmDirector : null;
-  const directorReferences = filterFilmDirectorReferencesForOutput(
-    filmDirector?.references,
-    filmDirector?.finalPrompt || prompt
-  );
-  const rawReferenceImageUrls = Array.isArray(req.body.referenceImageUrls) ? req.body.referenceImageUrls : [];
-  const rawReferenceImageLabels = Array.isArray(req.body.referenceImageLabels) ? req.body.referenceImageLabels : [];
-  const rawCharacterUrls = Array.isArray(req.body.characterReferenceUrls) ? req.body.characterReferenceUrls : [];
-  const rawCharacterLabels = Array.isArray(req.body.characterReferenceLabels) ? req.body.characterReferenceLabels : [];
-  const references = uniqueGeminiOmniReferences([
-    ...directorReferences.map((item) => ({ url: item?.url, label: item?.tag || item?.label })),
-    ...rawCharacterUrls.map((url, index) => ({ url, label: rawCharacterLabels[index] })),
-    ...rawReferenceImageUrls.map((url, index) => ({ url, label: rawReferenceImageLabels[index] }))
-  ].filter((item) => isLocalAssetUrl(item.url) && item.url !== startFrameUrl));
-  const submittedPrompt = [
-    buildGeminiOmniPrompt({
-      prompt,
-      hasStartFrame: Boolean(startFrameUrl),
-      references,
-      generateAudio
-    }),
-    `Create a ${durationSeconds}-second video in ${aspectRatio}.`
-  ].filter(Boolean).join("\n\n");
-  const media = [
-    ...(startFrameUrl ? [{ url: startFrameUrl, label: "First Frame", role: "first-frame" }] : []),
-    ...references.map((item) => ({ ...item, role: "reference" }))
-  ];
-  const task = references.length ? "reference_to_video" : startFrameUrl ? "image_to_video" : "text_to_video";
-
-  let provider = "Google";
-  let endpoint = googleGeminiOmniModel;
-  let requestId = "";
-  let remoteVideo = null;
-  let output = null;
-  let fallbackReason = "";
-
-  if (process.env.GOOGLE_API_KEY) {
-    try {
-      const direct = await generateGoogleGeminiOmniVideo({ submittedPrompt, media, aspectRatio, task, req });
-      requestId = direct.requestId;
-      remoteVideo = direct.remoteVideo;
-      output = direct.output;
-    } catch (error) {
-      if ((!process.env.FAL_KEY && !process.env.KREA_API_KEY) || !shouldFallbackGeminiOmniToFal(error)) throw error;
-      fallbackReason = error.message || "Google direct access was unavailable.";
-      console.warn(`Gemini Omni Google direct unavailable; using API fallback: ${fallbackReason}`);
-    }
-  }
-
-  if (!output) {
-    const runtimeProvider = resolveFalKreaProvider({
-      falKey: process.env.FAL_KEY,
-      kreaKey: process.env.KREA_API_KEY
-    });
-    const fallback = runtimeProvider === "fal"
-      ? await generateFalGeminiOmniVideo({ submittedPrompt, media, aspectRatio, durationSeconds })
-      : await generateKreaGeminiOmniVideo({ submittedPrompt, media, aspectRatio, durationSeconds });
-    provider = runtimeProvider === "fal" ? "fal.ai" : "Krea";
-    endpoint = fallback.endpoint;
-    requestId = fallback.requestId;
-    remoteVideo = fallback.remoteVideo;
-    output = await downloadVideo(req, remoteVideo.url, "gemini-omni");
-  }
-
-  const cost = estimateGeminiOmniCost({ durationSeconds, provider, endpoint });
-  await appendHistory({
-    id: requestId || randomUUID(),
-    createdAt: new Date().toISOString(),
-    mediaType: "video",
-    provider,
-    modelName: selectedVideoModel.displayName,
-    endpoint,
-    mode: `${selectedVideoModel.displayName} ${task.replaceAll("_", " ")}`,
-    prompt,
-    submittedPrompt,
-    project: projectFromBody(req.body),
-    node: nodeFromBody(req.body),
-    settings: {
-      duration: String(durationSeconds),
-      resolution: "720p",
-      aspectRatio,
-      generateAudio,
-      task,
-      startFrameCount: startFrameUrl ? 1 : 0,
-      referenceImageCount: references.length,
-      referenceImageNames: references.map((item) => item.label).filter(Boolean),
-      googleDirect: provider === "Google",
-      falFallback: provider === "fal.ai" && Boolean(process.env.GOOGLE_API_KEY),
-      kreaFallback: provider === "Krea" && Boolean(process.env.GOOGLE_API_KEY),
-      fallbackReason
-    },
-    cost,
-    remoteVideo,
-    localVideo: output.publicPath,
-    outputFileName: output.fileName,
-    outputBytes: output.bytes
-  });
-
-  return res.json({
-    requestId,
-    endpoint,
-    modelName: selectedVideoModel.displayName,
-    submittedPrompt,
-    provider,
-    cost,
-    video: {
-      ...remoteVideo,
-      localUrl: output.publicPath,
-      fileName: output.fileName
-    }
-  });
-}
-
-async function generateGoogleGeminiOmniVideo({ submittedPrompt, media, aspectRatio, task, req }) {
-  const input = [];
-  for (const item of media) {
-    const asset = await readLocalAsset(item.url);
-    if (!String(asset.mimeType || "").startsWith("image/")) continue;
-    input.push({
-      type: "image",
-      mime_type: asset.mimeType,
-      data: asset.buffer.toString("base64")
-    });
-  }
-  input.push({ type: "text", text: submittedPrompt });
-
-  const response = await fetch("https://generativelanguage.googleapis.com/v1beta/interactions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-goog-api-key": process.env.GOOGLE_API_KEY
-    },
-    body: JSON.stringify({
-      model: googleGeminiOmniModel,
-      input,
-      generation_config: { video_config: { task } },
-      response_format: { type: "video", aspect_ratio: aspectRatio, delivery: "uri" },
-      background: false,
-      store: true,
-      stream: false
-    })
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw httpError(response.status, data?.error?.message || data?.message || "Gemini Omni direct generation failed.", { raw: data });
-  }
-
-  const videoPart = extractGeminiOmniVideoPart(data);
-  if (!videoPart?.data && !videoPart?.uri) {
-    throw httpError(502, "Gemini Omni direct generation returned no video.", { raw: data });
-  }
-
-  const mimeType = videoPart.mime_type || videoPart.mimeType || "video/mp4";
-  const extension = mimeType === "video/webm" ? ".webm" : ".mp4";
-  const target = await createManagedAssetTarget(req, "gemini-omni", extension, workflowPackageOutputDirName);
-  const bytes = videoPart.data
-    ? Buffer.from(videoPart.data, "base64")
-    : await downloadGoogleGeminiOmniFile(videoPart.uri);
-  await writeFile(target.filePath, bytes);
-
-  return {
-    requestId: data.id || randomUUID(),
-    remoteVideo: {
-      url: videoPart.uri || "",
-      content_type: mimeType,
-      file_name: target.fileName,
-      file_size: bytes.length
-    },
-    output: {
-      fileName: target.fileName,
-      publicPath: target.publicPath,
-      filePath: target.filePath,
-      bytes: bytes.length
-    }
-  };
-}
-
-function extractGeminiOmniVideoPart(data = {}) {
-  if (data.output_video?.data || data.output_video?.uri) return data.output_video;
-  const steps = Array.isArray(data.steps) ? data.steps : [];
-  for (const step of steps) {
-    const content = Array.isArray(step?.content) ? step.content : [];
-    const video = content.find((item) => item?.type === "video" && (item.data || item.uri));
-    if (video) return video;
-  }
-  return null;
-}
-
-async function downloadGoogleGeminiOmniFile(uri) {
-  const fileId = String(uri || "").match(/files\/([^/:?]+)/)?.[1];
-  if (!fileId) throw httpError(502, "Gemini Omni returned an invalid video file URI.");
-
-  const baseUrl = `https://generativelanguage.googleapis.com/v1beta/files/${encodeURIComponent(fileId)}`;
-  for (let attempt = 0; attempt < 120; attempt += 1) {
-    const statusResponse = await fetch(baseUrl, { headers: { "x-goog-api-key": process.env.GOOGLE_API_KEY } });
-    const statusData = await statusResponse.json().catch(() => ({}));
-    if (!statusResponse.ok) {
-      throw httpError(statusResponse.status, statusData?.error?.message || "Could not check Gemini Omni video status.", { raw: statusData });
-    }
-    const state = String(statusData.state?.name || statusData.state || "").toUpperCase();
-    if (state === "ACTIVE") break;
-    if (state === "FAILED") throw httpError(502, "Gemini Omni video processing failed.", { raw: statusData });
-    if (attempt === 119) throw httpError(504, "Gemini Omni video processing timed out.");
-    await delay(5000);
-  }
-
-  const downloadResponse = await fetch(`${baseUrl}:download?alt=media`, {
-    headers: { "x-goog-api-key": process.env.GOOGLE_API_KEY }
-  });
-  if (!downloadResponse.ok) {
-    const message = await downloadResponse.text().catch(() => "");
-    throw httpError(downloadResponse.status, message || "Could not download Gemini Omni video.");
-  }
-  return Buffer.from(await downloadResponse.arrayBuffer());
-}
-
-async function generateFalGeminiOmniVideo({ submittedPrompt, media, aspectRatio, durationSeconds }) {
-  if (!process.env.FAL_KEY) throw httpError(400, "Gemini Omni fal fallback needs a Fal API key in Settings.");
-  const endpoint = media.length ? falGeminiOmniReferenceEndpoint : falGeminiOmniTextEndpoint;
-  const input = {
-    prompt: submittedPrompt,
-    aspect_ratio: aspectRatio,
-    duration: durationSeconds
-  };
-  if (media.length) {
-    input.image_urls = await Promise.all(media.map((item) => uploadLocalOutputToFal(item.url)));
-  }
-  const result = await subscribeFal(endpoint, { input, logs: true }, { route: "generate-video", model: videoModelNames.geminiOmni });
-  const remoteVideo = result?.data?.video;
-  if (!remoteVideo?.url) throw httpError(502, "Fal returned no Gemini Omni video URL.", { raw: result?.data });
-  return { endpoint, requestId: result.requestId, remoteVideo };
-}
-
-async function generateKreaGeminiOmniVideo({ submittedPrompt, media, aspectRatio, durationSeconds }) {
-  const endpoint = kreaEndpointForModel("video", videoModelNames.geminiOmni);
-  const startFrame = media.find((item) => item.role === "first-frame");
-  const references = media.filter((item) => item.role !== "first-frame").slice(0, 10);
-  const input = {
-    prompt: submittedPrompt,
-    aspect_ratio: normalizeChoice(aspectRatio, ["16:9", "9:16"], "16:9"),
-    duration: clampInteger(durationSeconds, 3, 10, 8),
-    start_image: startFrame ? await uploadLocalOutputToKrea(startFrame.url) : undefined,
-    reference_images: references.length
-      ? await Promise.all(references.map((item) => uploadLocalOutputToKrea(item.url)))
-      : undefined
-  };
-  const result = await runKreaGeneration({ endpoint, input, label: videoModelNames.geminiOmni });
-  const videoUrl = extractKreaJobResultUrl(result.job);
-  if (!videoUrl) {
-    throw httpError(502, "Krea completed Gemini Omni Flash but returned no video URL.", { body: result.job });
-  }
-  return {
-    endpoint,
-    requestId: result.requestId,
-    remoteVideo: {
-      url: videoUrl,
-      content_type: "video/mp4",
-      file_name: "gemini-omni.mp4"
-    }
-  };
-}
 
 async function runKlingO3Video(req, res, { prompt, selectedVideoModel, variant = "pro" }) {
   const is4k = variant === "4k";
@@ -4593,31 +4126,6 @@ async function optimizeKlingFilmDirectorMultiPrompt(multiPrompt = []) {
   }
 }
 
-function estimateGeminiOmniCost({ durationSeconds, provider, endpoint }) {
-  const googleDirect = provider === "Google";
-  const krea = provider === "Krea";
-  const unitRateUsd = krea ? null : googleDirect ? geminiOmniGoogleCostPerSecond : geminiOmniFalCostPerSecond;
-  return {
-    amountUsd: unitRateUsd == null ? null : roundCurrency(durationSeconds * unitRateUsd),
-    currency: "USD",
-    unitRateUsd,
-    units: durationSeconds,
-    unit: "second",
-    mediaType: "video",
-    resolution: "720p",
-    durationSeconds,
-    pricingBasis: krea
-      ? "Gemini Omni Flash generation through Krea; current public API documentation does not list a fixed local estimate"
-      : googleDirect
-        ? "Gemini Omni Flash Google output-token estimate at approximately $0.10 per 720p second"
-        : "Gemini Omni Flash fal.ai estimate at approximately $0.13 per 720p second",
-    pricingSource: krea
-      ? "krea-api-docs-2026-07-30"
-      : googleDirect ? "google-gemini-pricing-2026-07-09" : "fal-model-page-2026-07-10",
-    endpoint
-  };
-}
-
 function estimateKlingO3Cost({ durationSeconds, generateAudio, endpoint, variant = "pro" }) {
   const is4k = variant === "4k";
   const unitRateUsd = is4k ? klingO34kCostPerSecond : generateAudio ? klingO3ProAudioCostPerSecond : klingO3ProCostPerSecond;
@@ -4867,120 +4375,163 @@ async function runSam3VideoSegmentation(req, res, { prompt, referenceVideoUrls }
   });
 }
 
-async function runAuroraVideo(req, res, { prompt, referenceImageUrls, referenceAudioUrls }) {
-  const imageUrl = firstLocalOutput(referenceImageUrls);
-  if (!imageUrl) {
-    return res.status(400).json({ error: "Creatify Aurora requires a connected image." });
+async function runMiniMaxH3Video(req, res, { prompt, selectedVideoModel }) {
+  const startFrameUrl = firstLocalOutput(req.body.startFrameUrls);
+  const endFrameUrl = firstLocalOutput(req.body.endFrameUrls);
+  const filmDirector = req.body.filmDirector && typeof req.body.filmDirector === "object" ? req.body.filmDirector : null;
+  const directorReferences = filterFilmDirectorReferencesForOutput(
+    filmDirector?.references,
+    filmDirector?.finalPrompt || prompt
+  );
+  const mergedImages = mergeSeedanceDirectorReferences({
+    directUrls: Array.isArray(req.body.referenceImageUrls) ? req.body.referenceImageUrls : [],
+    directLabels: Array.isArray(req.body.referenceImageLabels) ? req.body.referenceImageLabels : [],
+    directorReferences,
+    limit: minimaxH3ReferenceLimits.images
+  });
+  const images = mergedImages.urls
+    .map((url, index) => ({ url, label: mergedImages.labels[index], type: "image" }))
+    .filter((item) => isLocalAssetUrl(item.url))
+    .slice(0, minimaxH3ReferenceLimits.images);
+  const videos = (Array.isArray(req.body.referenceVideoUrls) ? req.body.referenceVideoUrls : [])
+    .map((url, index) => ({ url, label: req.body.referenceVideoLabels?.[index], type: "video" }))
+    .filter((item) => isLocalAssetUrl(item.url))
+    .slice(0, minimaxH3ReferenceLimits.videos);
+  const audio = (Array.isArray(req.body.referenceAudioUrls) ? req.body.referenceAudioUrls : [])
+    .map((url, index) => ({ url, label: req.body.referenceAudioLabels?.[index], type: "audio" }))
+    .filter((item) => isLocalAssetUrl(item.url))
+    .slice(0, minimaxH3ReferenceLimits.audio);
+
+  const references = [...images, ...videos, ...audio].slice(0, minimaxH3ReferenceLimits.total);
+  const referenceImages = references.filter((item) => item.type === "image");
+  const referenceVideos = references.filter((item) => item.type === "video");
+  const referenceAudio = references.filter((item) => item.type === "audio");
+  const hasReferences = references.length > 0;
+  if (!startFrameUrl && referenceAudio.length && !referenceImages.length && !referenceVideos.length) {
+    return res.status(400).json({ error: "MiniMax H3 audio references require at least one connected reference image or video." });
   }
 
-  const audioUrl = firstLocalOutput(referenceAudioUrls);
-  if (!audioUrl) {
-    return res.status(400).json({ error: "Creatify Aurora requires a connected audio file." });
+  const routeKind = startFrameUrl ? "image-to-video" : hasReferences ? "reference-to-video" : "text-to-video";
+  const duration = normalizeMiniMaxH3Duration(req.body.duration);
+  const resolution = normalizeMiniMaxH3Resolution(req.body.resolution);
+  const aspectRatio = normalizeMiniMaxH3AspectRatio(req.body.aspectRatio);
+  const submittedPrompt = hasReferences
+    ? rewriteMiniMaxH3ReferenceMentions(prompt, references)
+    : prompt;
+  const runtimeProvider = resolveFalKreaProvider({
+    falKey: process.env.FAL_KEY,
+    kreaKey: process.env.KREA_API_KEY
+  });
+  if (!runtimeProvider) {
+    return res.status(400).json({ error: "MiniMax H3 needs an enabled Fal or Krea API key in Settings." });
   }
 
-  const endpoint = "fal-ai/creatify/aurora";
-  const resolution = normalizeChoice(req.body.resolution, ["480p", "720p"], "720p");
-  const input = {
-    image_url: await uploadLocalOutputToFal(imageUrl),
-    audio_url: await uploadLocalOutputToFal(audioUrl),
-    prompt,
-    resolution
-  };
+  let endpoint;
+  let requestId;
+  let resultSeed = null;
+  let remoteVideo;
+  let cost;
+  let providerName;
+  let input;
 
-  const result = await subscribeFal(endpoint, { input, logs: true });
-  const remoteVideo = result?.data?.video;
-
-  if (!remoteVideo?.url) {
-    return res.status(502).json({ error: "Fal returned no video URL.", raw: result?.data });
-  }
-
-  const output = await downloadVideo(req, remoteVideo.url, "creatify-aurora");
-  const cost = estimateAuroraCost({ endpoint, resolution, duration: remoteVideo.duration });
-  await appendHistory({
-    id: result.requestId || randomUUID(),
-    createdAt: new Date().toISOString(),
-    mediaType: "video",
-    provider: "fal.ai",
-    modelName: "Creatify Aurora",
-    endpoint,
-    mode: "Aurora lipsync image and audio to video",
-    prompt,
-    submittedPrompt: prompt,
-    project: projectFromBody(req.body),
-    node: nodeFromBody(req.body),
-    settings: {
+  if (runtimeProvider === "fal") {
+    endpoint = miniMaxH3FalEndpoint({ startFrame: Boolean(startFrameUrl), references: hasReferences });
+    input = {
+      prompt: submittedPrompt,
+      duration,
       resolution,
-      imageCount: 1,
-      audioCount: 1
-    },
-    cost,
-    remoteVideo,
-    localVideo: output.publicPath,
-    outputFileName: output.fileName,
-    outputBytes: output.bytes
-  });
+      prompt_expansion_mode: "balanced",
+      enable_safety_checker: req.body.enableSafetyChecker !== false
+    };
+    const seed = optionalInteger(req.body.seed);
+    if (seed !== undefined) input.seed = seed;
 
-  return res.json({
-    requestId: result.requestId,
-    endpoint,
-    cost,
-    video: {
-      ...remoteVideo,
-      localUrl: output.publicPath,
-      fileName: output.fileName
+    if (routeKind === "image-to-video") {
+      input.image_url = await uploadLocalOutputToFal(startFrameUrl);
+      if (endFrameUrl) input.end_image_url = await uploadLocalOutputToFal(endFrameUrl);
+    } else {
+      input.aspect_ratio = aspectRatio;
     }
-  });
-}
 
-async function runHappyHorseReferenceVideo(req, res, { prompt, referenceImageUrls, selectedVideoModel }) {
-  const imageUrls = referenceImageUrls.slice(0, 9);
-  if (!imageUrls.length) {
-    return res.status(400).json({ error: "Happy Horse requires at least one connected reference image." });
+    if (routeKind === "reference-to-video") {
+      if (referenceImages.length) input.reference_image_urls = await Promise.all(referenceImages.map((item) => uploadLocalOutputToFal(item.url)));
+      if (referenceVideos.length) input.reference_video_urls = await Promise.all(referenceVideos.map((item) => uploadLocalOutputToFal(item.url)));
+      if (referenceAudio.length) input.reference_audio_urls = await Promise.all(referenceAudio.map((item) => uploadLocalOutputToFal(item.url)));
+    }
+
+    const result = await subscribeFal(endpoint, { input, logs: true });
+    requestId = result.requestId;
+    resultSeed = result?.data?.seed ?? input.seed ?? null;
+    remoteVideo = normalizeFalFile(result?.data?.video);
+    if (!remoteVideo?.url) {
+      return res.status(502).json({ error: "Fal returned no MiniMax H3 video URL.", raw: result?.data });
+    }
+    providerName = "fal.ai";
+    cost = estimateMiniMaxH3FalCost({
+      duration,
+      resolution,
+      referenceImageCount: routeKind === "reference-to-video" ? referenceImages.length : 0,
+      endpoint
+    });
+  } else {
+    const kreaApiKey = String(process.env.KREA_API_KEY || "").trim();
+    endpoint = kreaEndpointForModel("video", selectedVideoModel.displayName);
+    const [startImage, endImage, uploadedImages, uploadedVideos, uploadedAudios] = await Promise.all([
+      startFrameUrl ? uploadLocalOutputToKrea(startFrameUrl, kreaApiKey) : "",
+      endFrameUrl ? uploadLocalOutputToKrea(endFrameUrl, kreaApiKey) : "",
+      Promise.all(referenceImages.map((item) => uploadLocalOutputToKrea(item.url, kreaApiKey))),
+      Promise.all(referenceVideos.map((item) => uploadLocalOutputToKrea(item.url, kreaApiKey))),
+      Promise.all(referenceAudio.map((item) => uploadLocalOutputToKrea(item.url, kreaApiKey)))
+    ]);
+    input = buildKreaMiniMaxH3Input({
+      prompt: submittedPrompt,
+      startImage,
+      endImage,
+      referenceImages: uploadedImages,
+      referenceVideos: uploadedVideos,
+      referenceAudios: uploadedAudios,
+      aspectRatio,
+      duration
+    });
+    const result = await runKreaGeneration({ endpoint, input, label: "MiniMax H3", apiKey: kreaApiKey });
+    requestId = result.requestId;
+    const videoUrl = extractKreaJobResultUrl(result.job);
+    if (!videoUrl) {
+      return res.status(502).json({ error: "Krea completed MiniMax H3 but returned no video URL.", raw: result.job });
+    }
+    remoteVideo = { url: videoUrl, content_type: "video/mp4", file_name: "minimax-h3.mp4" };
+    providerName = "Krea";
+    cost = estimateKreaMiniMaxH3Cost({ durationSeconds: duration, referenceImageCount: referenceImages.length });
   }
 
-  const endpoint = selectedVideoModel.id;
-  const resolution = normalizeHappyHorseResolution(req.body.resolution);
-  const duration = normalizeHappyHorseDuration(req.body.duration);
-  const aspectRatio = normalizeHappyHorseAspectRatio(req.body.aspectRatio);
-  const seed = optionalInteger(req.body.seed);
-  const input = {
-    prompt,
-    image_urls: await Promise.all(imageUrls.map(uploadLocalOutputToFal)),
-    aspect_ratio: aspectRatio,
-    resolution,
-    duration,
-    enable_safety_checker: req.body.enableSafetyChecker !== false
-  };
-  if (seed !== undefined) input.seed = Math.min(2147483647, Math.max(0, seed));
-
-  const result = await subscribeFal(endpoint, { input, logs: true });
-  const remoteVideo = normalizeFalFile(result?.data?.video);
-
-  if (!remoteVideo?.url) {
-    return res.status(502).json({ error: "Fal returned no Happy Horse video URL.", raw: result?.data });
-  }
-
-  const output = await downloadVideo(req, remoteVideo.url, "happy-horse-reference-to-video");
-  const cost = estimateHappyHorseCost({ endpoint, resolution, duration });
+  const output = await downloadVideo(req, remoteVideo.url, "minimax-h3");
   await appendHistory({
-    id: result.requestId || randomUUID(),
+    id: requestId || randomUUID(),
     createdAt: new Date().toISOString(),
     mediaType: "video",
-    provider: "fal.ai",
+    provider: providerName,
     modelName: selectedVideoModel.displayName,
     endpoint,
-    mode: "Happy Horse reference to video",
+    mode: `MiniMax H3 ${routeKind}`,
     prompt,
-    submittedPrompt: prompt,
+    submittedPrompt,
     project: projectFromBody(req.body),
     node: nodeFromBody(req.body),
     settings: {
-      resolution,
+      model: selectedVideoModel.displayName,
+      routeKind,
       duration,
-      aspectRatio,
-      referenceImageCount: imageUrls.length,
-      enableSafetyChecker: input.enable_safety_checker,
-      seed: result?.data?.seed ?? input.seed ?? null
+      resolution: runtimeProvider === "fal" ? resolution : "Krea provider default",
+      aspectRatio: runtimeProvider === "fal" && routeKind === "image-to-video" ? "source frame" : aspectRatio,
+      startFrameCount: startFrameUrl ? 1 : 0,
+      endFrameCount: endFrameUrl ? 1 : 0,
+      referenceImageCount: referenceImages.length,
+      referenceVideoCount: referenceVideos.length,
+      referenceAudioCount: referenceAudio.length,
+      promptExpansionMode: input.prompt_expansion_mode || null,
+      enableSafetyChecker: input.enable_safety_checker ?? null,
+      seed: resultSeed,
+      runtimeProvider
     },
     cost,
     remoteVideo,
@@ -4990,8 +4541,8 @@ async function runHappyHorseReferenceVideo(req, res, { prompt, referenceImageUrl
   });
 
   return res.json({
-    requestId: result.requestId,
-    seed: result?.data?.seed ?? input.seed,
+    requestId,
+    seed: resultSeed,
     endpoint,
     modelName: selectedVideoModel.displayName,
     cost,
@@ -5089,95 +4640,6 @@ async function runWanFunControlVideo(req, res, { prompt, referenceImageUrls, ref
     cost,
     video: {
       ...remoteVideo,
-      localUrl: output.publicPath,
-      fileName: output.fileName
-    }
-  });
-}
-
-async function runWan27ReferenceVideo(req, res, { prompt, referenceImageUrls, referenceVideoUrls, selectedVideoModel }) {
-  const options = req.body.wan27Reference || {};
-  const endpoint = selectedVideoModel.id;
-  const duration = normalizeWan27ReferenceDuration(req.body.duration);
-  const resolution = normalizeChoice(req.body.resolution, ["720p", "1080p"], "1080p");
-  const aspectRatio = normalizeWan27ReferenceAspectRatio(req.body.aspectRatio);
-  const negativePrompt = String(options.negativePrompt || req.body.negativePrompt || "").slice(0, 500);
-  const seed = optionalInteger(req.body.seed);
-  const input = {
-    prompt,
-    negative_prompt: negativePrompt,
-    aspect_ratio: aspectRatio,
-    resolution,
-    duration,
-    multi_shots: Boolean(options.multiShots),
-    enable_safety_checker: req.body.enableSafetyChecker !== false
-  };
-
-  if (seed !== undefined) input.seed = Math.min(2147483647, Math.max(0, seed));
-  if (referenceImageUrls.length) input.reference_image_urls = await Promise.all(referenceImageUrls.map(uploadLocalOutputToFal));
-  if (referenceVideoUrls.length) input.reference_video_urls = await Promise.all(referenceVideoUrls.map(uploadLocalOutputToFal));
-
-  const referenceVideoDurations = await localVideoDurations(referenceVideoUrls);
-  const result = await subscribeFal(endpoint, { input, logs: true });
-  const remoteVideo = result?.data?.video;
-
-  if (!remoteVideo?.url) {
-    return res.status(502).json({ error: "Fal returned no Wan 2.7 video URL.", raw: result?.data });
-  }
-
-  const output = await downloadVideo(req, remoteVideo.url, "wan-2-7-reference-to-video");
-  const outputVideo = enrichVideoMetadata(remoteVideo, await probeVideoFile(output.filePath));
-  const cost = estimateWan27ReferenceVideoCost({
-    endpoint,
-    duration,
-    outputVideo,
-    referenceVideoDurations,
-    resolution,
-    aspectRatio
-  });
-
-  await appendHistory({
-    id: result.requestId || randomUUID(),
-    createdAt: new Date().toISOString(),
-    mediaType: "video",
-    provider: "fal.ai",
-    modelName: selectedVideoModel.displayName,
-    endpoint,
-    mode: "Wan 2.7 reference-to-video",
-    prompt,
-    submittedPrompt: prompt,
-    project: projectFromBody(req.body),
-    node: nodeFromBody(req.body),
-    settings: {
-      model: selectedVideoModel.displayName,
-      negativePrompt,
-      duration,
-      resolution,
-      aspectRatio,
-      multiShots: input.multi_shots,
-      enableSafetyChecker: input.enable_safety_checker,
-      referenceImageCount: referenceImageUrls.length,
-      referenceVideoCount: referenceVideoUrls.length,
-      referenceVideoDurations,
-      actualPrompt: result?.data?.actual_prompt || null,
-      seed: result?.data?.seed ?? input.seed ?? null
-    },
-    cost,
-    remoteVideo: outputVideo,
-    localVideo: output.publicPath,
-    outputFileName: output.fileName,
-    outputBytes: output.bytes
-  });
-
-  return res.json({
-    requestId: result.requestId,
-    seed: result?.data?.seed ?? input.seed,
-    endpoint,
-    modelName: selectedVideoModel.displayName,
-    actualPrompt: result?.data?.actual_prompt || "",
-    cost,
-    video: {
-      ...outputVideo,
       localUrl: output.publicPath,
       fileName: output.fileName
     }
@@ -9218,14 +8680,15 @@ const seedanceResolutionDimensions = {
   }
 };
 
-function estimateSeedanceCost({ duration, resolution, aspectRatio, endpoint, routeKind }) {
+function estimateSeedanceCost({ duration, resolution, aspectRatio, endpoint, routeKind, hasVideoReference = false }) {
   const seconds = durationToSeconds(duration);
   const unitRateUsd = resolution === "4k"
     ? seedance4KCostPerThousandTokens
     : seedanceStandardCostPerThousandTokens;
   const dimensions = seedanceBillingDimensions(resolution, aspectRatio);
   const billableUnits = (dimensions.width * dimensions.height * seconds * seedanceBillingFps) / 1024 / 1000;
-  const amountUsd = roundCurrency(billableUnits * unitRateUsd);
+  const videoReferenceMultiplier = hasVideoReference ? 0.6 : 1;
+  const amountUsd = roundCurrency(billableUnits * unitRateUsd * videoReferenceMultiplier);
 
   return {
     amountUsd,
@@ -9240,51 +8703,9 @@ function estimateSeedanceCost({ duration, resolution, aspectRatio, endpoint, rou
     billingHeight: dimensions.height,
     durationSeconds: seconds,
     billingFps: seedanceBillingFps,
-    pricingBasis: "Seedance 2.0 fal.ai token estimate: width * height * duration * 24 / 1024, billed per 1K tokens",
+    pricingBasis: `Seedance 2.0 fal.ai token estimate: width * height * duration * 24 / 1024, billed per 1K tokens${hasVideoReference ? " with the published video-reference multiplier" : ""}`,
     pricingSource: "fal-model-page-2026-07-10",
     routeKind
-  };
-}
-
-function estimateHappyHorseCost({ duration, resolution, endpoint }) {
-  const seconds = Math.max(3, Math.min(15, Number(duration) || 5));
-  const unitRateUsd = resolution === "720p" ? happyHorse720pCostPerSecond : happyHorse1080pCostPerSecond;
-
-  return {
-    amountUsd: roundCurrency(seconds * unitRateUsd),
-    currency: "USD",
-    unitRateUsd,
-    units: seconds,
-    unit: "second",
-    mediaType: "video",
-    resolution,
-    pricingBasis: "Happy Horse fal.ai per-second pricing estimate",
-    pricingSource: "fal-model-page-2026-05-16",
-    endpoint,
-    routeKind: "reference-to-video"
-  };
-}
-
-function estimateWan27ReferenceVideoCost({ endpoint, duration, outputVideo, referenceVideoDurations = [], resolution, aspectRatio }) {
-  const outputSeconds = positiveNumber(outputVideo?.duration) || positiveNumber(duration) || 5;
-  const inputVideoSeconds = referenceVideoDurations.reduce((total, seconds) => total + (positiveNumber(seconds) || 0), 0);
-  const billableSeconds = outputSeconds + inputVideoSeconds;
-
-  return {
-    amountUsd: roundCurrency(billableSeconds * wan27ReferenceVideoCostPerSecond),
-    currency: "USD",
-    unitRateUsd: wan27ReferenceVideoCostPerSecond,
-    units: roundUsageUnits(billableSeconds),
-    unit: "video second",
-    mediaType: "video",
-    resolution,
-    aspectRatio,
-    outputDurationSeconds: outputSeconds,
-    referenceVideoDurationSeconds: roundUsageUnits(inputVideoSeconds),
-    pricingBasis: "Wan 2.7 Reference-to-Video fal.ai estimate at $0.10 per output second plus connected reference video seconds",
-    pricingSource: "fal-model-page-2026-05-25",
-    endpoint,
-    routeKind: "reference-to-video"
   };
 }
 
@@ -9377,24 +8798,6 @@ function wanVaceBillingFrames(outputVideo = {}, fallbackFrames) {
   const fps = positiveNumber(outputVideo.fps);
   if (duration && fps) return Math.round(duration * fps);
   return null;
-}
-
-function estimateAuroraCost({ endpoint, resolution, duration }) {
-  const seconds = Number(duration) > 0 ? Math.ceil(Number(duration)) : null;
-  const unitRateUsd = resolution === "480p" ? aurora480pCostPerSecond : aurora720pCostPerSecond;
-
-  return {
-    amountUsd: seconds ? roundCurrency(seconds * unitRateUsd) : null,
-    currency: "USD",
-    unitRateUsd,
-    units: seconds,
-    unit: "video second",
-    mediaType: "video",
-    resolution,
-    pricingBasis: "Creatify Aurora fal.ai rounded per-video-second pricing estimate",
-    pricingSource: "fal-model-page-2026-05-12",
-    endpoint
-  };
 }
 
 function estimateSam3ImageCost({ endpoint }) {
@@ -9613,49 +9016,6 @@ function estimateImageCost({ resolution }) {
   };
 }
 
-function estimateZImageCost({ endpoint, resolution, imageSize }) {
-  const width = Number(imageSize?.width || 0);
-  const height = Number(imageSize?.height || 0);
-  const megapixels = width > 0 && height > 0 ? (width * height) / 1000000 : null;
-  return {
-    amountUsd: megapixels ? roundCurrency(megapixels * zImageCostPerMegapixel) : null,
-    currency: "USD",
-    unitRateUsd: zImageCostPerMegapixel,
-    units: megapixels ? roundUsageUnits(megapixels) : null,
-    unit: "megapixel",
-    mediaType: "image",
-    resolution,
-    imageSize,
-    pricingBasis: "Z-Image Turbo fal.ai per-megapixel estimate at $0.005/MP",
-    pricingSource: "fal-model-page-2026-06-04",
-    endpoint
-  };
-}
-
-function estimateSeedream5ProCost({ resolution, imageSize, layerSeparation = false }) {
-  const width = Number(imageSize?.width || 0);
-  const height = Number(imageSize?.height || 0);
-  const is2K = width * height > 1536 * 1536;
-  const unitRateUsd = is2K ? seedream5ProCost2K : seedream5ProCostSmall;
-  const units = 1;
-  const layerCost = layerSeparation ? seedreamLayerSeparationCost : 0;
-  return {
-    amountUsd: roundCurrency(unitRateUsd + layerCost),
-    currency: "USD",
-    unitRateUsd,
-    units,
-    unit: "image",
-    mediaType: "image",
-    resolution,
-    imageSize,
-    pricingBasis: layerSeparation
-      ? "Seedream 5.0 Pro image plus fal.ai RGBA layer decomposition estimate"
-      : "Seedream 5.0 Pro tentative fal.ai per-output-image estimate",
-    pricingSource: "fal-model-page-2026-07-10",
-    endpoint: falSeedream5ProTextEndpoint
-  };
-}
-
 function estimateHunyuan3DProCost({ generateType, enablePbr, faceCount, inputImageCount = 1, endpoint }) {
   const customFaceCount = Number(faceCount) !== 500000;
   const multiView = Number(inputImageCount) > 1;
@@ -9823,16 +9183,6 @@ function durationToSeconds(duration) {
   if (duration === "auto") return 15;
   const match = String(duration || "15").match(/\d+/);
   return Math.max(1, Number(match?.[0] || 15));
-}
-
-function normalizeWan27ReferenceDuration(value) {
-  const match = String(value || "5").match(/\d+/);
-  return Math.min(10, Math.max(2, Number(match?.[0] || 5)));
-}
-
-function normalizeWan27ReferenceAspectRatio(value) {
-  const ratio = String(value || "16:9").match(/\d+:\d+/)?.[0] || "16:9";
-  return normalizeChoice(ratio, ["16:9", "9:16", "1:1", "4:3", "3:4"], "16:9");
 }
 
 function positiveNumber(value) {
@@ -10114,8 +9464,6 @@ async function processTextWithLlm({ text, textInputs, imageInputs, videoInputs }
   };
 }
 
-const skillDirectorSceneRules =
-  "Scene rules: Absolutely no music, no music score, no audio effects. Cinematic naturalism, premium live-action realism, motivated light, cine lens language, grounded acting, real physics, no subtitles, no music, continuity, 24fps smooth motion, environmental sounds, natural ambience.";
 const skillDirectorFinalPromptMaxChars = 7000;
 
 function skillDirectorSystemPrompt() {
@@ -10214,8 +9562,11 @@ function stripSkillDirectorFences(text) {
     .trim();
 }
 
-function composeSkillDirectorFinalPrompt({ referenceLines = [], styleDirection = "", motionDirection = "", shotList = "", shotListNotes = "" } = {}) {
-  const seenInstructions = new Set(skillDirectorInstructionUnits(skillDirectorSceneRules).map(skillDirectorInstructionKey));
+function composeSkillDirectorFinalPrompt({ referenceLines = [], sceneOverview = "", styleDirection = "", motionDirection = "", shotList = "", shotListNotes = "", audioMode = "production" } = {}) {
+  const audioPolicy = filmDirectorAudioPolicyPrompt(audioMode);
+  const seenInstructions = new Set(
+    skillDirectorInstructionUnits(`${filmDirectorVisualSceneRules}\n${audioPolicy}`).map(skillDirectorInstructionKey)
+  );
   const continuityNotes = skillDirectorContinuityNotesForFinal(shotListNotes);
   const cameraDirection = skillDirectorCameraDirectionForFinal(motionDirection);
   const cleanStyle = dedupeSkillDirectorInstructions(
@@ -10224,12 +9575,15 @@ function composeSkillDirectorFinalPrompt({ referenceLines = [], styleDirection =
   );
   const cleanCamera = dedupeSkillDirectorInstructions(cameraDirection, seenInstructions);
   const cleanContinuity = dedupeSkillDirectorInstructions(continuityNotes, seenInstructions);
+  const cleanOverview = cleanSkillDirectorMoodBoardReferences(sceneOverview).trim();
   const finalShotCount = largestSkillDirectorCutNumber(shotList);
   const maxCharsPerCut = filmDirectorShotMaxCharsPerCut(finalShotCount || "Auto");
   const cleanShotList = compactSkillDirectorShotList(shotList, maxCharsPerCut);
   let finalPrompt = [
     dedupeSkillDirectorLines(referenceLines).join("\n"),
-    skillDirectorSceneRules,
+    filmDirectorVisualSceneRules,
+    audioPolicy,
+    cleanOverview ? `Scene Overview:\n${cleanOverview}` : "",
     cleanStyle ? `Style Direction:\n${cleanStyle}` : "",
     cleanCamera ? `Camera Direction:\n${cleanCamera}` : "",
     cleanContinuity ? `Scene Continuity:\n${cleanContinuity}` : "",
@@ -10243,7 +9597,9 @@ function composeSkillDirectorFinalPrompt({ referenceLines = [], styleDirection =
   if (finalPrompt.length > skillDirectorFinalPromptMaxChars) {
     finalPrompt = [
       clipSkillDirectorText(dedupeSkillDirectorLines(referenceLines).join("\n"), 1400),
-      skillDirectorSceneRules,
+      filmDirectorVisualSceneRules,
+      audioPolicy,
+      cleanOverview ? `Scene Overview:\n${clipSkillDirectorText(cleanOverview, 1200)}` : "",
       cleanStyle ? `Style Direction:\n${clipSkillDirectorText(cleanStyle, 700)}` : "",
       cleanCamera ? `Camera Direction:\n${clipSkillDirectorText(cleanCamera, 500)}` : "",
       cleanContinuity ? `Scene Continuity:\n${clipSkillDirectorText(cleanContinuity, 500)}` : "",
@@ -10680,6 +10036,7 @@ function buildSkillDirectorPrompt({
   if (action === "shotList") {
     return [
       `Create the Shot List for one cinematic ${durationLabel} AI video scene.`,
+      "The current Scene Overview is the sole story authority for this pass and fully replaces every earlier version. Do not carry forward any prior event, action, prop, dialogue, evidence detail, or story beat that is absent from the current Scene Overview and connected asset descriptions. Do not turn an abstract beat into a newly invented concrete prop.",
       "Return strict JSON only with this exact shape:",
       `{"recommendedShotCount":3,"continuityLedger":"one compact line","mustHaveActions":"one compact line","cuts":[{"number":1,"shotFrame":"WS","cameraMovement":"Static","shotType":"Over-the-Shoulder","description":"${filmDirectorShotDescriptionExample(shotCount, durationSeconds)}"}]}`,
       skillDirectorContinuityMapDirective(durationLabel),
@@ -10752,8 +10109,10 @@ async function runFilmDirector({
   styleInputs = [],
   shotCount = "3",
   durationSeconds = "15",
+  videoModel = "",
   resolution = "720p",
-  aspectRatio = "16:9"
+  aspectRatio = "16:9",
+  audioMode = "production"
 }) {
   const model = skillDirectorFalModel;
   const anonymizedStyleInputs = styleInputs.map((item, index) => ({
@@ -10770,10 +10129,12 @@ async function runFilmDirector({
   if (action === "build") {
     const finalPrompt = composeSkillDirectorFinalPrompt({
       referenceLines,
+      sceneOverview,
       styleDirection,
       motionDirection,
       shotList,
-      shotListNotes
+      shotListNotes,
+      audioMode
     });
     if (!finalPrompt) {
       throw new Error("Lock generated Film Director sections before building the scene.");
@@ -10789,8 +10150,10 @@ async function runFilmDirector({
       helperUsages: [],
       shotCount,
       durationSeconds,
+      videoModel,
       resolution,
       aspectRatio,
+      audioMode,
       actualShotCount: largestSkillDirectorCutNumber(shotList || finalPrompt),
       resolvedShotCount: largestSkillDirectorCutNumber(shotList || finalPrompt) || requestedSkillDirectorShotCount(shotCount) || 0,
       referenceSetup: skillDirectorReferenceSetupFromLines(referenceLines),
@@ -10807,8 +10170,10 @@ async function runFilmDirector({
       revisionNotes,
       durationLabel: skillDirectorDurationLabel(durationSeconds),
       durationSeconds,
+      videoModel,
       resolution,
       aspectRatio,
+      audioMode,
       currentCutCount,
       sceneName,
       referenceSetup: skillDirectorReferenceSetupFromLines(referenceLines),
@@ -10848,6 +10213,10 @@ async function runFilmDirector({
       skillDirectorStructuredNumber(structuredOutput, ["durationSeconds", "duration_seconds", "duration"])
     );
     const revisedDurationSeconds = normalizeFilmDirectorDuration(requestedRevisedDuration, durationSeconds);
+    const revisedVideoModel = normalizeFilmDirectorVideoModel(
+      skillDirectorStructuredValue(structuredOutput, ["videoModel", "video_model", "model"]),
+      videoModel
+    );
     const revisedResolution = normalizeFilmDirectorResolution(
       skillDirectorStructuredValue(structuredOutput, ["resolution", "videoResolution", "video_resolution"]),
       resolution
@@ -10855,6 +10224,10 @@ async function runFilmDirector({
     const revisedAspectRatio = normalizeFilmDirectorAspectRatio(
       skillDirectorStructuredValue(structuredOutput, ["aspectRatio", "aspect_ratio", "ratio"]),
       aspectRatio
+    );
+    const revisedAudioMode = normalizeFilmDirectorAudioMode(
+      skillDirectorStructuredValue(structuredOutput, ["audioMode", "audio_mode", "audio"]),
+      audioMode
     );
     const revisedStyleDirection = compactFilmDirectorStyleDirection(cleanSkillDirectorMoodBoardReferences(
       skillDirectorStructuredValue(structuredOutput, ["styleDirection", "style_direction", "style"]) || styleDirection
@@ -10906,10 +10279,12 @@ async function runFilmDirector({
     const revisedShotListNotes = revisedPlan.shotListNotes || shotListNotes;
     const finalPrompt = composeSkillDirectorFinalPrompt({
       referenceLines: revisedReferenceLines,
+      sceneOverview: revisedSceneOverview,
       styleDirection: revisedStyleDirection,
       motionDirection: revisedMotionDirection,
       shotList: revisedShotList,
-      shotListNotes: revisedShotListNotes
+      shotListNotes: revisedShotListNotes,
+      audioMode: revisedAudioMode
     });
     const actualShotCount = largestSkillDirectorCutNumber(revisedShotList);
 
@@ -10924,8 +10299,10 @@ async function runFilmDirector({
       helperUsages: validatedOutput.usages || [],
       shotCount: actualShotCount ? String(actualShotCount) : shotCount,
       durationSeconds: revisedDurationSeconds,
+      videoModel: revisedVideoModel,
       resolution: revisedResolution,
       aspectRatio: revisedAspectRatio,
+      audioMode: revisedAudioMode,
       actualShotCount,
       resolvedShotCount: actualShotCount,
       sceneName: revisedSceneName,
@@ -10956,8 +10333,10 @@ async function runFilmDirector({
     styleInputs: anonymizedStyleInputs,
     shotCount,
     durationSeconds,
+    videoModel,
     resolution,
     aspectRatio,
+    audioMode,
     imageDescriptions: imageContext.descriptions
   });
   const llmResult = await runTextLlm({
@@ -11039,6 +10418,7 @@ async function runFilmDirector({
     durationSeconds,
     resolution,
     aspectRatio,
+    audioMode,
     actualShotCount,
     resolvedShotCount,
     referenceSetup: skillDirectorReferenceSetupFromLines(referenceLines),
@@ -11350,22 +10730,6 @@ function resolveImageModel(model) {
     };
   }
 
-  if (normalized.includes("z-image") || normalized.includes("z image") || normalized.includes("zimage")) {
-    return {
-      provider: "fal-z-image",
-      displayName: imageModelNames.zImage,
-      id: falZImageEndpoint
-    };
-  }
-
-  if (normalized.includes("seedream") && (normalized.includes("5") || normalized.includes("v5"))) {
-    return {
-      provider: "fal-seedream-5-pro",
-      displayName: imageModelNames.seedream5Pro,
-      id: falSeedream5ProTextEndpoint
-    };
-  }
-
   if (isNanoBanana2Model(model)) {
     return {
       provider: "fal-nano-banana-2",
@@ -11575,12 +10939,12 @@ function resolveVideoModel(model) {
       speed: "seedance-2.5"
     };
   }
-  if (normalized.includes("gemini") && normalized.includes("omni")) {
+  if (isMiniMaxH3Model(model)) {
     return {
-      provider: "google-gemini-omni",
-      displayName: videoModelNames.geminiOmni,
-      id: googleGeminiOmniModel,
-      speed: "gemini-omni"
+      provider: "fal-minimax-h3",
+      displayName: minimaxH3ModelName,
+      id: miniMaxH3FalEndpoint(),
+      speed: "minimax-h3"
     };
   }
   if (normalized.includes("kling") && (normalized.includes("o3") || normalized.includes("03")) && normalized.includes("4k")) {
@@ -11614,33 +10978,6 @@ function resolveVideoModel(model) {
       displayName: "SAM 3 Video",
       id: "fal-ai/sam-3/video",
       speed: "sam3"
-    };
-  }
-
-  if (normalized.includes("aurora") || normalized.includes("creatify")) {
-    return {
-      provider: "fal-aurora",
-      displayName: "Creatify Aurora",
-      id: "fal-ai/creatify/aurora",
-      speed: "aurora"
-    };
-  }
-
-  if (normalized.includes("happy") || normalized.includes("horse") || normalized.includes("alibaba")) {
-    return {
-      provider: "fal-happy-horse",
-      displayName: "Happy Horse",
-      id: "alibaba/happy-horse/reference-to-video",
-      speed: "happy-horse"
-    };
-  }
-
-  if (normalized.includes("wan 2.7") || normalized.includes("wan2.7") || normalized.includes("reference-to-video")) {
-    return {
-      provider: "fal-wan-2-7-reference-to-video",
-      displayName: "Wan 2.7 Reference-to-Video",
-      id: "fal-ai/wan/v2.7/reference-to-video",
-      speed: "wan-2.7"
     };
   }
 
@@ -12990,129 +12327,6 @@ async function generateFalNanoBananaPro({ prompt, imagePromptUrls, imagePromptLa
   };
 }
 
-async function generateFalSeedream5Pro({ prompt, imagePromptUrls, imagePromptLabels, aspectRatio, resolution, layerSeparation }) {
-  const imageInputs = [];
-
-  for (const [index, imagePromptUrl] of imagePromptUrls.entries()) {
-    const asset = await readLocalAsset(imagePromptUrl);
-    if (!asset.mimeType.startsWith("image/")) continue;
-    imageInputs.push({
-      ...asset,
-      label: cleanImagePromptLabel(imagePromptLabels[index])
-    });
-  }
-
-  const normalizedResolution = normalizeChoice(String(resolution || "2K").toUpperCase(), ["1K", "2K"], "2K");
-  const imageSize = imageSizeForResolutionAndAspectRatio({ resolution: normalizedResolution, aspectRatio });
-  const submittedPrompt = promptWithReferenceLabels(prompt, imageInputs);
-  const endpoint = imageInputs.length ? falSeedream5ProEditEndpoint : falSeedream5ProTextEndpoint;
-  const input = {
-    prompt: submittedPrompt,
-    image_size: imageSize,
-    num_images: 1,
-    max_images: 1,
-    output_format: "png",
-    sync_mode: false,
-    enable_safety_checker: true
-  };
-
-  if (imageInputs.length) {
-    input.image_urls = await Promise.all(imageInputs.slice(0, 10).map(uploadImageInputToFal));
-  }
-
-  const result = await subscribeFal(endpoint, { input, logs: true });
-  const generatedImages = falImageResults(result?.data);
-  if (!generatedImages.length) {
-    throw new Error("Fal returned no Seedream 5.0 Pro image URL.");
-  }
-
-  let remoteImages = generatedImages;
-  if (layerSeparation) {
-    const layerResult = await subscribeFal(falSeedreamLayerEndpoint, {
-      input: {
-        image_url: generatedImages[0].url,
-        prompt: "Separate this image into useful, independently editable semantic RGBA layers. Preserve text, primary subjects, foreground objects, environmental details, and background as distinct layers where possible.",
-        num_layers: 6,
-        num_inference_steps: 28,
-        guidance_scale: 5,
-        output_format: "png",
-        enable_safety_checker: true,
-        acceleration: "regular",
-        sync_mode: false
-      },
-      logs: true
-    });
-    const layers = falImageResults(layerResult?.data).map((image) => ({
-      ...image,
-      endpoint: falSeedreamLayerEndpoint
-    }));
-    if (!layers.length) {
-      throw new Error("Seedream generated the image, but Fal returned no transparent component layers.");
-    }
-    remoteImages = [
-      { ...generatedImages[0], endpoint },
-      ...layers
-    ];
-  }
-
-  return {
-    endpoint,
-    requestId: result.requestId,
-    remoteImages,
-    resolution: normalizedResolution,
-    imageSize,
-    submittedPrompt,
-    layerSeparation: Boolean(layerSeparation),
-    resultText: result?.data?.description || result?.data?.text || result?.data?.prompt || ""
-  };
-}
-
-async function generateFalZImage({ prompt, imagePromptUrls, imagePromptLabels, aspectRatio, resolution }) {
-  const imageInputs = [];
-
-  for (const [index, imagePromptUrl] of imagePromptUrls.entries()) {
-    const asset = await readLocalAsset(imagePromptUrl);
-    if (!asset.mimeType.startsWith("image/")) continue;
-    imageInputs.push({
-      ...asset,
-      label: cleanImagePromptLabel(imagePromptLabels[index])
-    });
-  }
-
-  const normalizedResolution = normalizeGeminiImageSize(resolution);
-  const imageSize = imageSizeForResolutionAndAspectRatio({ resolution: normalizedResolution, aspectRatio });
-  const submittedPrompt = promptWithReferenceLabels(prompt, imageInputs.slice(0, 1));
-  const input = {
-    prompt: submittedPrompt,
-    image_size: imageSize,
-    num_images: 1,
-    enable_safety_checker: true,
-    output_format: "png",
-    sync_mode: false
-  };
-
-  if (imageInputs.length) {
-    input.image_url = await uploadImageInputToFal(imageInputs[0], 0);
-  }
-
-  const result = await subscribeFal(falZImageEndpoint, { input, logs: true });
-  const remoteImage = firstFalImageResult(result?.data);
-
-  if (!remoteImage?.url) {
-    throw new Error("Fal returned no Z-Image URL.");
-  }
-
-  return {
-    endpoint: falZImageEndpoint,
-    requestId: result.requestId,
-    remoteImage,
-    resolution: normalizedResolution,
-    imageSize,
-    submittedPrompt,
-    resultText: result?.data?.description || result?.data?.text || ""
-  };
-}
-
 async function generateFalKrea2Large({ prompt, imagePromptUrls, imagePromptLabels, aspectRatio, creativity }) {
   const imageInputs = [];
 
@@ -13213,7 +12427,7 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function generateFalOpenAiImage2({ prompt, imagePromptUrls, imagePromptLabels, aspectRatio, resolution, quality }) {
+async function generateFalOpenAiImage2({ prompt, imagePromptUrls, imagePromptLabels, aspectRatio, resolution, quality, editMaskDataUrl }) {
   const imageInputs = [];
 
   for (const [index, imagePromptUrl] of imagePromptUrls.entries()) {
@@ -13225,7 +12439,8 @@ async function generateFalOpenAiImage2({ prompt, imagePromptUrls, imagePromptLab
     });
   }
 
-  return generateFalOpenAiImage2FromInputs({ prompt, imageInputs, aspectRatio, resolution, quality });
+  const editMaskInput = editMaskDataUrl ? imageDataUrlAsset(editMaskDataUrl, "character-wardrobe-mask.png") : null;
+  return generateFalOpenAiImage2FromInputs({ prompt, imageInputs, aspectRatio, resolution, quality, editMaskInput });
 }
 
 async function generateOpenAiImage2FromInputs(options) {
@@ -13291,7 +12506,7 @@ async function generateKreaOpenAiImage2FromInputs({
   };
 }
 
-async function generateFalOpenAiImage2FromInputs({ prompt, imageInputs = [], aspectRatio, resolution, quality: requestedQuality }) {
+async function generateFalOpenAiImage2FromInputs({ prompt, imageInputs = [], aspectRatio, resolution, quality: requestedQuality, editMaskInput = null }) {
   const size = normalizeOpenAiImageSize({ aspectRatio, resolution });
   const quality = normalizeOpenAiImage2Quality(requestedQuality);
   const submittedPrompt = promptWithReferenceLabels(prompt, imageInputs);
@@ -13307,6 +12522,7 @@ async function generateFalOpenAiImage2FromInputs({ prompt, imageInputs = [], asp
 
   if (imageInputs.length) {
     input.image_urls = await Promise.all(imageInputs.slice(0, 16).map(uploadImageInputToFal));
+    if (editMaskInput) input.mask_url = await uploadImageInputToFal(editMaskInput, imageInputs.length);
   }
 
   const result = await fal.subscribe(endpoint, { input, logs: true });
@@ -13473,20 +12689,6 @@ function mimeTypeForExtension(extension) {
 function normalizeDuration(value) {
   const match = String(value || "15").match(/\d+/);
   return normalizeChoice(match?.[0], ["4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15"], "15");
-}
-
-function normalizeHappyHorseDuration(value) {
-  const match = String(value || "5").match(/\d+/);
-  return clampInteger(match?.[0], 3, 15, 5);
-}
-
-function normalizeHappyHorseResolution(value) {
-  return normalizeChoice(String(value || "1080p"), ["720p", "1080p"], "1080p");
-}
-
-function normalizeHappyHorseAspectRatio(value) {
-  const normalized = String(value || "16:9").match(/\d+:\d+/)?.[0] || "16:9";
-  return normalizeChoice(normalized, ["16:9", "9:16", "1:1", "4:3", "3:4"], "16:9");
 }
 
 function normalizeAspectRatio(value) {

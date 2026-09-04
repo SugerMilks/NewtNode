@@ -5,7 +5,6 @@ import {
   ChevronDown,
   Clock3,
   ImagePlus,
-  Layers3,
   Loader2,
   Maximize2,
   Music2,
@@ -29,10 +28,6 @@ import {
   enabledVideoModelOptions,
   firstEnabledImageModel,
   firstEnabledVideoModel,
-  geminiOmniAspectRatioOptions,
-  geminiOmniDurationOptions,
-  geminiOmniResolutionOptions,
-  happyHorseDurationOptions,
   imageModelNames,
   imageResolutionOptions,
   krea2AspectRatios,
@@ -53,17 +48,18 @@ import {
   seedanceVideoAspectRatioOptions,
   seedanceVideoDurationOptions,
   seedanceVideoResolutionOptions,
-  seedream5ResolutionOptions,
   normalizeModelPreferences,
-  videoModelNames,
-  wan27ReferenceAspectRatioOptions,
-  wan27ReferenceDurationOptions,
-  wan27ReferenceResolutionOptions
+  videoModelNames
 } from "./modelOptions.js";
-import { isGeminiOmniModel } from "./geminiOmni.js";
 import { isNanoBanana2Model, nanoBanana2ResolutionOptions } from "./nanoBanana2.js";
 import { isReve21Model } from "./reve21.js";
 import { isSeedance25Model } from "./seedance25.js";
+import {
+  isMiniMaxH3Model,
+  minimaxH3AspectRatioOptions,
+  minimaxH3DurationOptions,
+  minimaxH3ResolutionOptions
+} from "./minimaxH3.js";
 import "./styles.css";
 
 installClientDiagnostics();
@@ -138,12 +134,11 @@ function App() {
   const [videoBatchCount, setVideoBatchCount] = React.useState("1");
   const [videoHistory, setVideoHistory] = React.useState([]);
   const [imagePrompt, setImagePrompt] = React.useState("");
-  const [imageModel, setImageModel] = React.useState(imageModelNames.zImage);
+  const [imageModel, setImageModel] = React.useState(imageModelNames.openAiImage2);
   const [imageReferences, setImageReferences] = React.useState([]);
   const [imageResolution, setImageResolution] = React.useState("2K");
   const [imageAspectRatio, setImageAspectRatio] = React.useState("16:9");
   const [imageKreaCreativity, setImageKreaCreativity] = React.useState("raw");
-  const [imageSeedreamLayers, setImageSeedreamLayers] = React.useState(false);
   const [imageStatus, setImageStatus] = React.useState("idle");
   const [imageMessage, setImageMessage] = React.useState("");
   const [imageResult, setImageResult] = React.useState([]);
@@ -189,9 +184,9 @@ function App() {
     [imageModel]
   );
   const activeVideoSettings = React.useMemo(() => videoSettingsForModel(videoModel), [videoModel]);
-  const supportsVideoAudio = isSeedanceVideoModel(videoModel) || isKlingO3VideoModel(videoModel) || isGeminiOmniModel(videoModel);
-  const supportsVideoEndFrame = !isGeminiOmniModel(videoModel);
-  const supportsVideoSeed = isSeedanceVideoModel(videoModel) || isHappyHorseVideoModel(videoModel) || isWan27VideoModel(videoModel);
+  const supportsVideoAudio = isSeedanceVideoModel(videoModel) || isKlingO3VideoModel(videoModel);
+  const supportsVideoEndFrame = true;
+  const supportsVideoSeed = isSeedanceVideoModel(videoModel) || isMiniMaxH3Model(videoModel);
 
   React.useEffect(() => {
     if (!modelPreferencesLoaded) return;
@@ -216,8 +211,7 @@ function App() {
   React.useEffect(() => {
     const options = imageResolutionOptionsForModel(imageModel);
     if (!options.includes(imageResolution)) setImageResolution(options[0]);
-    if (!isSeedream5ImageModel(imageModel) && imageSeedreamLayers) setImageSeedreamLayers(false);
-  }, [imageModel, imageResolution, imageSeedreamLayers]);
+  }, [imageModel, imageResolution]);
 
   React.useEffect(() => {
     if (!activeVideoSettings.resolutions.includes(resolution)) {
@@ -317,7 +311,7 @@ function App() {
       return;
     }
 
-    const count = imageSeedreamLayers ? 1 : Number(imageBatchCount);
+    const count = Number(imageBatchCount);
     setImageStatus("generating");
     setImageMessage(`Uploading references and starting ${formatBatchCount(count)}...`);
     setImageResult([]);
@@ -343,11 +337,7 @@ function App() {
 
       setImageResult(successes);
       setImageStatus(successes.length ? "complete" : "error");
-      setImageMessage(
-        imageSeedreamLayers && successes.length
-          ? `${successes.length} Seedream output${successes.length === 1 ? "" : "s"} ready.`
-          : batchStatusMessage("image", count, successes.length, failures)
-      );
+      setImageMessage(batchStatusMessage("image", count, successes.length, failures));
       if (successes.length) notifyGenerationTaskComplete();
       await refreshHistory();
     } catch (error) {
@@ -364,7 +354,6 @@ function App() {
         aspectRatio: imageAspectRatio,
         resolution: imageResolution,
         kreaCreativity: imageKreaCreativity,
-        seedreamLayers: imageSeedreamLayers,
         imagePromptUrls,
         projectId: "image",
         projectName: "Image",
@@ -569,22 +558,7 @@ function App() {
                   <SelectChip value={imageKreaCreativity} options={krea2CreativityOptions} onChange={setImageKreaCreativity} formatter={formatKrea2Creativity} />
                 )}
 
-                {isSeedream5ImageModel(imageModel) && (
-                  <button
-                    type="button"
-                    className={`chip layer-mode-chip ${imageSeedreamLayers ? "active" : ""}`}
-                    onClick={() => {
-                      setImageSeedreamLayers((current) => !current);
-                      setImageBatchCount("1");
-                    }}
-                    title="Return the flattened image and editable transparent component layers"
-                  >
-                    <Layers3 size={16} />
-                    <span>Layers</span>
-                  </button>
-                )}
-
-                <SelectChip icon={<Sparkles size={16} />} value={imageSeedreamLayers ? "1" : imageBatchCount} options={imageSeedreamLayers ? ["1"] : batchOptions} onChange={setImageBatchCount} formatter={formatBatchCount} />
+                <SelectChip icon={<Sparkles size={16} />} value={imageBatchCount} options={batchOptions} onChange={setImageBatchCount} formatter={formatBatchCount} />
 
                 <ReferenceChip count={imageReferences.length} onSelect={addImageReferences} />
 
@@ -601,7 +575,6 @@ function App() {
             <div className="route-strip">
               <span>{imageModel}</span>
               {isKrea2LargeImageModel(imageModel) && <span>{`Creativity ${formatKrea2Creativity(imageKreaCreativity)}`}</span>}
-              {isSeedream5ImageModel(imageModel) && imageSeedreamLayers && <span>Layer separation</span>}
               <span>{formatBatchCount(Number(imageBatchCount))}</span>
               <span>{imageResolution}</span>
               <span>{imageAspectRatio}</span>
@@ -1028,15 +1001,10 @@ function isKrea2LargeImageModel(model) {
   return normalized.includes("krea") && normalized.includes("large");
 }
 
-function isSeedream5ImageModel(model) {
-  const normalized = String(model || "").toLowerCase();
-  return normalized.includes("seedream") && normalized.includes("5");
-}
-
 function imageResolutionOptionsForModel(model) {
   if (isReve21Model(model)) return reve21ResolutionOptions;
   if (isNanoBanana2Model(model)) return nanoBanana2ResolutionOptions;
-  return isSeedream5ImageModel(model) ? seedream5ResolutionOptions : imageResolutionOptions;
+  return imageResolutionOptions;
 }
 
 function formatKrea2Creativity(value) {
@@ -1055,13 +1023,13 @@ function videoSettingsForModel(model) {
     };
   }
 
-  if (isGeminiOmniModel(model)) {
+  if (isMiniMaxH3Model(model)) {
     return {
-      durations: geminiOmniDurationOptions.map(durationLabelToValue),
-      durationValues: geminiOmniDurationOptions.map(durationLabelToValue),
-      defaultDuration: "8",
-      resolutions: geminiOmniResolutionOptions,
-      aspectRatios: geminiOmniAspectRatioOptions
+      durations: minimaxH3DurationOptions.map(durationLabelToValue),
+      durationValues: minimaxH3DurationOptions.map(durationLabelToValue),
+      defaultDuration: "10",
+      resolutions: minimaxH3ResolutionOptions,
+      aspectRatios: minimaxH3AspectRatioOptions
     };
   }
 
@@ -1073,26 +1041,6 @@ function videoSettingsForModel(model) {
       defaultDuration: "15",
       resolutions: is4k ? klingO34kResolutionOptions : klingO3ProResolutionOptions,
       aspectRatios: is4k ? klingO34kAspectRatioOptions : klingO3ProAspectRatioOptions
-    };
-  }
-
-  if (isHappyHorseVideoModel(model)) {
-    return {
-      durations: happyHorseDurationOptions.map(durationLabelToValue),
-      durationValues: happyHorseDurationOptions.map(durationLabelToValue),
-      defaultDuration: "5",
-      resolutions: ["1080p", "720p"],
-      aspectRatios: ["16:9", "9:16", "1:1", "4:3", "3:4"]
-    };
-  }
-
-  if (isWan27VideoModel(model)) {
-    return {
-      durations: wan27ReferenceDurationOptions.map(durationLabelToValue),
-      durationValues: wan27ReferenceDurationOptions.map(durationLabelToValue),
-      defaultDuration: "5",
-      resolutions: wan27ReferenceResolutionOptions,
-      aspectRatios: wan27ReferenceAspectRatioOptions
     };
   }
 
@@ -1117,16 +1065,6 @@ function isKlingO3VideoModel(model) {
 
 function isKlingO34kVideoModel(model) {
   return isKlingO3VideoModel(model) && String(model || "").toLowerCase().includes("4k");
-}
-
-function isHappyHorseVideoModel(model) {
-  const normalized = String(model || "").toLowerCase();
-  return normalized.includes("happy") || normalized.includes("horse");
-}
-
-function isWan27VideoModel(model) {
-  const normalized = String(model || "").toLowerCase();
-  return normalized.includes("wan 2.7") || normalized.includes("wan2.7") || normalized.includes("reference-to-video");
 }
 
 function durationLabelToValue(value) {

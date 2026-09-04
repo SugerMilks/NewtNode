@@ -11,20 +11,18 @@ import {
 } from "lucide-react";
 import { statsApi } from "./api/newtApi.js";
 import { estimateOpenAiImage2Cost, openAiImage2Costs, openAiImage2Quality } from "./openAiImage2.js";
+import { estimateKreaSeedanceCost } from "./kreaSeedance.js";
 import { nanoBanana2Costs, normalizeNanoBanana2Resolution } from "./nanoBanana2.js";
 import { reve21CostPerImage } from "./reve21.js";
+import { estimateImageRunCost, estimateVideoRunCost } from "./generationPricing.js";
 
 const defaultPricing = {
   seedance: {
-    standardCostPerSecond: 0.3034,
+    standardCostPerSecond: 0.3024,
     fastCostPerSecond: 0.2419,
     standardCostPerThousandTokens: 0.014,
     fastCostPerThousandTokens: 0.0112,
     billingFps: 24
-  },
-  geminiOmni: {
-    googleCostPerSecond: 0.1,
-    falCostPerSecond: 0.13
   },
   nanoBananaPro: {
     cost1K2K: 0.15,
@@ -36,8 +34,12 @@ const defaultPricing = {
     cost2K: nanoBanana2Costs["2K"],
     cost4K: nanoBanana2Costs["4K"]
   },
-  zImage: {
-    costPerMegapixel: 0.005
+  minimaxH3: {
+    costPerSecond480P: 0.05,
+    costPerSecond768P: 0.08,
+    costPerSecond2K: 0.13,
+    costPerSecond4K: 0.16,
+    extraReferenceImageCost: 0.08
   },
   openAiImage2: {
     quality: openAiImage2Quality,
@@ -73,10 +75,6 @@ const defaultPricing = {
     },
     sam3Video: {
       costPer16Frames: 0.005
-    },
-    aurora: {
-      costPerSecond480p: 0.07,
-      costPerSecond720p: 0.14
     },
     bytedanceUpscaler: {
       costPerSecond1080p: 0.0072,
@@ -480,10 +478,8 @@ function resolvedItemCost(item, mediaType, pricing) {
   const estimatedCost = estimateItemCost(item, mediaType, pricing);
   const trustedSource = item.cost?.pricingSource && item.cost.pricingSource !== "configured-pricing-v1";
 
-  if (storedCost !== null && item.cost?.pricingSource === "fal-usage-response") return storedCost;
-  if (storedCost !== null && item.cost?.pricingSource === "krea-api-pricing-2026-07-12") return storedCost;
-  if (estimatedCost !== null) return estimatedCost;
   if (storedCost !== null && trustedSource) return storedCost;
+  if (estimatedCost !== null) return estimatedCost;
   return storedCost;
 }
 
@@ -492,16 +488,24 @@ function estimateItemCost(item, mediaType, pricing) {
   const modelKey = [item.modelName, settings.model, item.endpoint, item.mode].filter(Boolean).join(" ").toLowerCase();
 
   if (mediaType === "image") {
+    const currentImageModel = currentImageModelName(modelKey);
+    if (currentImageModel) {
+      return estimateImageRunCost({
+        model: currentImageModel,
+        resolution: settings.resolution,
+        aspectRatio: settings.aspectRatio,
+        quality: settings.quality,
+        referenceCount: Number(settings.imagePromptCount || settings.imageStyleReferenceCount || 0),
+        provider: usageProvider(item)
+      });
+    }
+
     if (modelKey.includes("reve")) {
       return pricing.reve21?.costPerImage ?? defaultPricing.reve21.costPerImage;
     }
 
     if (modelKey.includes("qwen")) {
       return estimateMegapixelCost(item.remoteImage, 0.035);
-    }
-
-    if (modelKey.includes("z-image") || modelKey.includes("z image") || modelKey.includes("zimage")) {
-      return estimateZImageStatsCost(item, settings, pricing);
     }
 
     if (modelKey.includes("sam 3") || modelKey.includes("sam-3")) {
@@ -573,15 +577,30 @@ function estimateItemCost(item, mediaType, pricing) {
     return null;
   }
 
+  const currentVideoModel = currentVideoModelName(modelKey);
+  if (currentVideoModel) {
+    return estimateVideoRunCost({
+      model: currentVideoModel,
+      duration: settings.duration || item.cost?.durationSeconds || item.cost?.units,
+      resolution: settings.resolution || item.cost?.resolution,
+      aspectRatio: settings.aspectRatio || item.cost?.aspectRatio,
+      generateAudio: settings.generateAudio !== false,
+      hasVideoReference: Number(settings.referenceVideoCount || 0) > 0,
+      referenceImageCount: Number(settings.referenceImageCount || 0),
+      provider: usageProvider(item)
+    });
+  }
+
   if (modelKey.includes("seedance") || modelKey.includes("bytedance/seedance")) {
     return estimateSeedanceStatsCost(item, settings, pricing);
   }
 
-  if (modelKey.includes("gemini") && modelKey.includes("omni")) {
-    const modelPricing = pricing.geminiOmni || defaultPricing.geminiOmni;
-    const provider = String(item.provider || "").toLowerCase();
-    const rate = provider.includes("fal") ? modelPricing.falCostPerSecond : modelPricing.googleCostPerSecond;
-    return durationToSeconds(settings.duration) * rate;
+  if (modelKey.includes("minimax") && modelKey.includes("h3")) {
+    const modelPricing = pricing.minimaxH3 || defaultPricing.minimaxH3;
+    const resolution = String(settings.resolution || "2K").toUpperCase();
+    const rate = modelPricing[`costPerSecond${resolution}`] ?? defaultPricing.minimaxH3[`costPerSecond${resolution}`];
+    const extraImages = Math.max(0, Number(settings.referenceImageCount || 0) - 5);
+    return durationToSeconds(settings.duration) * rate + extraImages * modelPricing.extraReferenceImageCost;
   }
 
   if (modelKey.includes("wan-fun-control") || modelKey.includes("wan fun control")) {
@@ -592,10 +611,6 @@ function estimateItemCost(item, mediaType, pricing) {
 
   if (modelKey.includes("void") || modelKey.includes("video inpainting")) {
     return estimateVoidStatsCost(settings, pricing);
-  }
-
-  if (modelKey.includes("aurora") || modelKey.includes("creatify")) {
-    return estimateAuroraStatsCost(item, settings, pricing);
   }
 
   if (modelKey.includes("bytedance") && modelKey.includes("upscal")) {
@@ -623,6 +638,29 @@ function numericCostAmount(cost) {
   return Number.isFinite(amount) ? amount : null;
 }
 
+function currentImageModelName(modelKey) {
+  if (modelKey.includes("openai") && modelKey.includes("image")) return "OpenAI Image 2";
+  if (modelKey.includes("nano banana 2") || modelKey.includes("nano-banana-2") || modelKey.includes("gemini 3.1 flash image")) return "Nano Banana 2";
+  if (modelKey.includes("nano banana pro") || modelKey.includes("nano-banana-pro")) return "Nano Banana Pro";
+  if (modelKey.includes("reve") && modelKey.includes("2.1")) return "REVE 2.1";
+  if (modelKey.includes("krea") && modelKey.includes("large")) return "Krea 2 Large";
+  return "";
+}
+
+function currentVideoModelName(modelKey) {
+  if (modelKey.includes("seedance 2.5") || modelKey.includes("seedance-2.5")) return "Seedance 2.5";
+  if (modelKey.includes("seedance 2.0") || modelKey.includes("seedance-2.0")) return "Seedance 2.0";
+  if (modelKey.includes("kling") && (modelKey.includes("4k") || modelKey.includes("/4k/"))) return "Kling O3 4K";
+  if (modelKey.includes("kling") && (modelKey.includes("o3") || modelKey.includes("3.0"))) return "Kling O3 Pro";
+  if (modelKey.includes("minimax") && modelKey.includes("h3")) return "MiniMax H3";
+  return "";
+}
+
+function usageProvider(item) {
+  const provider = [item.provider, item.cost?.pricingSource, item.endpoint].filter(Boolean).join(" ").toLowerCase();
+  return provider.includes("krea") ? "krea" : "fal";
+}
+
 function usageCost(usage) {
   if (!usage) return null;
 
@@ -647,19 +685,6 @@ function usageCost(usage) {
 function estimateMegapixelCost(image, unitRateUsd) {
   const width = Number(image?.width || 0);
   const height = Number(image?.height || 0);
-  if (width <= 0 || height <= 0) return null;
-  return (width * height * unitRateUsd) / 1000000;
-}
-
-function estimateZImageStatsCost(item, settings, pricing) {
-  const zImagePricing = pricing.zImage || defaultPricing.zImage;
-  const unitRateUsd = zImagePricing.costPerMegapixel ?? defaultPricing.zImage.costPerMegapixel;
-  const remoteImageCost = estimateMegapixelCost(item.remoteImage, unitRateUsd);
-  if (remoteImageCost !== null) return remoteImageCost;
-
-  const imageSize = settings.imageSize || item.cost?.imageSize;
-  const width = Number(imageSize?.width || 0);
-  const height = Number(imageSize?.height || 0);
   if (width <= 0 || height <= 0) return null;
   return (width * height * unitRateUsd) / 1000000;
 }
@@ -692,6 +717,16 @@ const seedanceResolutionDimensions = {
 };
 
 function estimateSeedanceStatsCost(item, settings, pricing) {
+  const modelKey = [item.modelName, item.endpoint].filter(Boolean).join(" ").toLowerCase();
+  if (String(item.provider || "").toLowerCase() === "krea" && (modelKey.includes("seedance 2.5") || modelKey.includes("seedance-2.5"))) {
+    return estimateKreaSeedanceCost({
+      modelName: "Seedance 2.5",
+      durationSeconds: durationToSeconds(settings.duration || item.cost?.durationSeconds || item.cost?.units),
+      resolution: settings.resolution || item.cost?.resolution,
+      hasVideoReference: Number(settings.referenceVideoCount || 0) > 0
+    }).amountUsd;
+  }
+
   const seedancePricing = pricing.seedance || defaultPricing.seedance;
   const isFast = settings.speed === "fast" || String(item.endpoint || "").includes("/fast/");
   const fallbackTokenRate =
@@ -749,14 +784,6 @@ function estimateHunyuan3DStatsCost(settings, pricing) {
     (Number(settings.faceCount || 500000) !== 500000 ? 1 : 0) +
     (Number(settings.inputImageCount || 1) > 1 ? 1 : 0);
   return modelPricing.baseCost + addOnCount * modelPricing.addOnCost;
-}
-
-function estimateAuroraStatsCost(item, settings, pricing) {
-  const utilityPricing = pricing.utility?.aurora || defaultPricing.utility.aurora;
-  const duration = Number(item.remoteVideo?.duration || settings.duration || 0);
-  if (!Number.isFinite(duration) || duration <= 0) return null;
-  const rate = settings.resolution === "480p" ? utilityPricing.costPerSecond480p : utilityPricing.costPerSecond720p;
-  return Math.ceil(duration) * rate;
 }
 
 function estimateBytedanceUpscalerStatsCost(item, settings, pricing) {

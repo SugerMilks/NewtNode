@@ -30,6 +30,7 @@ import {
   Pipette,
   Play,
   Plus,
+  RefreshCw,
   GripVertical,
   Save,
   Trash2,
@@ -42,8 +43,14 @@ import {
   Wrench,
   X
 } from "lucide-react";
-import { composerApi, historyApi, nodeApi, systemApi } from "./api/newtApi.js";
+import { composerApi, historyApi, nodeApi, settingsApi, systemApi } from "./api/newtApi.js";
 import { notifyGenerationTaskComplete, shouldNotifyNodeGenerationComplete } from "./generationChime.js";
+import {
+  estimateImageRunCost,
+  estimateVideoRunCost,
+  formatPricedRunLabel,
+  generationProviderFromSettings
+} from "./generationPricing.js";
 import { CameraControlViewport } from "./components/CameraControlViewport.jsx";
 import { EdgePath, SelectionActionBar, SelectionMarquee, UnsavedWorkflowPrompt } from "./components/CanvasChrome.jsx";
 import { ComposerViewport } from "./components/ComposerViewport.jsx";
@@ -127,9 +134,7 @@ import {
 } from "./mediaAssets.js";
 import { appendResultItems, existingResultItemsForNode, normalizedResultItems } from "./mediaResults.js";
 import {
-  characterVideoBasicWardrobePrompt,
   characterVideoSheetPrompt,
-  characterVideoWardrobePrompt,
   preferredCharacterReferenceForVideo
 } from "./characterVideoSheets.js";
 import {
@@ -143,6 +148,19 @@ import {
   normalizeCharacterCustomSheets
 } from "./characterSheetLibrary.js";
 import { characterSheetModelOptions, normalizeCharacterSheetModel } from "./characterSheetModels.js";
+import {
+  characterBaseGenerationSignature,
+  characterBaseVariant,
+  characterBaseVideoGenerationSignature,
+  characterNeutralBaseWardrobePrompt,
+  characterVideoIdentityContinuityPrompt,
+  characterVideoNeutralBaseWardrobePrompt,
+  characterVideoWardrobeEditPrompt,
+  characterWardrobeEditPrompt,
+  characterWardrobeMaskRegions,
+  characterWardrobeVariantIsCurrent,
+  upsertCharacterWardrobeVariant
+} from "./characterSheetWorkflow.js";
 import { normalizeOpenAiImage2Quality, openAiImage2Quality, openAiImage2QualityOptions } from "./openAiImage2.js";
 import { coverageMethods, coveragePreviewItems, coverageShotsForMethod, normalizeCoverageMethod } from "./coveragePresets.js";
 import {
@@ -156,7 +174,6 @@ import {
   bytedanceUpscalerTierOptions,
   characterTraitOptions,
   colorIdMatteVideoOutputOptions,
-  happyHorseDurationOptions,
   imageBatchOptions,
   enabledImageModelOptions,
   enabledVideoModelOptions,
@@ -166,9 +183,6 @@ import {
   imageModelOptions,
   imageModelAutoAspectRatio,
   imageResolutionOptions,
-  geminiOmniAspectRatioOptions,
-  geminiOmniDurationOptions,
-  geminiOmniResolutionOptions,
   krea2AspectRatios,
   krea2CreativityOptions,
   klingO34kAspectRatioOptions,
@@ -195,7 +209,6 @@ import {
   seedanceVideoAspectRatioOptions,
   seedanceVideoDurationOptions,
   seedanceVideoResolutionOptions,
-  seedream5ResolutionOptions,
   shotPresetNames,
   shotPresetPrompts,
   stylePresetNames,
@@ -212,16 +225,18 @@ import {
   videoModelOptions,
   videoModelNames,
   voidVideoFrameOptions,
-  wan27ReferenceAspectRatioOptions,
-  wan27ReferenceDurationOptions,
-  wan27ReferenceResolutionOptions,
   wanVaceAccelerationOptions,
   wanVaceAspectRatioOptions,
   wanVaceResolutionOptions,
   wanVaceSamplerOptions
 } from "./modelOptions.js";
 import { isSeedance25Model } from "./seedance25.js";
-import { isGeminiOmniModel } from "./geminiOmni.js";
+import {
+  isMiniMaxH3Model,
+  minimaxH3AspectRatioOptions,
+  minimaxH3DurationOptions,
+  minimaxH3ResolutionOptions
+} from "./minimaxH3.js";
 import { isNanoBanana2Model, nanoBanana2ResolutionOptions, normalizeNanoBanana2Resolution } from "./nanoBanana2.js";
 import { isReve21Model } from "./reve21.js";
 import {
@@ -239,13 +254,15 @@ import {
   estimatedNodeWidth,
   graphBoundsForNodes,
   groupToRect,
+  localPortPointFromRects,
   normalizePlainTextNodeSize,
   normalizeRect,
   pointInRect,
   positiveModulo,
   rectsIntersect,
   rectsOverlap,
-  resizePlainTextNode
+  resizePlainTextNode,
+  scenePortPoint
 } from "./nodeGeometry.js";
 import { nodeTypeDefinitions, nodeTypeForOutputItem, nodeTypeLabel } from "./nodeRegistry.js";
 import {
@@ -267,22 +284,35 @@ import {
   runRunnableNodesByDependencyOrder,
   settleSequential
 } from "./nodeRunner.js";
-import { run3DModelGeneration, runAutoAspectGeneration, runCharacterSheetGeneration, runCoverageGeneration, runImageModelGeneration } from "./nodeRunners/mediaModels.js";
+import { run3DModelGeneration, runAutoAspectGeneration, runCharacterSheetGeneration, runCharacterWardrobeEdit, runCoverageGeneration, runImageModelGeneration } from "./nodeRunners/mediaModels.js";
 import { runSkillDirectorNode } from "./nodeRunners/skillDirector.js";
 import {
   appendFilmDirectorRevisionVersionHistory,
   filmDirectorRevisionStatePatch,
   trimFilmDirectorRevisionHistory
 } from "./filmDirectorRevision.js";
-import { filmDirectorOutputUsesReferenceTag, normalizeFilmDirectorScenes } from "./filmDirectorScenes.js";
+import {
+  filmDirectorCanAddAssetWhileSetupLocked,
+  filmDirectorOutputUsesReferenceTag,
+  isFilmDirectorSceneTransitionPatch,
+  normalizeFilmDirectorScenes
+} from "./filmDirectorScenes.js";
+import { clearFilmDirectorStageStale, filmDirectorShotListSourceSignature } from "./filmDirectorStageLocks.js";
 import { normalizeFilmDirectorAspectRatio } from "./filmDirectorAspectRatios.js";
 import { normalizeFilmDirectorResolution } from "./filmDirectorResolutions.js";
+import { normalizeFilmDirectorVideoModel } from "./filmDirectorVideoModels.js";
+import {
+  applyFilmDirectorAudioPolicyToPrompt,
+  filmDirectorAudioModeLabel,
+  normalizeFilmDirectorAudioMode
+} from "./filmDirectorAudio.js";
 import { runTextNodeProcessing } from "./nodeRunners/textModels.js";
 import {
   buildUtilityVideoRequest,
   buildVideoGenerationRequest,
   filmDirectorVideoAspectRatio,
   filmDirectorVideoDuration,
+  filmDirectorVideoGenerateAudio,
   filmDirectorVideoResolution,
   normalizeUtilityVideoGenerationResult,
   normalizeVideoGenerationResult,
@@ -504,8 +534,7 @@ const autoAspectModelOptions = [imageModelNames.openAiImage2, imageModelNames.na
 const coverageModelOptions = [
   imageModelNames.openAiImage2,
   imageModelNames.nanoBananaPro,
-  imageModelNames.reve21,
-  imageModelNames.seedream5Pro
+  imageModelNames.reve21
 ];
 const composerCharacterPortPrefix = "characterIn:";
 const maxCharacterWardrobes = 8;
@@ -515,10 +544,6 @@ const characterSheetPrompt =
   "Make one image:\n\nStudy the reference image of the character and preserve the person's identity, physical features, proportions, image quality, and visual style as closely as possible.\n\nCreate one high-resolution horizontal character photo sheet on a clean white background. The final image must contain exactly six panels and exactly six total depictions of the same character. Follow this fixed layout precisely:\n- On the left side, place two tall vertical full-body panels side by side: one full body front view, then one full body side profile.\n- On the right side, place four equal 1:1 square face close-up panels in a clean 2 by 2 grid: top left is a left side face profile, top right is a right side face profile, bottom left is a front face portrait with a resting neutral expression, and bottom right is a front face portrait with a natural talking expression with the mouth slightly open.\n\nEach panel must contain exactly one view only. Keep the grid clean, evenly spaced, and clearly separated by simple white spacing. Do not generate any additional views, duplicate depictions, merged two-in-one panels, alternate variations, split sheets, comparison images, multiple sheets, text, labels, props, frames, or borders.";
 const cinematicCharacterSheetPrompt =
   "Make one image:\n\nStudy the reference image of the character and preserve the person's identity, physical features and proportions as closely as possible. It's important the image is realistic with natural skin texture and natural skin tones. Preserve only the skin detail and texture naturally visible in the reference image, with subtle tonal variation, natural translucency, and restrained matte-to-satin highlights. Do not invent, exaggerate, sharpen, or outline pores, wrinkles, blemishes, facial lines, or other skin features that are not clearly present in the reference. Skin must not look plastic, waxy, airbrushed, porcelain, oily, overly smooth, glossy, synthetic, or digitally retouched. Avoid excessive specular highlights, HDR sheen, beauty-filter smoothing, and CG skin texture. High-end cinematic still frame, shot on ARRI Alexa 35, high quality prime lens, high dynamic range, shallow depth of field, atmospheric cinematography, subtle halation, very gentle lens bloom that does not soften identity-defining detail, fine film grain, realistic lens softness, very slight atmospheric haze, imperfect real-camera texture, high production value, feature film look.\n\nThe final image must contain exactly six panels and exactly six total depictions of the same character placed on the same solid gray background. Follow this fixed layout precisely:\n- On the left side, place two tall vertical full-body panels side by side: one full body front view, then one full body side profile.\n- On the right side, place four equal 1:1 square face close-up panels in a clean 2 by 2 grid: top left is a left side face profile, top right is a right side face profile, bottom left is a front face portrait with a resting neutral expression, and bottom right is a front face portrait with a natural talking expression with the mouth slightly open.\n\nEach panel must contain exactly one view only. Keep the grid clean, evenly spaced, and clearly separated by simple white spacing. Do not generate any additional views, duplicate depictions, merged two-in-one panels, alternate variations, split sheets, comparison images, multiple sheets, text, labels, props, frames, or borders.";
-const characterBasicWardrobePrompt =
-  "Wardrobe rule: use exactly one outfit across all six views. Replace the current wardrobe with a minimal form-fitting plain black one-piece wardrobe, consistently worn in every panel. Do not show the original wardrobe, alternate clothing, or a wardrobe comparison. No nudity; editorial fashion styling only.";
-const characterWardrobePrompt =
-  "Wardrobe rule: use exactly one outfit across all six views. Study the selected wardrobe sheet reference and apply only the clothing design, garments, materials, colors, and styling from that reference consistently to the character in every panel. If any person, model, face, body, skin, hair, pose, environment, background, text, or unrelated subject appears in the wardrobe reference, ignore it completely. Do not transfer the wardrobe reference person's identity, anatomy, facial features, pose, body shape, or composition. The character portrait reference is the only source for character identity. Do not show the basic black outfit, the original wardrobe, alternate clothing, or a wardrobe comparison. No nudity; editorial fashion styling only.";
 const characterVoicePrompt =
   "Use the provided dialogue audio file for the character and make sure the dialogue is seamlessly and realistically integrated into the scene with professional mixing techniques.";
 const composerReferencePrompt = (writtenPrompt = "") => {
@@ -882,8 +907,6 @@ const namedColorPalette = [
 const groupPalette = namedColorPalette.map((item) => item.color);
 const nodeColorPalette = [{ label: "Neutral", color: "" }, ...namedColorPalette];
 const referenceTagPalette = ["#4d8dff", "#ff4fb3", "#9b5cff", "#58ce63", "#ff8b35", "#f0c83b"];
-const zImageUnsupportedInputPorts = new Set(["cameraIn", "styleIn", "transferIn", "characterIn"]);
-const zImageUnsupportedSourceTypes = new Set(["camera", "style", "transfer", "character"]);
 const krea2UnsupportedInputPorts = new Set(["cameraIn", "transferIn", "characterIn"]);
 const krea2UnsupportedSourceTypes = new Set(["camera", "transfer", "character"]);
 const emptyPortSet = new Set();
@@ -963,6 +986,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const [selectedEdgeId, setSelectedEdgeId] = React.useState(null);
   const selectedEdgeIdRef = React.useRef(null);
   const [composerEditorNodeId, setComposerEditorNodeId] = React.useState(null);
+  const [generationProvider, setGenerationProvider] = React.useState("fal");
   const generationNodeStatusesRef = React.useRef(new Map());
   const generationNodeProjectIdRef = React.useRef(savedDraft.projectId);
 
@@ -986,6 +1010,19 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     }
     generationNodeStatusesRef.current = nextStatuses;
   }, [nodes, projectId]);
+
+  React.useEffect(() => {
+    if (!active) return undefined;
+    let cancelled = false;
+    settingsApi.load()
+      .then((settings) => {
+        if (!cancelled) setGenerationProvider(generationProviderFromSettings(settings));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [active]);
 
   const incomingByNode = React.useMemo(() => buildIncomingByNode(nodes, edges), [nodes, edges]);
   const connectedPortKeys = React.useMemo(() => buildConnectedPortKeys(edges), [edges]);
@@ -1154,12 +1191,38 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (!canvas) return undefined;
 
     const observer = new ResizeObserver(() => schedulePortPositionRefresh());
+    const observeGeometryTree = (root) => {
+      if (!(root instanceof Element)) return;
+      if (root.matches("[data-node-card-id], [data-port-key]")) observer.observe(root);
+      root.querySelectorAll("[data-node-card-id], [data-port-key]").forEach((element) => observer.observe(element));
+    };
+    const mutationObserver = typeof MutationObserver === "undefined"
+      ? null
+      : new MutationObserver((records) => {
+          let geometryChanged = false;
+          records.forEach((record) => {
+            if (record.target instanceof Element && record.target.closest("[data-node-card-id]")) geometryChanged = true;
+            record.addedNodes.forEach((addedNode) => {
+              if (!(addedNode instanceof Element)) return;
+              observeGeometryTree(addedNode);
+              if (addedNode.matches("[data-node-card-id], [data-port-key]") || addedNode.querySelector("[data-node-card-id], [data-port-key]")) {
+                geometryChanged = true;
+              }
+            });
+            if (record.removedNodes.length) geometryChanged = true;
+          });
+          if (geometryChanged) schedulePortPositionRefresh();
+        });
+
     observer.observe(canvas);
-    canvas.querySelectorAll("[data-node-card-id]").forEach((element) => observer.observe(element));
-    canvas.querySelectorAll("[data-port-key]").forEach((element) => observer.observe(element));
+    observeGeometryTree(canvas);
+    mutationObserver?.observe(canvas, { childList: true, subtree: true });
     schedulePortPositionRefresh();
 
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      mutationObserver?.disconnect();
+    };
   }, [active, nodes.map((node) => node.id).join("|"), selectedNodeIds.join("|")]);
 
   React.useEffect(() => () => {
@@ -1471,15 +1534,17 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const canvasRect = canvas.getBoundingClientRect();
     const nextPositions = {};
-    const activeViewport = viewportRef.current;
     canvas.querySelectorAll("[data-port-key]").forEach((element) => {
-      const rect = element.getBoundingClientRect();
-      nextPositions[element.dataset.portKey] = {
-        x: (rect.left - canvasRect.left + rect.width / 2 - activeViewport.x) / activeViewport.scale,
-        y: (rect.top - canvasRect.top + rect.height / 2 - activeViewport.y) / activeViewport.scale
-      };
+      const card = element.closest("[data-node-card-id]");
+      if (!card) return;
+      const cardRect = card.getBoundingClientRect();
+      const renderedScale = card.offsetWidth > 0 ? cardRect.width / card.offsetWidth : viewportRef.current.scale;
+      nextPositions[element.dataset.portKey] = localPortPointFromRects(
+        element.getBoundingClientRect(),
+        cardRect,
+        renderedScale
+      );
     });
     setPortPositions((current) => (samePointMap(current, nextPositions) ? current : nextPositions));
   }
@@ -2034,7 +2099,13 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       });
     }
 
-    if (nextSkillDirectorData && ("skillDirectorBuilt" in patch || "resultText" in patch) && (!nextSkillDirectorData.skillDirectorBuilt || !nextSkillDirectorData.resultText)) {
+    if (
+      nextSkillDirectorData
+      && ("skillDirectorBuilt" in patch || "resultText" in patch)
+      && (!nextSkillDirectorData.skillDirectorBuilt || !nextSkillDirectorData.resultText)
+      && !nextSkillDirectorData.skillDirectorOutputStale
+      && !isFilmDirectorSceneTransitionPatch(patch)
+    ) {
       const skillDirectorOutputPorts = new Set(["promptOut", "directorOut"]);
       setEdges((current) => current.filter((edge) => !(edge.from.nodeId === nodeId && skillDirectorOutputPorts.has(edge.from.port))));
       setSelectedEdgeId((current) => {
@@ -2320,7 +2391,6 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           requestedAspectRatio: node.data.frameItAspectRatio || "16:9",
           resolution: node.data.frameItImageResolution || "2K",
           quality: openAiImage2Quality,
-          seedreamLayers: false,
           imagePromptUrls: [guideData.image.localUrl],
           imagePromptLabels: ["Frame It camera, composition, and blocking guide"],
           ...workflowContextPayload(workflowContext),
@@ -2476,6 +2546,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }
 
   async function uploadCharacterWardrobes(node, fileList) {
+    if (node.data.status === "compiling") return;
     const existing = Array.isArray(node.data.characterWardrobes) ? node.data.characterWardrobes : [];
     const files = Array.from(fileList || [])
       .filter((file) => file.type.startsWith("image/"))
@@ -2494,10 +2565,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       const nextWardrobes = [...existing, ...assets].slice(0, maxCharacterWardrobes);
       updateNode(node.id, {
         characterWardrobes: nextWardrobes,
-        activeWardrobeId: node.data.activeWardrobeId || nextWardrobes[0]?.id || "",
         status: "ready",
         error: ""
       });
+      void autoGenerateCharacterWardrobes(node.id, assets);
     } catch (error) {
       updateNode(node.id, { status: "error", error: error.message });
     }
@@ -2648,6 +2719,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       setSaveStatus("Wardrobe accepts image outputs");
       return;
     }
+    if (node.data.status === "compiling") return;
 
     const existing = Array.isArray(node.data.characterWardrobes) ? node.data.characterWardrobes : [];
     if (existing.length >= maxCharacterWardrobes) {
@@ -2664,10 +2736,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     pushUndoSnapshot();
     updateNode(node.id, {
       characterWardrobes: nextWardrobes,
-      activeWardrobeId: node.data.activeWardrobeId || wardrobe.id,
       status: "ready",
       error: ""
     });
+    void autoGenerateCharacterWardrobes(node.id, [wardrobe]);
     setSaveStatus("Added output image as wardrobe reference");
   }
 
@@ -2750,11 +2822,200 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     });
   }
 
-  async function activateCharacterNode(node) {
+  async function generateCharacterWardrobeVariant(node, wardrobe, {
+    baseSheet,
+    baseVideoSheet = null,
+    baseSignature,
+    baseVideoSignature = "",
+    existingVariant = null,
+    regenerateVideo = false,
+    onGenerationComplete = () => {}
+  } = {}) {
+    let generated = existingVariant?.generated || null;
+    if (!(generated?.url || generated?.localUrl)) {
+      const imageMask = await createCharacterWardrobeEditMaskDataUrl(baseSheet, "image");
+      generated = await runCharacterWardrobeEdit({
+        node,
+        prompt: characterWardrobeEditPrompt,
+        baseSheet,
+        wardrobe,
+        editMaskDataUrl: imageMask,
+        workflowContext: workflowRequestContext(),
+        characterTag: characterTag(node)
+      });
+      onGenerationComplete();
+    }
+
+    let videoGenerated = regenerateVideo ? null : existingVariant?.videoGenerated || null;
+    let videoError = "";
+    if (
+      node.data.cuVideoGeneration
+      && (baseVideoSheet?.url || baseVideoSheet?.localUrl)
+      && !(videoGenerated?.url || videoGenerated?.localUrl)
+    ) {
+      try {
+        const videoMask = await createCharacterWardrobeEditMaskDataUrl(baseVideoSheet, "video");
+        videoGenerated = await runCharacterWardrobeEdit({
+          node,
+          prompt: characterVideoWardrobeEditPrompt,
+          baseSheet: baseVideoSheet,
+          wardrobe,
+          identityReference: node.data.characterPortrait,
+          consistencySheet: generated,
+          editMaskDataUrl: videoMask,
+          workflowContext: workflowRequestContext(),
+          characterTag: characterTag(node),
+          sheetKind: "video"
+        });
+      } catch (error) {
+        videoError = error.message || "CU video wardrobe edit failed.";
+      } finally {
+        onGenerationComplete();
+      }
+    }
+
+    return {
+      variant: {
+        wardrobeId: wardrobe.id,
+        wardrobeUrl: wardrobe.localUrl || wardrobe.url || "",
+        wardrobeFileName: wardrobe.fileName || "Wardrobe",
+        baseSheetUrl: baseSheet.url || baseSheet.localUrl || "",
+        baseSignature,
+        ...(videoGenerated && baseVideoSignature ? { baseVideoSignature } : {}),
+        generated,
+        ...(videoGenerated ? { videoGenerated } : {})
+      },
+      videoError
+    };
+  }
+
+  async function regenerateCharacterWardrobe(nodeId, wardrobeId) {
+    const node = nodesRef.current.find((item) => item.id === nodeId);
+    if (!node || node.data.status === "compiling") return;
+    const wardrobe = (node.data.characterWardrobes || []).find((item) => item.id === wardrobeId);
+    if (!wardrobe) return;
+    const baseSheet = node.data.characterBaseSheet || characterSheetVariantForWardrobeId(node.data, characterDefaultWardrobeId)?.generated;
+    const baseSignature = node.data.characterBaseSignature || characterBaseGenerationSignature(node.data);
+    const baseVideoSheet = node.data.characterBaseVideoSheet || characterSheetVariantForWardrobeId(node.data, characterDefaultWardrobeId)?.videoGenerated || null;
+    const baseVideoSignature = node.data.characterBaseVideoSignature || characterBaseVideoGenerationSignature(baseSignature, baseSheet);
+    if (!(baseSheet?.url || baseSheet?.localUrl)) {
+      updateNode(nodeId, { error: "Generate and lock the Base Identity sheet before applying wardrobe." });
+      return;
+    }
+    const total = node.data.cuVideoGeneration && (baseVideoSheet?.url || baseVideoSheet?.localUrl) ? 2 : 1;
+    let completed = 0;
+    const markComplete = () => {
+      completed += 1;
+      updateNode(nodeId, { characterBatchProgress: { completed, total } });
+    };
+
+    pushUndoSnapshot();
+    updateNode(nodeId, {
+      status: "compiling",
+      characterBatchProgress: { completed: 0, total },
+      characterVariantNotice: "",
+      error: ""
+    });
+
+    try {
+      const { variant, videoError } = await generateCharacterWardrobeVariant(node, wardrobe, {
+        baseSheet,
+        baseVideoSheet,
+        baseSignature,
+        baseVideoSignature,
+        onGenerationComplete: markComplete
+      });
+      const variants = upsertCharacterWardrobeVariant(node.data.characterSheetVariants, variant);
+      updateNode(nodeId, {
+        characterSheetVariants: variants,
+        activeWardrobeId: wardrobe.id,
+        activeCharacterSheetId: generatedCharacterSheetId(wardrobe.id),
+        characterSheetPreviewKind: "image",
+        characterBatchProgress: null,
+        characterVariantNotice: videoError ? `Image wardrobe updated. ${videoError}` : "",
+        ...characterVariantDisplayPatch(variant),
+        status: "ready",
+        error: ""
+      });
+    } catch (error) {
+      updateNode(nodeId, {
+        characterBatchProgress: null,
+        characterVariantNotice: "",
+        status: "error",
+        error: error.message || "Character wardrobe edit failed."
+      });
+    }
+  }
+
+  async function autoGenerateCharacterWardrobes(nodeId, addedWardrobes = []) {
+    const node = nodesRef.current.find((item) => item.id === nodeId);
+    const wardrobes = Array.isArray(addedWardrobes) ? addedWardrobes.filter(Boolean) : [];
+    if (!node || !wardrobes.length || node.data.status === "compiling") return;
+
+    const baseSheet = node.data.characterBaseSheet || characterSheetVariantForWardrobeId(node.data, characterDefaultWardrobeId)?.generated;
+    const baseVideoSheet = node.data.characterBaseVideoSheet || characterSheetVariantForWardrobeId(node.data, characterDefaultWardrobeId)?.videoGenerated || null;
+    const baseSignature = node.data.characterBaseSignature || "";
+    const currentSignature = characterBaseGenerationSignature(node.data);
+    if (!(baseSheet?.url || baseSheet?.localUrl) || !baseSignature || baseSignature !== currentSignature) return;
+    const baseVideoSignature = node.data.characterBaseVideoSignature || characterBaseVideoGenerationSignature(baseSignature, baseSheet);
+
+    const generatesVideoSheet = Boolean(
+      node.data.cuVideoGeneration
+      && (baseVideoSheet?.url || baseVideoSheet?.localUrl)
+    );
+    const total = wardrobes.length * (generatesVideoSheet ? 2 : 1);
+    let completed = 0;
+    let variants = Array.isArray(node.data.characterSheetVariants) ? [...node.data.characterSheetVariants] : [];
+    const failures = [];
+    const videoFailures = [];
+    const markComplete = () => {
+      completed += 1;
+      updateNode(nodeId, { characterBatchProgress: { completed, total } });
+    };
+
+    updateNode(nodeId, {
+      status: "compiling",
+      characterBatchProgress: { completed: 0, total },
+      characterVariantNotice: "",
+      error: ""
+    });
+
+    for (const wardrobe of wardrobes) {
+      const completedBeforeWardrobe = completed;
+      try {
+        const { variant, videoError } = await generateCharacterWardrobeVariant(node, wardrobe, {
+          baseSheet,
+          baseVideoSheet,
+          baseSignature,
+          baseVideoSignature,
+          onGenerationComplete: markComplete
+        });
+        variants = upsertCharacterWardrobeVariant(variants, variant);
+        if (videoError) videoFailures.push(wardrobe.fileName || "Wardrobe");
+      } catch (error) {
+        failures.push(wardrobe.fileName || "Wardrobe");
+        const expectedForWardrobe = generatesVideoSheet ? 2 : 1;
+        while (completed - completedBeforeWardrobe < expectedForWardrobe) markComplete();
+      }
+    }
+
+    updateNode(nodeId, {
+      characterSheetVariants: variants,
+      characterBatchProgress: null,
+      characterVariantNotice: [
+        failures.length ? `${failures.length} new wardrobe sheet${failures.length === 1 ? "" : "s"} could not be generated.` : "",
+        videoFailures.length ? `${videoFailures.length} CU video wardrobe sheet${videoFailures.length === 1 ? "" : "s"} could not be generated.` : ""
+      ].filter(Boolean).join(" "),
+      status: failures.length === wardrobes.length ? "error" : "ready",
+      error: failures.length === wardrobes.length ? "New wardrobe generation failed." : ""
+    });
+  }
+
+  async function activateCharacterNode(node, { forceRegenerateBase = false } = {}) {
     const portrait = node.data.characterPortrait;
     const selectedExistingVariant = activeCharacterSheetVariant(node.data);
     const name = String(node.data.characterName || "").trim();
-    if (!portrait?.localUrl && !selectedExistingVariant?.generated?.url) {
+    if (!(portrait?.localUrl || portrait?.url) && !(selectedExistingVariant?.generated?.url || selectedExistingVariant?.generated?.localUrl)) {
       updateNode(node.id, { error: "Upload a character portrait first." });
       return;
     }
@@ -2764,15 +3025,31 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     }
 
     const wardrobes = Array.isArray(node.data.characterWardrobes) ? node.data.characterWardrobes : [];
-    const wardrobeOptions = wardrobes.length ? wardrobes : [null];
     const desiredWardrobeId = characterWardrobeVariantId(activeCharacterWardrobe(node));
     const selectedVoice = activeCharacterVoice(node);
     const physicalDetailsPrompt = characterPhysicalDetailsPrompt(node.data);
     const baseCharacterSheetPrompt = node.data.cinematicCharacterSheet ? cinematicCharacterSheetPrompt : characterSheetPrompt;
     const generateCuVideoSheet = Boolean(node.data.cuVideoGeneration);
-    let completedVariantCount = 0;
+    const baseSignature = characterBaseGenerationSignature(node.data);
+    const storedBaseSheet = node.data.characterBaseSheet || characterSheetVariantForWardrobeId(node.data, characterDefaultWardrobeId)?.generated || null;
+    const canReuseBase = Boolean(
+      !forceRegenerateBase &&
+      (storedBaseSheet?.url || storedBaseSheet?.localUrl)
+      && node.data.characterBaseSignature === baseSignature,
+    );
+    const storedBaseVideoSheet = node.data.characterBaseVideoSheet || characterSheetVariantForWardrobeId(node.data, characterDefaultWardrobeId)?.videoGenerated || null;
+    const expectedBaseVideoSignature = characterBaseVideoGenerationSignature(baseSignature, canReuseBase ? storedBaseSheet : null);
+    const canReuseBaseVideo = Boolean(
+      canReuseBase &&
+      (storedBaseVideoSheet?.url || storedBaseVideoSheet?.localUrl) &&
+      node.data.characterBaseVideoSignature === expectedBaseVideoSignature
+    );
 
-    if (!portrait?.localUrl && selectedExistingVariant?.generated?.url) {
+    const shouldLockExistingSheet = !forceRegenerateBase && (
+      selectedExistingVariant?.source === "custom"
+      || !(portrait?.localUrl || portrait?.url)
+    );
+    if (shouldLockExistingSheet && (selectedExistingVariant?.generated?.url || selectedExistingVariant?.generated?.localUrl)) {
       pushUndoSnapshot();
       updateNode(node.id, {
         activated: true,
@@ -2792,64 +3069,109 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     }
 
     try {
-      const generationCount = wardrobeOptions.length * (generateCuVideoSheet ? 2 : 1);
+      const wardrobePlans = wardrobes.map((wardrobe) => {
+        const existingVariant = canReuseBase ? characterSheetVariantForWardrobeId(node.data, wardrobe.id) : null;
+        const imageCurrent = characterWardrobeVariantIsCurrent(existingVariant, wardrobe, baseSignature);
+        const videoCurrent = generateCuVideoSheet && characterWardrobeVariantIsCurrent(
+          existingVariant,
+          wardrobe,
+          baseSignature,
+          { requireVideo: true, baseVideoSignature: expectedBaseVideoSignature }
+        );
+        return {
+          wardrobe,
+          existingVariant: imageCurrent ? existingVariant : null,
+          needsImage: !imageCurrent,
+          needsVideo: generateCuVideoSheet && !videoCurrent
+        };
+      });
+      const reusableWardrobes = wardrobePlans.filter((plan) => !plan.needsImage && !plan.needsVideo);
+      const wardrobesToGenerate = wardrobePlans.filter((plan) => plan.needsImage || plan.needsVideo);
+      const generationCount =
+        (canReuseBase ? 0 : 1) +
+        (generateCuVideoSheet && !canReuseBaseVideo ? 1 : 0) +
+        wardrobesToGenerate.reduce((total, plan) => total + Number(plan.needsImage) + Number(plan.needsVideo), 0);
+      let completedGenerationCount = 0;
+      const markGenerationComplete = () => {
+        completedGenerationCount += 1;
+        updateNode(node.id, {
+          characterBatchProgress: { completed: completedGenerationCount, total: generationCount }
+        });
+      };
       updateNode(node.id, {
         status: "compiling",
         characterBatchProgress: { completed: 0, total: generationCount },
         characterVariantNotice: "",
         error: ""
       });
-      const results = await Promise.allSettled(
-        wardrobeOptions.map(async (wardrobe) => {
-          try {
-            const prompt = [baseCharacterSheetPrompt, wardrobe ? characterWardrobePrompt : characterBasicWardrobePrompt, physicalDetailsPrompt].filter(Boolean).join("\n\n");
-            const generated = await runCharacterSheetGeneration({
-              node,
-              prompt,
-              portrait,
-              wardrobe,
-              workflowContext: workflowRequestContext(),
-              characterTag: characterTag(node)
-            });
-            completedVariantCount += 1;
-            updateNode(node.id, {
-              characterBatchProgress: { completed: completedVariantCount, total: generationCount }
-            });
-            const videoGenerated = generateCuVideoSheet
-              ? await runCharacterSheetGeneration({
-                  node,
-                  prompt: [characterVideoSheetPrompt, wardrobe ? characterVideoWardrobePrompt : characterVideoBasicWardrobePrompt, physicalDetailsPrompt].filter(Boolean).join("\n\n"),
-                  portrait,
-                  wardrobe,
-                  workflowContext: workflowRequestContext(),
-                  characterTag: characterTag(node),
-                  sheetKind: "video"
-                })
-              : null;
-            return {
-              wardrobeId: characterWardrobeVariantId(wardrobe),
-              wardrobeUrl: wardrobe?.localUrl || "",
-              wardrobeFileName: wardrobe?.fileName || "Default black wardrobe",
-              generated,
-              ...(videoGenerated ? { videoGenerated } : {})
-            };
-          } finally {
-            if (generateCuVideoSheet) completedVariantCount += 1;
-            updateNode(node.id, {
-              characterBatchProgress: { completed: Math.min(completedVariantCount, generationCount), total: generationCount }
-            });
-          }
-        })
-      );
-      const variants = results.filter((result) => result.status === "fulfilled").map((result) => result.value);
-      const failures = results.filter((result) => result.status === "rejected");
-      if (!variants.length) {
-        throw failures[0]?.reason || new Error("Character sheet generation failed.");
+
+      const baseSheet = canReuseBase
+        ? storedBaseSheet
+        : await runCharacterSheetGeneration({
+            node,
+            prompt: [baseCharacterSheetPrompt, characterNeutralBaseWardrobePrompt, physicalDetailsPrompt].filter(Boolean).join("\n\n"),
+            portrait,
+            wardrobe: null,
+            workflowContext: workflowRequestContext(),
+            characterTag: characterTag(node)
+          });
+      if (!canReuseBase) markGenerationComplete();
+
+      const baseVideoSignature = characterBaseVideoGenerationSignature(baseSignature, baseSheet);
+      let baseVideoSheet = canReuseBaseVideo ? storedBaseVideoSheet : null;
+      if (generateCuVideoSheet && !(baseVideoSheet?.url || baseVideoSheet?.localUrl)) {
+        baseVideoSheet = await runCharacterSheetGeneration({
+          node,
+          prompt: [characterVideoSheetPrompt, characterVideoNeutralBaseWardrobePrompt, characterVideoIdentityContinuityPrompt, physicalDetailsPrompt].filter(Boolean).join("\n\n"),
+          portrait,
+          wardrobe: null,
+          additionalReferences: [{ ...baseSheet, label: "Base Identity Character Sheet" }],
+          workflowContext: workflowRequestContext(),
+          characterTag: characterTag(node),
+          sheetKind: "video"
+        });
+        markGenerationComplete();
       }
+
+      let variants = [characterBaseVariant({ baseSheet, baseVideoSheet, baseSignature })].filter(Boolean);
+      for (const plan of reusableWardrobes) {
+        if (plan.existingVariant) variants.push(plan.existingVariant);
+      }
+
+      const failures = [];
+      const videoFailures = [];
+      for (const plan of wardrobesToGenerate) {
+        const { wardrobe, existingVariant, needsImage, needsVideo } = plan;
+        try {
+          const { variant, videoError } = await generateCharacterWardrobeVariant(node, wardrobe, {
+            baseSheet,
+            baseVideoSheet,
+            baseSignature,
+            baseVideoSignature,
+            existingVariant,
+            regenerateVideo: needsVideo,
+            onGenerationComplete: markGenerationComplete
+          });
+          variants.push(variant);
+          if (videoError) videoFailures.push(`${wardrobe.fileName || "Wardrobe"}: ${videoError}`);
+        } catch (error) {
+          failures.push({ wardrobe, error });
+          const remainingForWardrobe = Number(needsImage) + Number(needsVideo);
+          for (let index = 0; index < remainingForWardrobe && completedGenerationCount < generationCount; index += 1) {
+            markGenerationComplete();
+          }
+        }
+      }
+
+      variants = [
+        variants.find((variant) => variant.wardrobeId === characterDefaultWardrobeId),
+        ...wardrobes.map((wardrobe) => variants.find((variant) => variant.wardrobeId === wardrobe.id)).filter(Boolean)
+      ].filter(Boolean);
       const selectedVariant = variants.find((variant) => variant.wardrobeId === desiredWardrobeId) || variants[0];
-      const variantNotice = failures.length
-        ? `${failures.length} outfit sheet${failures.length === 1 ? "" : "s"} could not be generated.`
-        : "";
+      const variantNotice = [
+        failures.length ? `${failures.length} wardrobe sheet${failures.length === 1 ? "" : "s"} could not be generated.` : "",
+        videoFailures.length ? `${videoFailures.length} CU video wardrobe sheet${videoFailures.length === 1 ? "" : "s"} could not be generated.` : ""
+      ].filter(Boolean).join(" ");
       pushUndoSnapshot();
       updateNode(node.id, {
         activated: true,
@@ -2857,6 +3179,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         characterTab: "sheet",
         characterSheetPreviewKind: "image",
         characterSheetVariants: variants,
+        characterBaseSheet: baseSheet,
+        characterBaseSignature: baseSignature,
+        characterBaseVideoSheet: baseVideoSheet,
+        characterBaseVideoSignature: (baseVideoSheet?.url || baseVideoSheet?.localUrl) ? baseVideoSignature : "",
         activeCharacterSheetId: generatedCharacterSheetId(selectedVariant.wardrobeId),
         activeWardrobeId: selectedVariant.wardrobeId === characterDefaultWardrobeId ? "" : selectedVariant.wardrobeId,
         compiledTraitPrompt: characterTraitPrompt(node.data),
@@ -2878,7 +3204,6 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
   function unlockCharacterNode(nodeId) {
     const node = nodesRef.current.find((item) => item.id === nodeId);
-    const firstCustomSheet = normalizeCharacterCustomSheets(node?.data || {})[0];
     pushUndoSnapshot();
     updateNode(nodeId, {
       activated: false,
@@ -2890,8 +3215,6 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       compiledWardrobeUrl: "",
       compiledTraitPrompt: "",
       compiledVoicePrompt: "",
-      characterSheetVariants: [],
-      activeCharacterSheetId: firstCustomSheet ? customCharacterSheetId(firstCustomSheet.id) : "",
       characterSheetPreviewKind: "image",
       characterBatchProgress: null,
       characterVariantNotice: "",
@@ -4765,7 +5088,12 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (!outputPortIdsForNode(source).includes(from.port)) return "Choose a valid output";
     if (!inputPortIdsForNode(target).includes(to.port)) return "Choose a valid input";
     if (source.type === "skillDirector" && (!source.data?.skillDirectorBuilt || !source.data?.resultText)) return "Build Scene before connecting Film Director output";
-    if (target.type === "skillDirector" && ["characterIn", "locationIn", "imageIn", "styleIn"].includes(to.port) && target.data?.skillDirectorLocks?.setup) {
+    if (
+      target.type === "skillDirector"
+      && ["characterIn", "locationIn", "imageIn", "styleIn"].includes(to.port)
+      && target.data?.skillDirectorLocks?.setup
+      && !filmDirectorCanAddAssetWhileSetupLocked(to.port)
+    ) {
       return "Unlock Scene Setup before changing Film Director references";
     }
     if (isImageModelUnsupportedInput(target, to.port)) return imageModelUnsupportedInputMessage(target.data?.model);
@@ -5021,11 +5349,13 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }
 
   function getPortPoint(nodeId, port) {
-    return portPositions[`${nodeId}:${port}`] || estimatePortPoint(nodeId, port);
+    const localPoint = portPositions[`${nodeId}:${port}`];
+    const node = nodes.find((item) => item.id === nodeId);
+    return localPoint && node ? scenePortPoint(node, localPoint) : estimatePortPoint(nodeId, port);
   }
 
   function estimatePortPoint(nodeId, portId) {
-    const node = nodesRef.current.find((item) => item.id === nodeId);
+    const node = nodes.find((item) => item.id === nodeId);
     if (!node) return { x: 0, y: 0 };
 
     const bounds = getNodeBounds(nodeId);
@@ -5308,6 +5638,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           lastRunSkillName: processed.skillName,
           lastRunShotCount: processed.resolvedShotCount || processed.shotCount,
           lastRunDurationSeconds: processed.durationSeconds,
+          skillDirectorAudioMode: normalizeFilmDirectorAudioMode(processed.audioMode, currentNode.data.skillDirectorAudioMode || "production"),
           lastRunActualShotCount: processed.actualShotCount,
           lastRunReferenceSetup: processed.referenceSetup,
           ...(Array.isArray(processed.referenceTags) ? { lastRunReferenceTags: processed.referenceTags } : {}),
@@ -5317,6 +5648,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         if (action === "style") {
           updateNode(currentNode.id, {
             ...nextSkillPatch,
+            skillDirectorStaleStages: clearFilmDirectorStageStale(currentNode.data.skillDirectorStaleStages, "style"),
             skillDirectorLocks: {
               ...(currentNode.data.skillDirectorLocks && typeof currentNode.data.skillDirectorLocks === "object" ? currentNode.data.skillDirectorLocks : {}),
               setup: true,
@@ -5332,6 +5664,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         if (action === "motion") {
           updateNode(currentNode.id, {
             ...nextSkillPatch,
+            skillDirectorStaleStages: clearFilmDirectorStageStale(currentNode.data.skillDirectorStaleStages, "motion"),
             skillDirectorLocks: {
               ...(currentNode.data.skillDirectorLocks && typeof currentNode.data.skillDirectorLocks === "object" ? currentNode.data.skillDirectorLocks : {}),
               setup: true,
@@ -5347,19 +5680,32 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           return { status: "complete" };
         }
         if (action === "shotList") {
+          const rebuildAfterShotList = Boolean(currentNode.data.skillDirectorRebuildAfterShotList);
           updateNode(currentNode.id, {
             ...nextSkillPatch,
+            skillDirectorStaleStages: clearFilmDirectorStageStale(currentNode.data.skillDirectorStaleStages, "shotList"),
             skillDirectorLocks: {
               ...(currentNode.data.skillDirectorLocks && typeof currentNode.data.skillDirectorLocks === "object" ? currentNode.data.skillDirectorLocks : {}),
               setup: true,
               style: true,
               motion: true,
               scene: true,
-              shotList: false
+              shotList: rebuildAfterShotList
+            },
+            skillDirectorCollapsed: {
+              ...(currentNode.data.skillDirectorCollapsed && typeof currentNode.data.skillDirectorCollapsed === "object" ? currentNode.data.skillDirectorCollapsed : {}),
+              ...(rebuildAfterShotList ? { shotList: true } : {})
             },
             shotList: processed.shotList || processed.text || currentNode.data.shotList || "",
             shotListNotes: processed.shotListNotes || "",
+            skillDirectorShotListSourceSignature: processed.shotListSourceSignature || filmDirectorShotListSourceSignature(currentNode.data),
             skillDirectorBuilt: false,
+            skillDirectorOutputStale: rebuildAfterShotList,
+            skillDirectorRebuildAfterShotList: false,
+            ...(rebuildAfterShotList ? {
+              skillDirectorQueuedAction: "build",
+              skillDirectorQueueId: `build-${Date.now()}`
+            } : {}),
             resultText: "",
             skillPreviewOpen: false
           });
@@ -5368,12 +5714,21 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         if (action === "revise") {
           const revisionState = filmDirectorRevisionStatePatch(currentNode.data, {
             ...processed,
-            text: formatSkillDirectorFinalPromptForClient(processed.text),
+            text: formatSkillDirectorFinalPromptForClient(processed.text, processed.audioMode),
             shotList: formatSkillDirectorShotListForClient(processed.shotList || currentNode.data.shotList || "")
+          });
+          const revisedShotListSourceSignature = filmDirectorShotListSourceSignature({
+            ...currentNode.data,
+            ...revisionState
           });
           const revisionVersion = appendFilmDirectorRevisionVersionHistory(currentNode.data.skillDirectorRevisionHistory, {
             current: currentNode.data,
-            revised: { ...currentNode.data, ...nextSkillPatch, ...revisionState },
+            revised: {
+              ...currentNode.data,
+              ...nextSkillPatch,
+              ...revisionState,
+              skillDirectorShotListSourceSignature: revisedShotListSourceSignature
+            },
             notes: currentNode.data.skillDirectorRevisionNotes,
             summary: processed.revisionSummary,
             selectedId: currentNode.data.skillDirectorRevisionSelectedId,
@@ -5382,6 +5737,13 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           updateNode(currentNode.id, {
             ...nextSkillPatch,
             ...revisionState,
+            skillDirectorStaleStages: {},
+            skillDirectorOutputStale: false,
+            skillDirectorRebuildAfterShotList: false,
+            skillDirectorRebuildAfterStyle: false,
+            skillDirectorRefreshAfterStyle: "",
+            skillDirectorRefreshShotListAfterMotion: false,
+            skillDirectorShotListSourceSignature: revisedShotListSourceSignature,
             skillDirectorRevisionOpen: true,
             skillDirectorRevisionNotes: "",
             skillDirectorLastRevisionSummary: processed.revisionSummary || "Applied the requested revisions.",
@@ -5392,12 +5754,17 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         }
         updateNode(currentNode.id, {
           ...nextSkillPatch,
-          resultText: action === "build" ? formatSkillDirectorFinalPromptForClient(processed.text) : processed.text,
+          resultText: action === "build" ? formatSkillDirectorFinalPromptForClient(processed.text, processed.audioMode) : processed.text,
           styleDirection: processed.styleDirection || currentNode.data.styleDirection || "",
           motionDirection: processed.motionDirection || currentNode.data.motionDirection || "",
           shotList: formatSkillDirectorShotListForClient(processed.shotList || currentNode.data.shotList || ""),
           shotListNotes: processed.shotListNotes || currentNode.data.shotListNotes || "",
           skillDirectorBuilt: Boolean(processed.text),
+          skillDirectorOutputStale: false,
+          skillDirectorRebuildAfterShotList: false,
+          skillDirectorRebuildAfterStyle: false,
+          skillDirectorRefreshAfterStyle: "",
+          skillDirectorRefreshShotListAfterMotion: false,
           skillPreviewOpen: Boolean(processed.text)
         });
         return { status: "complete" };
@@ -5620,18 +5987,15 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
       if (currentNode.type === "imageModel") {
         const isSegmentation = isSam3ImageModel(currentNode.data.model);
-        const isZImage = isZImageImageModel(currentNode.data.model);
         const aspectRatio = isSegmentation ? currentNode.data.aspectRatio : await resolveImageModelAspectRatio(currentNode, incoming);
         const imageInstructionSources = imageInstructionSourcesForModel(currentNode.data.model, incoming);
         const imagePromptItems = connectedImagePromptItems(
-          isSegmentation ? zImageSupportedReferenceConnections(incoming.imagePromptIn || []) : imageReferenceConnectionsForModel(currentNode.data.model, incoming),
+          isSegmentation ? incoming.imagePromptIn || [] : imageReferenceConnectionsForModel(currentNode.data.model, incoming),
           currentIncomingByNode,
-          { includeComposerCharacterBindings: !isZImage, prompt: basePrompt }
+          { includeComposerCharacterBindings: true, prompt: basePrompt }
         );
         const prompt = isSegmentation
           ? basePrompt
-          : isZImage
-            ? resolveImageReferenceMentions(basePrompt, imageInstructionSources)
           : buildEffectiveImagePrompt(basePrompt, imageInstructionSources, aspectRatio, currentIncomingByNode);
         const runIndexes = nodeRunIndexes(batchCount);
         const settled = await settleSequential(runIndexes, (index) =>
@@ -5992,6 +6356,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
               onCharacterWardrobeImport={importOutputAssetToCharacterWardrobes}
               onCharacterVoicesUpload={uploadCharacterVoices}
               onCharacterWardrobeRemove={removeCharacterWardrobe}
+              onCharacterWardrobeRegenerate={regenerateCharacterWardrobe}
               onCharacterCustomSheetRemove={removeCharacterCustomSheet}
               onCharacterVoiceRemove={removeCharacterVoice}
               onCharacterActivate={activateCharacterNode}
@@ -6021,6 +6386,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
               tagHighlight={referenceTagHighlights.get(node.id)}
               imageModelOptions={enabledImageModels}
               videoModelOptions={enabledVideoModels}
+              generationProvider={generationProvider}
             />
           ))}
         </div>
@@ -6281,6 +6647,7 @@ function NodeCard({
   onCharacterWardrobeImport,
   onCharacterVoicesUpload,
   onCharacterWardrobeRemove,
+  onCharacterWardrobeRegenerate,
   onCharacterCustomSheetRemove,
   onCharacterVoiceRemove,
   onCharacterActivate,
@@ -6309,7 +6676,8 @@ function NodeCard({
   selected,
   tagHighlight,
   imageModelOptions,
-  videoModelOptions
+  videoModelOptions,
+  generationProvider
 }) {
   const config = getNodeConfig(node.type);
   const Icon = config.icon;
@@ -6491,6 +6859,7 @@ function NodeCard({
         onCharacterWardrobeImport={onCharacterWardrobeImport}
         onCharacterVoicesUpload={onCharacterVoicesUpload}
         onCharacterWardrobeRemove={onCharacterWardrobeRemove}
+        onCharacterWardrobeRegenerate={onCharacterWardrobeRegenerate}
         onCharacterCustomSheetRemove={onCharacterCustomSheetRemove}
         onCharacterVoiceRemove={onCharacterVoiceRemove}
         onCharacterActivate={onCharacterActivate}
@@ -6515,6 +6884,7 @@ function NodeCard({
         transferCompiling={transferCompiling}
         imageModelOptions={imageModelOptions}
         videoModelOptions={videoModelOptions}
+        generationProvider={generationProvider}
       />
       {node.type === "plainText" && (
         <button
@@ -7385,6 +7755,7 @@ function NodeBody({
   onCharacterWardrobeImport,
   onCharacterVoicesUpload,
   onCharacterWardrobeRemove,
+  onCharacterWardrobeRegenerate,
   onCharacterCustomSheetRemove,
   onCharacterVoiceRemove,
   onCharacterActivate,
@@ -7409,7 +7780,8 @@ function NodeBody({
   incomingByNode,
   transferCompiling,
   imageModelOptions,
-  videoModelOptions
+  videoModelOptions,
+  generationProvider
 }) {
   const config = getNodeConfig(node.type);
   const outputPort = config.output[0];
@@ -7543,7 +7915,6 @@ function NodeBody({
     const customSheets = normalizeCharacterCustomSheets(node.data);
     const wardrobes = Array.isArray(node.data.characterWardrobes) ? node.data.characterWardrobes : [];
     const voices = Array.isArray(node.data.characterVoices) ? node.data.characterVoices : [];
-    const activeWardrobe = activeCharacterWardrobe(node);
     const activeVoice = activeCharacterVoice(node);
     const selectedTraits = Array.isArray(node.data.characterTraits) ? node.data.characterTraits : [];
     const hasCharacterTraits = selectedTraits.length > 0 || Boolean(String(node.data.customCharacterTraits || "").trim());
@@ -7551,22 +7922,34 @@ function NodeBody({
     const sheetChoices = characterSheetChoices(node.data);
     const selectedSheetId = activeCharacterSheetId(node.data);
     const variantCount = characterVariants.length;
-    const cuVideoVariantCount = characterVariants.filter((variant) => variant?.videoGenerated?.url).length;
-    const targetVariantCount = Math.max(1, wardrobes.length);
+    const cuVideoVariantCount = characterVariants.filter((variant) => variant?.videoGenerated?.url || variant?.videoGenerated?.localUrl).length;
     const batchProgress = node.data.characterBatchProgress;
     const locked = Boolean(node.data.locked && node.data.activated && node.data.resultUrl);
     const compiling = node.data.status === "compiling";
-    const activeTab = node.data.characterTab === "sheet" ? "sheet" : "build";
+    const activeTab = node.data.characterTab === "sheet" && sheetChoices.length ? "sheet" : "build";
     const characterResultItems = normalizedResultItems(node.data.resultItems, node.data.resultUrl, "image");
     const characterResultIndex = Math.min(
       Math.max(Number(node.data.selectedResultIndex) || 0, 0),
       Math.max(characterResultItems.length - 1, 0)
     );
     const activeCharacterVariant = activeCharacterSheetVariant(node.data);
-    const hasCuVideoSheet = Boolean(activeCharacterVariant?.videoGenerated?.url);
+    const characterBaseSheet = node.data.characterBaseSheet || characterSheetVariantForWardrobeId(node.data, characterDefaultWardrobeId)?.generated || null;
+    const hasGeneratedBase = Boolean(characterBaseSheet?.url || characterBaseSheet?.localUrl);
+    const canRegenerateBase = Boolean(
+      !locked
+      && !compiling
+      && hasGeneratedBase
+      && (portrait?.localUrl || portrait?.url)
+      && String(node.data.characterName || "").trim()
+    );
+    const canGenerateWardrobeVariants = Boolean(!compiling && hasGeneratedBase);
+    const hasCuVideoSheet = Boolean(activeCharacterVariant?.videoGenerated?.url || activeCharacterVariant?.videoGenerated?.localUrl);
     const characterSheetPreviewKind = node.data.characterSheetPreviewKind === "video" && hasCuVideoSheet ? "video" : "image";
     const selectedCharacterSheet = characterSheetPreviewKind === "video" ? activeCharacterVariant?.videoGenerated : activeCharacterVariant?.generated;
-    const characterSheetItem = selectedCharacterSheet?.url ? selectedCharacterSheet : characterResultItems[characterResultIndex] || null;
+    const selectedCharacterSheetUrl = selectedCharacterSheet?.url || selectedCharacterSheet?.localUrl || "";
+    const characterSheetItem = selectedCharacterSheetUrl
+      ? { ...selectedCharacterSheet, url: selectedCharacterSheetUrl }
+      : characterResultItems[characterResultIndex] || null;
     const characterSheetPreviewItem = characterSheetItem?.url
       ? {
           ...characterSheetItem,
@@ -7587,26 +7970,18 @@ function NodeBody({
       onUpdate(node.id, { characterTraits: nextTraits });
     }
 
-    function selectWardrobe(wardrobe) {
-      const variant = characterSheetVariantForWardrobeId(node.data, wardrobe.id);
-      if (locked && !variant) return;
-      onUpdate(node.id, {
-        activeWardrobeId: wardrobe.id,
-        ...(variant ? { activeCharacterSheetId: generatedCharacterSheetId(variant.wardrobeId) } : {}),
-        characterSheetPreviewKind: node.data.characterSheetPreviewKind === "video" && variant?.videoGenerated?.url ? "video" : "image",
-        ...(locked && variant ? characterVariantDisplayPatch(variant) : {})
-      });
-    }
-
     function selectCharacterSheet(choice) {
       const variant = choice?.variant;
-      if (!variant?.generated?.url) return;
+      if (!(variant?.generated?.url || variant?.generated?.localUrl)) return;
       onUpdate(node.id, {
+        characterTab: "sheet",
         activeCharacterSheetId: choice.id,
         ...(choice.source === "generated" && variant.wardrobeId !== characterDefaultWardrobeId
           ? { activeWardrobeId: variant.wardrobeId }
+          : choice.source === "generated"
+            ? { activeWardrobeId: "" }
           : {}),
-        characterSheetPreviewKind: node.data.characterSheetPreviewKind === "video" && variant.videoGenerated?.url ? "video" : "image",
+        characterSheetPreviewKind: node.data.characterSheetPreviewKind === "video" && (variant.videoGenerated?.url || variant.videoGenerated?.localUrl) ? "video" : "image",
         ...(locked ? characterVariantDisplayPatch(variant) : {})
       });
     }
@@ -7649,9 +8024,19 @@ function NodeBody({
             <button type="button" role="tab" aria-selected={activeTab === "build"} className={activeTab === "build" ? "active" : ""} onClick={() => onUpdate(node.id, { characterTab: "build" })}>
               Character Build
             </button>
-            <button type="button" role="tab" aria-selected={activeTab === "sheet"} className={activeTab === "sheet" ? "active" : ""} onClick={() => onUpdate(node.id, { characterTab: "sheet" })}>
-              Character Sheet
-            </button>
+            {sheetChoices.map((choice, index) => (
+              <button
+                key={choice.id}
+                type="button"
+                role="tab"
+                aria-selected={activeTab === "sheet" && choice.id === selectedSheetId}
+                className={activeTab === "sheet" && choice.id === selectedSheetId ? "active" : ""}
+                onClick={() => selectCharacterSheet(choice)}
+                title={choice.label}
+              >
+                Sheet {index + 1}
+              </button>
+            ))}
           </div>
           <div className="character-port-bar">
             {locked || outputConnected ? (
@@ -7670,7 +8055,7 @@ function NodeBody({
               <section className="character-sheet-panel drop-enabled" onDragOver={allowFileDrop} onDrop={(event) => handleCharacterDrop(event, "portrait")}>
                 <span className="character-section-label">Portrait Reference</span>
                 <label className={`character-main-preview ${portrait ? "has-image" : ""}`} title={portrait ? "Replace portrait image" : "Upload portrait image"}>
-                  {portrait?.localUrl ? (
+                  {portrait?.localUrl || portrait?.url ? (
                     <img {...fullResolutionImageProps(portrait)} src={previewImageUrl(portrait)} alt="Character portrait" loading="lazy" decoding="async" />
                   ) : (
                     <UserRound size={28} />
@@ -7704,7 +8089,7 @@ function NodeBody({
                     {wardrobes.length < maxCharacterWardrobes && (
                       <label className="character-add-button" title="Upload wardrobe images">
                         <Plus size={13} />
-                        <input type="file" accept="image/png,image/jpeg,image/webp" multiple onChange={(event) => onCharacterWardrobesUpload(node, event.target.files)} />
+                        <input type="file" accept="image/png,image/jpeg,image/webp" multiple disabled={compiling} onChange={(event) => onCharacterWardrobesUpload(node, event.target.files)} />
                       </label>
                     )}
                   </div>
@@ -7712,19 +8097,43 @@ function NodeBody({
                     {wardrobes.map((wardrobe) => {
                       const hasSheet = Boolean(characterSheetVariantForWardrobeId(node.data, wardrobe.id));
                       return (
-                        <button
+                        <div
                           key={wardrobe.id}
-                          type="button"
-                          className={`${wardrobe.id === activeWardrobe?.id ? "active" : ""} ${locked && !hasSheet ? "unavailable" : ""}`}
-                          disabled={compiling}
-                          onClick={() => selectWardrobe(wardrobe)}
-                          title={locked && hasSheet ? `Use ${wardrobe.fileName || "this wardrobe"} character sheet` : locked ? "No generated sheet for this wardrobe" : wardrobe.fileName}
+                          className={`character-wardrobe-thumb ${locked && !hasSheet ? "unavailable" : ""}`}
+                          title={hasSheet ? `${wardrobe.fileName || "Wardrobe"} sheet ready` : wardrobe.fileName}
                         >
                           <img {...fullResolutionImageProps(wardrobe)} src={previewImageUrl(wardrobe)} alt={wardrobe.fileName || "Wardrobe"} loading="lazy" decoding="async" />
-                          <span className="character-remove" onClick={(event) => { event.stopPropagation(); onCharacterWardrobeRemove(node.id, wardrobe.id); }}>
+                          {canGenerateWardrobeVariants && (
+                            <button
+                              type="button"
+                              className="character-regenerate"
+                              aria-label={`${hasSheet ? "Regenerate" : "Generate"} ${wardrobe.fileName || "wardrobe"} sheet`}
+                              title={hasSheet ? "Regenerate only this wardrobe sheet" : "Generate this wardrobe sheet from Base Identity"}
+                              onPointerDown={(event) => event.stopPropagation()}
+                              onClick={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                onCharacterWardrobeRegenerate?.(node.id, wardrobe.id);
+                              }}
+                            >
+                              <RefreshCw size={10} />
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            className="character-remove"
+                            aria-label={`Remove ${wardrobe.fileName || "wardrobe"}`}
+                            title={`Remove ${wardrobe.fileName || "wardrobe"}`}
+                            onPointerDown={(event) => event.stopPropagation()}
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              onCharacterWardrobeRemove(node.id, wardrobe.id);
+                            }}
+                          >
                             <X size={10} />
-                          </span>
-                        </button>
+                          </button>
+                        </div>
                       );
                     })}
                     {!wardrobes.length && <small>Drop outfit sheets here</small>}
@@ -7780,7 +8189,7 @@ function NodeBody({
                   onDrop={(event) => handleCharacterDrop(event, "customSheet")}
                 >
                   <div className="character-section-head">
-                    <span className="character-section-label">Character Sheets</span>
+                    <span className="character-section-label">Custom Sheets</span>
                     {customSheets.length < maxCharacterCustomSheets && (
                       <label className="character-add-button" title="Upload custom character sheets">
                         <Plus size={13} />
@@ -7794,40 +8203,26 @@ function NodeBody({
                       </label>
                     )}
                   </div>
-                  <div className="character-sheet-library-strip">
-                    {sheetChoices.map((choice) => (
-                      <button
-                        key={choice.id}
-                        type="button"
-                        className={`character-sheet-library-item ${choice.id === selectedSheetId ? "active" : ""}`}
-                        disabled={compiling}
-                        onClick={() => selectCharacterSheet(choice)}
-                        title={`Use ${choice.label}`}
-                      >
-                        <img {...fullResolutionImageProps(choice.item)} src={previewImageUrl(choice.item)} alt={choice.label} loading="lazy" decoding="async" />
-                        <span className="character-sheet-source">{choice.source === "custom" ? "Custom" : "Generated"}</span>
-                        <span className="character-sheet-name">{choice.label}</span>
-                        {choice.source === "custom" && (
-                          <span
-                            className="character-remove"
-                            role="button"
-                            aria-label={`Remove ${choice.label}`}
-                            title={`Remove ${choice.label}`}
-                            onClick={(event) => {
-                              event.preventDefault();
-                              event.stopPropagation();
-                              onCharacterCustomSheetRemove(node.id, choice.sheet.id);
-                            }}
-                          >
-                            <X size={10} />
-                          </span>
-                        )}
-                      </button>
+                  <div className="character-custom-sheet-list">
+                    {customSheets.map((sheet) => (
+                      <div key={sheet.id} className="character-custom-sheet-row">
+                        <FileImage size={14} />
+                        <span title={sheet.fileName || "Custom character sheet"}>{sheet.fileName || "Custom character sheet"}</span>
+                        <button
+                          type="button"
+                          aria-label={`Remove ${sheet.fileName || "custom character sheet"}`}
+                          title={`Remove ${sheet.fileName || "custom character sheet"}`}
+                          disabled={compiling}
+                          onClick={() => onCharacterCustomSheetRemove(node.id, sheet.id)}
+                        >
+                          <X size={11} />
+                        </button>
+                      </div>
                     ))}
-                    {!sheetChoices.length && (
+                    {!customSheets.length && (
                       <label className="character-sheet-library-empty">
                         <ImagePlus size={16} />
-                        <span>Drop or upload completed sheets</span>
+                        <span>Drop or upload completed custom sheets</span>
                         <input type="file" accept="image/png,image/jpeg,image/webp" multiple disabled={compiling} onChange={(event) => onCharacterPortraitUpload(node, event.target.files, "customSheet")} />
                       </label>
                     )}
@@ -7893,23 +8288,35 @@ function NodeBody({
                   ? `Building character sheets ${batchProgress.completed} / ${batchProgress.total}`
                   : node.data.characterVariantNotice
                     ? node.data.characterVariantNotice
-                  : locked
-                    ? node.data.cuVideoGeneration
-                        ? `${variantCount} image sheet${variantCount === 1 ? "" : "s"} and ${cuVideoVariantCount} CU video sheet${cuVideoVariantCount === 1 ? "" : "s"} ready.`
+                    : locked
+                      ? node.data.cuVideoGeneration
+                        ? `Base Identity plus ${Math.max(0, variantCount - 1)} wardrobe sheet${variantCount === 2 ? "" : "s"}; ${cuVideoVariantCount} CU video sheet${cuVideoVariantCount === 1 ? "" : "s"} ready.`
                         : `${sheetChoices.length} sheet${sheetChoices.length === 1 ? "" : "s"} ready. @${characterTag(node)} uses the selected sheet.`
                     : node.data.cuVideoGeneration
-                      ? `${targetVariantCount} image sheet${targetVariantCount === 1 ? "" : "s"} and ${targetVariantCount} CU video sheet${targetVariantCount === 1 ? "" : "s"} will generate on lock.`
-                      : `${targetVariantCount} outfit sheet${targetVariantCount === 1 ? "" : "s"} will generate on lock.`}
+                      ? `One Base Identity and ${wardrobes.length} wardrobe variant${wardrobes.length === 1 ? "" : "s"}, with matching CU video sheets, will generate on lock.`
+                      : `One Base Identity and ${wardrobes.length} wardrobe variant${wardrobes.length === 1 ? "" : "s"} will generate on lock.`}
               </span>
-              <button
-                className={`style-lock-button ${locked ? "locked" : ""}`}
-                type="button"
-                disabled={compiling || (!locked && (!(portrait?.localUrl || customSheets.length) || !String(node.data.characterName || "").trim()))}
-                onClick={() => (locked ? onCharacterUnlock(node.id) : onCharacterActivate(node))}
-                title={locked ? "Unlock character" : portrait?.localUrl ? `Generate and lock ${targetVariantCount} outfit sheet${targetVariantCount === 1 ? "" : "s"}` : "Lock the selected custom character sheet"}
-              >
-                {compiling ? "Generating..." : locked ? <Lock size={15} /> : <Unlock size={15} />}
-              </button>
+              <div className="character-action-buttons">
+                {canRegenerateBase && (
+                  <button
+                    className="character-regenerate-base-button"
+                    type="button"
+                    onClick={() => onCharacterActivate(node, { forceRegenerateBase: true })}
+                    title="Regenerate the Base Identity and every wardrobe and CU video sheet"
+                  >
+                    Regenerate Base
+                  </button>
+                )}
+                <button
+                  className={`style-lock-button ${locked ? "locked" : ""}`}
+                  type="button"
+                  disabled={compiling || (!locked && (!(portrait?.localUrl || portrait?.url || customSheets.length) || !String(node.data.characterName || "").trim()))}
+                  onClick={() => (locked ? onCharacterUnlock(node.id) : onCharacterActivate(node))}
+                  title={locked ? "Unlock character" : portrait?.localUrl || portrait?.url ? "Generate the Base Identity sheet and required wardrobe edits" : "Lock the selected custom character sheet"}
+                >
+                  {compiling ? "Generating..." : locked ? <Lock size={15} /> : <Unlock size={15} />}
+                </button>
+              </div>
             </div>
           </section>
         ) : (
@@ -10404,17 +10811,13 @@ function NodeBody({
     const promptValue = resolvedPromptText(incoming.promptIn) || node.data.prompt;
     const promptConnected = Boolean(resolvedPromptText(incoming.promptIn));
     const isSam3Image = isSam3ImageModel(node.data.model);
-    const isZImage = isZImageImageModel(node.data.model);
     const isKrea2Large = isKrea2LargeImageModel(node.data.model);
-    const isSeedream5 = isSeedream5ImageModel(node.data.model);
     const isOpenAiImage2 = node.data.model === imageModelNames.openAiImage2;
     const imageInstructionSources = imageInstructionSourcesForModel(node.data.model, incoming);
     const imagePromptConnections = imagePromptInputConnectionsForModel(node.data.model, incoming);
     const effectivePromptValue = isSam3Image
       ? promptValue
-      : isZImage
-        ? resolveImageReferenceMentions(promptValue, imagePromptConnections)
-        : buildEffectiveImagePrompt(promptValue, imageInstructionSources, node.data.aspectRatio, incomingByNode);
+      : buildEffectiveImagePrompt(promptValue, imageInstructionSources, node.data.aspectRatio, incomingByNode);
     const promptHasGeneratedAdditions = effectivePromptValue !== promptValue;
     const appliedInstructionLabels = activeImageInstructionLabels(imageInstructionSources, incomingByNode);
     const referenceTagMatches = isSam3Image
@@ -10426,6 +10829,20 @@ function NodeBody({
           incomingByNode
         );
     const imagePromptLabel = connectedSummary(imagePromptConnections, "Add file");
+    const pricedImagePromptItems = connectedImagePromptItems(
+      isSam3Image ? incoming.imagePromptIn || [] : imageReferenceConnectionsForModel(node.data.model, incoming),
+      incomingByNode,
+      { includeComposerCharacterBindings: true, prompt: promptValue }
+    );
+    const imageRunCost = estimateImageRunCost({
+      model: node.data.model,
+      resolution: node.data.resolution,
+      aspectRatio: node.data.aspectRatio,
+      quality: node.data.quality,
+      referenceCount: pricedImagePromptItems.length,
+      batchCount: isSam3Image ? 1 : node.data.batchCount,
+      provider: generationProvider
+    });
     const cameraPromptLabel = connectedSummary(incoming.cameraIn, "Add camera");
     const stylePromptLabel = connectedSummary(incoming.styleIn, "Add style");
     const transferPromptLabel = connectedSummary(incoming.transferIn, "Add mood board");
@@ -10481,7 +10898,9 @@ function NodeBody({
           </div>
         )}
         <button className="run-node-button" onClick={() => onRun(node)} disabled={running}>
-          {running ? `Running ${formatNodeBatchCount(isSam3Image ? 1 : node.data.batchCount)}...` : "Run Image"}
+          {running
+            ? `Running ${formatNodeBatchCount(isSam3Image ? 1 : node.data.batchCount)}...`
+            : formatPricedRunLabel("Run Image", imageRunCost)}
         </button>
         <details className="model-settings-drawer" open={settingsOpen} onToggle={(event) => onUpdate(node.id, { settingsOpen: event.currentTarget.open })}>
           <summary>Settings</summary>
@@ -10536,20 +10955,6 @@ function NodeBody({
               </select>
             </NodeRow>
           )}
-          {isSeedream5 && (
-            <NodeRow label="Layer Separation">
-              <button
-                className={`node-toggle ${node.data.seedreamLayers ? "enabled" : ""}`}
-                onClick={() => onUpdate(node.id, {
-                  seedreamLayers: !node.data.seedreamLayers,
-                  batchCount: "1"
-                })}
-                title="Return a flattened image plus editable transparent component layers"
-              >
-                <span />
-              </button>
-            </NodeRow>
-          )}
           <NodeRow label={isSam3Image ? "Image" : "Image Prompt"} inputPort={settingsOpen ? imagePromptPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
             <button className={imagePromptLabel !== "Add file" ? "connected-field" : ""}>{imagePromptLabel}</button>
           </NodeRow>
@@ -10576,8 +10981,8 @@ function NodeBody({
                 </NodeRow>
               )}
               <NodeRow label="Generations">
-                <select value={isSeedream5 && node.data.seedreamLayers ? "1" : node.data.batchCount || "1"} disabled={isSeedream5 && node.data.seedreamLayers} onChange={(event) => onUpdate(node.id, { batchCount: event.target.value })}>
-                  {(isSeedream5 && node.data.seedreamLayers ? ["1"] : imageBatchOptions).map((option) => (
+                <select value={node.data.batchCount || "1"} onChange={(event) => onUpdate(node.id, { batchCount: event.target.value })}>
+                  {imageBatchOptions.map((option) => (
                     <option key={option} value={option}>
                       {formatNodeBatchCount(option)}
                     </option>
@@ -10616,27 +11021,31 @@ function NodeBody({
   const referenceVideoPort = config.input.find((port) => port.id === "referenceVideoIn");
   const referenceAudioPort = config.input.find((port) => port.id === "referenceAudioIn");
   const characterPort = config.input.find((port) => port.id === "characterIn");
-  const isWanFunControl = isWanFunControlModel(node.data.model);
-  const isWan27Reference = isWan27ReferenceModel(node.data.model);
-  const isAurora = isAuroraModel(node.data.model);
-  const isHappyHorse = isHappyHorseModel(node.data.model);
-  const isKlingO34k = isKlingO34kModel(node.data.model);
-  const isKlingO3Pro = isKlingO3ProModel(node.data.model);
-  const isKlingO3 = isKlingO34k || isKlingO3Pro;
-  const isGeminiOmni = isGeminiOmniModel(node.data.model);
-  const isSeedance25 = isSeedance25Model(node.data.model);
-  const isSam3Video = isSam3VideoModel(node.data.model);
-  const wan27Duration = normalizedWan27ReferenceDurationLabel(node.data.duration);
-  const wan27Resolution = normalizedWan27ReferenceResolution(node.data.resolution);
-  const wan27AspectRatio = normalizedWan27ReferenceAspectRatio(node.data.aspectRatio);
-  const happyHorseDuration = normalizedHappyHorseDurationLabel(node.data.duration);
-  const happyHorseResolution = normalizedHappyHorseResolution(node.data.resolution);
-  const happyHorseAspectRatio = normalizedHappyHorseAspectRatio(node.data.aspectRatio);
-  const happyHorseReferenceImageCount = Math.min(incoming.referenceImageIn?.length || 0, 9);
-  const wan27ReferenceImageCount = incoming.referenceImageIn?.length || 0;
-  const wan27ReferenceVideoCount = incoming.referenceVideoIn?.length || 0;
-  const supportsCharacterInput = videoModelSupportsCharacterInput(node.data.model);
   const supportsDirectorInput = videoModelSupportsFilmDirector(node.data.model);
+  const directorConnected = supportsDirectorInput && Boolean(incoming.directorIn?.length);
+  const attachedDirectorSource = directorConnected
+    ? incoming.directorIn.find(({ source }) => source?.type === "skillDirector")?.source || null
+    : null;
+  const directorSource = directorConnected ? connectedDirectorPackageSource(incoming.directorIn) : null;
+  const activeDirectorPackage = directorSource ? directorPackageForVideo(directorSource, incomingByNode) : null;
+  const directorSettings = activeDirectorPackage || (attachedDirectorSource?.data ? {
+    videoModel: attachedDirectorSource.data.skillVideoModel,
+    durationSeconds: attachedDirectorSource.data.skillDurationSeconds || attachedDirectorSource.data.durationSeconds,
+    resolution: attachedDirectorSource.data.skillResolution,
+    aspectRatio: attachedDirectorSource.data.skillAspectRatio,
+    audioMode: attachedDirectorSource.data.skillDirectorAudioMode
+  } : null);
+  const effectiveVideoModel = directorConnected
+    ? normalizeFilmDirectorVideoModel(directorSettings?.videoModel, node.data.model)
+    : node.data.model;
+  const isWanFunControl = isWanFunControlModel(effectiveVideoModel);
+  const isMiniMaxH3 = isMiniMaxH3Model(effectiveVideoModel);
+  const isKlingO34k = isKlingO34kModel(effectiveVideoModel);
+  const isKlingO3Pro = isKlingO3ProModel(effectiveVideoModel);
+  const isKlingO3 = isKlingO34k || isKlingO3Pro;
+  const isSeedance25 = isSeedance25Model(effectiveVideoModel);
+  const isSam3Video = isSam3VideoModel(effectiveVideoModel);
+  const supportsCharacterInput = videoModelSupportsCharacterInput(effectiveVideoModel);
   const activeDirectorPort = supportsDirectorInput ? directorPort : null;
   const displayIncoming = supportsDirectorInput
     ? expandVideoDirectorPackageIncoming(incoming, incomingByNode, { includeCharacters: supportsCharacterInput })
@@ -10644,36 +11053,49 @@ function NodeBody({
   const directorPromptValue = supportsDirectorInput ? connectedDirectorPackageText(incoming.directorIn) : "";
   const promptValue = [directorPromptValue, resolvedPromptText(incoming.promptIn) || node.data.prompt].filter(Boolean).join("\n\n");
   const promptConnected = Boolean(resolvedPromptText(incoming.promptIn) || directorPromptValue);
-  const directorConnected = supportsDirectorInput && Boolean(incoming.directorIn?.length);
-  const directorSource = directorConnected ? connectedDirectorPackageSource(incoming.directorIn) : null;
-  const activeDirectorPackage = directorSource ? directorPackageForVideo(directorSource, incomingByNode) : null;
-  const effectiveVideoDuration = directorConnected && activeDirectorPackage
-    ? filmDirectorVideoDuration(node.data.model, activeDirectorPackage.durationSeconds, node.data.duration)
+  const effectiveVideoDuration = directorConnected && directorSettings
+    ? filmDirectorVideoDuration(effectiveVideoModel, directorSettings.durationSeconds, node.data.duration)
     : node.data.duration;
-  const effectiveVideoResolution = directorConnected && activeDirectorPackage
-    ? filmDirectorVideoResolution(node.data.model, activeDirectorPackage.resolution, node.data.resolution)
+  const effectiveVideoResolution = directorConnected && directorSettings
+    ? filmDirectorVideoResolution(effectiveVideoModel, directorSettings.resolution, node.data.resolution)
     : node.data.resolution;
-  const effectiveVideoAspectRatio = directorConnected && activeDirectorPackage
-    ? filmDirectorVideoAspectRatio(node.data.model, activeDirectorPackage.aspectRatio, node.data.aspectRatio)
+  const effectiveVideoAspectRatio = directorConnected && directorSettings
+    ? filmDirectorVideoAspectRatio(effectiveVideoModel, directorSettings.aspectRatio, node.data.aspectRatio)
     : node.data.aspectRatio;
+  const effectiveVideoGenerateAudio = directorConnected && directorSettings
+    ? filmDirectorVideoGenerateAudio(directorSettings.audioMode, node.data.generateAudio !== false)
+    : node.data.generateAudio !== false;
   const directorAssetReferences = activeDirectorPackage?.references || [];
   const directorAssetTags = [...new Set(directorAssetReferences.map((reference) => `@${String(reference.tag || "").replace(/^@+/, "")}`).filter((tag) => tag !== "@"))];
   const hasVideoPrompt = Boolean(String(promptValue || "").trim());
-  const tagMatches = isWanFunControl || isAurora || isSam3Video ? [] : videoModelReferenceTagMatches(promptValue, displayIncoming);
+  const tagMatches = isWanFunControl || isSam3Video ? [] : videoModelReferenceTagMatches(promptValue, displayIncoming);
   const characterConnected = supportsCharacterInput && Boolean(displayIncoming.characterIn?.length);
+  const pricedCharacterReferences = supportsCharacterInput
+    ? connectedCharacterReferences(displayIncoming.characterIn)
+    : [];
+  const pricedReferenceImages = uniqueAssetItems([
+    ...connectedAssetItems(displayIncoming.referenceImageIn),
+    ...pricedCharacterReferences.map((item) => ({ url: item.url, label: item.label, type: "image" }))
+  ]);
+  const pricedReferenceVideos = uniqueAssetItems(connectedAssetItems(displayIncoming.referenceVideoIn));
+  const videoRunCost = estimateVideoRunCost({
+    model: effectiveVideoModel,
+    duration: effectiveVideoDuration,
+    resolution: effectiveVideoResolution,
+    aspectRatio: effectiveVideoAspectRatio,
+    generateAudio: effectiveVideoGenerateAudio,
+    hasVideoReference: pricedReferenceVideos.length > 0,
+    referenceImageCount: pricedReferenceImages.length,
+    batchCount: isSam3Video ? 1 : node.data.batchCount,
+    provider: generationProvider
+  });
   const settingsOpen = node.data.settingsOpen !== false;
   const collapsedPorts = isWanFunControl
     ? [promptPort, activeDirectorPort, referenceVideoPort, referenceImagePort, characterPort]
-    : isWan27Reference
-      ? [promptPort, activeDirectorPort, referenceImagePort, referenceVideoPort, characterPort]
-    : isAurora
-      ? [promptPort, activeDirectorPort, referenceImagePort, referenceAudioPort]
-      : isHappyHorse
-        ? [promptPort, activeDirectorPort, referenceImagePort, characterPort]
+    : isMiniMaxH3
+      ? [promptPort, activeDirectorPort, startFramePort, endFramePort, referenceImagePort, referenceVideoPort, referenceAudioPort, characterPort]
     : isKlingO3
       ? [promptPort, activeDirectorPort, startFramePort, endFramePort, referenceImagePort, referenceVideoPort, characterPort]
-    : isGeminiOmni
-      ? [promptPort, activeDirectorPort, startFramePort, referenceImagePort, characterPort]
     : isSam3Video
       ? [promptPort, activeDirectorPort, referenceVideoPort]
       : [promptPort, activeDirectorPort, startFramePort, endFramePort, referenceImagePort, referenceVideoPort, referenceAudioPort, characterPort];
@@ -10690,7 +11112,9 @@ function NodeBody({
         onSelectResult={(index, item) => onUpdate(node.id, { selectedResultIndex: index, resultUrl: item.url })}
       />
       <button className="run-node-button" onClick={() => onRun(node)} disabled={running || !hasVideoPrompt}>
-        {running ? `Running ${formatNodeBatchCount(isSam3Video ? 1 : node.data.batchCount)}...` : "Run Video"}
+        {running
+          ? `Running ${formatNodeBatchCount(isSam3Video ? 1 : node.data.batchCount)}...`
+          : formatPricedRunLabel("Run Video", videoRunCost)}
       </button>
       <OutputPortRow node={node} port={outputPort} label="Video output" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
       {!settingsOpen && (
@@ -10710,8 +11134,14 @@ function NodeBody({
       )}
       <details className="model-settings-drawer" open={settingsOpen} onToggle={(event) => onUpdate(node.id, { settingsOpen: event.currentTarget.open })}>
         <summary>Settings</summary>
+        <fieldset className="video-director-controlled-settings" disabled={directorConnected}>
         <NodeRow label="Model">
-          <select value={node.data.model} onChange={(event) => onUpdate(node.id, videoModelSelectionPatch(node.data, event.target.value))}>
+          <select
+            value={effectiveVideoModel}
+            disabled={directorConnected}
+            title={directorConnected ? "Controlled by Film Director" : "Video model"}
+            onChange={(event) => onUpdate(node.id, videoModelSelectionPatch(node.data, event.target.value))}
+          >
             {videoModelOptions.map((model) => (
               <option key={model}>{model}</option>
             ))}
@@ -10727,6 +11157,7 @@ function NodeBody({
             onChange={(event) => onUpdate(node.id, { prompt: event.target.value })}
           />
         </NodeRow>
+        </fieldset>
         {supportsDirectorInput && (
           <NodeRow label="Film Director" inputPort={settingsOpen ? directorPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
             <button className={directorConnected ? "connected-field" : ""}>{connectedSummary(incoming.directorIn, "Add film director")}</button>
@@ -10739,8 +11170,11 @@ function NodeBody({
                 ? `Film Director assets applied (${directorAssetTags.length}): ${directorAssetTags.join(", ")}`
                 : "Film Director connected. This scene does not reference any visual assets."}
             </span>
+            <span>{`Film Director model: ${effectiveVideoModel}`}</span>
+            <span>{`Film Director audio: ${filmDirectorAudioModeLabel(directorSettings?.audioMode)}`}</span>
           </div>
         )}
+        <fieldset className="video-director-controlled-settings" disabled={directorConnected}>
         {tagMatches.length > 0 && (
           <div className="reference-tag-chips">
             {tagMatches.map((match) => (
@@ -10753,7 +11187,12 @@ function NodeBody({
         {characterConnected && !isSam3Video && <div className="effective-prompt-preview"><span>Character identity and selected voice instructions applied</span></div>}
         {!isSam3Video && (
           <NodeRow label="Generations">
-            <select value={node.data.batchCount || "1"} onChange={(event) => onUpdate(node.id, { batchCount: event.target.value })}>
+            <select
+              value={node.data.batchCount || "1"}
+              disabled={directorConnected}
+              title={directorConnected ? "Controlled by Film Director" : "Generations"}
+              onChange={(event) => onUpdate(node.id, { batchCount: event.target.value })}
+            >
               {batchOptions.map((option) => (
                 <option key={option} value={option}>
                   {formatNodeBatchCount(option)}
@@ -10817,131 +11256,48 @@ function NodeBody({
               <input value={node.data.seed || ""} onChange={(event) => onUpdate(node.id, { seed: event.target.value })} placeholder="Random" />
             </NodeRow>
           </>
-        ) : isWan27Reference ? (
-          <>
-            <NodeRow label="Reference Images" inputPort={settingsOpen ? referenceImagePort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-              <button className={incoming.referenceImageIn?.length ? "connected-field" : ""}>{`Add Images ( ${wan27ReferenceImageCount} )`}</button>
-            </NodeRow>
-            <NodeRow label="Reference Videos" inputPort={settingsOpen ? referenceVideoPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-              <button className={incoming.referenceVideoIn?.length ? "connected-field" : ""}>{`Add Videos ( ${wan27ReferenceVideoCount} )`}</button>
-            </NodeRow>
-            <NodeRow label="Negative">
-              <textarea value={node.data.negativePrompt || ""} onChange={(event) => onUpdate(node.id, { negativePrompt: event.target.value })} placeholder="Optional negative prompt" />
-            </NodeRow>
-            <NodeRow label="Duration">
-              <select value={wan27Duration} onChange={(event) => onUpdate(node.id, { duration: event.target.value })}>
-                {wan27ReferenceDurationOptions.map((option) => (
-                  <option key={option}>{option}</option>
-                ))}
-              </select>
-            </NodeRow>
-            <NodeRow label="Resolution">
-              <select value={wan27Resolution} onChange={(event) => onUpdate(node.id, { resolution: event.target.value })}>
-                {wan27ReferenceResolutionOptions.map((option) => (
-                  <option key={option}>{option}</option>
-                ))}
-              </select>
-            </NodeRow>
-            <NodeRow label="Aspect Ratio">
-              <select value={wan27AspectRatio} onChange={(event) => onUpdate(node.id, { aspectRatio: event.target.value })}>
-                {wan27ReferenceAspectRatioOptions.map((option) => (
-                  <option key={option}>{option}</option>
-                ))}
-              </select>
-            </NodeRow>
-            <NodeRow label="Multi Shot">
-              <button className={`node-toggle ${node.data.multiShots ? "enabled" : ""}`} onClick={() => onUpdate(node.id, { multiShots: !node.data.multiShots })}>
-                <span />
-              </button>
-            </NodeRow>
-            <NodeRow label="Seed">
-              <input value={node.data.seed || ""} onChange={(event) => onUpdate(node.id, { seed: event.target.value })} placeholder="Random" />
-            </NodeRow>
-            <NodeRow label="Safety Check">
-              <button className={`node-toggle ${node.data.enableSafetyChecker !== false ? "enabled" : ""}`} onClick={() => onUpdate(node.id, { enableSafetyChecker: node.data.enableSafetyChecker === false })}>
-                <span />
-              </button>
-            </NodeRow>
-          </>
-        ) : isAurora ? (
-          <>
-            <NodeRow label="Image" inputPort={settingsOpen ? referenceImagePort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-              <button className={incoming.referenceImageIn?.length ? "connected-field" : ""}>{connectedSummary(incoming.referenceImageIn, "Add image")}</button>
-            </NodeRow>
-            <NodeRow label="Audio" inputPort={settingsOpen ? referenceAudioPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-              <button className={incoming.referenceAudioIn?.length ? "connected-field" : ""}>{connectedSummary(incoming.referenceAudioIn, "Add audio")}</button>
-            </NodeRow>
-            <NodeRow label="Resolution">
-              <select value={node.data.resolution} onChange={(event) => onUpdate(node.id, { resolution: event.target.value })}>
-                <option>720p</option>
-                <option>480p</option>
-              </select>
-            </NodeRow>
-          </>
-        ) : isHappyHorse ? (
-          <>
-            <NodeRow label="Reference Images" inputPort={settingsOpen ? referenceImagePort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-              <button className={incoming.referenceImageIn?.length ? "connected-field" : ""}>{`Add Images ( ${happyHorseReferenceImageCount}/9 )`}</button>
-            </NodeRow>
-            <NodeRow label="Duration">
-              <select value={happyHorseDuration} onChange={(event) => onUpdate(node.id, { duration: event.target.value })}>
-                {happyHorseDurationOptions.map((option) => (
-                  <option key={option}>{option}</option>
-                ))}
-              </select>
-            </NodeRow>
-            <NodeRow label="Resolution">
-              <select value={happyHorseResolution} onChange={(event) => onUpdate(node.id, { resolution: event.target.value })}>
-                <option>1080p</option>
-                <option>720p</option>
-              </select>
-            </NodeRow>
-            <NodeRow label="Aspect Ratio">
-              <select value={happyHorseAspectRatio} onChange={(event) => onUpdate(node.id, { aspectRatio: event.target.value })}>
-                <option>16:9</option>
-                <option>9:16</option>
-                <option>1:1</option>
-                <option>4:3</option>
-                <option>3:4</option>
-              </select>
-            </NodeRow>
-            <NodeRow label="Seed">
-              <input value={node.data.seed || ""} onChange={(event) => onUpdate(node.id, { seed: event.target.value })} placeholder="Random" />
-            </NodeRow>
-            <NodeRow label="Safety Check">
-              <button className={`node-toggle ${node.data.enableSafetyChecker !== false ? "enabled" : ""}`} onClick={() => onUpdate(node.id, { enableSafetyChecker: node.data.enableSafetyChecker === false })}>
-                <span />
-              </button>
-            </NodeRow>
-          </>
-        ) : isGeminiOmni ? (
+        ) : isMiniMaxH3 ? (
           <>
             <NodeRow label="Start Frame" inputPort={settingsOpen ? startFramePort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
               <button className={incoming.startFrameIn?.length ? "connected-field" : ""}>{connectedSummary(incoming.startFrameIn, "Optional image")}</button>
             </NodeRow>
-            <NodeRow label="Reference Image" inputPort={settingsOpen ? referenceImagePort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-              <button className={displayIncoming.referenceImageIn?.length ? "connected-field" : ""}>{connectedSummary(displayIncoming.referenceImageIn, "Optional image")}</button>
+            <NodeRow label="End Frame" inputPort={settingsOpen ? endFramePort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+              <button className={incoming.endFrameIn?.length ? "connected-field" : ""}>{connectedSummary(incoming.endFrameIn, "Optional image")}</button>
+            </NodeRow>
+            <NodeRow label="Reference Images" inputPort={settingsOpen ? referenceImagePort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+              <button className={displayIncoming.referenceImageIn?.length ? "connected-field" : ""}>{`Add Images ( ${Math.min(displayIncoming.referenceImageIn?.length || 0, 9)}/9 )`}</button>
+            </NodeRow>
+            <NodeRow label="Reference Videos" inputPort={settingsOpen ? referenceVideoPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+              <button className={incoming.referenceVideoIn?.length ? "connected-field" : ""}>{`Add Videos ( ${Math.min(incoming.referenceVideoIn?.length || 0, 3)}/3 )`}</button>
+            </NodeRow>
+            <NodeRow label="Reference Audio" inputPort={settingsOpen ? referenceAudioPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+              <button className={incoming.referenceAudioIn?.length ? "connected-field" : ""}>{`Add Audio ( ${Math.min(incoming.referenceAudioIn?.length || 0, 3)}/3 )`}</button>
             </NodeRow>
             <NodeRow label="Character" inputPort={settingsOpen ? characterPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
               <button className={displayIncoming.characterIn?.length ? "connected-field" : ""}>{connectedSummary(displayIncoming.characterIn, "Optional character")}</button>
             </NodeRow>
             <NodeRow label="Duration">
               <select value={effectiveVideoDuration} disabled={directorConnected} onChange={(event) => onUpdate(node.id, { duration: event.target.value })}>
-                {geminiOmniDurationOptions.map((option) => <option key={option}>{option}</option>)}
+                {minimaxH3DurationOptions.map((option) => (
+                  <option key={option}>{option}</option>
+                ))}
               </select>
             </NodeRow>
             <NodeRow label="Resolution">
-              <select value={effectiveVideoResolution} disabled>
-                {geminiOmniResolutionOptions.map((option) => <option key={option}>{option}</option>)}
+              <select value={effectiveVideoResolution} disabled={directorConnected} onChange={(event) => onUpdate(node.id, { resolution: event.target.value })}>
+                {minimaxH3ResolutionOptions.map((option) => <option key={option}>{option}</option>)}
               </select>
             </NodeRow>
             <NodeRow label="Aspect Ratio">
               <select value={effectiveVideoAspectRatio} disabled={directorConnected} onChange={(event) => onUpdate(node.id, { aspectRatio: event.target.value })}>
-                {geminiOmniAspectRatioOptions.map((option) => <option key={option}>{option}</option>)}
+                {minimaxH3AspectRatioOptions.map((option) => <option key={option}>{option}</option>)}
               </select>
             </NodeRow>
-            <NodeRow label="Generate Audio">
-              <button className={`node-toggle ${node.data.generateAudio ? "enabled" : ""}`} onClick={() => onUpdate(node.id, { generateAudio: !node.data.generateAudio })}>
+            <NodeRow label="Seed">
+              <input value={node.data.seed || ""} onChange={(event) => onUpdate(node.id, { seed: event.target.value })} placeholder="Random" />
+            </NodeRow>
+            <NodeRow label="Safety Check">
+              <button className={`node-toggle ${node.data.enableSafetyChecker !== false ? "enabled" : ""}`} onClick={() => onUpdate(node.id, { enableSafetyChecker: node.data.enableSafetyChecker === false })}>
                 <span />
               </button>
             </NodeRow>
@@ -10990,7 +11346,12 @@ function NodeBody({
               </>
             )}
             <NodeRow label="Generate Audio">
-              <button className={`node-toggle ${node.data.generateAudio ? "enabled" : ""}`} onClick={() => onUpdate(node.id, { generateAudio: !node.data.generateAudio })}>
+              <button
+                className={`node-toggle ${effectiveVideoGenerateAudio ? "enabled" : ""}`}
+                disabled={directorConnected}
+                title={directorConnected ? "Controlled by Film Director" : "Generate audio"}
+                onClick={() => onUpdate(node.id, { generateAudio: !node.data.generateAudio })}
+              >
                 <span />
               </button>
             </NodeRow>
@@ -11043,17 +11404,20 @@ function NodeBody({
               </select>
             </NodeRow>
             <NodeRow label="Generate Audio">
-              <button className={`node-toggle ${node.data.generateAudio ? "enabled" : ""}`} onClick={() => onUpdate(node.id, { generateAudio: !node.data.generateAudio })}>
+              <button
+                className={`node-toggle ${effectiveVideoGenerateAudio ? "enabled" : ""}`}
+                disabled={directorConnected}
+                title={directorConnected ? "Controlled by Film Director" : "Generate audio"}
+                onClick={() => onUpdate(node.id, { generateAudio: !node.data.generateAudio })}
+              >
                 <span />
               </button>
             </NodeRow>
           </>
         )}
+        </fieldset>
       </details>
-      {isAurora && <small className="upload-status model-status-note">lipsync model</small>}
-      {isHappyHorse && <small className="upload-status model-status-note">reference image model</small>}
-      {isWan27Reference && <small className="upload-status model-status-note">multi-reference image/video model</small>}
-      {isGeminiOmni && <small className="upload-status model-status-note">Google direct with fal fallback · preview</small>}
+      {isMiniMaxH3 && <small className="upload-status model-status-note">native stereo audio on Fal · 5-15 seconds · 480P-4K on Fal</small>}
       {isKlingO3 && <small className="upload-status model-status-note">Film Director shots compile to {isKlingO34k ? "native 4K " : ""}Kling multi-shot</small>}
       {isSam3Video && <small className="upload-status model-status-note">segmentation mask model</small>}
     </div>
@@ -11633,14 +11997,22 @@ function createDefaultNodeData(type, label, count) {
       text: "",
       skillShotCount: "3",
       skillDurationSeconds: "15",
+      skillVideoModel: "",
       skillResolution: "720p",
       skillAspectRatio: "16:9",
+      skillDirectorAudioMode: "production",
       styleDirection: "",
       motionBrief: "",
       motionDirection: "",
       shotList: "",
       shotListNotes: "",
+      skillDirectorShotListSourceSignature: "",
+      skillDirectorLockedStyleInputSignature: "",
+      skillDirectorLockedAssetInputSignature: "",
+      skillDirectorLockedInputManifest: [],
+      skillDirectorLockedInputManifestInitialized: false,
       resultText: "",
+      skillDirectorOutputStale: false,
       skillDirectorLocks: {
         setup: false,
         style: false,
@@ -11648,6 +12020,7 @@ function createDefaultNodeData(type, label, count) {
         scene: false,
         shotList: false
       },
+      skillDirectorStaleStages: {},
       skillDirectorCollapsed: {
         setup: false,
         style: false,
@@ -11656,6 +12029,10 @@ function createDefaultNodeData(type, label, count) {
         shotList: false
       },
       skillDirectorBuilt: false,
+      skillDirectorRebuildAfterShotList: false,
+      skillDirectorRebuildAfterStyle: false,
+      skillDirectorRefreshAfterStyle: "",
+      skillDirectorRefreshShotListAfterMotion: false,
       skillDirectorAction: "",
       skillDirectorQueuedAction: "",
       skillDirectorQueueId: "",
@@ -11801,7 +12178,7 @@ function createDefaultNodeData(type, label, count) {
       characterReferenceNotes: "",
       characterTraits: [],
       customCharacterTraits: "",
-      characterSheetModel: imageModelNames.openAiImage2,
+      characterSheetModel: imageModelNames.nanoBanana2,
       cinematicCharacterSheet: false,
       cuVideoGeneration: false,
       useCustomCharacterSheet: false,
@@ -11816,6 +12193,10 @@ function createDefaultNodeData(type, label, count) {
       compiledWardrobeUrl: "",
       compiledTraitPrompt: "",
       compiledVoicePrompt: "",
+      characterBaseSheet: null,
+      characterBaseSignature: "",
+      characterBaseVideoSheet: null,
+      characterBaseVideoSignature: "",
       characterSheetVariants: [],
       characterSheetPreviewKind: "image",
       characterBatchProgress: null,
@@ -11951,7 +12332,6 @@ function createDefaultNodeData(type, label, count) {
       resolution: "2K",
       quality: openAiImage2Quality,
       kreaCreativity: "raw",
-      seedreamLayers: false,
       batchCount: "1",
       settingsOpen: true
     };
@@ -11976,15 +12356,13 @@ function createDefaultNodeData(type, label, count) {
 }
 
 function imageModelSelectionPatch(data = {}, model) {
-  const isSeedream5 = isSeedream5ImageModel(model);
   return {
     model,
     aspectRatio: normalizeImageModelAspectRatio(data.aspectRatio, model),
     resolution: normalizeImageModelResolutionForModel(data.resolution, model),
     quality: normalizeOpenAiImage2Quality(data.quality),
     kreaCreativity: normalizeKrea2Creativity(data.kreaCreativity),
-    seedreamLayers: isSeedream5 ? Boolean(data.seedreamLayers) : false,
-    batchCount: isSeedream5 && data.seedreamLayers ? "1" : data.batchCount || "1"
+    batchCount: data.batchCount || "1"
   };
 }
 
@@ -12042,11 +12420,6 @@ function isKrea2LargeImageModel(model) {
   return normalized.includes("krea") && normalized.includes("large");
 }
 
-function isSeedream5ImageModel(model) {
-  const normalized = String(model || "").toLowerCase();
-  return normalized.includes("seedream") && normalized.includes("5");
-}
-
 function normalizeKrea2Creativity(value) {
   return normalizeChoice(String(value || "raw").toLowerCase(), krea2CreativityOptions, "raw");
 }
@@ -12056,29 +12429,17 @@ function formatKrea2Creativity(value) {
   return `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
 }
 
-function isZImageImageModel(model) {
-  const normalized = String(model || "").toLowerCase();
-  return normalized.includes("z-image") || normalized.includes("z image") || normalized.includes("zimage");
-}
-
-function zImageUnsupportedInputMessage() {
-  return "Z-Image supports Prompt and Image Prompt only; Camera, Style, Mood Board, and Character inputs are not supported.";
-}
-
 function imageModelUnsupportedInputMessage(model) {
-  if (isZImageImageModel(model)) return zImageUnsupportedInputMessage();
   if (isKrea2LargeImageModel(model)) return "This input is not supported by the selected model.";
   return "";
 }
 
 function imageModelUnsupportedInputPorts(model) {
-  if (isZImageImageModel(model)) return zImageUnsupportedInputPorts;
   if (isKrea2LargeImageModel(model)) return krea2UnsupportedInputPorts;
   return emptyPortSet;
 }
 
 function imageModelUnsupportedSourceTypes(model) {
-  if (isZImageImageModel(model)) return zImageUnsupportedSourceTypes;
   if (isKrea2LargeImageModel(model)) return krea2UnsupportedSourceTypes;
   return emptyPortSet;
 }
@@ -12091,15 +12452,7 @@ function isImageModelUnsupportedSource(target, source) {
   return target?.type === "imageModel" && imageModelUnsupportedSourceTypes(target.data?.model).has(source?.type);
 }
 
-function zImageSupportedReferenceConnections(items = []) {
-  return items.filter(({ source, edge }) => {
-    if (!source?.data?.resultUrl || zImageUnsupportedSourceTypes.has(source.type)) return false;
-    return previewMediaType(source, edge) === "image";
-  });
-}
-
 function imagePromptInputConnectionsForModel(model, incoming = {}) {
-  if (isZImageImageModel(model)) return zImageSupportedReferenceConnections(incoming.imagePromptIn || []);
   return incoming.imagePromptIn || [];
 }
 
@@ -12116,7 +12469,6 @@ function imageInstructionSourcesForModel(model, incoming = {}) {
 
 function imageReferenceConnectionsForModel(model, incoming = {}) {
   const unsupportedPorts = imageModelUnsupportedInputPorts(model);
-  if (isZImageImageModel(model)) return zImageSupportedReferenceConnections(incoming.imagePromptIn || []);
   return [
     ...(incoming.imagePromptIn || []),
     ...(!unsupportedPorts.has("transferIn") ? incoming.transferIn || [] : []),
@@ -12127,21 +12479,6 @@ function imageReferenceConnectionsForModel(model, incoming = {}) {
 function isWanFunControlModel(model) {
   const normalized = String(model || "").toLowerCase();
   return normalized.includes("wan fun") || normalized.includes("wan-fun") || normalized === "wan";
-}
-
-function isWan27ReferenceModel(model) {
-  const normalized = String(model || "").toLowerCase();
-  return normalized.includes("wan 2.7") || normalized.includes("wan2.7") || normalized.includes("reference-to-video");
-}
-
-function isAuroraModel(model) {
-  const normalized = String(model || "").toLowerCase();
-  return normalized.includes("aurora") || normalized.includes("creatify");
-}
-
-function isHappyHorseModel(model) {
-  const normalized = String(model || "").toLowerCase();
-  return normalized.includes("happy") || normalized.includes("horse") || normalized.includes("alibaba");
 }
 
 function isKlingO3Model(model) {
@@ -12158,7 +12495,7 @@ function isKlingO3ProModel(model) {
 }
 
 function videoModelSupportsCharacterInput(model) {
-  return !isAuroraModel(model) && !isSam3VideoModel(model);
+  return !isSam3VideoModel(model);
 }
 
 function isVideoModelUnsupportedCharacterInput(node, portId) {
@@ -12168,23 +12505,18 @@ function isVideoModelUnsupportedCharacterInput(node, portId) {
 function isVideoModelUnsupportedInput(node, portId) {
   if (isVideoModelUnsupportedCharacterInput(node, portId)) return true;
   if (node?.type === "videoModel" && portId === "directorIn" && !videoModelSupportsFilmDirector(node.data?.model)) return true;
-  if (node?.type === "videoModel" && isGeminiOmniModel(node.data?.model) && ["endFrameIn", "referenceVideoIn", "referenceAudioIn"].includes(portId)) return true;
   return node?.type === "videoModel" && isKlingO3Model(node.data?.model) && portId === "referenceAudioIn";
 }
 
 function videoModelUnsupportedInputMessage(model, portId) {
   if (portId === "directorIn" && !videoModelSupportsFilmDirector(model)) {
-    return "Film Director is available only for Seedance 2.0, Seedance 2.5, Kling O3 Pro, Kling O3 4K, and Gemini Omni Flash.";
+    return "Film Director is available only for Seedance 2.0, Seedance 2.5, Kling O3 Pro, Kling O3 4K, and MiniMax H3.";
   }
-  if (isGeminiOmniModel(model) && portId === "endFrameIn") return "Gemini Omni Flash preview does not support end-frame interpolation.";
-  if (isGeminiOmniModel(model) && portId === "referenceVideoIn") return "Gemini Omni Flash preview video references are not reliable yet.";
-  if (isGeminiOmniModel(model) && portId === "referenceAudioIn") return "Gemini Omni Flash preview does not support uploaded audio references.";
   if (isKlingO3Model(model) && portId === "referenceAudioIn") return `${isKlingO34kModel(model) ? "Kling O3 4K" : "Kling O3 Pro"} generates native audio but does not accept reference audio files.`;
   return videoModelUnsupportedCharacterMessage(model);
 }
 
-function videoModelUnsupportedCharacterMessage(model) {
-  if (isAuroraModel(model)) return "Creative Aurora does not support Character inputs.";
+function videoModelUnsupportedCharacterMessage() {
   return "This video model does not support Character inputs.";
 }
 
@@ -12199,13 +12531,14 @@ function videoModelSelectionPatch(data = {}, model) {
     };
   }
 
-  if (isGeminiOmniModel(model)) {
+  if (isMiniMaxH3Model(model)) {
     return {
       model,
-      duration: isGeminiOmniModel(data.model) && geminiOmniDurationOptions.includes(data.duration) ? data.duration : "8 seconds",
-      resolution: "720p",
-      aspectRatio: isGeminiOmniModel(data.model) && geminiOmniAspectRatioOptions.includes(data.aspectRatio) ? data.aspectRatio : "16:9",
-      generateAudio: data.generateAudio !== false
+      duration: isMiniMaxH3Model(data.model) && minimaxH3DurationOptions.includes(data.duration) ? data.duration : "10 seconds",
+      resolution: isMiniMaxH3Model(data.model) && minimaxH3ResolutionOptions.includes(data.resolution) ? data.resolution : "2K",
+      aspectRatio: isMiniMaxH3Model(data.model) && minimaxH3AspectRatioOptions.includes(data.aspectRatio) ? data.aspectRatio : "16:9",
+      enableSafetyChecker: data.enableSafetyChecker !== false,
+      seed: data.seed || ""
     };
   }
 
@@ -12222,36 +12555,12 @@ function videoModelSelectionPatch(data = {}, model) {
     };
   }
 
-  if (isWan27ReferenceModel(model)) {
-    return {
-      model,
-      duration: isWan27ReferenceModel(data.model) ? normalizedWan27ReferenceDurationLabel(data.duration) : "5 seconds",
-      resolution: isWan27ReferenceModel(data.model) ? normalizedWan27ReferenceResolution(data.resolution) : "1080p",
-      aspectRatio: isWan27ReferenceModel(data.model) ? normalizedWan27ReferenceAspectRatio(data.aspectRatio) : "16:9",
-      negativePrompt: data.negativePrompt || "",
-      multiShots: Boolean(data.multiShots),
-      enableSafetyChecker: data.enableSafetyChecker !== false,
-      seed: data.seed || ""
-    };
-  }
-
-  if (!isHappyHorseModel(model)) {
-    return {
-      model,
-      duration: seedanceVideoDurationOptions.includes(data.duration) ? data.duration : "15 seconds",
-      resolution: seedanceVideoResolutionOptions.includes(data.resolution) ? data.resolution : "720p",
-      aspectRatio: seedanceVideoAspectRatioOptions.includes(data.aspectRatio) ? data.aspectRatio : "16:9 (Landscape)",
-      generateAudio: data.generateAudio !== false
-    };
-  }
-
   return {
     model,
-    duration: isHappyHorseModel(data.model) ? normalizedHappyHorseDurationLabel(data.duration) : "5 seconds",
-    resolution: isHappyHorseModel(data.model) ? normalizedHappyHorseResolution(data.resolution) : "1080p",
-    aspectRatio: isHappyHorseModel(data.model) ? normalizedHappyHorseAspectRatio(data.aspectRatio) : "16:9",
-    enableSafetyChecker: data.enableSafetyChecker !== false,
-    seed: data.seed || ""
+    duration: seedanceVideoDurationOptions.includes(data.duration) ? data.duration : "15 seconds",
+    resolution: seedanceVideoResolutionOptions.includes(data.resolution) ? data.resolution : "720p",
+    aspectRatio: seedanceVideoAspectRatioOptions.includes(data.aspectRatio) ? data.aspectRatio : "16:9 (Landscape)",
+    generateAudio: data.generateAudio !== false
   };
 }
 
@@ -12261,7 +12570,6 @@ function normalizeImageModelResolution(value) {
 
 function imageModelResolutionOptions(model) {
   if (isReve21Model(model)) return reve21ResolutionOptions;
-  if (isSeedream5ImageModel(model)) return seedream5ResolutionOptions;
   if (isNanoBanana2Model(model)) return nanoBanana2ResolutionOptions;
   return imageResolutionOptions;
 }
@@ -12274,21 +12582,6 @@ function normalizeImageModelResolutionForModel(value, model) {
 
 function normalizeAutoAspectModel(value) {
   return autoAspectModelOptions.includes(value) ? value : imageModelNames.openAiImage2;
-}
-
-function normalizedHappyHorseDurationLabel(value) {
-  const number = Math.min(15, Math.max(3, Math.round(Number(String(value || "").match(/\d+/)?.[0]) || 5)));
-  return `${number} seconds`;
-}
-
-function normalizedHappyHorseResolution(value) {
-  const normalized = String(value || "1080p");
-  return ["720p", "1080p"].includes(normalized) ? normalized : "1080p";
-}
-
-function normalizedHappyHorseAspectRatio(value) {
-  const normalized = String(value || "16:9").match(/\d+:\d+/)?.[0] || "16:9";
-  return ["16:9", "9:16", "1:1", "4:3", "3:4"].includes(normalized) ? normalized : "16:9";
 }
 
 function isSam3ImageModel(model) {
@@ -12838,7 +13131,6 @@ function resetCoverageOutputPatch() {
 function coverageModelLabel(model) {
   if (model === imageModelNames.openAiImage2) return "GPT Image 2";
   if (model === imageModelNames.reve21) return "REVE 2.1";
-  if (model === imageModelNames.seedream5Pro) return "Seedream";
   return model;
 }
 
@@ -13030,7 +13322,7 @@ function directorPackageConnections(items = []) {
 
 function connectedDirectorPackageText(items = []) {
   return directorPackageConnections(items)
-    .map(({ source }) => source.data.resultText)
+    .map(({ source }) => applyFilmDirectorAudioPolicyToPrompt(source.data.resultText, source.data.skillDirectorAudioMode))
     .filter(Boolean)
     .join("\n\n");
 }
@@ -13073,14 +13365,16 @@ function directorPackageForVideo(source = null, incomingByNode = {}) {
   return {
     sceneName: source.data.sceneName || "",
     durationSeconds: source.data.skillDurationSeconds || "15",
+    videoModel: normalizeFilmDirectorVideoModel(source.data.skillVideoModel),
     resolution: normalizeFilmDirectorResolution(source.data.skillResolution),
     aspectRatio: normalizeFilmDirectorAspectRatio(source.data.skillAspectRatio),
+    audioMode: normalizeFilmDirectorAudioMode(source.data.skillDirectorAudioMode),
     styleDirection: source.data.styleDirection || "",
     cameraDirection: source.data.motionDirection || "",
     sceneOverview: source.data.sceneOverview || "",
     shotList: source.data.shotList || "",
     shotListNotes: source.data.shotListNotes || "",
-    finalPrompt: source.data.resultText || "",
+    finalPrompt: applyFilmDirectorAudioPolicyToPrompt(source.data.resultText, source.data.skillDirectorAudioMode),
     references
   };
 }
@@ -13652,21 +13946,6 @@ function formatTimelineTime(seconds) {
   return `${minutes}:${wholeSeconds.toString().padStart(2, "0")}.${tenths}`;
 }
 
-function normalizedWan27ReferenceDurationLabel(value) {
-  const number = Math.min(10, Math.max(2, Math.round(Number(String(value || "").match(/\d+/)?.[0]) || 5)));
-  return `${number} seconds`;
-}
-
-function normalizedWan27ReferenceResolution(value) {
-  const normalized = String(value || "1080p");
-  return wan27ReferenceResolutionOptions.includes(normalized) ? normalized : "1080p";
-}
-
-function normalizedWan27ReferenceAspectRatio(value) {
-  const normalized = String(value || "16:9").match(/\d+:\d+/)?.[0] || "16:9";
-  return wan27ReferenceAspectRatioOptions.includes(normalized) ? normalized : "16:9";
-}
-
 function connected3DViewUrls(incoming = {}) {
   return Object.fromEntries(
     model3DViewInputs
@@ -13688,6 +13967,9 @@ async function runVideoModelGeneration({ node, prompt, incoming, incomingByNode,
     ...characterReferences.map((item) => ({ url: item.url, label: item.label, type: "image" }))
   ]);
   const referenceVideoItems = uniqueAssetItems(connectedAssetItems(incoming.referenceVideoIn));
+  const referenceAudioItems = uniqueAssetItems(connectedAssetItems(incoming.referenceAudioIn));
+  const characterVoiceItems = characterVoices.map((url, index) => ({ url, label: `Character voice ${index + 1}`, type: "audio" }));
+  const audioItems = uniqueAssetItems([...referenceAudioItems, ...characterVoiceItems]);
   const directorSource = videoModelSupportsFilmDirector(node.data.model) ? connectedDirectorPackageSource(incoming.directorIn) : null;
   const { response, data } = await nodeApi.generateVideo(buildVideoGenerationRequest({
     node,
@@ -13703,7 +13985,8 @@ async function runVideoModelGeneration({ node, prompt, incoming, incomingByNode,
     characterReferenceLabels: characterReferences.map((item) => item.label),
     referenceVideoUrls: referenceVideoItems.map((item) => item.url),
     referenceVideoLabels: referenceVideoItems.map((item) => item.label),
-    referenceAudioUrls: [...new Set([...connectedAudioUrls(incoming.referenceAudioIn), ...characterVoices])],
+    referenceAudioUrls: audioItems.map((item) => item.url),
+    referenceAudioLabels: audioItems.map((item) => item.label),
     filmDirector: directorPackageForVideo(directorSource, incomingByNode)
   }));
   if (!response.ok) throw new Error(`Run ${index + 1}: ${data.error || "Video generation failed."}`);
@@ -14794,6 +15077,31 @@ function characterWardrobeVariantId(wardrobe) {
   return wardrobe?.id || characterDefaultWardrobeId;
 }
 
+async function createCharacterWardrobeEditMaskDataUrl(baseSheet, sheetKind = "image") {
+  const sourceUrl = baseSheet?.localUrl || baseSheet?.url || "";
+  if (!sourceUrl || typeof document === "undefined") return "";
+  const image = await loadCanvasImage(sourceUrl);
+  const width = Math.max(1, Math.round(image.naturalWidth || image.width || 1));
+  const height = Math.max(1, Math.round(image.naturalHeight || image.height || 1));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  if (!context) return "";
+  context.fillStyle = "#000";
+  context.fillRect(0, 0, width, height);
+  context.fillStyle = "#fff";
+  characterWardrobeMaskRegions(sheetKind).forEach((region) => {
+    context.fillRect(
+      Math.round(region.x * width),
+      Math.round(region.y * height),
+      Math.ceil(region.width * width),
+      Math.ceil(region.height * height)
+    );
+  });
+  return canvas.toDataURL("image/png");
+}
+
 function characterSheetVariantForWardrobeId(data = {}, wardrobeId = "") {
   const targetId = wardrobeId || characterDefaultWardrobeId;
   const variants = Array.isArray(data.characterSheetVariants) ? data.characterSheetVariants : [];
@@ -14802,9 +15110,10 @@ function characterSheetVariantForWardrobeId(data = {}, wardrobeId = "") {
 
 function characterVariantDisplayPatch(variant) {
   const generated = variant?.generated || {};
+  const generatedUrl = generated.url || generated.localUrl || "";
   return {
-    resultUrl: generated.url || "",
-    resultItems: generated.url ? [generated] : [],
+    resultUrl: generatedUrl,
+    resultItems: generatedUrl ? [{ ...generated, url: generatedUrl }] : [],
     selectedResultIndex: 0,
     fileName: generated.fileName || "",
     compiledWardrobeUrl: variant?.wardrobeUrl || ""
@@ -15076,8 +15385,8 @@ function formatSkillDirectorShotListForClient(text = "") {
     .trim();
 }
 
-function formatSkillDirectorFinalPromptForClient(text = "") {
-  return String(text || "")
+function formatSkillDirectorFinalPromptForClient(text = "", audioMode = "production") {
+  return applyFilmDirectorAudioPolicyToPrompt(String(text || ""), audioMode)
     .replace(/(Shot List:\s*)([\s\S]*)$/i, (_match, label, body) => `${label.trim()}\n${formatSkillDirectorShotListForClient(body)}`)
     .replace(/\n{3,}/g, "\n\n")
     .trim();
@@ -15150,14 +15459,22 @@ function normalizeCurrentNode(node) {
         text: sceneOverview,
         skillShotCount: legacyShotCount,
         skillDurationSeconds: data.skillDurationSeconds || data.durationSeconds || "15",
+        skillVideoModel: normalizeFilmDirectorVideoModel(data.skillVideoModel),
         skillResolution: normalizeFilmDirectorResolution(data.skillResolution),
         skillAspectRatio: normalizeFilmDirectorAspectRatio(data.skillAspectRatio),
+        skillDirectorAudioMode: normalizeFilmDirectorAudioMode(data.skillDirectorAudioMode),
         styleDirection: data.styleDirection || "",
         motionBrief: data.motionBrief || "",
         motionDirection: data.motionDirection || "",
         shotList: restoredShotList.shotList,
         shotListNotes: restoredShotList.shotListNotes,
-        resultText: formatSkillDirectorFinalPromptForClient(data.resultText || ""),
+        skillDirectorShotListSourceSignature: String(data.skillDirectorShotListSourceSignature || ""),
+        skillDirectorLockedStyleInputSignature: String(data.skillDirectorLockedStyleInputSignature || ""),
+        skillDirectorLockedAssetInputSignature: String(data.skillDirectorLockedAssetInputSignature || ""),
+        skillDirectorLockedInputManifest: Array.isArray(data.skillDirectorLockedInputManifest) ? data.skillDirectorLockedInputManifest : [],
+        skillDirectorLockedInputManifestInitialized: Boolean(data.skillDirectorLockedInputManifestInitialized),
+        resultText: formatSkillDirectorFinalPromptForClient(data.resultText || "", data.skillDirectorAudioMode),
+        skillDirectorOutputStale: Boolean(data.skillDirectorOutputStale),
         skillDirectorLocks:
           data.skillDirectorLocks && typeof data.skillDirectorLocks === "object"
             ? {
@@ -15168,6 +15485,10 @@ function normalizeCurrentNode(node) {
                 shotList: Boolean(data.skillDirectorLocks.shotList)
               }
             : { setup: false, style: false, motion: false, scene: false, shotList: false },
+        skillDirectorStaleStages:
+          data.skillDirectorStaleStages && typeof data.skillDirectorStaleStages === "object"
+            ? { ...data.skillDirectorStaleStages }
+            : {},
         skillDirectorCollapsed:
           data.skillDirectorCollapsed && typeof data.skillDirectorCollapsed === "object"
             ? {
@@ -15179,6 +15500,10 @@ function normalizeCurrentNode(node) {
               }
             : { setup: false, style: false, motion: false, scene: false, shotList: false },
         skillDirectorBuilt: Boolean(data.skillDirectorBuilt && data.resultText),
+        skillDirectorRebuildAfterShotList: Boolean(data.skillDirectorRebuildAfterShotList),
+        skillDirectorRebuildAfterStyle: Boolean(data.skillDirectorRebuildAfterStyle),
+        skillDirectorRefreshAfterStyle: String(data.skillDirectorRefreshAfterStyle || ""),
+        skillDirectorRefreshShotListAfterMotion: Boolean(data.skillDirectorRefreshShotListAfterMotion),
         skillDirectorAction: "",
         skillDirectorQueuedAction: "",
         skillDirectorQueueId: "",
@@ -15296,6 +15621,13 @@ function normalizeCurrentNode(node) {
   if (nextNode.type === "character") {
     const characterSheetVariants = normalizeCharacterSheetVariants(data);
     const characterCustomSheets = normalizeCharacterCustomSheets({ ...data, characterSheetVariants });
+    const legacyBaseVariant = characterSheetVariants.find((variant) => variant.wardrobeId === characterDefaultWardrobeId);
+    const characterBaseSheet = data.characterBaseSheet?.url || data.characterBaseSheet?.localUrl
+      ? data.characterBaseSheet
+      : legacyBaseVariant?.generated || null;
+    const characterBaseVideoSheet = data.characterBaseVideoSheet?.url || data.characterBaseVideoSheet?.localUrl
+      ? data.characterBaseVideoSheet
+      : legacyBaseVariant?.videoGenerated || null;
     const normalizedData = {
       ...createDefaultNodeData("character", "Character", 1),
       ...data,
@@ -15304,6 +15636,10 @@ function normalizeCurrentNode(node) {
       characterTraits: Array.isArray(data.characterTraits) ? data.characterTraits : [],
       characterSheetModel: normalizeCharacterSheetModel(data.characterSheetModel),
       characterSheetVariants,
+      characterBaseSheet,
+      characterBaseSignature: String(data.characterBaseSignature || ""),
+      characterBaseVideoSheet,
+      characterBaseVideoSignature: String(data.characterBaseVideoSignature || ""),
       characterCustomSheets,
       customCharacterSheet: null,
       useCustomCharacterSheet: false,
@@ -16296,8 +16632,7 @@ function normalizeModel3DData(data = {}) {
 }
 
 function normalizeImageModelData(data = {}) {
-  const model = data.model || imageModelNames.openAiImage2;
-  const isSeedream5 = isSeedream5ImageModel(model);
+  const model = imageModelOptions.includes(data.model) ? data.model : imageModelNames.openAiImage2;
   return {
     ...data,
     title: data.title || "Image Model",
@@ -16307,8 +16642,7 @@ function normalizeImageModelData(data = {}) {
     resolution: normalizeImageModelResolutionForModel(data.resolution, model),
     quality: normalizeOpenAiImage2Quality(data.quality),
     kreaCreativity: normalizeKrea2Creativity(data.kreaCreativity),
-    seedreamLayers: isSeedream5 ? Boolean(data.seedreamLayers) : false,
-    batchCount: isSeedream5 && data.seedreamLayers ? "1" : data.batchCount || "1",
+    batchCount: data.batchCount || "1",
     settingsOpen: data.settingsOpen !== false
   };
 }
