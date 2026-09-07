@@ -1,0 +1,188 @@
+{
+  "id": "4267ddd9-2217-45cc-8ee8-a37f6222fef4",
+  "name": "Edit Image",
+  "version": 2,
+  "createdAt": "2026-09-07T00:02:44.719Z",
+  "graph": {
+    "nodes": [
+      {
+        "id": "plainText-1788738248299-s62fw0",
+        "type": "plainText",
+        "x": 10883.389508986917,
+        "y": -451.5378153450647,
+        "data": {
+          "title": "Standard",
+          "text": "Edit the exact image. Important that only the requested revision is changed, leave everything else exactly the same.",
+          "textNodeWidth": 312,
+          "textNodeHeight": 176,
+          "nodeColor": "#58ce63",
+          "textareaHeights": {
+            "0:Text prompt": 73
+          }
+        },
+        "presetSize": {
+          "width": 311.99727695609545,
+          "height": 175.99831617665257
+        }
+      },
+      {
+        "id": "plainText-1788738548090-sgvyb2",
+        "type": "plainText",
+        "x": 10883.766447510585,
+        "y": -666.5324340840973,
+        "data": {
+          "title": "Standard",
+          "text": "Edit the exact image by replacing or swapping out the request: \n",
+          "textNodeWidth": 310,
+          "textNodeHeight": 176,
+          "nodeColor": "#58ce63",
+          "textareaHeights": {
+            "0:Text prompt": 73
+          }
+        },
+        "presetSize": {
+          "width": 310.0001531354901,
+          "height": 175.99818705296332
+        }
+      },
+      {
+        "id": "plainText-1788738627495-zwfpzi",
+        "type": "plainText",
+        "x": 10884.915432430193,
+        "y": -1258.3533012431944,
+        "data": {
+          "title": "What to Edit/Remove",
+          "text": "Remove the blue car.\n",
+          "nodeColor": "#f0c83b",
+          "textareaHeights": {
+            "0:Text prompt": 103
+          }
+        },
+        "presetSize": {
+          "width": 310.0001531354901,
+          "height": 205.99826851701164
+        }
+      },
+      {
+        "id": "imageModel-1788738698332-77o5wk",
+        "type": "imageModel",
+        "x": 11244.065286919424,
+        "y": -1257.7989197854267,
+        "data": {
+          "title": "Image Model",
+          "model": "Nano Banana 2",
+          "prompt": "",
+          "aspectRatio": "Auto",
+          "resolution": "2K",
+          "quality": "high",
+          "kreaCreativity": "raw",
+          "batchCount": "1",
+          "settingsOpen": true,
+          "nodeColor": "#58ce63",
+          "textareaHeights": {
+            "0:textarea": 112
+          }
+        },
+        "presetSize": {
+          "width": 364.99996891671435,
+          "height": 984.8264424210499
+        }
+      },
+      {
+        "id": "image-1788738730359-aaqut9",
+        "type": "image",
+        "x": 10882.957233857389,
+        "y": -1011.1323564816429,
+        "data": {
+          "title": "Upload Img to Edit",
+          "nodeColor": "#f0c83b"
+        },
+        "presetSize": {
+          "width": 310.0001531354901,
+          "height": 303.9756937283063
+        }
+      },
+      {
+        "id": "preview-1788739043074-ri02v4",
+        "type": "preview",
+        "x": 11658.784603099282,
+        "y": -1253.189170595545,
+        "data": {
+          "title": "Preview",
+          "previewScale": 4.53,
+          "previewItemIndex": 0,
+          "previewTab": "preview",
+          "previewLayoutItems": [],
+          "nodeColor": "#58ce63"
+        },
+        "presetSize": {
+          "width": 1494.895423561189,
+          "height": 980.0868928455272
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-1788738799347",
+        "from": {
+          "nodeId": "plainText-1788738548090-sgvyb2",
+          "port": "promptOut"
+        },
+        "to": {
+          "nodeId": "imageModel-1788738698332-77o5wk",
+          "port": "promptIn"
+        },
+        "color": "#f0c83b"
+      },
+      {
+        "id": "edge-1788738804279",
+        "from": {
+          "nodeId": "plainText-1788738627495-zwfpzi",
+          "port": "promptOut"
+        },
+        "to": {
+          "nodeId": "imageModel-1788738698332-77o5wk",
+          "port": "promptIn"
+        },
+        "color": "#f0c83b"
+      },
+      {
+        "id": "edge-1788738808038",
+        "from": {
+          "nodeId": "plainText-1788738248299-s62fw0",
+          "port": "promptOut"
+        },
+        "to": {
+          "nodeId": "imageModel-1788738698332-77o5wk",
+          "port": "promptIn"
+        },
+        "color": "#f0c83b"
+      },
+      {
+        "id": "edge-1788738827289",
+        "from": {
+          "nodeId": "image-1788738730359-aaqut9",
+          "port": "imageOut"
+        },
+        "to": {
+          "nodeId": "imageModel-1788738698332-77o5wk",
+          "port": "imagePromptIn"
+        },
+        "color": "#3d85ff"
+      },
+      {
+        "id": "edge-1788739118326",
+        "from": {
+          "nodeId": "imageModel-1788738698332-77o5wk",
+          "port": "imageOut"
+        },
+        "to": {
+          "nodeId": "preview-1788739043074-ri02v4",
+          "port": "sourceIn"
+        },
+        "color": "#3d85ff"
+      }
+    ],
+    "groups": []
+  }
+}

@@ -126,6 +126,7 @@ export function estimateVideoRunCost({
 }
 
 export function formatRunCost(amountUsd) {
+  if (amountUsd == null || amountUsd === "") return "";
   const amount = Number(amountUsd);
   if (!Number.isFinite(amount)) return "";
   if (amount > 0 && amount < 0.01) return "<$0.01";
@@ -148,6 +149,7 @@ function estimateSeedance20FalCost({ duration, resolution, aspectRatio, hasVideo
 }
 
 function totalEstimate(unitCost, batchCount) {
+  if (unitCost == null || unitCost === "") return null;
   if (!Number.isFinite(Number(unitCost))) return null;
   const count = Math.max(1, Math.round(Number(batchCount) || 1));
   return roundCurrency(Number(unitCost) * count);

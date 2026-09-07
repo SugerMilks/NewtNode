@@ -5,6 +5,7 @@ import { updateFilmDirectorRevisionVersionSnapshot } from "../filmDirectorRevisi
 import { applyFilmDirectorAudioPolicyToPrompt, filmDirectorAudioModeOptions, normalizeFilmDirectorAudioMode } from "../filmDirectorAudio.js";
 import { filmDirectorAspectRatioOptions, normalizeFilmDirectorAspectRatio } from "../filmDirectorAspectRatios.js";
 import { filmDirectorDurationOptions } from "../filmDirectorDurations.js";
+import { filmDirectorApproachChanged, filmDirectorApproachOptions, filmDirectorDefaultCameraDirection, filmDirectorMusicVideoError, filmDirectorSupportsMusic, filmDirectorUsesMusic, normalizeFilmDirectorApproach } from "../filmDirectorApproaches.js";
 import { filmDirectorResolutionOptions, normalizeFilmDirectorResolution } from "../filmDirectorResolutions.js";
 import {
   filmDirectorVideoModelOptions,
@@ -23,13 +24,18 @@ import {
 import {
   addFilmDirectorScene,
   filmDirectorReferencedTags,
+  filmDirectorReferenceVideoMode,
   filmDirectorSceneLimit,
   filmDirectorSceneTabs,
   filmDirectorUsesReference,
+  normalizeFilmDirectorReferenceVideoBlueprint,
+  normalizeFilmDirectorReferenceVideoOptions,
   removeFilmDirectorScene,
+  selectFilmDirectorReferenceVideoMode,
   switchFilmDirectorScene
 } from "../filmDirectorScenes.js";
 import { MediaPreview, UploadIcon } from "./MediaViews.jsx";
+import { DirectorTaskStatus } from "./DirectorTaskStatus.jsx";
 import { NodeRow, OutputPortRow, PortHandle } from "./NodePorts.jsx";
 
 export function PlainTextNodeBody({ node, outputPort, onUpdate, onConnectStart, onDisconnectInput, connectedPortKeys }) {
@@ -100,8 +106,6 @@ export function TextModelNodeBody({ node, config, outputPort, incoming, onUpdate
 }
 
 const skillDirectorShotCounts = Array.from({ length: 25 }, (_value, index) => String(index + 1));
-const skillDirectorDefaultCameraDirection =
-  "Use restrained handheld coverage with natural eye-level framing, subtle push-ins only during emotional beats, and clean continuity of screen direction across cuts.";
 
 function formatSkillDirectorShotListDisplay(text = "") {
   return String(text || "")
@@ -229,14 +233,16 @@ export function SkillDirectorNodeBody({
   onDisconnectInput,
   connectedPortKeys
 }) {
-  const inputPorts = ["characterIn", "locationIn", "imageIn", "styleIn"]
+  const inputPorts = ["characterIn", "locationIn", "imageIn", "styleIn", "referenceVideoIn", "musicIn"]
     .map((id) => config.input.find((port) => port.id === id))
     .filter(Boolean);
   const characterInputPort = inputPorts.find((port) => port.id === "characterIn");
   const locationInputPort = inputPorts.find((port) => port.id === "locationIn");
   const elementInputPort = inputPorts.find((port) => port.id === "imageIn");
   const styleInputPort = inputPorts.find((port) => port.id === "styleIn");
-  const connectedCount = connectedInputCount(incoming, inputPorts.map((port) => port.id));
+  const referenceVideoInputPort = inputPorts.find((port) => port.id === "referenceVideoIn");
+  const musicInputPort = inputPorts.find((port) => port.id === "musicIn");
+  const connectedCount = connectedInputCount(incoming, inputPorts.filter((port) => port.id !== "musicIn" || filmDirectorSupportsMusic(node.data.skillApproach)).map((port) => port.id));
   const styleInputSourceSignature = filmDirectorInputSourceSignature(incoming.styleIn, "style-inputs");
   const assetInputSourceSignature = filmDirectorInputSourceSignature([
     ...(incoming.characterIn || []),
@@ -249,6 +255,9 @@ export function SkillDirectorNodeBody({
   const referencedTagSignature = [...referencedTags].sort().join("|");
   const locks = skillDirectorDefaultLocks(node.data.skillDirectorLocks);
   const collapsed = skillDirectorDefaultCollapsed(node.data.skillDirectorCollapsed);
+  const setupInputPort = (port) => locks.setup
+    ? { ...port, disabled: true, disabledReason: "Unlock Scene Setup before changing this input" }
+    : port;
   const referenceItems = [
     ...(incoming.characterIn || []).map((entry) => {
       const { source } = entry;
@@ -312,6 +321,23 @@ export function SkillDirectorNodeBody({
   const resolutionValue = normalizeFilmDirectorResolution(node.data.skillResolution);
   const aspectRatioValue = normalizeFilmDirectorAspectRatio(node.data.skillAspectRatio);
   const audioModeValue = normalizeFilmDirectorAudioMode(node.data.skillDirectorAudioMode);
+  const approachValue = normalizeFilmDirectorApproach(node.data.skillApproach);
+  const musicVideo = approachValue === "music-video";
+  const musicAvailable = filmDirectorSupportsMusic(approachValue);
+  const musicInputs = (incoming.musicIn || []).slice(-1).map(({ source }) => ({ url: source?.data?.resultUrl }));
+  const usesMusic = filmDirectorUsesMusic(approachValue, musicInputs);
+  const musicPort = !musicAvailable
+    ? { ...musicInputPort, disabled: true, disabledReason: "Music is available for Music Video and Montage only" }
+    : running ? { ...musicInputPort, disabled: true, disabledReason: "Wait for the Director task to finish" } : setupInputPort(musicInputPort);
+  const musicError = filmDirectorMusicVideoError({ approach: approachValue, audioInputs: musicInputs, videoModel: videoModelValue });
+  const musicSetupSignature = musicAvailable ? filmDirectorInputSourceSignature(incoming.musicIn?.slice(-1), "music") : "";
+  const musicChanged = String(node.data.skillDirectorLockedMusicSignature || "") !== musicSetupSignature;
+  const referenceVideoOptions = normalizeFilmDirectorReferenceVideoOptions(node.data.skillDirectorReferenceVideoOptions);
+  const referenceVideoMode = filmDirectorReferenceVideoMode(referenceVideoOptions);
+  const referenceVideoBlueprint = normalizeFilmDirectorReferenceVideoBlueprint(node.data.skillDirectorReferenceVideoBlueprint);
+  const hasReferenceVideo = Boolean(incoming.referenceVideoIn?.length);
+  const referenceVideoSourceSignature = filmDirectorInputSourceSignature(incoming.referenceVideoIn, "reference-video");
+  const referenceVideoSetupSignature = `${referenceVideoMode}|${referenceVideoSourceSignature}`;
   const sceneName = node.data.sceneName || "";
   const sceneOverview = node.data.sceneOverview ?? node.data.text ?? "";
   const styleDirection = node.data.styleDirection || "";
@@ -330,6 +356,14 @@ export function SkillDirectorNodeBody({
   const shotListReady = Boolean(shotList.trim());
   const styleStageEnabled = locks.setup && (!running || styleReady);
   const canBuild = locks.setup && locks.style && locks.motion && locks.scene && locks.shotList;
+  const taskAction = node.data.skillDirectorAction || "";
+  const canRetryTask = Boolean({
+    style: locks.setup && !locks.style,
+    motion: locks.setup && locks.style && !locks.motion,
+    shotList: locks.scene && sceneReady && !locks.shotList,
+    build: canBuild,
+    revise: built && revisionNotes.trim()
+  }[taskAction]);
   const invalidate = skillDirectorInvalidationPatch();
   const queuedRunRef = useRef("");
 
@@ -400,9 +434,26 @@ export function SkillDirectorNodeBody({
     const nextAudioMode = normalizeFilmDirectorAudioMode(value);
     onUpdate(node.id, {
       skillDirectorAudioMode: nextAudioMode,
-      ...(built ? { resultText: applyFilmDirectorAudioPolicyToPrompt(node.data.resultText, nextAudioMode) } : {})
+      ...(built ? { resultText: applyFilmDirectorAudioPolicyToPrompt(node.data.resultText, nextAudioMode, approachValue, usesMusic) } : {})
     });
   };
+  const updateReferenceVideoMode = (mode, enabled) => {
+    updateUnlocked({
+      skillDirectorReferenceVideoOptions: selectFilmDirectorReferenceVideoMode(referenceVideoOptions, mode, enabled),
+      skillDirectorReferenceVideoAnalysis: "",
+      skillDirectorReferenceVideoAnalysisSource: "",
+      skillDirectorReferenceVideoBlueprint: normalizeFilmDirectorReferenceVideoBlueprint()
+    }, ["style", "motion", "shotList"]);
+  };
+  useEffect(() => {
+    if (hasReferenceVideo || !referenceVideoMode || locks.setup) return;
+    updateUnlocked({
+      skillDirectorReferenceVideoOptions: selectFilmDirectorReferenceVideoMode(),
+      skillDirectorReferenceVideoAnalysis: "",
+      skillDirectorReferenceVideoAnalysisSource: "",
+      skillDirectorReferenceVideoBlueprint: normalizeFilmDirectorReferenceVideoBlueprint()
+    }, ["style", "motion", "shotList"]);
+  }, [hasReferenceVideo, referenceVideoMode, locks.setup]);
   const queuedAction = node.data.skillDirectorQueuedAction || "";
   const queuedRunKey = `${node.id}:${node.data.skillDirectorQueueId || ""}:${queuedAction}`;
   useEffect(() => {
@@ -431,19 +482,25 @@ export function SkillDirectorNodeBody({
       assetInputManifest,
       referencedTags
     );
-    const directionAssetsChanged = manifestChanges.characterChanged || manifestChanges.locationChanged;
+    const referenceVideoChanged = Boolean(
+      node.data.skillDirectorLockedInputManifestInitialized
+      && String(node.data.skillDirectorLockedReferenceVideoSignature || "") !== referenceVideoSetupSignature
+    );
+    const approachChanged = filmDirectorApproachChanged(node.data);
+    const styleInputsChanged = setupChanges.styleChanged || referenceVideoChanged || approachChanged;
+    const directionAssetsChanged = manifestChanges.characterChanged || manifestChanges.locationChanged || approachChanged || musicChanged;
     const referencedAssetsChanged = directionAssetsChanged || manifestChanges.propsChanged;
-    if (!setupChanges.styleChanged && !referencedAssetsChanged) return;
+    if (!styleInputsChanged && !referencedAssetsChanged) return;
 
     const canRefreshPlan = Boolean(sceneOverview.trim());
     const refreshMotion = directionAssetsChanged && canRefreshPlan;
     const refreshShotList = referencedAssetsChanged && canRefreshPlan;
     const hadBuiltOutput = Boolean(node.data.skillDirectorBuilt && node.data.resultText);
-    const rebuildAfterStyle = setupChanges.styleChanged && Boolean(
+    const rebuildAfterStyle = styleInputsChanged && Boolean(
       hadBuiltOutput || node.data.skillDirectorOutputStale || node.data.resultText || node.data.skillDirectorRebuildAfterStyle
     );
     const refreshAfterStyle = refreshMotion ? "motion" : refreshShotList ? "shotList" : rebuildAfterStyle ? "build" : "";
-    const firstRefreshAction = setupChanges.styleChanged ? "style" : refreshMotion ? "motion" : refreshShotList ? "shotList" : "";
+    const firstRefreshAction = styleInputsChanged ? "style" : refreshMotion ? "motion" : refreshShotList ? "shotList" : "";
     if (!firstRefreshAction) return;
 
     const referenceChangePatch = ["sceneOverview", "text", "motionDirection", "motionBrief", "shotList", "shotListNotes", "resultText"]
@@ -455,36 +512,39 @@ export function SkillDirectorNodeBody({
         )
       }), {});
     const staleStages = markFilmDirectorStagesStale(node.data.skillDirectorStaleStages, [
-      ...(setupChanges.styleChanged ? ["style"] : []),
+      ...(styleInputsChanged ? ["style"] : []),
       ...(directionAssetsChanged ? ["motion", "shotList"] : []),
       ...(manifestChanges.propsChanged ? ["shotList"] : [])
     ]);
     onUpdate(node.id, {
       skillDirectorLockedStyleInputSignature: styleInputSourceSignature,
+      skillDirectorLockedApproach: approachValue,
+      skillDirectorLockedMusicSignature: musicSetupSignature,
       skillDirectorLockedAssetInputSignature: assetInputSourceSignature,
+      skillDirectorLockedReferenceVideoSignature: referenceVideoSetupSignature,
       skillDirectorLockedInputManifest: assetInputManifest,
       skillDirectorStaleStages: staleStages,
       ...(manifestChanges.replacements.length || manifestChanges.disconnectedTags.length ? referenceChangePatch : {}),
       skillDirectorLocks: {
         ...locks,
-        ...(setupChanges.styleChanged ? { style: false } : {}),
+        ...(styleInputsChanged ? { style: false } : {}),
         ...(refreshMotion ? { motion: false } : {}),
         ...(refreshShotList ? { shotList: false } : {})
       },
       skillDirectorCollapsed: {
         ...collapsed,
-        ...(setupChanges.styleChanged ? { style: false } : {}),
+        ...(styleInputsChanged ? { style: false } : {}),
         ...(refreshMotion ? { motion: false } : {}),
         ...(refreshShotList ? { shotList: false } : {})
       },
       ...(hadBuiltOutput ? { skillDirectorBuilt: false, skillDirectorOutputStale: true } : {}),
       ...(rebuildAfterStyle ? { skillDirectorRebuildAfterStyle: true } : {}),
-      ...(setupChanges.styleChanged && refreshAfterStyle ? { skillDirectorRefreshAfterStyle: refreshAfterStyle } : {}),
+      ...(styleInputsChanged && refreshAfterStyle ? { skillDirectorRefreshAfterStyle: refreshAfterStyle } : {}),
       ...(refreshMotion && refreshShotList ? { skillDirectorRefreshShotListAfterMotion: true } : {}),
       ...(refreshShotList && hadBuiltOutput ? { skillDirectorRebuildAfterShotList: true } : {}),
       ...queuedActionPatch(firstRefreshAction)
     });
-  }, [assetInputSourceSignature, referencedTagSignature, styleInputSourceSignature]);
+  }, [assetInputSourceSignature, referenceVideoSetupSignature, referencedTagSignature, styleInputSourceSignature, approachValue, musicSetupSignature, running]);
 
   const handleSetupLock = () => {
     if (locks.setup) {
@@ -510,8 +570,14 @@ export function SkillDirectorNodeBody({
       assetInputManifest,
       referencedTags
     );
+    const referenceVideoChanged = Boolean(
+      node.data.skillDirectorLockedInputManifestInitialized
+      && String(node.data.skillDirectorLockedReferenceVideoSignature || "") !== referenceVideoSetupSignature
+    );
+    const approachChanged = filmDirectorApproachChanged(node.data);
+    const styleInputsChanged = setupChanges.styleChanged || referenceVideoChanged || approachChanged;
     const legacyAssetChange = setupChanges.assetsChanged && !node.data.skillDirectorLockedInputManifestInitialized;
-    const directionAssetsChanged = manifestChanges.characterChanged || manifestChanges.locationChanged || legacyAssetChange;
+    const directionAssetsChanged = manifestChanges.characterChanged || manifestChanges.locationChanged || legacyAssetChange || approachChanged || musicChanged;
     const referencedAssetsChanged = directionAssetsChanged || manifestChanges.propsChanged;
     const referenceChangePatch = ["sceneOverview", "text", "motionDirection", "motionBrief", "shotList", "shotListNotes", "resultText"]
       .reduce((patch, key) => ({
@@ -522,7 +588,7 @@ export function SkillDirectorNodeBody({
         )
       }), {});
     const staleStages = markFilmDirectorStagesStale(node.data.skillDirectorStaleStages, [
-      ...(setupChanges.styleChanged ? ["style"] : []),
+      ...(styleInputsChanged ? ["style"] : []),
       ...(directionAssetsChanged ? ["motion", "shotList"] : []),
       ...(manifestChanges.propsChanged ? ["shotList"] : [])
     ]);
@@ -535,7 +601,7 @@ export function SkillDirectorNodeBody({
     const canRefreshPlan = Boolean(sceneOverview.trim());
     const refreshMotion = directionAssetsChanged && canRefreshPlan;
     const refreshShotList = referencedAssetsChanged && canRefreshPlan;
-    const rebuildAfterStyle = setupChanges.styleChanged && Boolean(
+    const rebuildAfterStyle = styleInputsChanged && Boolean(
       hadBuiltOutput || node.data.skillDirectorOutputStale || node.data.resultText || node.data.skillDirectorRebuildAfterStyle
     );
     const rebuildForAssetChange = setupChanges.assetsChanged && hadBuiltOutput && canRebuildFromLockedStages && !refreshShotList;
@@ -550,11 +616,14 @@ export function SkillDirectorNodeBody({
     const resetPatch = {
       skillDirectorLocks: nextLocks,
       skillDirectorCollapsed: { ...collapsed, setup: false, ...(needsStyleDraft ? { style: false } : {}) },
+      skillDirectorLockedApproach: approachValue,
+      skillDirectorLockedMusicSignature: musicSetupSignature,
       skillDirectorLockedStyleInputSignature: styleInputSourceSignature,
       skillDirectorLockedAssetInputSignature: assetInputSourceSignature,
+      skillDirectorLockedReferenceVideoSignature: referenceVideoSetupSignature,
       skillDirectorLockedInputManifest: assetInputManifest,
       skillDirectorLockedInputManifestInitialized: true,
-      ...(setupChanges.styleChanged || referencedAssetsChanged ? { skillDirectorStaleStages: staleStages } : {}),
+      ...(styleInputsChanged || referencedAssetsChanged ? { skillDirectorStaleStages: staleStages } : {}),
       ...(manifestChanges.replacements.length || manifestChanges.disconnectedTags.length ? referenceChangePatch : {}),
       ...(needsStyleDraft && refreshAfterStyle ? { skillDirectorRefreshAfterStyle: refreshAfterStyle } : {}),
       ...(refreshMotion && refreshShotList ? { skillDirectorRefreshShotListAfterMotion: true } : {}),
@@ -620,7 +689,7 @@ export function SkillDirectorNodeBody({
       return;
     }
     const nextLocks = updateFilmDirectorStageLock(locks, "motion", true);
-    const nextMotionDirection = motionDirection.trim() || skillDirectorDefaultCameraDirection;
+    const nextMotionDirection = motionDirection.trim() || filmDirectorDefaultCameraDirection(approachValue);
     const refreshShotList = Boolean(node.data.skillDirectorRefreshShotListAfterMotion && locks.scene && sceneOverview.trim());
     onUpdate(node.id, {
       skillDirectorLocks: nextLocks,
@@ -705,6 +774,8 @@ export function SkillDirectorNodeBody({
     if (!version) return;
     onUpdate(node.id, {
       ...version.snapshot,
+      skillApproach: normalizeFilmDirectorApproach(version.snapshot.skillApproach),
+      skillDirectorLockedApproach: normalizeFilmDirectorApproach(version.snapshot.skillDirectorLockedApproach),
       status: "complete",
       error: "",
       skillDirectorAction: "",
@@ -719,7 +790,7 @@ export function SkillDirectorNodeBody({
 
   return (
     <div className="node-body text-node-body skill-director-node-body">
-      <div className="skill-director-scene-tabs" aria-label="Film Director scenes">
+      <div className="skill-director-scene-tabs" aria-label="Director scenes">
         <div className="skill-director-scene-tab-list">
           {sceneTabs.map((scene) => (
             <button
@@ -755,7 +826,7 @@ export function SkillDirectorNodeBody({
           type="button"
           className="skill-director-scene-add"
           disabled={running || sceneTabs.length >= filmDirectorSceneLimit}
-          aria-label="Add Film Director scene"
+          aria-label="Add Director scene"
           title="Add scene"
           onPointerDown={(event) => event.stopPropagation()}
           onClick={addScene}
@@ -764,9 +835,11 @@ export function SkillDirectorNodeBody({
         </button>
       </div>
 
+      <DirectorTaskStatus data={node.data} running={running} canRetry={canRetryTask} onRetry={() => runAction(taskAction)} />
+
       <OutputPortRow
         node={node}
-        port={built ? directorOutputPort : { ...directorOutputPort, disabled: true, disabledReason: "Build this scene before connecting Film Director output" }}
+        port={built ? directorOutputPort : { ...directorOutputPort, disabled: true, disabledReason: "Build this scene before connecting Director output" }}
         onConnectStart={onConnectStart}
         onDisconnectInput={onDisconnectInput}
         connectedPortKeys={connectedPortKeys}
@@ -779,7 +852,7 @@ export function SkillDirectorNodeBody({
             <small>{locks.setup ? "Locked" : "Add scene basics and references first"}</small>
           </div>
           <div className="skill-director-stage-actions">
-            <SkillDirectorLockButton locked={locks.setup} disabled={running || (!setupReady && !locks.setup)} label={locks.setup ? "Unlock scene setup" : "Lock scene setup"} onClick={handleSetupLock} />
+            <SkillDirectorLockButton locked={locks.setup} disabled={running || ((!setupReady || Boolean(musicError)) && !locks.setup)} label={locks.setup ? "Unlock scene setup" : "Lock scene setup"} onClick={handleSetupLock} />
           </div>
         </div>
 
@@ -790,8 +863,14 @@ export function SkillDirectorNodeBody({
                 <input value={sceneName} disabled={running || locks.setup} onChange={(event) => onUpdate(node.id, { sceneName: event.target.value })} />
               </label>
               <label className="node-row">
+                <span>Approach</span>
+                <select value={approachValue} disabled={running || locks.setup} onChange={(event) => updateUnlocked({ skillApproach: normalizeFilmDirectorApproach(event.target.value) }, ["style", "motion", "shotList"])}>
+                  {filmDirectorApproachOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </select>
+              </label>
+              <label className="node-row">
                 <span>Duration</span>
-                <select value={durationValue} disabled={running} onChange={(event) => onUpdate(node.id, { skillDurationSeconds: event.target.value, durationSeconds: event.target.value })}>
+                <select value={durationValue} disabled={running || locks.setup} onChange={(event) => onUpdate(node.id, { skillDurationSeconds: event.target.value, durationSeconds: event.target.value })}>
                   {filmDirectorDurationOptions.map((duration) => (
                     <option key={duration} value={duration}>
                       {duration}s
@@ -801,16 +880,16 @@ export function SkillDirectorNodeBody({
               </label>
               <label className="node-row skill-director-model-row">
                 <span>Video Model</span>
-                <select value={videoModelValue} disabled={running} onChange={(event) => onUpdate(node.id, { skillVideoModel: normalizeFilmDirectorVideoModel(event.target.value) })}>
+                <select value={videoModelValue} disabled={running || locks.setup} onChange={(event) => onUpdate(node.id, { skillVideoModel: normalizeFilmDirectorVideoModel(event.target.value) })}>
                   <option value="">Connected Model</option>
                   {filmDirectorVideoModelOptions.map((model) => (
-                    <option key={model} value={model}>{model}</option>
+                    <option key={model} value={model} disabled={musicVideo && Boolean(filmDirectorMusicVideoError({ approach: approachValue, audioInputs: [{ url: "connected" }], videoModel: model }))}>{model}</option>
                   ))}
                 </select>
               </label>
               <label className="node-row">
                 <span>Resolution</span>
-                <select value={resolutionValue} disabled={running} onChange={(event) => onUpdate(node.id, { skillResolution: event.target.value })}>
+                <select value={resolutionValue} disabled={running || locks.setup} onChange={(event) => onUpdate(node.id, { skillResolution: event.target.value })}>
                   {filmDirectorResolutionOptions.map((resolution) => (
                     <option key={resolution} value={resolution}>
                       {resolution}
@@ -820,7 +899,7 @@ export function SkillDirectorNodeBody({
               </label>
               <label className="node-row">
                 <span>Aspect Ratio</span>
-                <select value={aspectRatioValue} disabled={running} onChange={(event) => onUpdate(node.id, { skillAspectRatio: event.target.value })}>
+                <select value={aspectRatioValue} disabled={running || locks.setup} onChange={(event) => onUpdate(node.id, { skillAspectRatio: event.target.value })}>
                   {filmDirectorAspectRatioOptions.map((aspectRatio) => (
                     <option key={aspectRatio} value={aspectRatio}>
                       {aspectRatio}
@@ -847,8 +926,8 @@ export function SkillDirectorNodeBody({
               </label>
               <label className="node-row skill-director-audio-row">
                 <span>Audio</span>
-                <select value={audioModeValue} disabled={running} onChange={(event) => updateAudioMode(event.target.value)}>
-                  {filmDirectorAudioModeOptions.map((option) => (
+                <select value={usesMusic ? "music" : audioModeValue} disabled={running || locks.setup || usesMusic} onChange={(event) => updateAudioMode(event.target.value)}>
+                  {usesMusic ? <option value="music">Connected Music</option> : filmDirectorAudioModeOptions.map((option) => (
                     <option key={option.value} value={option.value}>
                       {option.label}
                     </option>
@@ -857,28 +936,70 @@ export function SkillDirectorNodeBody({
               </label>
             </div>
 
-            <div className="skill-director-input-rows" aria-label="Film Director inputs">
-              <NodeRow label="Character" inputPort={characterInputPort} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-                <button type="button" disabled={running} className={incoming.characterIn?.length ? "connected-field" : ""}>
+            <div className="skill-director-input-rows" aria-label="Director inputs">
+              <NodeRow label="Character" inputPort={setupInputPort(characterInputPort)} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+                <button type="button" disabled={running || locks.setup} className={incoming.characterIn?.length ? "connected-field" : ""}>
                   {connectedInputSummary(incoming.characterIn, "Add character")}
                 </button>
               </NodeRow>
-              <NodeRow label="Location" inputPort={locationInputPort} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-                <button type="button" disabled={running} className={incoming.locationIn?.length ? "connected-field" : ""}>
+              <NodeRow label="Location" inputPort={setupInputPort(locationInputPort)} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+                <button type="button" disabled={running || locks.setup} className={incoming.locationIn?.length ? "connected-field" : ""}>
                   {connectedInputSummary(incoming.locationIn, "Add location")}
                 </button>
               </NodeRow>
-              <NodeRow label="Props" inputPort={elementInputPort} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-                <button type="button" disabled={running} className={incoming.imageIn?.length ? "connected-field" : ""}>
+              <NodeRow label="Props" inputPort={setupInputPort(elementInputPort)} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+                <button type="button" disabled={running || locks.setup} className={incoming.imageIn?.length ? "connected-field" : ""}>
                   {connectedInputSummary(incoming.imageIn, "Add props")}
                 </button>
               </NodeRow>
-              <NodeRow label="Mood Board" inputPort={styleInputPort} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+              <NodeRow label="Mood Board" inputPort={setupInputPort(styleInputPort)} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
                 <button type="button" disabled={running || locks.setup} className={styleConnected ? "connected-field" : ""}>
                   {connectedInputSummary(incoming.styleIn, "Add mood board")}
                 </button>
               </NodeRow>
+              <NodeRow label="Video" inputPort={setupInputPort(referenceVideoInputPort)} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+                <button type="button" disabled={running || locks.setup} className={hasReferenceVideo ? "connected-field" : ""}>
+                  {connectedInputSummary(incoming.referenceVideoIn, "Optional video context direction")}
+                </button>
+              </NodeRow>
+              <NodeRow label="Music" inputPort={musicPort} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
+                <button type="button" disabled={musicPort.disabled} title={!musicAvailable ? musicPort.disabledReason : undefined} className={musicInputs.some((item) => item.url) ? "connected-field" : ""}>
+                  {connectedInputSummary(incoming.musicIn?.slice(-1), musicVideo ? "Connect required audio" : "Optional music track")}
+                </button>
+              </NodeRow>
             </div>
+            {musicError && <p role="alert" className="error">{musicError}</p>}
+
+            <div className={`skill-director-video-options ${hasReferenceVideo ? "active" : "disabled"}`} aria-label="Reference video options">
+              {[
+                ["extend", "Extend", "Continue the attached video"],
+                ["camera", "Camera", "Use its camera movement"],
+                ["reference", "Reference", "Use it as a visual reference"]
+              ].map(([key, label, description]) => (
+                <label key={key} className="skill-director-video-option">
+                  <input
+                    type="checkbox"
+                    checked={referenceVideoOptions[key]}
+                    disabled={running || locks.setup || !hasReferenceVideo}
+                    onChange={(event) => updateReferenceVideoMode(key, event.target.checked)}
+                  />
+                  <span>
+                    <strong>{label}</strong>
+                    <small>{description}</small>
+                  </span>
+                </label>
+              ))}
+            </div>
+            {referenceVideoMode === "camera" && referenceVideoBlueprint.mode === "camera" && referenceVideoBlueprint.shotCount > 0 && (
+              <div className="skill-director-video-blueprint-status">
+                Camera mapped: {referenceVideoBlueprint.shotCount} {referenceVideoBlueprint.shotCount === 1 ? "shot" : "shots"} / {referenceVideoBlueprint.durationSeconds || durationValue}s
+              </div>
+            )}
+            {referenceVideoMode === "reference" && referenceVideoBlueprint.mode === "reference" && referenceVideoBlueprint.shotCount > 0 && (
+              <div className="skill-director-video-blueprint-status">
+                Reference mapped: {referenceVideoBlueprint.shotCount} {referenceVideoBlueprint.shotCount === 1 ? "shot" : "shots"} / {referenceVideoBlueprint.durationSeconds || durationValue}s{referenceVideoBlueprint.audioDetected ? " / audio detected" : ""}
+              </div>
+            )}
 
             {referenceItems.length > 0 && (
               <div className="skill-director-reference-setup">
@@ -933,7 +1054,7 @@ export function SkillDirectorNodeBody({
           <div>
             <strong>2. Style Direction</strong>
             <small>
-              {running && locks.setup
+              {running && taskAction === "style"
                 ? "Refreshing from Scene Setup and Mood Board..."
                 : styleReady
                   ? "LLM draft ready. Edit, then lock."
@@ -957,7 +1078,7 @@ export function SkillDirectorNodeBody({
           <>
             <label className="text-field-group">
               <textarea
-                aria-label="Film Director style direction"
+                aria-label="Director style direction"
                 value={styleDirection}
                 readOnly={running || !styleStageEnabled || locks.style}
                 placeholder="Generated style, tone, pacing, lighting, and performance texture appears here."
@@ -965,7 +1086,7 @@ export function SkillDirectorNodeBody({
               />
             </label>
             <button type="button" className="skill-director-secondary-run" onClick={() => runAction("style")} disabled={running || !locks.setup || locks.style}>
-              {running && locks.setup ? "Refreshing Style..." : "Regenerate Style"}
+              {running && taskAction === "style" ? "Refreshing Style..." : "Regenerate Style"}
             </button>
           </>
         )}
@@ -991,7 +1112,7 @@ export function SkillDirectorNodeBody({
         {!isStageCollapsed("motion") && (
           <label className="text-field-group">
             <textarea
-              aria-label="Film Director camera direction"
+              aria-label="Director camera direction"
               value={motionDirection}
               readOnly={running || !locks.style || locks.motion}
               placeholder="Describe camera movement, framing, blocking, lens feel, or coverage."
@@ -1022,7 +1143,7 @@ export function SkillDirectorNodeBody({
           <label className="text-field-group">
             <span>Scene Overview</span>
             <textarea
-              aria-label="Film Director scene overview"
+              aria-label="Director scene overview"
               value={sceneOverview}
               readOnly={running || !locks.motion || locks.scene}
               placeholder="Summarize the scene, continuity rules, required moments, dialogue beats, or actions."
@@ -1054,7 +1175,7 @@ export function SkillDirectorNodeBody({
             <label className="text-field-group">
               <span>Shot List</span>
               <textarea
-                aria-label="Film Director shot list"
+                aria-label="Director shot list"
                 className="skill-director-shot-list-textarea"
                 value={shotList}
                 readOnly={running || !locks.scene || locks.shotList}
@@ -1125,7 +1246,7 @@ export function SkillDirectorNodeBody({
           {revisionOpen && (
             <div className="skill-director-revision-panel">
               <textarea
-                aria-label="Film Director revision notes"
+                aria-label="Director revision notes"
                 value={revisionNotes}
                 disabled={running}
                 placeholder="Ask the Director to adjust shots, remove dialogue, change pacing, or address notes from the latest video."
@@ -1149,7 +1270,6 @@ export function SkillDirectorNodeBody({
         </section>
       )}
 
-      {node.data.error && <small className="upload-error">{node.data.error}</small>}
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import React from "react";
-import { Hand, Play, Plus } from "lucide-react";
+import { Hand, Play, Plus, Save } from "lucide-react";
 import { normalizeRect } from "../nodeGeometry.js";
 
 export const EdgePath = React.memo(function EdgePath({ edgeId, from, to, color, draft, selected, active, inactive, onSelect }) {
@@ -37,7 +37,7 @@ export const SelectionMarquee = React.memo(function SelectionMarquee({ start, cu
   );
 });
 
-export const SelectionActionBar = React.memo(function SelectionActionBar({ bounds, viewport, selectedCount, runnableCount, onRunAll, onGroup, onMoveStart }) {
+export const SelectionActionBar = React.memo(function SelectionActionBar({ bounds, viewport, selectedCount, runnableCount, onRunAll, onGroup, onSavePreset, onMoveStart }) {
   const x = viewport.x + (bounds.left + bounds.width / 2) * viewport.scale;
   const y = viewport.y + bounds.top * viewport.scale - 54;
 
@@ -55,6 +55,7 @@ export const SelectionActionBar = React.memo(function SelectionActionBar({ bound
         <Plus size={17} />
         <span>Group</span>
       </button>
+      <button onClick={onSavePreset} title="Save selected nodes as a Newt Preset"><Save size={17} /><span>Newt Preset</span></button>
     </div>
   );
 });

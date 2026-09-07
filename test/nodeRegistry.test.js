@@ -9,6 +9,10 @@ test("Coverage appears directly beneath Storyboard in the node sidebar", () => {
   assert.equal(nodeTypeDefinitions[storyboardIndex + 1]?.type, "coverage");
 });
 
+test("the Film Director node is presented as Director", () => {
+  assert.equal(nodeTypeDefinitions.find(({ type }) => type === "skillDirector")?.label, "Director");
+});
+
 test("Auto Aspect lives inside Utility Image instead of the node catalog", () => {
   assert.equal(nodeTypeDefinitions.some(({ type }) => type === "autoAspect"), false);
   assert.equal(utilityImageModelNames.autoAspect, "Auto Aspect");

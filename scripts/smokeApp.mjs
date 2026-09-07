@@ -2,6 +2,14 @@ const clientUrl = new URL(process.env.NEWT_SMOKE_CLIENT_URL || process.argv[2] |
 const apiHealthUrl = new URL(process.env.NEWT_SMOKE_API_URL || process.argv[3] || "http://127.0.0.1:3336/api/health");
 
 const requiredHealthRoutes = [
+  "myNewt",
+  "myNewtPlanning",
+  "myNewtLocalActions",
+  "myNewtBackgroundActions",
+  "creativeReasoningV2",
+  "myNewtVoice",
+  "newtPresets",
+  "systemNewtPresets",
   "apiJsonErrors",
   "composerFrame",
   "composerPoses",

@@ -92,7 +92,7 @@ export function nodeRunPriority(node) {
 
 export function runStageLabel(type) {
   if (type === "text") return "text model";
-  if (type === "skillDirector") return "film director";
+  if (type === "skillDirector") return "director";
   if (type === "imageModel") return "image";
   if (type === "autoAspect") return "auto aspect";
   if (type === "coverage") return "coverage";

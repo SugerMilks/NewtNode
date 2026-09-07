@@ -218,7 +218,7 @@ export function useWorkflowPersistence({
     try {
       const cleanProjectName = String(options.name || projectName || "").trim() || "Untitled node project";
       const lastSavedName = String(savedProjectName || selectedProjectName || "").trim();
-      const shouldCreateNewProject = Boolean(!projectPackagePath && projectId && lastSavedName && cleanProjectName !== lastSavedName);
+      const shouldCreateNewProject = Boolean(!options.preserveProjectId && !projectPackagePath && projectId && lastSavedName && cleanProjectName !== lastSavedName);
       const saveNodes = nodesForSave();
 
       setSaveStatus(options.saveAsPackage ? "Saving workflow package..." : "Saving...");
@@ -255,7 +255,7 @@ export function useWorkflowPersistence({
     }
   }
 
-  async function saveProject() {
+  async function saveProject(options = {}) {
     if (saveInFlightRef.current) return saveInFlightRef.current;
 
     saveInFlightRef.current = (async () => {
@@ -270,7 +270,7 @@ export function useWorkflowPersistence({
         return true;
       }
 
-      return saveProjectToSavedWorkflows();
+      return saveProjectToSavedWorkflows({ preserveProjectId: options.preserveProjectId === true });
     })();
 
     try {
@@ -498,7 +498,8 @@ export function useWorkflowPersistence({
   }
 
   function importWorkflow(project) {
-    const graph = normalizeEditorGraph(project.graph?.nodes || [], project.graph?.edges || [], project.graph?.groups || []);
+    const importedGraphNodes = (project.graph?.nodes || []).filter((node) => node.type !== "myNewt" || !nodes.some((existing) => existing.type === "myNewt"));
+    const graph = normalizeEditorGraph(importedGraphNodes, project.graph?.edges || [], project.graph?.groups || []);
     if (!graph.nodes.length) {
       setSaveStatus("That workflow has no nodes to import");
       return;
@@ -538,13 +539,6 @@ export function useWorkflowPersistence({
     try {
       const nextProjects = await workflowApi.remove(project.registryFileName || project.fileName || project.id);
       setProjects(nextProjects);
-      if (projectId === project.id) {
-        setProjectId(null);
-        setProjectName("Untitled node project");
-        setSavedProjectName(null);
-        setProjectPackagePath("");
-        setWorkflowFilePath("");
-      }
       setProjectMenuOpen(false);
       setSaveStatus("Workflow removed from dropdown");
     } catch (error) {

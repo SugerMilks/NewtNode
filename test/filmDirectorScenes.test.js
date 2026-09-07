@@ -3,22 +3,149 @@ import test from "node:test";
 import {
   addFilmDirectorScene,
   filterFilmDirectorReferencesForOutput,
-  filmDirectorCanAddAssetWhileSetupLocked,
+  filmDirectorCameraInstruction,
+  filmDirectorExtendInstruction,
   filmDirectorOutputUsesReferenceTag,
+  filmDirectorReferenceVideoMode,
+  filmDirectorReferenceVideoCacheKey,
+  filmDirectorReferenceInstruction,
   filmDirectorReferencedTags,
   filmDirectorSceneTabs,
+  filmDirectorSetupInputIsLocked,
   filmDirectorUsesReference,
   filmDirectorUsesReferenceTag,
   isFilmDirectorSceneTransitionPatch,
+  normalizeFilmDirectorReferenceVideoOptions,
+  normalizeFilmDirectorReferenceVideoBlueprint,
   removeFilmDirectorScene,
+  selectFilmDirectorReferenceVideoMode,
   switchFilmDirectorScene
 } from "../src/filmDirectorScenes.js";
 
-test("Film Director keeps reusable asset inputs available while setup is locked", () => {
-  assert.equal(filmDirectorCanAddAssetWhileSetupLocked("characterIn"), true);
-  assert.equal(filmDirectorCanAddAssetWhileSetupLocked("locationIn"), true);
-  assert.equal(filmDirectorCanAddAssetWhileSetupLocked("imageIn"), true);
-  assert.equal(filmDirectorCanAddAssetWhileSetupLocked("styleIn"), false);
+test("Director locks every Scene Setup asset input", () => {
+  const locked = { setup: true };
+  assert.equal(filmDirectorSetupInputIsLocked(locked, "characterIn"), true);
+  assert.equal(filmDirectorSetupInputIsLocked(locked, "locationIn"), true);
+  assert.equal(filmDirectorSetupInputIsLocked(locked, "imageIn"), true);
+  assert.equal(filmDirectorSetupInputIsLocked(locked, "styleIn"), true);
+  assert.equal(filmDirectorSetupInputIsLocked(locked, "referenceVideoIn"), true);
+  assert.equal(filmDirectorSetupInputIsLocked({ setup: false }, "characterIn"), false);
+});
+
+test("Director reference video options normalize and remain scene-specific", () => {
+  assert.deepEqual(normalizeFilmDirectorReferenceVideoOptions(), {
+    extend: false,
+    camera: false,
+    reference: false
+  });
+
+  const firstScene = {
+    sceneName: "Opening",
+    skillDirectorReferenceVideoOptions: { extend: true, camera: true }
+  };
+  const secondScene = addFilmDirectorScene(firstScene);
+  assert.deepEqual(secondScene.skillDirectorReferenceVideoOptions, {
+    extend: false,
+    camera: false,
+    reference: false
+  });
+
+  const restoredFirstScene = switchFilmDirectorScene(secondScene, "scene-1");
+  assert.deepEqual(restoredFirstScene.skillDirectorReferenceVideoOptions, {
+    extend: true,
+    camera: false,
+    reference: false
+  });
+});
+
+test("Director reference video modes are mutually exclusive", () => {
+  assert.deepEqual(normalizeFilmDirectorReferenceVideoOptions({ extend: true, camera: true }), {
+    extend: true,
+    camera: false,
+    reference: false
+  });
+  const camera = selectFilmDirectorReferenceVideoMode({ extend: true }, "camera", true);
+  assert.deepEqual(camera, { extend: false, camera: true, reference: false });
+  assert.equal(filmDirectorReferenceVideoMode(camera), "camera");
+  assert.deepEqual(selectFilmDirectorReferenceVideoMode(camera, "camera", false), {
+    extend: false,
+    camera: false,
+    reference: false
+  });
+});
+
+test("Director Extend begins from the reference video's ending without replaying it", () => {
+  assert.match(filmDirectorExtendInstruction, /exact final visual and temporal state/i);
+  assert.match(filmDirectorExtendInstruction, /Do not restart, recap, reinterpret, or recreate/i);
+  assert.match(filmDirectorExtendInstruction, /additional shots below/i);
+});
+
+test("Director Camera transfers only camera choreography and edit timing", () => {
+  assert.match(filmDirectorCameraInstruction, /solely as the authoritative camera and editing blueprint/i);
+  assert.match(filmDirectorCameraInstruction, /shot boundaries, shot order, framing progression/i);
+  assert.match(filmDirectorCameraInstruction, /Do not copy or introduce people, wardrobe, objects, setting/i);
+  assert.equal(filmDirectorReferenceVideoCacheKey("camera", "/outputs/reference.mp4"), "camera:/outputs/reference.mp4");
+});
+
+test("Director Reference re-stages performance while replacing source visual identity", () => {
+  assert.match(filmDirectorReferenceInstruction, /temporal performance, blocking, camera, composition, edit, and sound-timing blueprint/i);
+  assert.match(filmDirectorReferenceInstruction, /body movement, gestures, expressions, eyelines, interactions/i);
+  assert.match(filmDirectorReferenceInstruction, /Replace every source-video identity and visual appearance/i);
+  assert.match(filmDirectorReferenceInstruction, /Style Direction is authoritative/i);
+  assert.match(filmDirectorReferenceInstruction, /preserve its speech timing and natural performance cadence/i);
+  assert.equal(filmDirectorReferenceVideoCacheKey("reference", "/outputs/performance.mp4"), "reference:/outputs/performance.mp4");
+});
+
+test("Director Camera blueprints normalize persisted timing and shot metadata", () => {
+  assert.deepEqual(normalizeFilmDirectorReferenceVideoBlueprint({
+    mode: "camera",
+    sourceDurationSeconds: 12.44,
+    durationSeconds: "12",
+    shotCount: 3,
+    cutTimes: [8.1, 3.2, 3.2, -1, 20],
+    shots: [
+      { startSeconds: 0, endSeconds: 3.2, durationSeconds: 3.2, description: "WS; static" },
+      { startSeconds: 3.2, endSeconds: 8.1, durationSeconds: 4.9, description: "CU; dolly in" },
+      { startSeconds: 8.1, endSeconds: 12.44, durationSeconds: 4.34, description: "MS; pan right" }
+    ]
+  }), {
+    mode: "camera",
+    sourceDurationSeconds: 12.44,
+    durationSeconds: "12",
+    shotCount: 3,
+    cutTimes: [3.2, 8.1],
+    shots: [
+      { number: 1, startSeconds: 0, endSeconds: 3.2, durationSeconds: 3.2, description: "WS; static" },
+      { number: 2, startSeconds: 3.2, endSeconds: 8.1, durationSeconds: 4.9, description: "CU; dolly in" },
+      { number: 3, startSeconds: 8.1, endSeconds: 12.44, durationSeconds: 4.34, description: "MS; pan right" }
+    ],
+    audioDetected: false,
+    audioTranscript: "",
+    audioSummary: ""
+  });
+});
+
+test("Director Reference blueprints preserve audio and performance context", () => {
+  const blueprint = normalizeFilmDirectorReferenceVideoBlueprint({
+    mode: "reference",
+    sourceDurationSeconds: 8.2,
+    durationSeconds: "8",
+    shotCount: 2,
+    cutTimes: [4.1],
+    shots: [
+      { startSeconds: 0, endSeconds: 4.1, durationSeconds: 4.1, description: "Performer A crosses and sits" },
+      { startSeconds: 4.1, endSeconds: 8.2, durationSeconds: 4.1, description: "Performer A speaks, then pauses" }
+    ],
+    audioDetected: true,
+    audioTranscript: "[4.50-6.00s] Hello there.",
+    audioSummary: "One spoken line followed by a pause."
+  });
+
+  assert.equal(blueprint.mode, "reference");
+  assert.equal(blueprint.shotCount, 2);
+  assert.equal(blueprint.audioDetected, true);
+  assert.match(blueprint.audioTranscript, /Hello there/);
+  assert.match(blueprint.shots[1].description, /speaks, then pauses/);
 });
 
 test("Film Director scene transitions preserve existing output connections", () => {

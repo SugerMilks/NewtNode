@@ -11,7 +11,12 @@ export function cloneGraphState(state) {
 
 export function workflowStateFingerprint(state = {}) {
   return JSON.stringify({
-    nodes: (state.nodes || []).map(cloneNode),
+    nodes: (state.nodes || []).map((node) => {
+      const copy = cloneNode(node);
+      // My Newt progress is journaled separately; finishing a Save must not dirty the canvas.
+      if (node.type === "myNewt") delete copy.data.myNewtSummary;
+      return copy;
+    }),
     edges: (state.edges || []).map(cloneEdge),
     groups: (state.groups || []).map(cloneGroup),
     projectName: String(state.projectName || "Untitled node project").trim() || "Untitled node project",
@@ -32,17 +37,8 @@ export function createNodeId(type, suffix = "") {
 }
 
 export function resetCopiedNodeRuntime(data = {}) {
-  if (!["running", "uploading"].includes(data.status)) return data;
-
-  return {
-    ...data,
-    status: "ready",
-    error: "",
-    resultUrl: "",
-    resultItems: [],
-    selectedResultIndex: 0,
-    resultText: ""
-  };
+  const next = clearStaleRunningState({ data }).data;
+  return data.jobId ? { ...next, jobId: "", myNewtSummary: null } : next;
 }
 
 export function sameStringList(first = [], second = []) {
@@ -76,16 +72,24 @@ export function dedupeEdges(edges) {
 }
 
 export function clearStaleRunningState(node) {
-  const staleStatus = node.data?.status;
-  if (staleStatus !== "running" && staleStatus !== "compiling") return node;
-
-  return {
-    ...node,
-    data: {
-      ...node.data,
-      status: staleStatus === "compiling" ? "ready" : node.data.resultUrl ? "complete" : "ready",
-      ...(staleStatus === "compiling" ? { characterBatchProgress: null } : {})
+  const original = node.data || {};
+  let data = clearInterruptedMediaJob(original);
+  for (const field of ["storyboardFrames", "storyboardCharacters"]) {
+    if (!Array.isArray(original[field])) continue;
+    const items = original[field].map(clearInterruptedMediaJob);
+    if (items.some((item, index) => item !== original[field][index])) {
+      data = { ...data, [field]: items };
     }
+  }
+  return data === original ? node : { ...node, data };
+}
+
+function clearInterruptedMediaJob(data) {
+  if (!["running", "compiling", "uploading"].includes(data?.status)) return data;
+  return {
+    ...data,
+    status: data.status === "compiling" ? "ready" : data.resultUrl ? "complete" : "ready",
+    ...(data.status === "compiling" || data.characterBatchProgress ? { characterBatchProgress: null } : {})
   };
 }
 
@@ -104,6 +108,7 @@ export function remapImportedGraph(graph = {}, offset = {}, stamp = Date.now()) 
     idMap.set(node.id, nextId);
     return {
       ...cloneNode(node),
+      data: node.type === "myNewt" ? { ...node.data, jobId: "", myNewtSummary: null } : cloneNode(node).data,
       id: nextId,
       x: Math.round(node.x + safeOffset.x),
       y: Math.round(node.y + safeOffset.y)

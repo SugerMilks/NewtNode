@@ -1,0 +1,335 @@
+{
+  "id": "9fd4e2d8-4eb2-4553-8e5d-37bd82648325",
+  "name": "Headshot Image",
+  "version": 2,
+  "createdAt": "2026-09-05T13:10:58.101Z",
+  "graph": {
+    "nodes": [
+      {
+        "id": "plainText-1788612249416-1788612249416-0-q8rrvl",
+        "type": "plainText",
+        "x": 4203.584452812835,
+        "y": -1152.8926124819043,
+        "data": {
+          "title": "Prompt Template",
+          "text": "A uniquely intriguing man with naturally dark hair, prominent brows, brown eyes, heavy eyelids, and subtle freckles. He has a short scruffy beard with natural stray hairs. ",
+          "textNodeWidth": 342,
+          "textNodeHeight": 291,
+          "textareaHeights": {
+            "0:Text prompt": 184
+          },
+          "nodeColor": "#f0c83b"
+        },
+        "presetSize": {
+          "width": 341.9965167293585,
+          "height": 290.9982804915728
+        }
+      },
+      {
+        "id": "plainText-1788612249416-1788612249416-1-osonxp",
+        "type": "plainText",
+        "x": 4198.370930457596,
+        "y": -843.839694302619,
+        "data": {
+          "title": "Standard Portrait",
+          "text": "An indistinct plain, solid gray background. Use diffused lighting to create gentle light with no harsh shadows. Emphasize realistic skin and natural skin. High-detail editorial, subdued contrast. Do not crop out any of the face or hair.",
+          "textNodeWidth": 355,
+          "textNodeHeight": 275,
+          "textareaHeights": {
+            "0:Text prompt": 168
+          },
+          "nodeColor": "#58ce63"
+        },
+        "presetSize": {
+          "width": 355.0000729507883,
+          "height": 274.9999819167375
+        }
+      },
+      {
+        "id": "camera-1788612249416-1788612249416-2-xzxmxp",
+        "type": "camera",
+        "x": 4196.642017721168,
+        "y": -553.48122108898,
+        "data": {
+          "title": "Camera",
+          "shotPreset": "CU",
+          "lensPreset": "50mm",
+          "typePreset": "Portrait",
+          "nodeColor": "#58ce63"
+        },
+        "presetSize": {
+          "width": 359.99985387863217,
+          "height": 237.06599575515918
+        }
+      },
+      {
+        "id": "style-1788612249416-1788612249416-3-mcmlwm",
+        "type": "style",
+        "x": 4193.975643778186,
+        "y": -293.9476691443364,
+        "data": {
+          "title": "Style",
+          "stylePreset": "Cinematic Standard",
+          "gradePreset": "None",
+          "customPaletteRgbText": "",
+          "customPalettePicker": "#ddc631",
+          "customPaletteColors": [],
+          "customPalettePreviewUrl": "",
+          "customPaletteSourceName": "",
+          "customPaletteStatus": "",
+          "customPaletteError": "",
+          "nodeColor": "#58ce63"
+        },
+        "presetSize": {
+          "width": 360.0001481122399,
+          "height": 191.0764818776353
+        }
+      },
+      {
+        "id": "imageModel-1788612249416-1788612249416-4-jlebk1",
+        "type": "imageModel",
+        "x": 4602.661306536071,
+        "y": -1158.2796911236633,
+        "data": {
+          "title": "Image Model",
+          "model": "Nano Banana Pro",
+          "prompt": "A serene landscape with mountains",
+          "aspectRatio": "3:4",
+          "resolution": "2K",
+          "kreaCreativity": "raw",
+          "batchCount": "4",
+          "settingsOpen": true,
+          "quality": "high",
+          "status": "complete",
+          "error": "",
+          "resultUrl": "/outputs/Newt-Presets/dependencies/9fd4e2d8-4eb2-4553-8e5d-37bd82648325/0-2026-09-05T13-08-42-534Z-nano-banana-pro-a0fde2b7.jpg",
+          "resultItems": [
+            {
+              "type": "image",
+              "label": "Image 1",
+              "url": "/outputs/Newt-Presets/dependencies/9fd4e2d8-4eb2-4553-8e5d-37bd82648325/0-2026-09-05T13-08-42-534Z-nano-banana-pro-a0fde2b7.jpg",
+              "thumbnailUrl": "/outputs/Newt-Presets/dependencies/9fd4e2d8-4eb2-4553-8e5d-37bd82648325/1-2026-09-05T13-08-42-534Z-nano-banana-pro-a0fde2b7-preview.jpg",
+              "text": "",
+              "cost": {
+                "amountUsd": 0.15,
+                "currency": "USD",
+                "unitRateUsd": 0.15,
+                "units": 1,
+                "unit": "image",
+                "mediaType": "image",
+                "resolution": "2K",
+                "pricingBasis": "Nano Banana Pro fal.ai per-image estimate",
+                "pricingSource": "fal-model-page-2026-05-15"
+              },
+              "layerIndex": null
+            },
+            {
+              "type": "image",
+              "label": "Image 2",
+              "url": "/outputs/Newt-Presets/dependencies/9fd4e2d8-4eb2-4553-8e5d-37bd82648325/2-2026-09-05T13-09-06-099Z-nano-banana-pro-7d44b258.jpg",
+              "thumbnailUrl": "/outputs/Newt-Presets/dependencies/9fd4e2d8-4eb2-4553-8e5d-37bd82648325/3-2026-09-05T13-09-06-099Z-nano-banana-pro-7d44b258-preview.jpg",
+              "text": "",
+              "cost": {
+                "amountUsd": 0.15,
+                "currency": "USD",
+                "unitRateUsd": 0.15,
+                "units": 1,
+                "unit": "image",
+                "mediaType": "image",
+                "resolution": "2K",
+                "pricingBasis": "Nano Banana Pro fal.ai per-image estimate",
+                "pricingSource": "fal-model-page-2026-05-15"
+              },
+              "layerIndex": null
+            },
+            {
+              "type": "image",
+              "label": "Image 3",
+              "url": "/outputs/Newt-Presets/dependencies/9fd4e2d8-4eb2-4553-8e5d-37bd82648325/4-2026-09-05T13-09-29-990Z-nano-banana-pro-fe17edd7.jpg",
+              "thumbnailUrl": "/outputs/Newt-Presets/dependencies/9fd4e2d8-4eb2-4553-8e5d-37bd82648325/5-2026-09-05T13-09-29-990Z-nano-banana-pro-fe17edd7-preview.jpg",
+              "text": "",
+              "cost": {
+                "amountUsd": 0.15,
+                "currency": "USD",
+                "unitRateUsd": 0.15,
+                "units": 1,
+                "unit": "image",
+                "mediaType": "image",
+                "resolution": "2K",
+                "pricingBasis": "Nano Banana Pro fal.ai per-image estimate",
+                "pricingSource": "fal-model-page-2026-05-15"
+              },
+              "layerIndex": null
+            },
+            {
+              "type": "image",
+              "label": "Image 4",
+              "url": "/outputs/Newt-Presets/dependencies/9fd4e2d8-4eb2-4553-8e5d-37bd82648325/6-2026-09-05T13-09-53-882Z-nano-banana-pro-2c813a32.jpg",
+              "thumbnailUrl": "/outputs/Newt-Presets/dependencies/9fd4e2d8-4eb2-4553-8e5d-37bd82648325/7-2026-09-05T13-09-53-882Z-nano-banana-pro-2c813a32-preview.jpg",
+              "text": "",
+              "cost": {
+                "amountUsd": 0.15,
+                "currency": "USD",
+                "unitRateUsd": 0.15,
+                "units": 1,
+                "unit": "image",
+                "mediaType": "image",
+                "resolution": "2K",
+                "pricingBasis": "Nano Banana Pro fal.ai per-image estimate",
+                "pricingSource": "fal-model-page-2026-05-15"
+              },
+              "layerIndex": null
+            }
+          ],
+          "selectedResultIndex": 0,
+          "resultText": "",
+          "textareaHeights": {
+            "0:textarea": 112
+          },
+          "nodeColor": "#58ce63"
+        },
+        "presetSize": {
+          "width": 365.0002232736915,
+          "height": 1054.3663220307537
+        }
+      },
+      {
+        "id": "preview-1788612941303-9bvv5c",
+        "type": "preview",
+        "x": 5022.892966624853,
+        "y": -1150.445947105511,
+        "data": {
+          "title": "Preview",
+          "previewScale": 2.98,
+          "previewItemIndex": 0,
+          "previewTab": "layout",
+          "previewLayoutItems": [
+            {
+              "id": "layout-1788613793986-8uup19",
+              "url": "/outputs/Newt-Presets/dependencies/9fd4e2d8-4eb2-4553-8e5d-37bd82648325/0-2026-09-05T13-08-42-534Z-nano-banana-pro-a0fde2b7.jpg",
+              "sourceUrl": "/outputs/Newt-Presets/dependencies/9fd4e2d8-4eb2-4553-8e5d-37bd82648325/0-2026-09-05T13-08-42-534Z-nano-banana-pro-a0fde2b7.jpg",
+              "thumbnailUrl": "/outputs/Newt-Presets/dependencies/9fd4e2d8-4eb2-4553-8e5d-37bd82648325/1-2026-09-05T13-08-42-534Z-nano-banana-pro-a0fde2b7-preview.jpg",
+              "type": "image",
+              "label": "2026-09-05T13-08-42-534Z-nano-banana-pro-a0fde2b7.jpg 1",
+              "fileName": "2026-09-05T13-08-42-534Z-nano-banana-pro-a0fde2b7.jpg",
+              "mimeType": "image/jpeg",
+              "width": 1792,
+              "height": 2400
+            },
+            {
+              "id": "layout-1788613793986-um2tpg",
+              "url": "/outputs/Newt-Presets/dependencies/9fd4e2d8-4eb2-4553-8e5d-37bd82648325/2-2026-09-05T13-09-06-099Z-nano-banana-pro-7d44b258.jpg",
+              "sourceUrl": "/outputs/Newt-Presets/dependencies/9fd4e2d8-4eb2-4553-8e5d-37bd82648325/2-2026-09-05T13-09-06-099Z-nano-banana-pro-7d44b258.jpg",
+              "thumbnailUrl": "/outputs/Newt-Presets/dependencies/9fd4e2d8-4eb2-4553-8e5d-37bd82648325/3-2026-09-05T13-09-06-099Z-nano-banana-pro-7d44b258-preview.jpg",
+              "type": "image",
+              "label": "2026-09-05T13-08-42-534Z-nano-banana-pro-a0fde2b7.jpg 2",
+              "fileName": "2026-09-05T13-09-06-099Z-nano-banana-pro-7d44b258.jpg",
+              "mimeType": "image/jpeg",
+              "width": 1792,
+              "height": 2400
+            },
+            {
+              "id": "layout-1788613793986-k6k7tn",
+              "url": "/outputs/Newt-Presets/dependencies/9fd4e2d8-4eb2-4553-8e5d-37bd82648325/4-2026-09-05T13-09-29-990Z-nano-banana-pro-fe17edd7.jpg",
+              "sourceUrl": "/outputs/Newt-Presets/dependencies/9fd4e2d8-4eb2-4553-8e5d-37bd82648325/4-2026-09-05T13-09-29-990Z-nano-banana-pro-fe17edd7.jpg",
+              "thumbnailUrl": "/outputs/Newt-Presets/dependencies/9fd4e2d8-4eb2-4553-8e5d-37bd82648325/5-2026-09-05T13-09-29-990Z-nano-banana-pro-fe17edd7-preview.jpg",
+              "type": "image",
+              "label": "2026-09-05T13-08-42-534Z-nano-banana-pro-a0fde2b7.jpg 3",
+              "fileName": "2026-09-05T13-09-29-990Z-nano-banana-pro-fe17edd7.jpg",
+              "mimeType": "image/jpeg",
+              "width": 1792,
+              "height": 2400
+            },
+            {
+              "id": "layout-1788613793986-solie3",
+              "url": "/outputs/Newt-Presets/dependencies/9fd4e2d8-4eb2-4553-8e5d-37bd82648325/6-2026-09-05T13-09-53-882Z-nano-banana-pro-2c813a32.jpg",
+              "sourceUrl": "/outputs/Newt-Presets/dependencies/9fd4e2d8-4eb2-4553-8e5d-37bd82648325/6-2026-09-05T13-09-53-882Z-nano-banana-pro-2c813a32.jpg",
+              "thumbnailUrl": "/outputs/Newt-Presets/dependencies/9fd4e2d8-4eb2-4553-8e5d-37bd82648325/7-2026-09-05T13-09-53-882Z-nano-banana-pro-2c813a32-preview.jpg",
+              "type": "image",
+              "label": "2026-09-05T13-08-42-534Z-nano-banana-pro-a0fde2b7.jpg 4",
+              "fileName": "2026-09-05T13-09-53-882Z-nano-banana-pro-2c813a32.jpg",
+              "mimeType": "image/jpeg",
+              "width": 1792,
+              "height": 2400
+            }
+          ],
+          "nodeColor": "#58ce63",
+          "previewSourceId": "imageModel-1788612249416-1788612249416-4-jlebk1:imageOut",
+          "previewLayoutHiddenUrls": [
+            "/outputs/Newt-Presets/dependencies/9fd4e2d8-4eb2-4553-8e5d-37bd82648325/8-2026-09-04T22-25-45-795Z-nano-banana-pro-240fca74.jpg",
+            "/outputs/Newt-Presets/dependencies/9fd4e2d8-4eb2-4553-8e5d-37bd82648325/9-2026-09-04T22-26-08-746Z-nano-banana-pro-8cc001bc.jpg",
+            "/outputs/Newt-Presets/dependencies/9fd4e2d8-4eb2-4553-8e5d-37bd82648325/10-2026-09-04T22-26-31-795Z-nano-banana-pro-55ff7fea.jpg",
+            "/outputs/Newt-Presets/dependencies/9fd4e2d8-4eb2-4553-8e5d-37bd82648325/11-2026-09-04T22-26-53-089Z-nano-banana-pro-85979474.jpg"
+          ]
+        },
+        "presetSize": {
+          "width": 983.3941680939988,
+          "height": 1042.2309511082447
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-1788612249416-0",
+        "from": {
+          "nodeId": "plainText-1788612249416-1788612249416-0-q8rrvl",
+          "port": "promptOut"
+        },
+        "to": {
+          "nodeId": "imageModel-1788612249416-1788612249416-4-jlebk1",
+          "port": "promptIn"
+        },
+        "color": "#f0c83b"
+      },
+      {
+        "id": "edge-1788612249416-1",
+        "from": {
+          "nodeId": "plainText-1788612249416-1788612249416-1-osonxp",
+          "port": "promptOut"
+        },
+        "to": {
+          "nodeId": "imageModel-1788612249416-1788612249416-4-jlebk1",
+          "port": "promptIn"
+        },
+        "color": "#f0c83b"
+      },
+      {
+        "id": "edge-1788612249416-2",
+        "from": {
+          "nodeId": "camera-1788612249416-1788612249416-2-xzxmxp",
+          "port": "cameraOut"
+        },
+        "to": {
+          "nodeId": "imageModel-1788612249416-1788612249416-4-jlebk1",
+          "port": "cameraIn"
+        },
+        "color": "#ef4444"
+      },
+      {
+        "id": "edge-1788612249416-3",
+        "from": {
+          "nodeId": "style-1788612249416-1788612249416-3-mcmlwm",
+          "port": "styleOut"
+        },
+        "to": {
+          "nodeId": "imageModel-1788612249416-1788612249416-4-jlebk1",
+          "port": "styleIn"
+        },
+        "color": "#9b5cff"
+      },
+      {
+        "id": "edge-1788612948072",
+        "from": {
+          "nodeId": "imageModel-1788612249416-1788612249416-4-jlebk1",
+          "port": "imageOut"
+        },
+        "to": {
+          "nodeId": "preview-1788612941303-9bvv5c",
+          "port": "sourceIn"
+        },
+        "color": "#3d85ff"
+      }
+    ],
+    "groups": []
+  }
+}

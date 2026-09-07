@@ -1,0 +1,177 @@
+{
+  "id": "5f9ef270-7b69-41cb-b345-235c0154a2b5",
+  "name": "Standard Workflow",
+  "version": 2,
+  "createdAt": "2026-09-07T01:27:19.732Z",
+  "graph": {
+    "nodes": [
+      {
+        "id": "text-1",
+        "type": "plainText",
+        "x": 123.3203125,
+        "y": 102.61370849609375,
+        "data": {
+          "title": "Prompt 1",
+          "text": "A dog with a ball."
+        },
+        "presetSize": {
+          "width": 309.9999836478612,
+          "height": 205.9982674777695
+        }
+      },
+      {
+        "id": "image-model-1",
+        "type": "imageModel",
+        "x": 546.8897713928794,
+        "y": 96.03308838042841,
+        "data": {
+          "title": "Image Model",
+          "model": "OpenAI Image 2",
+          "prompt": "A serene landscape with mountains",
+          "aspectRatio": "16:9",
+          "resolution": "2K",
+          "kreaCreativity": "raw",
+          "batchCount": "1",
+          "settingsOpen": true,
+          "quality": "high"
+        },
+        "presetSize": {
+          "width": 365.000131471901,
+          "height": 1065.8073426362594
+        }
+      },
+      {
+        "id": "text-2",
+        "type": "plainText",
+        "x": 124.23687795605827,
+        "y": 379.67701542395395,
+        "data": {
+          "title": "Prompt",
+          "text": "The location is a park."
+        },
+        "presetSize": {
+          "width": 309.9999836478612,
+          "height": 205.9982674777695
+        }
+      },
+      {
+        "id": "camera-1",
+        "type": "camera",
+        "x": 101.27786006671954,
+        "y": 658.981734327887,
+        "data": {
+          "title": "Camera",
+          "shotPreset": "MS",
+          "lensPreset": "35mm",
+          "typePreset": "None"
+        },
+        "presetSize": {
+          "width": 360.0000686413647,
+          "height": 237.06605305233904
+        }
+      },
+      {
+        "id": "style-1",
+        "type": "style",
+        "x": 102.00101081119362,
+        "y": 970.3715360841652,
+        "data": {
+          "title": "Style",
+          "stylePreset": "Cinematic Standard",
+          "gradePreset": "None",
+          "customPaletteRgbText": "",
+          "customPalettePicker": "#ddc631",
+          "customPaletteColors": [],
+          "customPalettePreviewUrl": "",
+          "customPaletteSourceName": "",
+          "customPaletteStatus": "",
+          "customPaletteError": ""
+        },
+        "presetSize": {
+          "width": 360.0000686413647,
+          "height": 191.076424556431
+        }
+      },
+      {
+        "id": "preview-1",
+        "type": "preview",
+        "x": 1022.6723497659082,
+        "y": 313.64054190479334,
+        "data": {
+          "title": "Preview",
+          "previewScale": 2.42,
+          "previewItemIndex": 0,
+          "previewTab": "preview",
+          "previewLayoutItems": []
+        },
+        "presetSize": {
+          "width": 798.593747528113,
+          "height": 588.4115259653247
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-1",
+        "from": {
+          "nodeId": "text-1",
+          "port": "promptOut"
+        },
+        "to": {
+          "nodeId": "image-model-1",
+          "port": "promptIn"
+        },
+        "color": "#f0c83b"
+      },
+      {
+        "id": "edge-2",
+        "from": {
+          "nodeId": "text-2",
+          "port": "promptOut"
+        },
+        "to": {
+          "nodeId": "image-model-1",
+          "port": "promptIn"
+        },
+        "color": "#f0c83b"
+      },
+      {
+        "id": "edge-3",
+        "from": {
+          "nodeId": "camera-1",
+          "port": "cameraOut"
+        },
+        "to": {
+          "nodeId": "image-model-1",
+          "port": "cameraIn"
+        },
+        "color": "#ef4444"
+      },
+      {
+        "id": "edge-4",
+        "from": {
+          "nodeId": "style-1",
+          "port": "styleOut"
+        },
+        "to": {
+          "nodeId": "image-model-1",
+          "port": "styleIn"
+        },
+        "color": "#9b5cff"
+      },
+      {
+        "id": "edge-5",
+        "from": {
+          "nodeId": "image-model-1",
+          "port": "imageOut"
+        },
+        "to": {
+          "nodeId": "preview-1",
+          "port": "sourceIn"
+        },
+        "color": "#3d85ff"
+      }
+    ],
+    "groups": []
+  }
+}

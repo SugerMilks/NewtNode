@@ -812,6 +812,14 @@
   user-select: none;
 }
 
+.output-lightbox-image-editor.sized > img {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  object-fit: contain;
+}
+
 .output-lightbox-image-editor.cropping > img {
   pointer-events: none;
 }
@@ -844,8 +852,6 @@
 .output-crop-box {
   position: absolute;
   z-index: 2;
-  min-width: 30px;
-  min-height: 30px;
   border: 2px solid #ddc631;
   border-radius: 4px;
   cursor: move;
@@ -870,14 +876,15 @@
 
 .output-crop-handle {
   position: absolute;
-  right: -7px;
-  bottom: -7px;
-  width: 15px;
-  height: 15px;
+  right: -9px;
+  bottom: -9px;
+  width: 19px;
+  height: 19px;
   border: 2px solid #101010;
   border-radius: 50%;
   background: #ddc631;
   cursor: nwse-resize;
+  touch-action: none;
 }
 
 .output-lightbox-error {
@@ -1290,6 +1297,111 @@
   user-select: none;
 }
 
+.node-card.myNewt { width: 410px; }
+.newt-icon {
+  display: inline-block;
+  flex-shrink: 0;
+  width: var(--newt-icon-size);
+  height: var(--newt-icon-size);
+  background-color: currentColor;
+  -webkit-mask: url("/newt-mark.png") center / contain no-repeat;
+  mask: url("/newt-mark.png") center / contain no-repeat;
+  pointer-events: none;
+}
+.node-card.myNewt > .node-title .newt-icon {
+  width: calc(var(--newt-icon-size) * 313 / 195);
+}
+.my-newt-body { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.my-newt-history { display: grid; gap: 5px; font-size: 11px; color: #aaa; }
+.my-newt-history select, .my-newt-settings select { min-width: 0; max-width: 100%; background: #171717; color: #eee; border: 1px solid #414141; border-radius: 4px; padding: 7px; font: inherit; }
+.my-newt-settings select { margin-left: auto; }
+.my-newt-preset-binding { display: grid; gap: 5px; min-width: 0; }
+.my-newt-preset-binding select { width: 100%; min-width: 0; padding: 7px; background: #171717; color: #eee; border: 1px solid #414141; border-radius: 4px; }
+.newt-preset-slots { border: 0; margin: 12px 0; padding: 0; max-height: 260px; overflow-y: auto; }
+.newt-preset-slots legend { margin-bottom: 8px; }
+.newt-preset-slots > div { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.newt-preset-dialog .newt-preset-slots label { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; overflow-wrap: anywhere; }
+.newt-preset-slots input[type=checkbox] { width: 16px; min-width: 16px; height: 16px; margin: 0; accent-color: #ddc631; }
+.newt-preset-slots select { min-width: 80px; max-width: 140px; }
+.my-newt-asset-label { display: block; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.my-newt-plan, .my-newt-run-preview { min-width: 0; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.my-newt-plan p, .my-newt-run-preview p { margin: 8px 0; white-space: pre-wrap; max-height: 200px; overflow-y: auto; }
+.my-newt-plan ol { list-style: none; margin: 8px 0; padding: 0; }
+.my-newt-plan ol li { display: flex; align-items: baseline; gap: 7px; margin: 5px 0; }
+.my-newt-plan svg { flex: 0 0 auto; }
+.my-newt-plan [data-state=complete] { color: #77cf89; }
+.my-newt-plan [data-state=blocked] { color: #ffa38b; }
+.my-newt-plan ul, .my-newt-run-preview ul { padding-left: 18px; max-height: 150px; overflow-y: auto; }
+.my-newt-run-preview { padding: 10px 0; border-block: 1px solid #454027; display: grid; gap: 5px; }
+.my-newt-estimate { color: #ddc631; font-variant-numeric: tabular-nums; }
+.my-newt-estimate span { color: #aaa; }
+.my-newt-deliverables { display: grid; grid-template-columns: minmax(0, 1fr); gap: 5px; max-height: 180px; overflow-y: auto; }
+.my-newt-deliverables button { display: flex; align-items: center; gap: 8px; min-width: 0; text-align: left; background: #282828; border: 0; color: #ddd; padding: 7px; border-radius: 4px; }
+.my-newt-deliverables span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.my-newt-body textarea { width: 100%; box-sizing: border-box; resize: vertical; line-height: 1.5; }
+.my-newt-brief { display: flex; gap: 8px; align-items: flex-end; min-width: 0; }
+.my-newt-brief textarea { min-height: 88px; min-width: 0; }
+.my-newt-note textarea { min-width: 0; }
+.my-newt-mic { touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.my-newt-mic.is-recording { color: #fff; border-color: #e67373; background: #a52b37; }
+.my-newt-mic:focus-visible { outline: 2px solid #ddc631; outline-offset: 2px; }
+.my-newt-mic:disabled { opacity: 0.55; cursor: wait; }
+.my-newt-voice-status { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
+.my-newt-voice-status .my-newt-icon { align-self: center; }
+.my-newt-mic-spinner { animation: my-newt-mic-spin 1s linear infinite; }
+@keyframes my-newt-mic-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .my-newt-mic-spinner { animation: none; } }
+.my-newt-controls, .my-newt-note { display: flex; align-items: stretch; gap: 8px; }
+.my-newt-controls .node-run { display: flex; justify-content: center; align-items: center; gap: 8px; flex: 1; min-height: 38px; border-radius: 6px; background: #ddc631; color: #111; font-weight: 700; border: 0; }
+.my-newt-controls button:disabled { opacity: 0.45; cursor: not-allowed; }
+.my-newt-icon { width: 36px; min-width: 36px; height: 36px; min-height: 36px; align-self: flex-end; display: grid; place-items: center; background: #303030; color: #ddd; border: 1px solid #414141; border-radius: 6px; }
+.my-newt-message { margin: 0; font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 180px; overflow-y: auto; }
+.my-newt-message.error { color: #ffa38b; }
+.my-newt-body .my-newt-note textarea { min-height: 48px; height: 48px; max-height: 160px; }
+.my-newt-settings { display: flex; flex-direction: column; gap: 10px; padding: 10px 0; }
+.my-newt-settings label { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.my-newt-settings input[type=checkbox] { width: 15px; height: 15px; accent-color: #ddc631; margin: 0; }
+.my-newt-settings input[type=number] { width: 88px; height: 30px; box-sizing: border-box; margin-left: auto; padding: 5px 7px; background: #171717; color: #eee; border: 1px solid #3b3b3b; border-radius: 4px; font: inherit; }
+.my-newt-presets { min-width: 0; display: grid; gap: 6px; font-size: 12px; }
+.my-newt-preset-controls { display: flex; gap: 6px; min-width: 0; }
+.my-newt-preset-controls select { flex: 1; min-width: 0; height: 36px; padding: 5px 8px; border: 1px solid #3b3b3b; border-radius: 4px; background: #171717; color: #eee; font: inherit; text-overflow: ellipsis; }
+.my-newt-settings label.my-newt-intelligence { display: grid; gap: 8px; }
+.my-newt-intelligence span { display: flex; justify-content: space-between; gap: 10px; }
+.my-newt-intelligence output { color: #ddc631; }
+.my-newt-intelligence input[type=range] { width: 100%; margin: 0; accent-color: #ddc631; }
+.newt-preset-dialog { box-sizing: border-box; border-radius: 8px; max-height: calc(100dvh - 56px); overflow-y: auto; }
+.newt-preset-dialog label { display: grid; gap: 8px; font-size: 13px; }
+.newt-preset-dialog input:not([type=checkbox]) { min-width: 0; width: 100%; box-sizing: border-box; padding: 10px; color: #eee; background: #101010; border: 1px solid #555; border-radius: 4px; font: inherit; }
+.newt-preset-advanced { min-width: 0; }
+.newt-preset-advanced > summary { cursor: pointer; color: #aaa; font-size: 13px; }
+.newt-preset-advanced > summary:focus-visible { outline: 2px solid #ddc631; outline-offset: 3px; }
+.newt-preset-dialog .workflow-prompt-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.newt-preset-dialog button:disabled { opacity: 0.5; cursor: default; }
+.my-newt-model { color: #999; font-size: 11px; }
+.my-newt-activity { list-style: none; padding: 0; margin: 10px 0 0; max-height: 230px; overflow-y: auto; font-size: 11px; line-height: 1.5; }
+.my-newt-activity li { padding: 6px 0; border-bottom: 1px solid #383838; overflow-wrap: anywhere; }
+.my-newt-activity time { display: block; color: #999; font-size: 10px; }
+
+.my-newt-confetti { position: absolute; top: 20px; left: 50%; width: 0; height: 0; overflow: visible; pointer-events: none; z-index: 10; }
+.my-newt-confetti span {
+  position: absolute;
+  width: 6px;
+  height: 10px;
+  background: var(--confetti-color);
+  opacity: 0;
+  animation: my-newt-confetti-burst 1100ms var(--confetti-delay) ease-out both;
+}
+@keyframes my-newt-confetti-burst {
+  0% { opacity: 0; transform: translate(-3px, 0) rotate(0); }
+  8% { opacity: 1; }
+  40% { opacity: 1; transform: translate(var(--confetti-x), var(--confetti-rise)) rotate(calc(var(--confetti-spin) * 0.5)); }
+  100% { opacity: 0; transform: translate(var(--confetti-x), var(--confetti-fall)) rotate(var(--confetti-spin)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .my-newt-confetti { display: none; }
+  .my-newt-confetti span { animation: none; }
+}
+
 .node-card.plainText {
   display: flex;
   width: var(--text-node-width, 310px);
@@ -1354,6 +1466,11 @@
     0 20px 50px rgba(0, 0, 0, 0.32),
     0 0 0 2px rgba(221, 198, 49, 0.14),
     0 0 0 4px color-mix(in srgb, var(--node-color) 16%, transparent);
+}
+
+.node-card.myNewt.has-node-color.selected {
+  border-color: var(--node-color);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.32), 0 0 0 2px color-mix(in srgb, var(--node-color) 20%, transparent);
 }
 
 .node-card.reference-tag-highlighted {
@@ -2510,6 +2627,26 @@
   background: rgba(0, 0, 0, 0.24);
 }
 
+.skill-director-task-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px 0;
+  border-bottom: 1px solid #454545;
+  color: #e8d75b;
+  font-size: 13px;
+}
+
+.skill-director-task-status.error { color: #ffa88d; }
+.skill-director-task-status > svg { flex: 0 0 16px; margin-top: 2px; }
+.skill-director-task-status > div { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.skill-director-task-status p { margin: 4px 0; white-space: pre-wrap; }
+.skill-director-task-status small { color: #b5b5b5; }
+.skill-director-task-status button { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; padding: 6px 8px; background: #303030; color: #f2f2f2; border: 1px solid #555; border-radius: 6px; font: inherit; cursor: pointer; }
+.skill-director-task-status button:hover { background: #3a3a3a; }
+.skill-director-task-status.running > svg { animation: storyboard-render-spin 1s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .skill-director-task-status.running > svg { animation: none; } }
+
 .skill-director-scene-tab-list {
   display: flex;
   gap: 4px;
@@ -2615,7 +2752,7 @@
 
 .skill-director-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 112px 112px 112px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
   align-items: start;
 }
@@ -2629,10 +2766,6 @@
   color: rgba(244, 240, 232, 0.62);
   font-size: 10px;
   line-height: 1;
-}
-
-.skill-director-grid .skill-director-audio-row {
-  grid-column: span 2;
 }
 
 .skill-director-grid input[type="number"],
@@ -2811,6 +2944,66 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.skill-director-video-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.skill-director-video-options.disabled {
+  opacity: 0.38;
+}
+
+.skill-director-video-option {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: start;
+  gap: 7px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.skill-director-video-option input {
+  width: 14px;
+  min-width: 14px;
+  min-height: 14px;
+  margin: 1px 0 0;
+  accent-color: #ddc631;
+}
+
+.skill-director-video-option span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.skill-director-video-option strong {
+  color: rgba(244, 240, 232, 0.82);
+  font-size: 11px;
+  font-weight: 820;
+}
+
+.skill-director-video-option small {
+  color: rgba(244, 240, 232, 0.46);
+  font-size: 9px;
+  line-height: 1.25;
+}
+
+.skill-director-video-option:has(input:checked) {
+  border-color: rgba(221, 198, 49, 0.34);
+  background: rgba(221, 198, 49, 0.07);
+}
+
+.skill-director-video-blueprint-status {
+  color: rgba(244, 240, 232, 0.58);
+  font-size: 10px;
+  font-weight: 720;
+  line-height: 1.35;
 }
 
 .skill-director-reference-setup {

@@ -92,6 +92,13 @@ export const referenceGradePresets = Object.freeze({
       "#1F1904", "#4D3416", "#5E4B2B", "#786345", "#92785E", "#A98B76", "#BFA192",
       "#D8B7A2", "#F0CAB2", "#627263", "#4A5948", "#749694", "#86B6B4", "#C98B78"
     ])
+  }),
+  "Jaws of Life": Object.freeze({
+    description: "Weathered, low-saturation color grade with dusty blue-green and slate-cyan midtones, deep softened umber-charcoal shadows, muted rust-brown accents, warm taupe neutrals, restrained gray-sage highlights, subdued exposure, soft contrast, and gentle highlight rolloff. Keep the cool-warm separation subtle and natural.",
+    palette: Object.freeze([
+      "#271E18", "#362922", "#413932", "#4E473F", "#4F5D5E", "#5C6F76", "#606D6B",
+      "#667B82", "#6C5241", "#737975", "#738588", "#7E6554", "#7F9294", "#8E9E9C"
+    ])
   })
 });
 

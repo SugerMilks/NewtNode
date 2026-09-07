@@ -1,6 +1,16 @@
+import { filmDirectorApproachDirective, normalizeFilmDirectorApproach } from "./filmDirectorApproaches.js";
+
 export const filmDirectorStyleDirectionMaxChars = 900;
 
-export function filmDirectorStyleDirectionDirective() {
+export function filmDirectorStyleDirectionDirective(approach = "cinematic") {
+  if (normalizeFilmDirectorApproach(approach) !== "cinematic") {
+    return [
+      `Style Direction must be a focused production brief of 3-6 concise sentences and no more than ${filmDirectorStyleDirectionMaxChars} characters.`,
+      filmDirectorApproachDirective(approach),
+      "Describe the visible treatment and emotional/performance tone: medium, palette, lighting, contrast, texture and image finish. Keep direction literal and production-ready.",
+      "Do not include camera movement or placement, shot-by-shot framing, blocking, action choreography, plot summary, editorial instructions, metaphor, or poetic non-literal direction. Those belong in Camera Direction, Scene Overview, or the Shot List."
+    ].join(" ");
+  }
   return [
     `Style Direction must be a focused production brief of 3-6 concise sentences and no more than ${filmDirectorStyleDirectionMaxChars} characters.`,
     "Describe the visible cinematic look and emotional tone: capture medium, color palette and grade, lighting quality, contrast and exposure, texture, atmosphere, image finish, and grounded performance texture.",

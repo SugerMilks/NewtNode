@@ -1,9 +1,111 @@
+import { normalizeFilmDirectorApproach } from "./filmDirectorApproaches.js";
+
 export const filmDirectorSceneLimit = 24;
 
-const persistentAssetInputPorts = new Set(["characterIn", "locationIn", "imageIn"]);
+export const filmDirectorNewSceneSetup = Object.freeze({
+  skillApproach: "cinematic",
+  skillDurationSeconds: "30",
+  skillVideoModel: "Seedance 2.5",
+  skillResolution: "1080p",
+  skillAspectRatio: "21:9",
+  skillShotCount: "Auto",
+  skillDirectorAudioMode: "production"
+});
 
-export function filmDirectorCanAddAssetWhileSetupLocked(portId = "") {
-  return persistentAssetInputPorts.has(String(portId || ""));
+const sceneSetupInputPorts = new Set(["characterIn", "locationIn", "imageIn", "styleIn", "referenceVideoIn", "musicIn"]);
+
+const defaultReferenceVideoOptions = {
+  extend: false,
+  camera: false,
+  reference: false
+};
+
+export const filmDirectorReferenceVideoModes = ["extend", "camera", "reference"];
+
+export function normalizeFilmDirectorReferenceVideoOptions(value = {}) {
+  const source = value && typeof value === "object" ? value : {};
+  const activeMode = filmDirectorReferenceVideoModes.find((mode) => Boolean(source[mode])) || "";
+  return {
+    extend: activeMode === "extend",
+    camera: activeMode === "camera",
+    reference: activeMode === "reference"
+  };
+}
+
+export function filmDirectorReferenceVideoMode(value = {}) {
+  const options = normalizeFilmDirectorReferenceVideoOptions(value);
+  return filmDirectorReferenceVideoModes.find((mode) => options[mode]) || "";
+}
+
+export function selectFilmDirectorReferenceVideoMode(current = {}, mode = "", enabled = true) {
+  const normalizedMode = filmDirectorReferenceVideoModes.includes(mode) ? mode : "";
+  const activeMode = enabled ? normalizedMode : "";
+  return Object.fromEntries(filmDirectorReferenceVideoModes.map((key) => [key, key === activeMode]));
+}
+
+export const filmDirectorExtendInstruction = "Use the provided reference video as the authoritative context and seamlessly continue the scene from its exact final visual and temporal state. Preserve character identity, wardrobe, location, lighting, color, atmosphere, screen direction, blocking, camera position, lens character, motion, performance, and continuity. Do not restart, recap, reinterpret, or recreate the existing footage. Begin the continuation with the additional shots below.";
+
+export function filmDirectorExtendInstructionForApproach(approach = "cinematic") {
+  if (normalizeFilmDirectorApproach(approach) === "cinematic") return filmDirectorExtendInstruction;
+  return "Use the provided reference video as the authoritative story and continuity context. Continue from its exact ending action, subject positions and temporal state. Preserve recognizable character identity, wardrobe, location, screen direction, blocking, camera framing and motion, performance and continuity. Apply the selected approach and Style Direction to the capture medium, rendering, color treatment, texture and visual frame cadence; these override conflicting source-video visual treatment. Do not restart, recap or recreate the existing events. Begin the continuation with the additional shots below.";
+}
+
+export const filmDirectorCameraInstruction = "Use the provided reference video solely as the authoritative camera and editing blueprint. Match its shot boundaries, shot order, framing progression, camera positions, movement paths, movement speed, and transitions while depicting only the scene, assets, performances, location, lighting, and visual style described in this prompt. Do not copy or introduce people, wardrobe, objects, setting, action, dialogue, story content, lighting, color treatment, or visual style from the reference video.";
+
+export const filmDirectorReferenceInstruction = "Use the provided reference video as the authoritative temporal performance, blocking, camera, composition, edit, and sound-timing blueprint. Re-stage its shot boundaries, shot order, framing, camera movement, body movement, gestures, expressions, eyelines, interactions, dialogue timing, pauses, and performance cadence with only the characters, wardrobe, props, location, lighting, and visual style described in this prompt. Replace every source-video identity and visual appearance with the connected scene assets and requested look. Do not copy the source video's people, wardrobe, objects, setting, lighting, color treatment, rendering style, branding, or other visual identity. The Style Direction is authoritative: when it requests animation, illustration, stylization, or another non-live-action treatment, that requested look supersedes the live-action language in the general Scene rules while performance and physics remain coherent. When reference audio is available and generated audio is enabled, preserve its speech timing and natural performance cadence without importing music.";
+
+export function filmDirectorReferenceVideoCacheKey(mode = "", url = "") {
+  const normalizedMode = filmDirectorReferenceVideoModes.includes(mode) ? mode : "";
+  const normalizedUrl = String(url || "").trim();
+  return normalizedMode && normalizedUrl ? `${normalizedMode}:${normalizedUrl}` : "";
+}
+
+export function normalizeFilmDirectorReferenceVideoBlueprint(value = {}) {
+  const source = value && typeof value === "object" ? value : {};
+  const mode = filmDirectorReferenceVideoModes.includes(source.mode) ? source.mode : "";
+  const sourceDurationSeconds = Math.max(0, Number(source.sourceDurationSeconds) || 0);
+  const requestedDuration = Number.parseInt(String(source.durationSeconds || ""), 10);
+  const durationSeconds = Number.isInteger(requestedDuration)
+    ? String(Math.max(4, Math.min(30, requestedDuration)))
+    : "";
+  const cutTimes = [...new Set((Array.isArray(source.cutTimes) ? source.cutTimes : [])
+    .map((time) => Number(time))
+    .filter((time) => Number.isFinite(time) && time > 0 && (!sourceDurationSeconds || time < sourceDurationSeconds))
+    .map((time) => Number(time.toFixed(3))))]
+    .sort((a, b) => a - b)
+    .slice(0, 24);
+  const shots = (Array.isArray(source.shots) ? source.shots : [])
+    .filter((shot) => shot && typeof shot === "object")
+    .slice(0, 25)
+    .map((shot, index) => ({
+      number: index + 1,
+      startSeconds: Math.max(0, Number(shot.startSeconds) || 0),
+      endSeconds: Math.max(0, Number(shot.endSeconds) || 0),
+      durationSeconds: Math.max(0, Number(shot.durationSeconds) || 0),
+      description: String(shot.description || "").trim()
+    }));
+  const requestedShotCount = Number.parseInt(String(source.shotCount || ""), 10);
+  const shotCount = Math.max(0, Math.min(25,
+    Number.isInteger(requestedShotCount) && requestedShotCount > 0
+      ? requestedShotCount
+      : shots.length || (cutTimes.length ? cutTimes.length + 1 : 0)
+  ));
+
+  return {
+    mode,
+    sourceDurationSeconds,
+    durationSeconds,
+    shotCount,
+    cutTimes,
+    shots,
+    audioDetected: Boolean(source.audioDetected),
+    audioTranscript: String(source.audioTranscript || "").trim().slice(0, 8000),
+    audioSummary: String(source.audioSummary || "").trim().slice(0, 2000)
+  };
+}
+
+export function filmDirectorSetupInputIsLocked(locks = {}, portId = "") {
+  return Boolean(locks?.setup && sceneSetupInputPorts.has(String(portId || "")));
 }
 
 export function isFilmDirectorSceneTransitionPatch(patch = {}) {
@@ -26,6 +128,14 @@ const sceneStateKeys = [
   "skillResolution",
   "skillAspectRatio",
   "skillDirectorAudioMode",
+  "skillApproach",
+  "skillDirectorLockedApproach",
+  "skillDirectorLockedMusicSignature",
+  "skillDirectorReferenceVideoOptions",
+  "skillDirectorReferenceVideoAnalysis",
+  "skillDirectorReferenceVideoAnalysisSource",
+  "skillDirectorReferenceVideoBlueprint",
+  "skillDirectorLockedReferenceVideoSignature",
   "styleDirection",
   "motionBrief",
   "motionDirection",
@@ -83,6 +193,7 @@ function cloneValue(value) {
 }
 
 function sceneDefaults(sceneName = "") {
+  // Keep legacy snapshot fallbacks separate from defaults for newly created scenes.
   return {
     sceneName,
     sceneOverview: "",
@@ -95,6 +206,14 @@ function sceneDefaults(sceneName = "") {
     skillResolution: "720p",
     skillAspectRatio: "16:9",
     skillDirectorAudioMode: "production",
+    skillApproach: "cinematic",
+    skillDirectorLockedApproach: "cinematic",
+    skillDirectorLockedMusicSignature: "",
+    skillDirectorReferenceVideoOptions: { ...defaultReferenceVideoOptions },
+    skillDirectorReferenceVideoAnalysis: "",
+    skillDirectorReferenceVideoAnalysisSource: "",
+    skillDirectorReferenceVideoBlueprint: normalizeFilmDirectorReferenceVideoBlueprint(),
+    skillDirectorLockedReferenceVideoSignature: "",
     styleDirection: "",
     motionBrief: "",
     motionDirection: "",
@@ -138,9 +257,13 @@ export function filmDirectorSceneSnapshot(data = {}, fallbackName = "") {
     snapshot[key] = cloneValue(Object.prototype.hasOwnProperty.call(data, key) ? data[key] : defaults[key]);
   });
   snapshot.sceneName = String(snapshot.sceneName || fallbackName || "");
+  snapshot.skillApproach = normalizeFilmDirectorApproach(snapshot.skillApproach);
+  snapshot.skillDirectorLockedApproach = normalizeFilmDirectorApproach(snapshot.skillDirectorLockedApproach);
   snapshot.skillDirectorLocks = { ...defaultLocks, ...(snapshot.skillDirectorLocks || {}) };
   snapshot.skillDirectorStaleStages = { ...(snapshot.skillDirectorStaleStages || {}) };
   snapshot.skillDirectorCollapsed = { ...defaultCollapsed, ...(snapshot.skillDirectorCollapsed || {}) };
+  snapshot.skillDirectorReferenceVideoOptions = normalizeFilmDirectorReferenceVideoOptions(snapshot.skillDirectorReferenceVideoOptions);
+  snapshot.skillDirectorReferenceVideoBlueprint = normalizeFilmDirectorReferenceVideoBlueprint(snapshot.skillDirectorReferenceVideoBlueprint);
   snapshot.skillDirectorRevisionHistory = Array.isArray(snapshot.skillDirectorRevisionHistory)
     ? snapshot.skillDirectorRevisionHistory
     : [];
@@ -225,7 +348,11 @@ export function addFilmDirectorScene(data = {}) {
   const id = nextSceneId(scenes);
   const nextScene = {
     id,
-    state: filmDirectorSceneSnapshot({}, `Scene ${scenes.length + 1}`)
+    state: filmDirectorSceneSnapshot({
+      ...filmDirectorNewSceneSetup,
+      shotCount: filmDirectorNewSceneSetup.skillShotCount,
+      durationSeconds: filmDirectorNewSceneSetup.skillDurationSeconds
+    }, `Scene ${scenes.length + 1}`)
   };
   return {
     ...nextScene.state,

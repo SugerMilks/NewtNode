@@ -1,6 +1,7 @@
 export const nodeTypeDefinitions = [
   { type: "plainText", label: "Text" },
   { type: "text", label: "Smart Text" },
+  { type: "myNewt", label: "My Newt" },
   { type: "imageModel", label: "Image Model" },
   { type: "videoModel", label: "Video Model" },
   { type: "preview", label: "Preview" },
@@ -8,7 +9,7 @@ export const nodeTypeDefinitions = [
   { type: "transfer", label: "Mood Board" },
   { type: "character", label: "Character" },
   { type: "camera", label: "Camera" },
-  { type: "skillDirector", label: "Film Director" },
+  { type: "skillDirector", label: "Director" },
   { type: "storyboard", label: "Storyboard" },
   { type: "coverage", label: "Coverage" },
   { type: "composer", label: "Composer" },

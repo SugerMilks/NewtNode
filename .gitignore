@@ -18,6 +18,8 @@ server/data/*-index.json
 server/data/.*.tmp
 server/data/*.log
 server/data/*.log.*
+server/data/my-newt/
+server/data/newt-presets/
 public/models/poses/.*.tmp
 .vs_ai_logs/
 .newtnode_logs/

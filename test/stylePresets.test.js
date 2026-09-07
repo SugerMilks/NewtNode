@@ -8,6 +8,7 @@ const addedStylePresetNames = [
   "Cinematic Indie",
   "Cinematic Standard",
   "Cinematic Commercial",
+  "Vintage 8mm",
   "UGC Device",
   "Photography Color",
   "Photography B&W",
@@ -35,6 +36,15 @@ test("new Style Node presets provide complete prompt suffixes", () => {
   assert.match(stylePresetPrompts["Pixel Art"], /no anti-aliasing, no text, no watermark\.$/);
 });
 
+test("Vintage 8mm preserves the exact requested prompt and saved preset selection", () => {
+  assert.equal(
+    stylePresetPrompts["Vintage 8mm"],
+    "Cinematic still frame from a vintage film, shot on 8mm film, soft lens. Slightly refurbished film. Any captured motion within the composition needs to have realistic motion blur based off of a hand cranked film camera. Must have dynamic framing, atmospheric cinematography, and halation. Realistic low contrast and muted color grade. Shallow depth of field, Lens bloom, heavy 8mm film grain. Realistic lens edge distortions, blurs, and vignetting. Atmospheric haze, imperfect real-camera texture, classic film look."
+  );
+  assert.equal(normalizeStylePresetName("Vintage 8mm"), "Vintage 8mm");
+  assert.equal(stylePresetNames.filter((name) => name === "Vintage 8mm").length, 1);
+});
+
 test("legacy Commercial preset is no longer available", () => {
   assert.equal(stylePresetNames.includes("Commercial"), false);
   assert.equal(Object.hasOwn(stylePresetPrompts, "Commercial"), false);
@@ -51,8 +61,9 @@ test("Grade choices remain independent from Style choices", () => {
   assert.equal(stylePresetNames.includes("Custom Palette"), false);
   assert.deepEqual(gradePresetNames, [
     "None", "Cool", "Warm", "Refn Beauty", "Spiky Nike", "Vintage Son", "Dusty Brothers",
-    "Moody Meadow", "Classy Kubric", "Coney Color", "Custom"
+    "Moody Meadow", "Classy Kubric", "Coney Color", "Jaws of Life", "Custom"
   ]);
+  assert.equal(stylePresetNames.includes("Jaws of Life"), false);
   assert.match(gradePresetPrompts.Cool, /COLOR PALETTE:/);
   assert.match(gradePresetPrompts.Warm, /COLOR PALETTE:/);
   assert.equal(normalizeGradePresetName("Unknown"), "None");

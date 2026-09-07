@@ -1,3 +1,6 @@
+import { filmDirectorSceneRules, normalizeFilmDirectorApproach } from "./filmDirectorApproaches.js";
+export { filmDirectorVisualSceneRules } from "./filmDirectorApproaches.js";
+
 export const filmDirectorAudioModeValues = {
   production: "production",
   full: "full",
@@ -9,9 +12,6 @@ export const filmDirectorAudioModeOptions = [
   { value: filmDirectorAudioModeValues.full, label: "Full Audio" },
   { value: filmDirectorAudioModeValues.silent, label: "Silent" }
 ];
-
-export const filmDirectorVisualSceneRules =
-  "Scene rules: Cinematic naturalism, premium live-action realism, motivated light, cine lens language, grounded acting, real physics, no subtitles, continuity, 24fps smooth motion.";
 
 export function normalizeFilmDirectorAudioMode(value = "", fallback = filmDirectorAudioModeValues.production) {
   const normalized = String(value || "").trim().toLowerCase().replace(/[\s_-]+/g, " ");
@@ -30,7 +30,13 @@ export function filmDirectorAudioModeLabel(value = "") {
   return filmDirectorAudioModeOptions.find((option) => option.value === normalized)?.label || "Production Sound";
 }
 
-export function filmDirectorAudioPolicyPrompt(value = "") {
+export function filmDirectorAudioPolicyPrompt(value = "", approach = "cinematic", connectedMusic = false) {
+  if (normalizeFilmDirectorApproach(approach) === "music-video") {
+    return "Audio policy: Use the connected music reference as the soundtrack and timing authority from the opening through the final frame. Preserve its vocals, words, phrasing and musical timing. Synchronize visible singing precisely to the supplied vocal phonemes; keep instrumental passages instrumental. Do not invent lyrics, spoken dialogue, replacement music, intro or outro cues. Prioritize the supplied track over sound from any video reference.";
+  }
+  if (normalizeFilmDirectorApproach(approach) === "montage" && connectedMusic) {
+    return "Audio policy: Use the connected music reference as the montage soundtrack and timing authority from the opening through the final frame. Pace the vignettes around the supplied track's energy and phrasing. Preserve its music, vocals and timing without inventing lyrics, replacement music, intro or outro cues. Do not add singing performances unless requested. Prioritize the supplied track over sound from any video reference.";
+  }
   const mode = normalizeFilmDirectorAudioMode(value);
   if (mode === filmDirectorAudioModeValues.silent) {
     return "Audio policy: Silent output. Generate no dialogue, voices, ambience, room tone, sound effects, music, or soundtrack.";
@@ -45,10 +51,12 @@ export function filmDirectorGenerateAudio(value = "") {
   return normalizeFilmDirectorAudioMode(value) !== filmDirectorAudioModeValues.silent;
 }
 
-export function applyFilmDirectorAudioPolicyToPrompt(prompt = "", value = "") {
+export function applyFilmDirectorAudioPolicyToPrompt(prompt = "", value = "", approach = "cinematic", connectedMusic) {
   const source = String(prompt || "").trim();
   if (!source) return source;
-  const replacement = `${filmDirectorVisualSceneRules}\n\n${filmDirectorAudioPolicyPrompt(value)}`;
+  // Load-time formatting has no graph. Preserve a saved policy until live inputs resolve it.
+  const usesMusic = connectedMusic ?? source.split("\n").includes(filmDirectorAudioPolicyPrompt("full", "montage", true));
+  const replacement = `${filmDirectorSceneRules(approach)}\n\n${filmDirectorAudioPolicyPrompt(value, approach, usesMusic)}`;
   const withoutAudioPolicy = source
     .replace(/^Audio policy:[^\n]*(?:\n|$)/gim, "")
     .replace(/\n{3,}/g, "\n\n")

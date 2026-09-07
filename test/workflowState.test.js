@@ -1,9 +1,19 @@
 import test from "node:test";
+
+test("My Newt journal progress does not mark a saved canvas dirty", () => {
+  const state = { nodes: [{ id: "newt", type: "myNewt", data: { brief: "Save", jobId: "task", myNewtSummary: { status: "running" } } }] };
+  const before = workflowStateFingerprint(state);
+  state.nodes[0].data.myNewtSummary.status = "complete";
+  assert.equal(workflowStateFingerprint(state), before);
+  state.nodes[0].data.brief = "New task";
+  assert.notEqual(workflowStateFingerprint(state), before);
+});
 import assert from "node:assert/strict";
 import {
   clearStaleRunningState,
   dedupeEdges,
   remapImportedGraph,
+  resetCopiedNodeRuntime,
   workflowStateFingerprint
 } from "../src/workflowState.js";
 
@@ -48,4 +58,42 @@ test("dedupeEdges and clearStaleRunningState preserve load-safe graph state", ()
     clearStaleRunningState({ id: "character", type: "character", data: { status: "compiling", characterBatchProgress: { completed: 1, total: 2 } } }).data,
     { status: "ready", characterBatchProgress: null }
   );
+});
+
+test("copying a generating Character clears its busy state without losing completed sheets", () => {
+  const data = {
+    status: "compiling",
+    characterBatchProgress: { completed: 1, total: 3 },
+    resultUrl: "/outputs/base.png",
+    resultItems: [{ url: "/outputs/base.png", type: "image" }],
+    characterBaseSheet: { url: "/outputs/base.png" },
+    error: ""
+  };
+  const copied = resetCopiedNodeRuntime(data);
+  assert.equal(copied.status, "ready");
+  assert.equal(copied.characterBatchProgress, null);
+  assert.equal(copied.resultUrl, data.resultUrl);
+  assert.deepEqual(copied.resultItems, data.resultItems);
+  assert.equal(data.status, "compiling");
+});
+
+test("reopening a workflow clears interrupted uploads and storyboard frame jobs", () => {
+  const uploaded = clearStaleRunningState({ data: { status: "uploading", resultUrl: "/uploads/previous.png" } });
+  assert.equal(uploaded.data.status, "complete");
+  assert.equal(uploaded.data.resultUrl, "/uploads/previous.png");
+  const storyboard = {
+    type: "storyboard",
+    data: {
+      status: "ready",
+      storyboardFrames: [
+        { id: "a", status: "running", resultUrl: "" },
+        { id: "b", status: "running", resultUrl: "/outputs/previous.png" },
+        { id: "c", status: "complete", resultUrl: "/outputs/complete.png" }
+      ]
+    }
+  };
+  const restored = clearStaleRunningState(storyboard);
+  assert.deepEqual(restored.data.storyboardFrames.map((frame) => frame.status), ["ready", "complete", "complete"]);
+  assert.equal(restored.data.storyboardFrames[1].resultUrl, "/outputs/previous.png");
+  assert.equal(storyboard.data.storyboardFrames[0].status, "running");
 });

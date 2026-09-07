@@ -34,10 +34,12 @@ export function resizePlainTextNode(startSize = {}, delta = {}) {
 }
 
 export function estimatedNodeWidth(type) {
+  if (type === "myNewt") return 410;
   if (type === "frameIt") return 980;
   if (type === "autoAspect") return 390;
   if (type === "coverage") return 390;
   if (type === "skillDirector") return 760;
+  if (type === "storyboard") return 920;
   if (type === "imageModel" || type === "videoModel" || type === "utility" || type === "model3d") return 370;
   if (type === "character") return 760;
   if (type === "camera" || type === "style") return 360;
@@ -46,6 +48,7 @@ export function estimatedNodeWidth(type) {
 }
 
 export function estimatedNodeHeight(type) {
+  if (type === "myNewt") return 650;
   if (type === "frameIt") return 700;
   if (type === "character") return 520;
   if (type === "composer") return 410;
@@ -59,10 +62,11 @@ export function estimatedNodeHeight(type) {
 
 export function estimatedNodeRect(node, padding = 0) {
   const plainTextSize = node?.type === "plainText" ? normalizePlainTextNodeSize(node.data) : null;
+  const storyboardScale = node?.type === "storyboard" ? Math.max(1, Number(node.data?.storyboardScale) || 1) : 1;
   return {
     left: Number(node?.x || 0) - padding,
     top: Number(node?.y || 0) - padding,
-    right: Number(node?.x || 0) + (plainTextSize?.width || estimatedNodeWidth(node?.type)) + padding,
+    right: Number(node?.x || 0) + (plainTextSize?.width || estimatedNodeWidth(node?.type) * storyboardScale) + padding,
     bottom: Number(node?.y || 0) + (plainTextSize?.height || estimatedNodeHeight(node?.type)) + padding
   };
 }
@@ -80,6 +84,22 @@ export function graphBoundsForNodes(nodes = []) {
 
 export function rectsOverlap(first, second) {
   return first.left < second.right && first.right > second.left && first.top < second.bottom && first.bottom > second.top;
+}
+
+// Move only the new rectangle. Each collision advances past at least one obstacle.
+export function nonOverlappingPosition(size, preferred, occupied = [], gap = 80) {
+  const width = positiveDimension(size.width, 370);
+  const height = positiveDimension(size.height, 520);
+  let x = Number.isFinite(preferred?.x) ? preferred.x : 0;
+  const y = Number.isFinite(preferred?.y) ? preferred.y : 0;
+  const spacing = Math.max(0, Number(gap) || 0);
+  for (let step = 0; step <= occupied.length; step++) {
+    const candidate = { left: x - spacing, top: y - spacing, right: x + width + spacing, bottom: y + height + spacing };
+    const collisions = occupied.filter((rect) => rectsOverlap(candidate, rect));
+    if (!collisions.length) return { x, y };
+    x = Math.max(...collisions.map((rect) => rect.right)) + spacing;
+  }
+  return { x, y };
 }
 
 export function normalizeRect(start, current) {

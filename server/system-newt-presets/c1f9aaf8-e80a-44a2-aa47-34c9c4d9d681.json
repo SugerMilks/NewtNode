@@ -1,0 +1,147 @@
+{
+  "id": "c1f9aaf8-e80a-44a2-aa47-34c9c4d9d681",
+  "name": "Style Transfer",
+  "version": 2,
+  "createdAt": "2026-09-07T03:05:34.186Z",
+  "graph": {
+    "nodes": [
+      {
+        "id": "plainText-1788749039529-urkeka",
+        "type": "plainText",
+        "x": 11595.90126006744,
+        "y": -1059.8875246595107,
+        "data": {
+          "title": "Style Transfer",
+          "text": "Style Transfer Edit: Restyle @Transfer using the visual style of @Style. Preserve @Transfer’s content, but restyle. Apply @Style’s style only.",
+          "textNodeWidth": 307,
+          "textNodeHeight": 324,
+          "nodeColor": "#58ce63"
+        },
+        "presetSize": {
+          "width": 306.99687943625213,
+          "height": 323.99296434218627
+        }
+      },
+      {
+        "id": "preview-1788749762439-kvf9p1",
+        "type": "preview",
+        "x": 12345.045158305522,
+        "y": -1719.6441845022096,
+        "data": {
+          "title": "Preview",
+          "previewScale": 4.56,
+          "previewItemIndex": 0,
+          "previewTab": "preview",
+          "previewLayoutItems": [],
+          "nodeColor": "#58ce63",
+          "previewSourceId": "imageModel-1788749708791-8zdrrm:imageOut"
+        },
+        "presetSize": {
+          "width": 1504.7918056833805,
+          "height": 985.651086740392
+        }
+      },
+      {
+        "id": "imageModel-1788750161317-1kc8on",
+        "type": "imageModel",
+        "x": 11940.9715343445,
+        "y": -1719.9107131984838,
+        "data": {
+          "title": "Image Model",
+          "model": "Nano Banana 2",
+          "prompt": "",
+          "aspectRatio": "Auto",
+          "resolution": "2K",
+          "quality": "high",
+          "kreaCreativity": "raw",
+          "batchCount": "1",
+          "settingsOpen": true,
+          "nodeColor": "#58ce63"
+        },
+        "presetSize": {
+          "width": 364.99964255319355,
+          "height": 984.8264007152966
+        }
+      },
+      {
+        "id": "image-1788750176292-z04nfz",
+        "type": "image",
+        "x": 11595.856584617804,
+        "y": -1713.240712847177,
+        "data": {
+          "title": "Style",
+          "nodeColor": "#f0c83b"
+        },
+        "presetSize": {
+          "width": 310.0005566280597,
+          "height": 303.9756483618212
+        }
+      },
+      {
+        "id": "image-1788750189494-1788750189494-0-9wvum8",
+        "type": "image",
+        "x": 11596.645532401131,
+        "y": -1386.017289141512,
+        "data": {
+          "title": "Transfer",
+          "nodeColor": "#f0c83b"
+        },
+        "presetSize": {
+          "width": 309.9995172534327,
+          "height": 303.97576384789113
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-1788750252537",
+        "from": {
+          "nodeId": "imageModel-1788750161317-1kc8on",
+          "port": "imageOut"
+        },
+        "to": {
+          "nodeId": "preview-1788749762439-kvf9p1",
+          "port": "sourceIn"
+        },
+        "color": "#3d85ff"
+      },
+      {
+        "id": "edge-1788750313074",
+        "from": {
+          "nodeId": "plainText-1788749039529-urkeka",
+          "port": "promptOut"
+        },
+        "to": {
+          "nodeId": "imageModel-1788750161317-1kc8on",
+          "port": "promptIn"
+        },
+        "color": "#f0c83b"
+      },
+      {
+        "id": "edge-1788750315534",
+        "from": {
+          "nodeId": "image-1788750189494-1788750189494-0-9wvum8",
+          "port": "imageOut"
+        },
+        "to": {
+          "nodeId": "imageModel-1788750161317-1kc8on",
+          "port": "imagePromptIn"
+        },
+        "color": "#3d85ff"
+      },
+      {
+        "id": "edge-1788750319014",
+        "from": {
+          "nodeId": "image-1788750176292-z04nfz",
+          "port": "imageOut"
+        },
+        "to": {
+          "nodeId": "imageModel-1788750161317-1kc8on",
+          "port": "imagePromptIn"
+        },
+        "color": "#3d85ff"
+      }
+    ],
+    "groups": []
+  }
+}

@@ -13,6 +13,7 @@ import {
 } from "../modelOptions.js";
 import { isSeedance25Model } from "../seedance25.js";
 import { filmDirectorGenerateAudio, normalizeFilmDirectorAudioMode } from "../filmDirectorAudio.js";
+import { filmDirectorMusicVideoError, filmDirectorUsesMusic } from "../filmDirectorApproaches.js";
 import {
   normalizeFilmDirectorVideoModel,
   videoModelSupportsFilmDirector
@@ -23,6 +24,7 @@ import {
   minimaxH3DurationOptions,
   minimaxH3ResolutionOptions
 } from "../minimaxH3.js";
+import { normalizeVideoGenerateAudio } from "../videoAudio.js";
 
 export { videoModelSupportsFilmDirector };
 
@@ -126,6 +128,18 @@ export function buildVideoGenerationRequest({
   const model = activeFilmDirector
     ? normalizeFilmDirectorVideoModel(activeFilmDirector.videoModel, node.data.model)
     : node.data.model;
+  const usesMusic = filmDirectorUsesMusic(activeFilmDirector?.approach, [activeFilmDirector?.musicReference]);
+  if (usesMusic) {
+    const music = filmDirector?.musicReference;
+    const musicError = filmDirectorMusicVideoError({ approach: activeFilmDirector.approach, audioInputs: [music], videoModel: model });
+    if (musicError) throw new Error(musicError);
+    if (startFrameUrls.length || endFrameUrls.length) throw new Error("Director music uses reference-to-video. Move the start/end image to Reference Images so the music track is not ignored.");
+    referenceAudioUrls = [music.url];
+    referenceAudioLabels = [music.label || "Music"];
+    if (model === "MiniMax H3" && !referenceImageUrls.length && !characterReferenceUrls.length && !referenceVideoUrls.length && !filmDirector.references?.length) {
+      throw new Error("MiniMax H3 with Director music also needs a reference image or video.");
+    }
+  }
   return {
     prompt,
     model,
@@ -138,9 +152,9 @@ export function buildVideoGenerationRequest({
     aspectRatio: activeFilmDirector
       ? filmDirectorVideoAspectRatio(model, activeFilmDirector.aspectRatio, node.data.aspectRatio)
       : node.data.aspectRatio,
-    generateAudio: activeFilmDirector
-      ? filmDirectorVideoGenerateAudio(activeFilmDirector.audioMode, node.data.generateAudio !== false)
-      : node.data.generateAudio,
+    generateAudio: usesMusic ? true : activeFilmDirector
+      ? filmDirectorVideoGenerateAudio(activeFilmDirector.audioMode, normalizeVideoGenerateAudio(node.data.generateAudio))
+      : normalizeVideoGenerateAudio(node.data.generateAudio),
     klingCfgScale: node.data.klingCfgScale ?? 0.5,
     negativePrompt: node.data.negativePrompt || "",
     seed: node.data.seed || "",

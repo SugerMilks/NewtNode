@@ -64,6 +64,8 @@ export const stylePresetPrompts = {
     "High-end cinematic still frame, shot on ARRI Alexa 35, high quality prime lens, high dynamic range, shallow depth of field, atmospheric cinematography, subtle halation, gentle lens bloom, fine film grain, realistic lens softness, slight atmospheric haze, imperfect real-camera texture, high production value, feature film look.",
   "Cinematic Commercial":
     "Polished commercial image, premium advertising style, shot on ARRI Alexa, high quality prime lens, high dynamic range clean composition, bright refined lighting, shallow depth of field, elevated brand look, modern campaign aesthetic, crisp details, visually appealing.",
+  "Vintage 8mm":
+    "Cinematic still frame from a vintage film, shot on 8mm film, soft lens. Slightly refurbished film. Any captured motion within the composition needs to have realistic motion blur based off of a hand cranked film camera. Must have dynamic framing, atmospheric cinematography, and halation. Realistic low contrast and muted color grade. Shallow depth of field, Lens bloom, heavy 8mm film grain. Realistic lens edge distortions, blurs, and vignetting. Atmospheric haze, imperfect real-camera texture, classic film look.",
   "UGC Device":
     "UGC, Low-end phone photo, shot on iPhone, standard lens, realistic, imperfect real-phone capture, low production value, social media look, User Generated Content. No graphics. No foreground phone seen.",
   "Photography Color":

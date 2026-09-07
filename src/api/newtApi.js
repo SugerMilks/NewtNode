@@ -1,4 +1,5 @@
-const localApiPort = import.meta.env.VITE_API_PORT || "3336";
+import { scopedMyNewtRequest } from "../myNewt/requestScope.js";
+const localApiPort = import.meta.env?.VITE_API_PORT || "3336";
 const localApiBaseUrl = `http://127.0.0.1:${localApiPort}`;
 
 function ensureOk(response, data, fallbackMessage) {
@@ -10,6 +11,8 @@ function ensureOk(response, data, fallbackMessage) {
 }
 
 export async function fetchJsonApi(path, options = {}, label = "Request") {
+  const scoped = scopedMyNewtRequest(path, options);
+  if (scoped) return scoped;
   const requestUrl = localApiFetchUrl(path);
   let response;
   try {
@@ -129,6 +132,58 @@ export async function postForm(path, form, fallbackMessage) {
   }, fallbackMessage);
 }
 
+export const newtPresetsApi = {
+  list: async () => {
+    await requireSystemPresetBackend();
+    return getJson("/api/newt-presets", "Could not load Newt Presets.");
+  },
+  get: (id) => getJson(`/api/newt-presets/${encodeURIComponent(id)}`, "Could not load this Newt Preset."),
+  save: (body) => postJson("/api/newt-presets", body, "Could not save Newt Preset."),
+  remove: async (id) => {
+    await requireSystemPresetBackend();
+    return deleteJson(`/api/newt-presets/${encodeURIComponent(id)}`, "Could not remove Newt Preset.");
+  }
+};
+
+async function requireSystemPresetBackend() {
+  const health = await getJson("/api/health", "Could not check the preset library.");
+  if (!health?.routes?.systemNewtPresets) throw new Error("Restart the NewtNode backend to activate protected System presets. No presets were changed.");
+}
+
+let myNewtBackendCheckedAt = 0;
+async function requireMyNewtBackend(force = false) {
+  if (!force && Date.now() - myNewtBackendCheckedAt < 30000) return;
+  const health = await getJson("/api/health", "Could not check My Newt backend.");
+  if (!health?.routes?.myNewtPlanning || !health?.routes?.myNewtLocalActions || !health?.routes?.myNewtBackgroundActions) throw new Error("Restart the NewtNode backend to activate My Newt background actions and cost controls. No new task was started.");
+  myNewtBackendCheckedAt = Date.now();
+}
+async function postMyNewt(path, body, message) {
+  await requireMyNewtBackend(path === "/api/my-newt/jobs" || path.endsWith("/control"));
+  return postJson(path, body, message);
+}
+
+export const myNewtApi = {
+  async transcribe(audio, context, signal) {
+    const form = new FormData();
+    form.append("audio", audio, "voice-recording");
+    for (const key of ["projectId", "projectName", "nodeId"]) if (context[key]) form.append(key, context[key]);
+    // Never replay a possibly billed transcription through the generic API fallback.
+    const response = await fetch(localApiFetchUrl("/api/my-newt/transcribe"), {
+      method: "POST", body: form, signal: AbortSignal.any([signal, AbortSignal.timeout(180000)])
+    });
+    return ensureOk(response, await readJsonResponse(response, "Voice transcription"), "Voice transcription failed.");
+  },
+  start: (body) => postMyNewt("/api/my-newt/jobs", body, "Could not start My Newt."),
+  history: (body) => postJson("/api/my-newt/history", body, "Could not load My Newt history."),
+  prepare: (id, body) => postJson(`/api/my-newt/jobs/${encodeURIComponent(id)}/prepare`, body, "Could not prepare run approval."),
+  recover: (id, body) => postJson(`/api/my-newt/jobs/${encodeURIComponent(id)}/recover`, body, "Could not restore My Newt checkpoint."),
+  sync: (id, body) => postMyNewt(`/api/my-newt/jobs/${encodeURIComponent(id)}/sync`, body, "Could not sync My Newt."),
+  control: (id, body) => (["pause", "stop"].includes(body.action) ? postJson : postMyNewt)(`/api/my-newt/jobs/${encodeURIComponent(id)}/control`, body, "Could not update My Newt."),
+  claim: (id, body) => postMyNewt(`/api/my-newt/jobs/${encodeURIComponent(id)}/claim`, body, "Could not claim My Newt action."),
+  complete: (id, body) => postJson(`/api/my-newt/jobs/${encodeURIComponent(id)}/complete`, body, "Could not finish My Newt action."),
+  request: (id, body) => postJson(`/api/my-newt/jobs/${encodeURIComponent(id)}/request`, body, "My Newt request failed.")
+};
+
 export async function deleteJson(path, fallbackMessage) {
   return requestData(path, {
     method: "DELETE"
@@ -197,7 +252,7 @@ export const nodeApi = {
     return fetchJsonApi("/api/node/process-text", jsonBody(body), label);
   },
 
-  runSkillDirector(body, label = "Film Director") {
+  runSkillDirector(body, label = "Director") {
     return fetchJsonApi("/api/node/run-skill-director", jsonBody(body), label);
   },
 

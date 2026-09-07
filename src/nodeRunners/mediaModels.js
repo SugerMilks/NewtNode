@@ -1,5 +1,6 @@
 import { nodeApi } from "../api/newtApi.js";
 import { characterSheetGenerationSettings } from "../characterSheetModels.js";
+import { characterVideoBaseReferences } from "../characterVideoSheets.js";
 import { workflowContextPayload } from "../workflowContext.js";
 
 export async function runImageModelGeneration({ node, prompt, aspectRatio, imagePromptItems, workflowContext, index }) {
@@ -187,8 +188,8 @@ export async function runCharacterSheetGeneration({
   const generationSettings = characterSheetGenerationSettings(node.data.characterSheetModel);
   const portraitUrl = portrait?.localUrl || portrait?.url || "";
   if (!portraitUrl) throw new Error("Character sheet generation requires an identity reference.");
-  const references = [
-    { url: portraitUrl, label: isVideoSheet ? "Original Character Portrait" : "The Character portrait reference" },
+  const references = isVideoSheet ? characterVideoBaseReferences(portrait) : [
+    { url: portraitUrl, label: "The Character portrait reference" },
     ...(wardrobe?.localUrl || wardrobe?.url ? [{ url: wardrobe.localUrl || wardrobe.url, label: "Selected wardrobe sheet" }] : []),
     ...additionalReferences
       .map((reference, index) => ({
@@ -208,6 +209,7 @@ export async function runCharacterSheetGeneration({
     nodeTitle: `${node.data.title || "Character"}${isVideoSheet ? " CU Video" : ""} Character Sheet`
   }, "Character sheet generation");
   if (!response.ok) throw new Error(data.error || "Character sheet generation failed.");
+  if (!data.image?.localUrl) throw new Error("Character sheet generation returned no image.");
 
   return {
     url: data.image.localUrl,
@@ -225,8 +227,6 @@ export async function runCharacterWardrobeEdit({
   prompt,
   baseSheet,
   wardrobe,
-  identityReference = null,
-  consistencySheet = null,
   editMaskDataUrl = "",
   workflowContext,
   characterTag,
@@ -236,19 +236,12 @@ export async function runCharacterWardrobeEdit({
   const generationSettings = characterSheetGenerationSettings(node.data.characterSheetModel);
   const baseUrl = baseSheet?.localUrl || baseSheet?.url || "";
   const wardrobeUrl = wardrobe?.localUrl || wardrobe?.url || "";
-  const identityUrl = identityReference?.localUrl || identityReference?.url || "";
-  const consistencyUrl = consistencySheet?.localUrl || consistencySheet?.url || "";
   if (!baseUrl) throw new Error("Generate the Base Identity sheet before applying wardrobe.");
   if (!wardrobeUrl) throw new Error("A wardrobe reference is required for this edit.");
 
   const references = [
     { url: baseUrl, label: isVideoSheet ? "Locked Base Identity CU Video Sheet" : "Locked Base Identity Character Sheet" },
-    ...(identityUrl ? [{ url: identityUrl, label: "Original Character Portrait" }] : []),
-    { url: wardrobeUrl, label: "Selected wardrobe reference; clothing only" },
-    ...(consistencyUrl ? [{
-      url: consistencyUrl,
-      label: "Matching Full Character Sheet; wardrobe and identity continuity only; ignore its layout, crops, poses, and head visibility"
-    }] : [])
+    { url: wardrobeUrl, label: "Selected wardrobe reference; clothing only" }
   ];
   const { response, data } = await nodeApi.generateImage({
     prompt,

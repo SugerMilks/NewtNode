@@ -3,9 +3,10 @@ import assert from "node:assert/strict";
 
 import {
   characterVideoSheetPrompt,
+  characterVideoBaseReferences,
   preferredCharacterReferenceForVideo
 } from "../src/characterVideoSheets.js";
-import { characterVideoIdentityContinuityPrompt, characterVideoWardrobeEditPrompt } from "../src/characterSheetWorkflow.js";
+import { characterVideoIdentityContinuityPrompt, characterVideoNeutralBaseWardrobePrompt, characterVideoWardrobeEditPrompt } from "../src/characterSheetWorkflow.js";
 
 function characterNode({ enabled = true, includeVideo = true } = {}) {
   return {
@@ -39,11 +40,35 @@ test("CU video sheet prompt fixes the requested three-panel layout and off-camer
   assert.match(characterVideoSheetPrompt, /mouth slightly open/i);
 });
 
-test("CU generation keeps the original portrait as the likeness authority", () => {
-  assert.match(characterVideoIdentityContinuityPrompt, /Original Character Portrait is the sole authority/i);
+test("CU generation uses the original portrait while wardrobe edits preserve the CU master face", () => {
+  assert.match(characterVideoIdentityContinuityPrompt, /Original Character Portrait image is the primary authority/i);
   assert.match(characterVideoIdentityContinuityPrompt, /Do not average, reinterpret, replace/i);
-  assert.match(characterVideoWardrobeEditPrompt, /Original Character Portrait is the sole authority/i);
-  assert.match(characterVideoWardrobeEditPrompt, /Matching Full Character Sheet/i);
+  assert.match(characterVideoSheetPrompt, /Edit the provided Portrait image/i);
+  assert.match(characterVideoSheetPrompt, /Use the face view from the Portrait/i);
+  assert.match(characterVideoSheetPrompt, /ARRI Alexa 35/i);
+  assert.match(characterVideoNeutralBaseWardrobePrompt, /For a female character, use a one-piece swimsuit/i);
+  assert.match(characterVideoNeutralBaseWardrobePrompt, /For a male character, use men's Speedo-style swim briefs/i);
+  assert.match(characterVideoWardrobeEditPrompt, /neutral foundation swimwear or existing reference garment/i);
+  assert.doesNotMatch([characterVideoSheetPrompt, characterVideoIdentityContinuityPrompt].join(" "), /Base Identity Character Sheet|layout conversion|supporting identity check/i);
+  assert.match(characterVideoWardrobeEditPrompt, /Base Identity CU Video Sheet remains the sole authority/i);
+  assert.match(characterVideoWardrobeEditPrompt, /Preserve the portrait's face, hair, head angle, eyeline, and expression exactly/i);
+  assert.doesNotMatch(characterVideoWardrobeEditPrompt, /Matching Full Character Sheet|Original Character Portrait/i);
+});
+
+test("CU requests use only the full-resolution original portrait", () => {
+  const references = characterVideoBaseReferences({
+    localUrl: "/uploads/portrait.png",
+    url: "https://provider.example/portrait.png",
+    thumbnailUrl: "/thumbnails/portrait.jpg"
+  });
+  assert.deepEqual(references.map((item) => item.url), ["/uploads/portrait.png"]);
+  assert.match(references[0].label, /Original Character Portrait; sole identity reference/i);
+});
+
+test("CU creation requires a portrait, not a regular base or thumbnail", () => {
+  assert.throws(() => characterVideoBaseReferences(null), /Upload the original character portrait/);
+  assert.throws(() => characterVideoBaseReferences({ thumbnailUrl: "/thumb.jpg" }), /Upload the original character portrait/);
+  assert.equal(characterVideoBaseReferences({ url: "/portrait.png" })[0].url, "/portrait.png");
 });
 
 test("video generation prefers the active wardrobe CU sheet when enabled", () => {

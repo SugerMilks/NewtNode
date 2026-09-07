@@ -1,3 +1,5 @@
+import { normalizeFilmDirectorApproach } from "./filmDirectorApproaches.js";
+
 export const filmDirectorStageKeys = ["setup", "style", "motion", "scene", "shotList"];
 
 function stableFilmDirectorValue(value) {
@@ -145,7 +147,9 @@ export function applyFilmDirectorReferenceChanges(text = "", changes = {}) {
 }
 
 export function filmDirectorShotListSourceSignature(data = {}) {
+  const approach = normalizeFilmDirectorApproach(data.skillApproach);
   const source = stableFilmDirectorValue({
+    ...(approach !== "cinematic" ? { approach } : {}),
     sceneOverview: data.sceneOverview ?? data.text ?? "",
     motionDirection: data.motionDirection || data.motionBrief || "",
     shotCount: data.skillShotCount || data.shotCount || "3",

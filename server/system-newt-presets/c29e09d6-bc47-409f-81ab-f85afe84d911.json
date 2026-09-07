@@ -1,0 +1,360 @@
+{
+  "id": "c29e09d6-bc47-409f-81ab-f85afe84d911",
+  "name": "Cinematic Prop",
+  "version": 2,
+  "createdAt": "2026-09-05T23:32:52.220Z",
+  "graph": {
+    "nodes": [
+      {
+        "id": "style-1788651155546-import-1788651155546-0-zlylqw",
+        "type": "style",
+        "x": 7970,
+        "y": -976,
+        "data": {
+          "title": "Style",
+          "stylePreset": "Photography Color",
+          "gradePreset": "None",
+          "customPaletteRgbText": "",
+          "customPalettePicker": "#ddc631",
+          "customPaletteColors": [],
+          "customPalettePreviewUrl": "",
+          "customPaletteSourceName": "",
+          "customPaletteStatus": "",
+          "customPaletteError": "",
+          "nodeColor": "#58ce63"
+        },
+        "presetSize": {
+          "width": 360.0001178715356,
+          "height": 191.07640675400853
+        }
+      },
+      {
+        "id": "imageModel-1788651155546-import-1788651155546-1-u5efe3",
+        "type": "imageModel",
+        "x": 8387,
+        "y": -1840,
+        "data": {
+          "title": "Image Model",
+          "model": "Nano Banana Pro",
+          "prompt": "",
+          "aspectRatio": "1:1",
+          "resolution": "2K",
+          "quality": "high",
+          "kreaCreativity": "raw",
+          "batchCount": "6",
+          "settingsOpen": true,
+          "nodeColor": "#58ce63",
+          "status": "complete",
+          "error": "",
+          "resultUrl": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/0-0-0-2026-09-05T19-23-51-192Z-nano-banana-pro-bec0f777.jpg",
+          "resultItems": [
+            {
+              "type": "image",
+              "label": "Image 1",
+              "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/0-0-0-2026-09-05T19-23-51-192Z-nano-banana-pro-bec0f777.jpg",
+              "thumbnailUrl": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/1-1-1-2026-09-05T19-23-51-192Z-nano-banana-pro-bec0f777-preview.jpg",
+              "text": "",
+              "cost": {
+                "amountUsd": 0.15,
+                "currency": "USD",
+                "unitRateUsd": 0.15,
+                "units": 1,
+                "unit": "image",
+                "mediaType": "image",
+                "resolution": "2K",
+                "pricingBasis": "Nano Banana Pro fal.ai per-image estimate",
+                "pricingSource": "fal-model-page-2026-05-15"
+              },
+              "layerIndex": null
+            },
+            {
+              "type": "image",
+              "label": "Image 2",
+              "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/2-2-2-2026-09-05T19-24-14-686Z-nano-banana-pro-3f1e5abf.jpg",
+              "thumbnailUrl": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/3-3-3-2026-09-05T19-24-14-686Z-nano-banana-pro-3f1e5abf-preview.jpg",
+              "text": "",
+              "cost": {
+                "amountUsd": 0.15,
+                "currency": "USD",
+                "unitRateUsd": 0.15,
+                "units": 1,
+                "unit": "image",
+                "mediaType": "image",
+                "resolution": "2K",
+                "pricingBasis": "Nano Banana Pro fal.ai per-image estimate",
+                "pricingSource": "fal-model-page-2026-05-15"
+              },
+              "layerIndex": null
+            },
+            {
+              "type": "image",
+              "label": "Image 3",
+              "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/4-4-4-2026-09-05T19-24-36-265Z-nano-banana-pro-b72f5527.jpg",
+              "thumbnailUrl": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/5-5-5-2026-09-05T19-24-36-265Z-nano-banana-pro-b72f5527-preview.jpg",
+              "text": "",
+              "cost": {
+                "amountUsd": 0.15,
+                "currency": "USD",
+                "unitRateUsd": 0.15,
+                "units": 1,
+                "unit": "image",
+                "mediaType": "image",
+                "resolution": "2K",
+                "pricingBasis": "Nano Banana Pro fal.ai per-image estimate",
+                "pricingSource": "fal-model-page-2026-05-15"
+              },
+              "layerIndex": null
+            },
+            {
+              "type": "image",
+              "label": "Image 4",
+              "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/6-6-6-2026-09-05T19-24-58-869Z-nano-banana-pro-c0ba32b8.jpg",
+              "thumbnailUrl": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/7-7-7-2026-09-05T19-24-58-869Z-nano-banana-pro-c0ba32b8-preview.jpg",
+              "text": "",
+              "cost": {
+                "amountUsd": 0.15,
+                "currency": "USD",
+                "unitRateUsd": 0.15,
+                "units": 1,
+                "unit": "image",
+                "mediaType": "image",
+                "resolution": "2K",
+                "pricingBasis": "Nano Banana Pro fal.ai per-image estimate",
+                "pricingSource": "fal-model-page-2026-05-15"
+              },
+              "layerIndex": null
+            },
+            {
+              "type": "image",
+              "label": "Image 5",
+              "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/8-8-8-2026-09-05T19-25-19-854Z-nano-banana-pro-bb9cbab1.jpg",
+              "thumbnailUrl": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/9-9-9-2026-09-05T19-25-19-854Z-nano-banana-pro-bb9cbab1-preview.jpg",
+              "text": "",
+              "cost": {
+                "amountUsd": 0.15,
+                "currency": "USD",
+                "unitRateUsd": 0.15,
+                "units": 1,
+                "unit": "image",
+                "mediaType": "image",
+                "resolution": "2K",
+                "pricingBasis": "Nano Banana Pro fal.ai per-image estimate",
+                "pricingSource": "fal-model-page-2026-05-15"
+              },
+              "layerIndex": null
+            },
+            {
+              "type": "image",
+              "label": "Image 6",
+              "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/10-10-10-2026-09-05T19-25-41-783Z-nano-banana-pro-b9da1b03.jpg",
+              "thumbnailUrl": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/11-11-11-2026-09-05T19-25-41-783Z-nano-banana-pro-b9da1b03-preview.jpg",
+              "text": "",
+              "cost": {
+                "amountUsd": 0.15,
+                "currency": "USD",
+                "unitRateUsd": 0.15,
+                "units": 1,
+                "unit": "image",
+                "mediaType": "image",
+                "resolution": "2K",
+                "pricingBasis": "Nano Banana Pro fal.ai per-image estimate",
+                "pricingSource": "fal-model-page-2026-05-15"
+              },
+              "layerIndex": null
+            }
+          ],
+          "selectedResultIndex": 0,
+          "resultText": "",
+          "textareaHeights": {
+            "0:textarea": 112
+          }
+        },
+        "presetSize": {
+          "width": 365.0003640579107,
+          "height": 1054.3663714572526
+        }
+      },
+      {
+        "id": "plainText-1788651155546-import-1788651155546-2-2bp3ba",
+        "type": "plainText",
+        "x": 7976,
+        "y": -1838,
+        "data": {
+          "title": "Prop Prompt",
+          "text": "Photo of a full 1830s whaling harpoon, with the rope attached.",
+          "textNodeWidth": 357,
+          "textNodeHeight": 214,
+          "nodeColor": "#f0c83b",
+          "textareaHeights": {
+            "0:Text prompt": 111
+          }
+        },
+        "presetSize": {
+          "width": 356.9959044169518,
+          "height": 213.99305271091976
+        }
+      },
+      {
+        "id": "camera-1788651155546-import-1788651155546-3-bgf6qp",
+        "type": "camera",
+        "x": 7971,
+        "y": -1259,
+        "data": {
+          "title": "Camera",
+          "shotPreset": "None",
+          "lensPreset": "50mm",
+          "typePreset": "None",
+          "nodeColor": "#58ce63"
+        },
+        "presetSize": {
+          "width": 360.0001178715356,
+          "height": 237.0660056680049
+        }
+      },
+      {
+        "id": "preview-1788651155546-import-1788651155546-4-5d6zgs",
+        "type": "preview",
+        "x": 8810,
+        "y": -1840,
+        "data": {
+          "title": "Preview",
+          "previewScale": 3.98,
+          "previewItemIndex": 0,
+          "previewTab": "layout",
+          "previewLayoutItems": [],
+          "nodeColor": "#58ce63",
+          "previewSourceId": "imageModel-1788634133384-import-1788634133384-1-xdje43:imageOut",
+          "previewLayoutHiddenUrls": [
+            "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/12-12-20-8-2026-09-04T22-25-45-795Z-nano-banana-pro-240fca74.jpg",
+            "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/13-13-21-9-2026-09-04T22-26-08-746Z-nano-banana-pro-8cc001bc.jpg",
+            "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/14-14-22-10-2026-09-04T22-26-31-795Z-nano-banana-pro-55ff7fea.jpg",
+            "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/15-15-23-11-2026-09-04T22-26-53-089Z-nano-banana-pro-85979474.jpg",
+            "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/16-16-24-0-2026-09-05T13-08-42-534Z-nano-banana-pro-a0fde2b7.jpg",
+            "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/17-17-25-2-2026-09-05T13-09-06-099Z-nano-banana-pro-7d44b258.jpg",
+            "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/18-18-26-4-2026-09-05T13-09-29-990Z-nano-banana-pro-fe17edd7.jpg",
+            "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/19-19-27-6-2026-09-05T13-09-53-882Z-nano-banana-pro-2c813a32.jpg",
+            "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/20-20-28-2026-09-05T19-03-03-528Z-openai-image-2-02d058eb.png",
+            "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/21-21-29-2026-09-05T19-05-21-306Z-openai-image-2-10e6f733.png",
+            "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/22-22-30-2026-09-05T19-07-31-668Z-openai-image-2-b4d1f6ff.png",
+            "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/23-23-31-2026-09-05T19-09-42-217Z-openai-image-2-b2f7e2ca.png",
+            "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/24-24-32-2026-09-05T19-12-18-087Z-nano-banana-pro-9766b070.jpg",
+            "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/25-25-33-2026-09-05T19-12-38-500Z-nano-banana-pro-b8929674.jpg",
+            "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/26-26-34-2026-09-05T19-12-59-446Z-nano-banana-pro-0368806c.jpg",
+            "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/27-27-35-2026-09-05T19-13-21-991Z-nano-banana-pro-3b7e4a31.jpg",
+            "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/28-28-36-2026-09-05T19-15-37-411Z-nano-banana-pro-8400a30c.jpg",
+            "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/29-29-37-2026-09-05T19-16-23-364Z-nano-banana-pro-b93c970e.jpg",
+            "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/30-30-38-2026-09-05T19-18-33-592Z-nano-banana-pro-b432fe68.jpg",
+            "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/31-31-39-2026-09-05T19-19-03-820Z-nano-banana-pro-df0fb979.jpg",
+            "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/32-32-40-2026-09-05T19-19-25-352Z-nano-banana-pro-c0c44d9e.jpg",
+            "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/33-33-41-2026-09-05T19-19-47-531Z-nano-banana-pro-82a81dd0.jpg",
+            "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/34-34-42-2026-09-05T19-16-00-100Z-nano-banana-pro-fe6c4d87.jpg",
+            "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/35-35-43-2026-09-05T19-20-11-132Z-nano-banana-pro-581f3fd4.jpg",
+            "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/36-36-44-2026-09-05T19-20-37-190Z-nano-banana-pro-faf95c8d.jpg",
+            "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/37-37-45-2026-09-05T19-20-59-652Z-nano-banana-pro-a5f27c9b.jpg",
+            "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/38-38-46-2026-09-05T19-21-45-500Z-nano-banana-pro-1f9b6b19.jpg",
+            "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/39-39-47-2026-09-05T19-22-30-113Z-nano-banana-pro-88d19402.jpg",
+            "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/40-40-48-2026-09-05T19-17-11-665Z-nano-banana-pro-ead1cf65.jpg",
+            "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/41-41-49-2026-09-05T19-16-48-370Z-nano-banana-pro-5b41015c.jpg",
+            "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/2-2-2-2026-09-05T19-24-14-686Z-nano-banana-pro-3f1e5abf.jpg",
+            "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/6-6-6-2026-09-05T19-24-58-869Z-nano-banana-pro-c0ba32b8.jpg",
+            "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/10-10-10-2026-09-05T19-25-41-783Z-nano-banana-pro-b9da1b03.jpg",
+            "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/8-8-8-2026-09-05T19-25-19-854Z-nano-banana-pro-bb9cbab1.jpg",
+            "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/0-0-0-2026-09-05T19-23-51-192Z-nano-banana-pro-bec0f777.jpg",
+            "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/42-42-12-2026-09-05T19-17-34-458Z-nano-banana-pro-9e6fd13f.jpg",
+            "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/4-4-4-2026-09-05T19-24-36-265Z-nano-banana-pro-b72f5527.jpg",
+            "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/43-43-14-2026-09-05T19-21-22-954Z-nano-banana-pro-0a967572.jpg",
+            "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/44-44-16-2026-09-05T19-22-08-085Z-nano-banana-pro-36d9f2fb.jpg",
+            "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/45-45-18-2026-09-05T19-18-10-995Z-nano-banana-pro-e1f784c1.jpg"
+          ]
+        },
+        "presetSize": {
+          "width": 1313.3936078341612,
+          "height": 916.9791154181986
+        }
+      },
+      {
+        "id": "plainText-1788651155546-import-1788651155546-5-d2ojkj",
+        "type": "plainText",
+        "x": 7975,
+        "y": -1578,
+        "data": {
+          "title": "Standard Environemt",
+          "text": "Do not crop out any of the object. An indistinct plain, solid gray background. Use diffused lighting to create gentle light with no harsh shadows. Emphasize realistic textures. High-detail, subdued contrast. ",
+          "textNodeWidth": 355,
+          "textNodeHeight": 275,
+          "textareaHeights": {
+            "0:Text prompt": 168
+          },
+          "nodeColor": "#58ce63"
+        },
+        "presetSize": {
+          "width": 354.99987168516236,
+          "height": 274.99991155154953
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-1788651155546-t0h314",
+        "from": {
+          "nodeId": "plainText-1788651155546-import-1788651155546-2-2bp3ba",
+          "port": "promptOut"
+        },
+        "to": {
+          "nodeId": "imageModel-1788651155546-import-1788651155546-1-u5efe3",
+          "port": "promptIn"
+        },
+        "color": "#f0c83b"
+      },
+      {
+        "id": "edge-1788651155546-a2mujy",
+        "from": {
+          "nodeId": "style-1788651155546-import-1788651155546-0-zlylqw",
+          "port": "styleOut"
+        },
+        "to": {
+          "nodeId": "imageModel-1788651155546-import-1788651155546-1-u5efe3",
+          "port": "styleIn"
+        },
+        "color": "#9b5cff"
+      },
+      {
+        "id": "edge-1788651155546-p3finl",
+        "from": {
+          "nodeId": "camera-1788651155546-import-1788651155546-3-bgf6qp",
+          "port": "cameraOut"
+        },
+        "to": {
+          "nodeId": "imageModel-1788651155546-import-1788651155546-1-u5efe3",
+          "port": "cameraIn"
+        },
+        "color": "#ef4444"
+      },
+      {
+        "id": "edge-1788651155546-ra6dsb",
+        "from": {
+          "nodeId": "imageModel-1788651155546-import-1788651155546-1-u5efe3",
+          "port": "imageOut"
+        },
+        "to": {
+          "nodeId": "preview-1788651155546-import-1788651155546-4-5d6zgs",
+          "port": "sourceIn"
+        },
+        "color": "#3d85ff"
+      },
+      {
+        "id": "edge-1788651155546-mvl7xh",
+        "from": {
+          "nodeId": "plainText-1788651155546-import-1788651155546-5-d2ojkj",
+          "port": "promptOut"
+        },
+        "to": {
+          "nodeId": "imageModel-1788651155546-import-1788651155546-1-u5efe3",
+          "port": "promptIn"
+        },
+        "color": "#f0c83b"
+      }
+    ],
+    "groups": []
+  }
+}

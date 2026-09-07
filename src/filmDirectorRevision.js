@@ -12,6 +12,7 @@ import {
 } from "./filmDirectorAspectRatios.js";
 import { filmDirectorResolutionOptions, normalizeFilmDirectorResolution } from "./filmDirectorResolutions.js";
 import { filmDirectorStyleDirectionDirective } from "./filmDirectorStyle.js";
+import { filmDirectorApproachDirective, filmDirectorApproachOptions, normalizeFilmDirectorApproach } from "./filmDirectorApproaches.js";
 import { filmDirectorAudioModeOptions, normalizeFilmDirectorAudioMode } from "./filmDirectorAudio.js";
 import {
   filmDirectorVideoModelOptions,
@@ -28,6 +29,14 @@ const filmDirectorRevisionSnapshotKeys = [
   "skillResolution",
   "skillAspectRatio",
   "skillDirectorAudioMode",
+  "skillApproach",
+  "skillDirectorLockedApproach",
+  "skillDirectorLockedMusicSignature",
+  "skillDirectorReferenceVideoOptions",
+  "skillDirectorReferenceVideoAnalysis",
+  "skillDirectorReferenceVideoAnalysisSource",
+  "skillDirectorReferenceVideoBlueprint",
+  "skillDirectorLockedReferenceVideoSignature",
   "skillShotCount",
   "shotCount",
   "skillReferenceNotes",
@@ -68,6 +77,7 @@ export function buildFilmDirectorRevisionPrompt({
   resolution = "720p",
   aspectRatio = "16:9",
   audioMode = "production",
+  approach = "cinematic",
   currentCutCount = 0,
   sceneName = "",
   referenceSetup = "",
@@ -83,12 +93,15 @@ export function buildFilmDirectorRevisionPrompt({
   if (!notes) return "";
 
   return [
-    `Revise this completed Film Director package for one ${durationLabel} AI video scene.`,
+    `Revise this completed Director package for one ${durationLabel} AI video scene.`,
     "The user's revision notes are the authority for this pass. Apply them precisely, including removals, wording changes, shot adjustments, dialogue changes, or continuity corrections.",
     "Apply every requested change in one pass. Update every dependent field needed to keep the package internally consistent, while preserving unaffected material verbatim whenever practical.",
     "Examples: removing or adding a shot must update recommendedShotCount, renumber every CUT, and revise continuity; tighter framing or camera movement must update both cameraDirection and the affected CUT fields; a style note must update only the visual appearance in styleDirection and any directly dependent visual language.",
     "Keep each section inside its job: styleDirection owns the visible cinematic treatment, emotional tone, and performance texture; cameraDirection owns camera behavior and framing strategy; sceneOverview owns story and action; cuts own shot-specific execution. Never copy camera movement, blocking, action choreography, plot summary, or poetic non-literal story language into styleDirection.",
-    filmDirectorStyleDirectionDirective(),
+    filmDirectorStyleDirectionDirective(approach),
+    `The approach is ${normalizeFilmDirectorApproach(approach)}. Preserve it unless the user explicitly requests a different approach. approach must be one of ${filmDirectorApproachOptions.map((option) => option.value).join(", ")}. If explicitly changed, update dependent style, camera and CUT language to match the new approach, replacing the previous approach's conflicting guidance while preserving story and assets.`,
+    `Alternative approach guidance, only when explicitly requested:\n${filmDirectorApproachOptions.filter((option) => option.value !== normalizeFilmDirectorApproach(approach)).map((option) => option.value === "cinematic" ? filmDirectorStyleDirectionDirective() : filmDirectorApproachDirective(option.value)).join("\n")}`,
+    "Music Video requires an available connected music file and an audio-reference-capable video model (Seedance 2.0, Seedance 2.5 or MiniMax H3). Montage may optionally use a connected music file with the same supported models. Never claim to hear a track from its name or invent lyrics. When Music Video is explicitly requested or Montage has an active connected track, set audioMode to full; the connected soundtrack supersedes Production Sound and Silent. For other approaches ignore connected music. Otherwise preserve the selected audio policy.",
     "Scene name, video model, duration, resolution, aspect ratio, and audio mode may change only when the user explicitly requests them. If duration changes, rebalance pacing and CUT count for the new duration.",
     `videoModel must be one of ${filmDirectorVideoModelOptions.join(", ")}. Otherwise preserve the current video model.`,
     `durationSeconds must be one of ${filmDirectorDurationPromptList()}. Otherwise preserve the current duration.`,
@@ -102,7 +115,7 @@ export function buildFilmDirectorRevisionPrompt({
       ? `Preserve the current ${currentCutCount} CUT sections unless the user explicitly asks to add, remove, combine, or restructure shots.`
       : "Preserve the current shot structure unless the user explicitly asks to change it.",
     "Return strict JSON only with this exact shape:",
-    `{"changeSummary":"one short sentence","sceneName":"complete revised scene name","videoModel":"Seedance 2.5","durationSeconds":"15","resolution":"720p","aspectRatio":"16:9","audioMode":"production","activeReferenceTags":["@ExactConnectedTag"],"styleDirection":"concise literal visual treatment only","cameraDirection":"complete revised camera direction","sceneOverview":"complete revised scene overview","recommendedShotCount":3,"continuityLedger":"one compact line","mustHaveActions":"one compact line","cuts":[{"number":1,"shotFrame":"WS","cameraMovement":"Static","shotType":"Over-the-Shoulder","description":"${filmDirectorShotDescriptionExample(currentCutCount, durationSeconds)}"}]}`,
+    `{"changeSummary":"one short sentence","sceneName":"complete revised scene name","videoModel":"Seedance 2.5","durationSeconds":"15","resolution":"720p","aspectRatio":"16:9","audioMode":"production","approach":"${normalizeFilmDirectorApproach(approach)}","activeReferenceTags":["@ExactConnectedTag"],"styleDirection":"concise literal visual treatment only","cameraDirection":"complete revised camera direction","sceneOverview":"complete revised scene overview","recommendedShotCount":3,"continuityLedger":"one compact line","mustHaveActions":"one compact line","cuts":[{"number":1,"shotFrame":"WS","cameraMovement":"Static","shotType":"Over-the-Shoulder","description":"${filmDirectorShotDescriptionExample(currentCutCount, durationSeconds)}"}]}`,
     shotLogic,
     filmDirectorShotDetailDirective(currentCutCount || "Auto", durationSeconds),
     "Do not return a partial patch. Return the complete revised values so NewtNode can replace the finished package safely. Do not use markdown or add keys outside the schema.",
@@ -175,6 +188,7 @@ export function filmDirectorRevisionStatePatch(current = {}, result = {}) {
   const nextResolution = normalizeFilmDirectorResolution(result.resolution, current.skillResolution || "720p");
   const nextAspectRatio = normalizeFilmDirectorAspectRatio(result.aspectRatio, current.skillAspectRatio || "16:9");
   const nextAudioMode = normalizeFilmDirectorAudioMode(result.audioMode, current.skillDirectorAudioMode || "production");
+  const nextApproach = normalizeFilmDirectorApproach(result.approach, normalizeFilmDirectorApproach(current.skillApproach));
   const finalPrompt = revisionString(result, "text", current.resultText);
   const sceneOverview = revisionString(result, "sceneOverview", current.sceneOverview ?? current.text);
   const cameraDirection = revisionString(result, "motionDirection", current.motionDirection ?? current.motionBrief);
@@ -187,6 +201,8 @@ export function filmDirectorRevisionStatePatch(current = {}, result = {}) {
     skillResolution: nextResolution,
     skillAspectRatio: nextAspectRatio,
     skillDirectorAudioMode: nextAudioMode,
+    skillApproach: nextApproach,
+    skillDirectorLockedApproach: nextApproach,
     skillShotCount: nextShotCount,
     shotCount: nextShotCount,
     styleDirection: revisionString(result, "styleDirection", current.styleDirection),
@@ -211,8 +227,8 @@ function cloneRevisionValue(value) {
 export function createFilmDirectorRevisionSnapshot(data = {}) {
   return Object.fromEntries(
     filmDirectorRevisionSnapshotKeys
-      .filter((key) => Object.prototype.hasOwnProperty.call(data || {}, key))
-      .map((key) => [key, cloneRevisionValue(data[key])])
+      .filter((key) => ["skillApproach", "skillDirectorLockedApproach"].includes(key) || Object.prototype.hasOwnProperty.call(data || {}, key))
+      .map((key) => [key, ["skillApproach", "skillDirectorLockedApproach"].includes(key) ? normalizeFilmDirectorApproach(data[key]) : cloneRevisionValue(data[key])])
   );
 }
 

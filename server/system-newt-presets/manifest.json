@@ -1,0 +1,336 @@
+{
+  "version": 1,
+  "presets": [
+    {
+      "id": "4267ddd9-2217-45cc-8ee8-a37f6222fef4",
+      "assets": []
+    },
+    {
+      "id": "5f9ef270-7b69-41cb-b345-235c0154a2b5",
+      "assets": []
+    },
+    {
+      "id": "9fd4e2d8-4eb2-4553-8e5d-37bd82648325",
+      "assets": [
+        {
+          "url": "/outputs/Newt-Presets/dependencies/9fd4e2d8-4eb2-4553-8e5d-37bd82648325/0-2026-09-05T13-08-42-534Z-nano-banana-pro-a0fde2b7.jpg",
+          "file": "assets/310e643355191318a5273765674d48741a7a8118cf0a2d93af666ba938f02308.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/9fd4e2d8-4eb2-4553-8e5d-37bd82648325/1-2026-09-05T13-08-42-534Z-nano-banana-pro-a0fde2b7-preview.jpg",
+          "file": "assets/581b9ee9cb6ae9714525e7a4938344bbd5a82e5a6240f09de654cce68077676c.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/9fd4e2d8-4eb2-4553-8e5d-37bd82648325/2-2026-09-05T13-09-06-099Z-nano-banana-pro-7d44b258.jpg",
+          "file": "assets/a131d654ef95162a1fe147830354c0f31166076e646c80ff9f6e0b3e31c3ba61.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/9fd4e2d8-4eb2-4553-8e5d-37bd82648325/3-2026-09-05T13-09-06-099Z-nano-banana-pro-7d44b258-preview.jpg",
+          "file": "assets/2db2b56c831ca10e9e167e8df837d4546aea0f675c917ec07cd0c90dcef444dc.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/9fd4e2d8-4eb2-4553-8e5d-37bd82648325/4-2026-09-05T13-09-29-990Z-nano-banana-pro-fe17edd7.jpg",
+          "file": "assets/507fdf28517b2ee60dfeb80e05d4332c1f764f67d7353a3e67135ae932724423.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/9fd4e2d8-4eb2-4553-8e5d-37bd82648325/5-2026-09-05T13-09-29-990Z-nano-banana-pro-fe17edd7-preview.jpg",
+          "file": "assets/5bcd8bc3c97524c15765b6c69a68cede51c848ac1d4504b31d691d84dc666272.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/9fd4e2d8-4eb2-4553-8e5d-37bd82648325/6-2026-09-05T13-09-53-882Z-nano-banana-pro-2c813a32.jpg",
+          "file": "assets/76db3ad880db892c1ffccbc224af9f633e6ea8fba2e3c73346122651458deec7.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/9fd4e2d8-4eb2-4553-8e5d-37bd82648325/7-2026-09-05T13-09-53-882Z-nano-banana-pro-2c813a32-preview.jpg",
+          "file": "assets/50944eccaa6303e80bf04f7708a6e873255faa4469f46383ac86cead298627b3.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/9fd4e2d8-4eb2-4553-8e5d-37bd82648325/8-2026-09-04T22-25-45-795Z-nano-banana-pro-240fca74.jpg",
+          "file": "assets/28fa4decbe8fdca55011b07a6d81f002bfdb7874607616f1d3b49a38b293bec2.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/9fd4e2d8-4eb2-4553-8e5d-37bd82648325/9-2026-09-04T22-26-08-746Z-nano-banana-pro-8cc001bc.jpg",
+          "file": "assets/fdd1e28244ba216d398b23b3e81b5c7d647f8b99607f04e865f2ee617ae987f4.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/9fd4e2d8-4eb2-4553-8e5d-37bd82648325/10-2026-09-04T22-26-31-795Z-nano-banana-pro-55ff7fea.jpg",
+          "file": "assets/41d1771b8d8215aa8c152f3bfd6f2d8fe9f7ac8b4328c34e6f7f6c9a6d691987.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/9fd4e2d8-4eb2-4553-8e5d-37bd82648325/11-2026-09-04T22-26-53-089Z-nano-banana-pro-85979474.jpg",
+          "file": "assets/100d21d298efdbc86cc30e9e8f1533d8af46ec6ebfec7c2f6724053106c7917a.jpg"
+        }
+      ]
+    },
+    {
+      "id": "ba4827ee-fa76-4e5b-a16d-97fa3f39286b",
+      "assets": [
+        {
+          "url": "/outputs/Newt-Presets/dependencies/ba4827ee-fa76-4e5b-a16d-97fa3f39286b/0-2026-09-05T20-48-40-104Z-nano-banana-pro-a0bb65f8.jpg",
+          "file": "assets/b947ca2b121f47c1d148a945648f97ef708381d46876db5dc849de2bccf3f7e6.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/ba4827ee-fa76-4e5b-a16d-97fa3f39286b/1-2026-09-05T20-48-40-104Z-nano-banana-pro-a0bb65f8-preview.jpg",
+          "file": "assets/1c53f7b6a835cad09d50e37f586a905fd2e586f57d70b32b3969b1c202b1fc8a.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/ba4827ee-fa76-4e5b-a16d-97fa3f39286b/2-2026-09-05T20-49-03-734Z-nano-banana-pro-67996cb7.jpg",
+          "file": "assets/4349e9a922e3953f55eb6674aa88dddc90636aa3ba6d34918656be0930614b9e.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/ba4827ee-fa76-4e5b-a16d-97fa3f39286b/3-2026-09-05T20-49-03-734Z-nano-banana-pro-67996cb7-preview.jpg",
+          "file": "assets/1bbd261d0001516f1597e086f8077859b15a2ec4cfa81cec8faeb65656068ae8.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/ba4827ee-fa76-4e5b-a16d-97fa3f39286b/4-2026-09-05T20-49-29-428Z-nano-banana-pro-f50e243b.jpg",
+          "file": "assets/55b884f5ce76b60650f86888031c9606e3bdb2a6222156e822f667b5d96f69f9.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/ba4827ee-fa76-4e5b-a16d-97fa3f39286b/5-2026-09-05T20-49-29-428Z-nano-banana-pro-f50e243b-preview.jpg",
+          "file": "assets/9d35e064ec134b02fbd0365bfd9b37fbc7a48f5cc25e73ae5afc479608fc05e7.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/ba4827ee-fa76-4e5b-a16d-97fa3f39286b/6-2026-09-05T20-49-53-387Z-nano-banana-pro-2eff617d.jpg",
+          "file": "assets/67a70ad7c1533236bf8d78125557d0e5d8f5cf3f7659b6967c88fc9bd4354381.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/ba4827ee-fa76-4e5b-a16d-97fa3f39286b/7-2026-09-05T20-49-53-387Z-nano-banana-pro-2eff617d-preview.jpg",
+          "file": "assets/281a2f86c3c6830b56172c6a968334da2d97122de9b2276b3f456709c1d9f6e0.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/ba4827ee-fa76-4e5b-a16d-97fa3f39286b/8-2026-09-05T20-51-21-548Z-nano-banana-pro-aba8e288.jpg",
+          "file": "assets/f04da1215e325b1330124a79d2f3a47bf412f48f8d00bb69109be341656c5f6a.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/ba4827ee-fa76-4e5b-a16d-97fa3f39286b/9-2026-09-05T20-51-21-548Z-nano-banana-pro-aba8e288-preview.jpg",
+          "file": "assets/7441f3dd92ed701064a4f2dae40a1b0bcdf3c66954a2df953c1f43411ecc20b5.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/ba4827ee-fa76-4e5b-a16d-97fa3f39286b/10-2026-09-05T20-51-45-006Z-nano-banana-pro-5973b443.jpg",
+          "file": "assets/402d3e7d46deb01c7abe6abb20fc7a71fb8e78326cd9b3bca252015ff1977b31.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/ba4827ee-fa76-4e5b-a16d-97fa3f39286b/11-2026-09-05T20-51-45-006Z-nano-banana-pro-5973b443-preview.jpg",
+          "file": "assets/e66f298eb4b7f89918479594b93dd34b82f25349d154f843764d1158453420ba.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/ba4827ee-fa76-4e5b-a16d-97fa3f39286b/12-2026-09-05T20-45-27-099Z-nano-banana-pro-1db96c09.jpg",
+          "file": "assets/44e18b99fda8ae14bb3a5e14daa3841c79906be0a5fc9a16669c4d4c729a1926.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/ba4827ee-fa76-4e5b-a16d-97fa3f39286b/13-2026-09-05T20-45-49-695Z-nano-banana-pro-faa73897.jpg",
+          "file": "assets/8185669a52bffd1cfae58707d986148e934fb30377353add1eb7dc9e08b2caf9.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/ba4827ee-fa76-4e5b-a16d-97fa3f39286b/14-2026-09-05T20-46-14-078Z-nano-banana-pro-16c652a4.jpg",
+          "file": "assets/f2a8b8b6dab28f15c8efab4266a95ece60b873b63f7836596ce5b1d082c26ac2.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/ba4827ee-fa76-4e5b-a16d-97fa3f39286b/15-2026-09-05T20-46-36-101Z-nano-banana-pro-3271107c.jpg",
+          "file": "assets/5eddcd43bd768f9047b12c709a1204b57e7dcf8f47cf2c9f243375408b1b3d59.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/ba4827ee-fa76-4e5b-a16d-97fa3f39286b/16-2026-09-05T20-46-58-691Z-nano-banana-pro-836bf84f.jpg",
+          "file": "assets/4c1dce3ebd5dc6277ba17bda5410d73682f9ad071401b202ba448410051a142e.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/ba4827ee-fa76-4e5b-a16d-97fa3f39286b/17-2026-09-05T20-47-22-767Z-nano-banana-pro-23afa8a7.jpg",
+          "file": "assets/6a84f4c27b2f6b36ae090e58918cf7c0dd3190411e87c0ff9179623bc87ca6ce.jpg"
+        }
+      ]
+    },
+    {
+      "id": "c1f9aaf8-e80a-44a2-aa47-34c9c4d9d681",
+      "assets": []
+    },
+    {
+      "id": "c29e09d6-bc47-409f-81ab-f85afe84d911",
+      "assets": [
+        {
+          "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/0-0-0-2026-09-05T19-23-51-192Z-nano-banana-pro-bec0f777.jpg",
+          "file": "assets/612e206d5a1b2407d7d25b076ded8bbfeef9a2f211a64fe6f69e56f137d075bf.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/1-1-1-2026-09-05T19-23-51-192Z-nano-banana-pro-bec0f777-preview.jpg",
+          "file": "assets/f1dc496b365d80d7d2b1b926c500987587cbb1a77c0eb6ac9c76551e0ce2537d.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/2-2-2-2026-09-05T19-24-14-686Z-nano-banana-pro-3f1e5abf.jpg",
+          "file": "assets/b185239b70e5922dc9e9241af6ddbab9ed2252b5447549f034f3f08935029e64.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/3-3-3-2026-09-05T19-24-14-686Z-nano-banana-pro-3f1e5abf-preview.jpg",
+          "file": "assets/98c45662c4ccb53ddbe53abc86d3fad93c64412ded517650170f5c281d8d6c40.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/4-4-4-2026-09-05T19-24-36-265Z-nano-banana-pro-b72f5527.jpg",
+          "file": "assets/0083b9add44ff0ef53674aea76619c52cab57a1d041a5d2682f76a234ea478d2.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/5-5-5-2026-09-05T19-24-36-265Z-nano-banana-pro-b72f5527-preview.jpg",
+          "file": "assets/7f459f35d10ee15217c2869d7e91d26afab3ab16680393692d4d0b178c7573a1.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/6-6-6-2026-09-05T19-24-58-869Z-nano-banana-pro-c0ba32b8.jpg",
+          "file": "assets/95b7c6ad4e972a167b655903bc32708316b6156269ac36cfe7054cc2ed318910.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/7-7-7-2026-09-05T19-24-58-869Z-nano-banana-pro-c0ba32b8-preview.jpg",
+          "file": "assets/b2c0261cd0d9ee8ae8f3c50f281fa116a827acc68a27864c5dc8e764519b8730.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/8-8-8-2026-09-05T19-25-19-854Z-nano-banana-pro-bb9cbab1.jpg",
+          "file": "assets/303ddd3efa97daff488be7a65887466e03c5fe0ae7ff72a3d1ccd15892c3cbea.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/9-9-9-2026-09-05T19-25-19-854Z-nano-banana-pro-bb9cbab1-preview.jpg",
+          "file": "assets/e41b0cff48fe57424bede68080921546c909b1aa8cccd92bcacf0cedec120ec4.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/10-10-10-2026-09-05T19-25-41-783Z-nano-banana-pro-b9da1b03.jpg",
+          "file": "assets/68b149108705d86fc8a9b97da87b720f5ad6b8f95c777f87a58bee31d6b4e9c6.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/11-11-11-2026-09-05T19-25-41-783Z-nano-banana-pro-b9da1b03-preview.jpg",
+          "file": "assets/9b43803b936102902dfc2dfba39eab1029fe3681af2db744c2e6db60c6471684.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/12-12-20-8-2026-09-04T22-25-45-795Z-nano-banana-pro-240fca74.jpg",
+          "file": "assets/28fa4decbe8fdca55011b07a6d81f002bfdb7874607616f1d3b49a38b293bec2.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/13-13-21-9-2026-09-04T22-26-08-746Z-nano-banana-pro-8cc001bc.jpg",
+          "file": "assets/fdd1e28244ba216d398b23b3e81b5c7d647f8b99607f04e865f2ee617ae987f4.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/14-14-22-10-2026-09-04T22-26-31-795Z-nano-banana-pro-55ff7fea.jpg",
+          "file": "assets/41d1771b8d8215aa8c152f3bfd6f2d8fe9f7ac8b4328c34e6f7f6c9a6d691987.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/15-15-23-11-2026-09-04T22-26-53-089Z-nano-banana-pro-85979474.jpg",
+          "file": "assets/100d21d298efdbc86cc30e9e8f1533d8af46ec6ebfec7c2f6724053106c7917a.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/16-16-24-0-2026-09-05T13-08-42-534Z-nano-banana-pro-a0fde2b7.jpg",
+          "file": "assets/310e643355191318a5273765674d48741a7a8118cf0a2d93af666ba938f02308.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/17-17-25-2-2026-09-05T13-09-06-099Z-nano-banana-pro-7d44b258.jpg",
+          "file": "assets/a131d654ef95162a1fe147830354c0f31166076e646c80ff9f6e0b3e31c3ba61.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/18-18-26-4-2026-09-05T13-09-29-990Z-nano-banana-pro-fe17edd7.jpg",
+          "file": "assets/507fdf28517b2ee60dfeb80e05d4332c1f764f67d7353a3e67135ae932724423.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/19-19-27-6-2026-09-05T13-09-53-882Z-nano-banana-pro-2c813a32.jpg",
+          "file": "assets/76db3ad880db892c1ffccbc224af9f633e6ea8fba2e3c73346122651458deec7.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/20-20-28-2026-09-05T19-03-03-528Z-openai-image-2-02d058eb.png",
+          "file": "assets/55e9744b0825ba1ea93532e2ec88b13b7b9ae2e2d3e5c2d6fabc132594b2ff1f.png"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/21-21-29-2026-09-05T19-05-21-306Z-openai-image-2-10e6f733.png",
+          "file": "assets/f8a48892d9b59712e7dcc573a73590ed7b13647e5847794b912a8b8f9b584ea5.png"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/22-22-30-2026-09-05T19-07-31-668Z-openai-image-2-b4d1f6ff.png",
+          "file": "assets/c6ca8eafaeeb64ee77426c76791e3dc3aad1b116cd6d711ebec5d43c21869fed.png"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/23-23-31-2026-09-05T19-09-42-217Z-openai-image-2-b2f7e2ca.png",
+          "file": "assets/4947a10e5bc5828f5c1959ae351dc1e0337d372f7653e3ae9ab17990e25fdc7e.png"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/24-24-32-2026-09-05T19-12-18-087Z-nano-banana-pro-9766b070.jpg",
+          "file": "assets/1e530b6da7baa7153e8f6e6fbab2bd18aeb8140976ec440c99dcb9ca7157d011.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/25-25-33-2026-09-05T19-12-38-500Z-nano-banana-pro-b8929674.jpg",
+          "file": "assets/01abc3ea669bcd4194cec85410e7f232c33b02335c9226f04a5ce5abfacd7608.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/26-26-34-2026-09-05T19-12-59-446Z-nano-banana-pro-0368806c.jpg",
+          "file": "assets/d46d411b96814a499140a1b295bd99802aebad146ad51fc9c0a14d96eaf4acd0.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/27-27-35-2026-09-05T19-13-21-991Z-nano-banana-pro-3b7e4a31.jpg",
+          "file": "assets/e37b520ea4dc151825a6c68394e96305330ad37a49fba61aa56c93caa2d43f59.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/28-28-36-2026-09-05T19-15-37-411Z-nano-banana-pro-8400a30c.jpg",
+          "file": "assets/5a1ab957cb03940269b1b3b465f85b8b721c8e8addceeaf5e21565246155676f.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/29-29-37-2026-09-05T19-16-23-364Z-nano-banana-pro-b93c970e.jpg",
+          "file": "assets/38476e234f13e128fe367784874eef9b4215775b3c9522d2007a4dd6e0108c19.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/30-30-38-2026-09-05T19-18-33-592Z-nano-banana-pro-b432fe68.jpg",
+          "file": "assets/850164a55a0ea5c7ff60df0d6ab8fbfd130fd9029c8cd98909938a27e3b88ef5.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/31-31-39-2026-09-05T19-19-03-820Z-nano-banana-pro-df0fb979.jpg",
+          "file": "assets/d21f3e1080e5aa6450459a82c349e9312588b3ad8f3e3322acb39d45a1ad330d.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/32-32-40-2026-09-05T19-19-25-352Z-nano-banana-pro-c0c44d9e.jpg",
+          "file": "assets/c7e5d867216b755af86d2c3b78559854188a0e4012e676689de7a24e4ffe050d.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/33-33-41-2026-09-05T19-19-47-531Z-nano-banana-pro-82a81dd0.jpg",
+          "file": "assets/d82c4c46e07af11f43ad88f41cec30a7a1ab21ca5ef1cf51e3644b114c12cd95.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/34-34-42-2026-09-05T19-16-00-100Z-nano-banana-pro-fe6c4d87.jpg",
+          "file": "assets/1d99d19ee8e8d1748cec6cdd23f2d68346c8ba2f958e50e065c4265cf80a59ee.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/35-35-43-2026-09-05T19-20-11-132Z-nano-banana-pro-581f3fd4.jpg",
+          "file": "assets/dd9a38bdf906f16059161a459874609eccec8224c35d573d8e7e0d9279284c85.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/36-36-44-2026-09-05T19-20-37-190Z-nano-banana-pro-faf95c8d.jpg",
+          "file": "assets/e573b5b9dbeda92d884fbc2cf82ecadd04ba4b9c75ca00a7a2cb81e84d062008.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/37-37-45-2026-09-05T19-20-59-652Z-nano-banana-pro-a5f27c9b.jpg",
+          "file": "assets/bc05b89a32349bfd4655f65fedc0341fb19bab2c861b58a54ab8f552623004b8.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/38-38-46-2026-09-05T19-21-45-500Z-nano-banana-pro-1f9b6b19.jpg",
+          "file": "assets/b00a8e6c25e2bcf2d73c1715a0089fa974c5167ec2c92cf20b0dd27cfaf2e380.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/39-39-47-2026-09-05T19-22-30-113Z-nano-banana-pro-88d19402.jpg",
+          "file": "assets/de1e76f64738504f92faae6edf087d1b25cbe919bfa4c9ed47ab6eabdb8e8f98.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/40-40-48-2026-09-05T19-17-11-665Z-nano-banana-pro-ead1cf65.jpg",
+          "file": "assets/650bd1d706304781112d71d70526b7eb2c7b7f5c3845c571957b5e230e3db201.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/41-41-49-2026-09-05T19-16-48-370Z-nano-banana-pro-5b41015c.jpg",
+          "file": "assets/046cd4ea4ce1d9700bcab11c749fb40c868dd13652f835fb4df861f76602a7e9.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/42-42-12-2026-09-05T19-17-34-458Z-nano-banana-pro-9e6fd13f.jpg",
+          "file": "assets/3ef55029d7b6dfbec13203fbd82141cf32b25303f482388bbfdd791c00b62c49.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/43-43-14-2026-09-05T19-21-22-954Z-nano-banana-pro-0a967572.jpg",
+          "file": "assets/dd3a3c506839c24d5fe3257ea542aa49f67f14c16f79f7f1fe348e2a0ab7e46e.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/44-44-16-2026-09-05T19-22-08-085Z-nano-banana-pro-36d9f2fb.jpg",
+          "file": "assets/9ab3e0cfee80a2c912f80eb6523b2aea8f40cfdb93e2d357de082c6560f70629.jpg"
+        },
+        {
+          "url": "/outputs/Newt-Presets/dependencies/c29e09d6-bc47-409f-81ab-f85afe84d911/45-45-18-2026-09-05T19-18-10-995Z-nano-banana-pro-e1f784c1.jpg",
+          "file": "assets/b2eee8dc86d9ac80b275d3b0a843057c5a84c96cdbe6ed4c7592c3f59e3ae9c0.jpg"
+        }
+      ]
+    }
+  ]
+}

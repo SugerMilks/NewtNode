@@ -95,7 +95,7 @@ export function storyboardDirectorExpansionInstruction(shotList = "", maxFrames 
     .join("\n");
 
   return `FILM DIRECTOR SHOT-TO-FRAME PLAN:
-The connected Film Director contains ${plan.cutCount} CUT${plan.cutCount === 1 ? "" : "s"}. A CUT is one continuous shot, not necessarily one storyboard frame.
+The connected Director contains ${plan.cutCount} CUT${plan.cutCount === 1 ? "" : "s"}. A CUT is one continuous shot, not necessarily one storyboard frame.
 Preserve every CUT and its order. Create at least one storyboard frame for every CUT.
 Use multiple sequential keyframes inside one CUT whenever its subject action, blocking, camera position, framing, angle, altitude, scale, or reveal changes materially.
 For a complex continuous move, show the opening composition, each necessary transition or action beat, and the final composition. For example, a child playing soccer, a move to a bird's-eye view of the field, and a rise above the clouds requires at least three frames within the same CUT.
@@ -105,6 +105,6 @@ Simple static shots with one visual state should remain one frame. Use no more t
 Recommended keyframe budget:
 ${budget}
 
-Connected Film Director shot list:
+Connected Director shot list:
 ${normalizedCutText(shotList)}`;
 }

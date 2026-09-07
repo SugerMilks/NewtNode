@@ -11,6 +11,7 @@ import {
   coolGradePalette,
   gradePresetNames,
   gradePresetPrompts,
+  normalizeGradePresetName,
   normalizeHexColor,
   referenceGradePresets,
   warmGradeDescription,
@@ -75,7 +76,7 @@ test("creates a reusable preset without requiring a user prompt", () => {
 test("ships reusable Cool and Warm grade presets", () => {
   assert.deepEqual(gradePresetNames, [
     "None", "Cool", "Warm", "Refn Beauty", "Spiky Nike", "Vintage Son", "Dusty Brothers",
-    "Moody Meadow", "Classy Kubric", "Coney Color", "Custom"
+    "Moody Meadow", "Classy Kubric", "Coney Color", "Jaws of Life", "Custom"
   ]);
   assert.equal(coolGradePalette.length, 14);
   assert.equal(warmGradePalette.length, 14);
@@ -89,7 +90,7 @@ test("ships reusable Cool and Warm grade presets", () => {
 
 test("ships named reference grades with complete palette direction", () => {
   assert.deepEqual(Object.keys(referenceGradePresets), [
-    "Refn Beauty", "Spiky Nike", "Vintage Son", "Dusty Brothers", "Moody Meadow", "Classy Kubric", "Coney Color"
+    "Refn Beauty", "Spiky Nike", "Vintage Son", "Dusty Brothers", "Moody Meadow", "Classy Kubric", "Coney Color", "Jaws of Life"
   ]);
   for (const [name, preset] of Object.entries(referenceGradePresets)) {
     assert.equal(preset.palette.length, 14, `${name} should preserve a full reference palette`);
@@ -98,6 +99,20 @@ test("ships named reference grades with complete palette direction", () => {
     assert.ok(gradePresetPrompts[name].includes(colorLookPreservationInstruction));
     for (const hex of preset.palette) assert.ok(gradePresetPrompts[name].includes(hex));
   }
+});
+
+test("Jaws of Life preserves its sampled palette and saved grade selection", () => {
+  const preset = referenceGradePresets["Jaws of Life"];
+  assert.deepEqual(preset.palette, [
+    "#271E18", "#362922", "#413932", "#4E473F", "#4F5D5E", "#5C6F76", "#606D6B",
+    "#667B82", "#6C5241", "#737975", "#738588", "#7E6554", "#7F9294", "#8E9E9C"
+  ]);
+  assert.equal(new Set(preset.palette).size, 14);
+  for (const hex of preset.palette) assert.equal(normalizeHexColor(hex), hex);
+  assert.equal(normalizeGradePresetName("Jaws of Life"), "Jaws of Life");
+  assert.equal(gradePresetNames.filter((name) => name === "Jaws of Life").length, 1);
+  assert.ok(gradePresetPrompts["Jaws of Life"].includes(preset.description));
+  assert.match(gradePresetPrompts["Jaws of Life"], /loose visual palette, not as literal flat colors/);
 });
 
 test("builds a semantic custom grade prompt from an extracted palette", () => {
