@@ -321,7 +321,7 @@ export default function SettingsPage() {
               type="text"
               value={repository}
               onChange={(event) => setRepository(event.target.value)}
-              placeholder="https://github.com/kungfukoi/Newt_Node"
+              placeholder="https://github.com/VersusAIStudio/newt-node-beta"
             />
           </label>
           <div className="settings-actions">

@@ -1,5 +1,19 @@
 export const apiKeyProviderIds = Object.freeze(["fal", "google", "krea", "openAi"]);
-export const maxApiKeyVersionsPerProvider = 9;
+export const maxApiKeyVersionsPerProvider = 20;
+
+export function migrateVsApiCredentials(credentials = {}, activeCredentialIds = {}) {
+  return Object.fromEntries(apiKeyProviderIds.map((provider) => {
+    const entries = (Array.isArray(credentials?.[provider]) ? credentials[provider] : [])
+      .slice(0, maxApiKeyVersionsPerProvider)
+      .map((entry) => ({
+        value: String(entry?.key ?? entry?.value ?? "").trim(),
+        enabled: Boolean(entry?.id) && entry.id === activeCredentialIds?.[provider]
+      }))
+      .filter((entry) => entry.value && !/[^\x20-\xFF]/.test(entry.value));
+    // An unselected VS provider must not fall back to an environment key.
+    return [provider, entries.length ? entries : [{ value: "", enabled: false }]];
+  }));
+}
 
 export function normalizeApiKeyVersions(value = {}, { legacyValues = {}, providerPreferences = {} } = {}) {
   const incoming = value && typeof value === "object" ? value : {};

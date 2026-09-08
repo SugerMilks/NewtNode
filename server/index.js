@@ -41,6 +41,7 @@ import { storyboardPlanIssues, storyboardQcUnavailable } from "../src/storyboard
 import {
   apiKeyProviderIds,
   apiKeyProviderPreferences,
+  migrateVsApiCredentials,
   normalizeApiKeyVersions
 } from "../src/apiKeyVersions.js";
 import { estimateOpenAiImage2Cost as estimateOpenAiImage2OutputCost, normalizeOpenAiImage2Quality, openAiImage2Costs, openAiImage2HighCosts, openAiImage2Quality } from "../src/openAiImage2.js";
@@ -962,7 +963,12 @@ async function readRuntimeSettingsStore() {
     krea: optionalRuntimeSetting(data?.kreaApiKey) || "",
     openAi: optionalRuntimeSetting(data?.openAiApiKey) || ""
   };
-  const apiKeyVersions = normalizeApiKeyVersions(data?.apiKeyVersions, {
+  const savedVersions = data?.apiKeyVersions ?? (
+    Object.prototype.hasOwnProperty.call(data || {}, "credentials")
+      ? migrateVsApiCredentials(data.credentials, data.activeCredentialIds)
+      : undefined
+  );
+  const apiKeyVersions = normalizeApiKeyVersions(savedVersions, {
     legacyValues,
     providerPreferences
   });

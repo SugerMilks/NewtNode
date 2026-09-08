@@ -17,12 +17,14 @@ export PORT="$API_PORT"
 export VITE_API_PORT="$API_PORT"
 export VITE_CLIENT_PORT="$CLIENT_PORT"
 
+node "$ROOT_DIR/scripts/prepareRuntimeDependencies.mjs"
+
 BUILD_REQUIRED=0
 if [ ! -f "$ROOT_DIR/dist/index.html" ]; then
   BUILD_REQUIRED=1
 elif find "$ROOT_DIR/src" "$ROOT_DIR/public" -type f -newer "$ROOT_DIR/dist/index.html" -print -quit 2>/dev/null | grep -q .; then
   BUILD_REQUIRED=1
-elif [ "$ROOT_DIR/index.html" -nt "$ROOT_DIR/dist/index.html" ] || [ "$ROOT_DIR/vite.config.js" -nt "$ROOT_DIR/dist/index.html" ] || [ "$ROOT_DIR/package.json" -nt "$ROOT_DIR/dist/index.html" ]; then
+elif [ "$ROOT_DIR/index.html" -nt "$ROOT_DIR/dist/index.html" ] || [ "$ROOT_DIR/remote.html" -nt "$ROOT_DIR/dist/index.html" ] || [ "$ROOT_DIR/vite.config.js" -nt "$ROOT_DIR/dist/index.html" ] || [ "$ROOT_DIR/package.json" -nt "$ROOT_DIR/dist/index.html" ] || [ "$ROOT_DIR/package-lock.json" -nt "$ROOT_DIR/dist/index.html" ] || [ "$ROOT_DIR/node_modules/.newtnode-dependencies.json" -nt "$ROOT_DIR/dist/index.html" ]; then
   BUILD_REQUIRED=1
 fi
 

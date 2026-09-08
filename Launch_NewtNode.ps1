@@ -5,13 +5,19 @@ $appUrl = "http://127.0.0.1:5176/"
 
 Set-Location $root
 
+& node (Join-Path $root "scripts\prepareRuntimeDependencies.mjs")
+if ($LASTEXITCODE -ne 0) { throw "NewtNode dependency setup failed. Check the error above and relaunch." }
+
 $distIndex = Join-Path $root "dist\index.html"
 $sourcePaths = @(
   (Join-Path $root "src"),
   (Join-Path $root "public"),
   (Join-Path $root "index.html"),
+  (Join-Path $root "remote.html"),
   (Join-Path $root "vite.config.js"),
-  (Join-Path $root "package.json")
+  (Join-Path $root "package.json"),
+  (Join-Path $root "package-lock.json"),
+  (Join-Path $root "node_modules\.newtnode-dependencies.json")
 )
 $buildRequired = -not (Test-Path -LiteralPath $distIndex)
 if (-not $buildRequired) {

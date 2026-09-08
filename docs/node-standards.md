@@ -328,6 +328,8 @@ Portable packages are the default Save As shape for workflows that need to move 
 - Preserve both Windows and macOS startup entry points when changing app launch behavior: `Launch_NewtNode.ps1`, `Launch_NewtNode.bat`, `Restart_NewtNode.ps1`, `Restart_NewtNode.bat`, `NewtNode.command`, `NewtNode.app`, and `mac/NewtNodeLauncher.applescript`.
 - Preserve app icons and bundle metadata when changing launchers or packaging: `public/icon.png`, `NewtNode.app/Contents/Info.plist`, and the `.icns` resources under `NewtNode.app/Contents/Resources/`.
 - Keep launcher ports, health URLs, package scripts, and README startup instructions aligned. Document platform-specific commands separately rather than baking them into shared code.
+- Launchers run `scripts/prepareRuntimeDependencies.mjs` before building. Its ignored `node_modules` stamp tracks the package/lockfile, platform and Node version; missing direct packages invalidate it. Failed installs must stop startup without marking preparation complete. Do not touch runtime settings, keys, workflows or media during dependency preparation. Include both HTML entrypoints and dependency changes in build freshness checks.
+- Older VS releases use `credentials`/`activeCredentialIds` rather than `apiKeyVersions`. Migrate only when current versioned keys are absent, retain up to the legacy maximum of 20 keys, and preserve the exact active selection or disabled state. Keep the original records in local settings. VS main release synchronization preserves both Git ancestries and a backup branch, never force-resets other users' clones. The older Settings updater only pulls source; the first upgrade requires a launcher relaunch to install dependencies and rebuild.
 
 ## UI Design Standards
 
