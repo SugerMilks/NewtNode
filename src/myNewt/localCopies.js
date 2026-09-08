@@ -4,7 +4,7 @@ import { graphBoundsForNodes, groupToRect } from "../nodeGeometry.js";
 export function buildMyNewtDuplicateGraph(graph, nodeIds, count = 1) {
   if (!Number.isInteger(count) || count < 1 || count > 10 || !nodeIds.length || nodeIds.length * count > 100) throw new Error("Duplicate 1 to 10 copies, up to 100 new nodes at a time.");
   const originals = nodeIds.map((id) => graph.nodes.find((node) => node.id === id));
-  if (originals.some((node) => !node || node.type === "myNewt")) throw new Error("Choose creative nodes to duplicate, not My Newt.");
+  if (originals.some((node) => !node || node.type === "myNewt")) throw new Error("Choose creative nodes to duplicate, not Newt.");
   if (originals.some((node) => ["running", "planning", "compiling", "uploading", "generating"].includes(node.data?.status))) throw new Error("Wait for the selected nodes to finish before duplicating them.");
   const clean = buildNewtPresetGraph(graph, nodeIds);
   const rects = [graphBoundsForNodes(clean.nodes), ...clean.groups.map(groupToRect)];

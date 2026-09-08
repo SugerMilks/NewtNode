@@ -6,6 +6,10 @@ import { notifyGenerationTaskComplete } from "../generationChime.js";
 import { createMyNewtCompletionTracker, MY_NEWT_BURST_MS, myNewtTaskKey } from "./completion.js";
 import { myNewtCheckpoint, restoreMyNewtCheckpoint } from "./recovery.js";
 import { myNewtLocalAction, validateLocalUpdate } from "./localActions.js";
+import { assertMyNewtProtection, myNewtProtectedNodes } from "./workProtection.js";
+import { myNewtCompletedRunRecord, myNewtReusableRun } from "./runReuse.js";
+import { useMyNewtRemote } from "./useMyNewtRemote.js";
+import { myNewtRequiresRunApproval } from "./review.js";
 
 export function useMyNewt(adapter) {
   const live = useRef(adapter); live.current = adapter;
@@ -14,6 +18,7 @@ export function useMyNewt(adapter) {
   const [busy, setBusy] = useState(false);
   const [history, setHistory] = useState([]);
   const controlling = useRef(false);
+  const controlError = useRef("");
   const [completionBurst, setCompletionBurst] = useState("");
   const completionTracker = useRef(createMyNewtCompletionTracker());
   const clientId = useRef(crypto.randomUUID());
@@ -112,7 +117,8 @@ export function useMyNewt(adapter) {
       const permissions = myNewtSettings(a.nodes.find((item) => item.id === owner.nodeId)?.data);
       const graph = a.getGraph();
       const p = action.payload || {};
-      if (task.execution === "local" && myNewtLocalActionSignature(action.expected, action) !== myNewtLocalActionSignature(snapshot(), action)) throw new Error("The project or referenced nodes changed after planning. Start a fresh command using the current project.");
+      assertMyNewtProtection(graph, action, { local: task.execution === "local" });
+      if ((task.execution === "local" || action.operation === "protect") && myNewtLocalActionSignature(action.expected, action) !== myNewtLocalActionSignature(snapshot(), action)) throw new Error("The project or referenced nodes changed after planning. Start a fresh command using the current project.");
       const node = graph.nodes.find((item) => item.id === p.nodeId);
       const guard = (target, allowLockedRun = false) => {
         if (!target) throw new Error("This node no longer exists.");
@@ -123,7 +129,11 @@ export function useMyNewt(adapter) {
         const current = snapshot().nodes.find((item) => item.id === target.id);
         if (expected && JSON.stringify(expected.data) !== JSON.stringify(current?.data)) throw new Error("The user changed this node after planning. Read the current project and reconsider this action.");
       };
-      if (action.operation === "workflow" && task.execution === "local") {
+      if (["protect", "release-protection"].includes(action.operation)) {
+        a.snapshot();
+        for (const nodeId of p.nodeIds) a.update(nodeId, { myNewtProtection: action.operation === "protect" ? { approved: true, approvedAt: new Date().toISOString() } : null });
+        result = { protectedIds: p.nodeIds, approved: action.operation === "protect" };
+      } else if (action.operation === "workflow" && task.execution === "local") {
         result = await a.insertLocalWorkflow(p.workflowId, p);
       } else if (action.operation === "duplicate" && task.execution === "local") {
         result = await a.duplicateLocal(p.nodeIds, p.count);
@@ -163,20 +173,29 @@ export function useMyNewt(adapter) {
         if (myNewtInputSignature(action.expected, node.id) !== myNewtInputSignature(snapshot(), node.id)) throw new Error("Connected assets or inputs changed after this run was planned. Read the updated project before generating.");
         if (node.type === "myNewt" || !["text", "imageModel", "videoModel", "coverage", "character", "skillDirector", "storyboard"].includes(node.type)) throw new Error("This node needs manual operation in this version.");
         const hasImages = ["imageModel", "coverage", "character"].includes(node.type) || (node.type === "storyboard" && p.stage === "generate");
-        if (permissions.approveRuns && !action.approved) throw new Error("Approve this run before generation.");
-        if (hasImages && !permissions.allowImages) throw new Error("Image generation is disabled in My Newt Settings.");
-        if (node.type === "videoModel" && !permissions.allowVideos) throw new Error("Video generation is disabled in My Newt Settings.");
+        if (myNewtRequiresRunApproval(permissions, p) && !action.approved) throw new Error("Approve this run before generation.");
+        if (hasImages && !permissions.allowImages) throw new Error("Image generation is disabled in Newt Settings.");
+        if (node.type === "videoModel" && !permissions.allowVideos) throw new Error("Video generation is disabled in Newt Settings.");
         if (node.type === "skillDirector" && p.stage !== "revise" && node.data.skillDirectorLocks?.[p.stage]) throw new Error("That Director section is locked.");
+        const before = snapshot(), beforePreview = a.describeRun(node, p.stage);
+        const reuse = await myNewtReusableRun(before, node.id, p.stage, beforePreview);
+        if (reuse.reusable && p.force !== true) throw new Error("This completed run is unchanged. Reuse its existing outputs, or request an explicitly approved repeat.");
         a.snapshot();
-        await withMyNewtRequestScope(node.id, async (route, body, sequence) => {
+        const outcome = await withMyNewtRequestScope(node.id, async (route, body, sequence) => {
           if (live.current.projectId !== owner.projectId) throw new Error("Project changed. No additional generations will be submitted.");
+          assertMyNewtProtection(a.getGraph(), action);
           const reply = await myNewtApi.request(id, { ...owner, actionId: action.id, clientId: clientId.current, sequence, route, body });
           return { response: { ok: reply.status >= 200 && reply.status < 300, status: reply.status }, data: reply.data };
         }, () => a.run(node, p.stage));
         if (task.newIds?.includes(node.id)) await a.settlePlacement(node.id);
         await new Promise((resolve) => setTimeout(resolve, 100));
         const latest = a.getGraph().nodes.find((item) => item.id === node.id);
-        result = { nodeId: node.id, status: latest?.data.status, error: latest?.data.error || "", resultUrl: latest?.data.resultUrl || "", resultText: latest?.data.resultText || "" };
+        const runError = latest?.data.error || outcome?.error?.message || (typeof outcome?.error === "string" ? outcome.error : "") || (outcome?.status === "error" ? "The node run did not complete." : "");
+        if (!runError && live.current.projectId === owner.projectId && latest) {
+          const record = await myNewtCompletedRunRecord(before, snapshot(), node.id, p.stage, beforePreview, a.describeRun(latest, p.stage));
+          if (record) a.update(node.id, { myNewtRunRecords: [...(Array.isArray(latest.data.myNewtRunRecords) ? latest.data.myNewtRunRecords : []).filter((item) => item && item.stage !== record.stage), record].slice(-6) });
+        }
+        result = { nodeId: node.id, status: latest?.data.status, error: runError, resultUrl: latest?.data.resultUrl || "", resultText: latest?.data.resultText || "" };
       } else throw new Error("Unsupported editor action.");
       await new Promise((resolve) => setTimeout(resolve, 100));
     } catch (err) { result = { error: err.message || "Could not complete this step." }; }
@@ -188,18 +207,20 @@ export function useMyNewt(adapter) {
     } catch (err) { setError(`${err.message} The action will not be automatically repeated.`); }
   }
 
-  async function control(action, note = "") {
+  async function control(action, note = "", remoteExpectation = null) {
     if (controlling.current || !agent) return false;
     controlling.current = true;
+    controlError.current = "";
     setBusy(true); setError("");
     try {
+      if (remoteExpectation && remoteExpectation.jobId !== (live.current.nodes.find((item) => item.id === agent.id)?.data.jobId || "")) throw new Error("The selected task changed after the remote command was sent.");
       if (action === "start" || action === "continue") {
         const brief = String(action === "continue" ? note : note || agent.data.brief || "").trim();
         if (!brief) throw new Error("Enter a task brief first.");
         const graph = snapshot();
         const route = myNewtLocalAction(brief, graph, agent.data, action === "continue" ? job?.createdIds : []);
         if (route.route === "blocked") throw new Error(route.error);
-        const next = await myNewtApi.start({ ...identity, brief, executionRoute: route.route, parentId: action === "continue" ? jobId : undefined, settings: agent.data, snapshot: graph, checkpoint: myNewtCheckpoint(live.current.getGraph(), `Before: ${brief.slice(0, 100)}`) });
+        const next = await (remoteExpectation ? myNewtApi.startRemote : myNewtApi.start)({ ...identity, brief, executionRoute: route.route, parentId: action === "continue" ? jobId : undefined, settings: agent.data, snapshot: graph, checkpoint: myNewtCheckpoint(live.current.getGraph(), `Before: ${brief.slice(0, 100)}`) });
         if (live.current.projectId !== identity.projectId || !live.current.nodes.some((node) => node.id === identity.nodeId)) {
           await myNewtApi.control(next.id, { ...identity, action: "pause" }); return false;
         }
@@ -211,10 +232,10 @@ export function useMyNewt(adapter) {
         live.current.restore(restoreMyNewtCheckpoint(result.checkpoint, live.current.getGraph()));
         accept(result.job);
       } else {
-        accept(await myNewtApi.control(jobId, { ...identity, action, note, settings: myNewtSettings(agent.data) }));
+        accept(await (remoteExpectation ? myNewtApi.controlRemote : myNewtApi.control)(jobId, { ...identity, action, note, settings: myNewtSettings(agent.data), ...(remoteExpectation ? { expectedVersion: remoteExpectation.version } : {}) }));
       }
       return live.current.projectId === identity.projectId && live.current.nodes.some((node) => node.id === identity.nodeId);
-    } catch (err) { setError(err.message); return false; } finally { controlling.current = false; setBusy(false); }
+    } catch (err) { controlError.current = err.message; setError(err.message); return false; } finally { controlling.current = false; setBusy(false); }
   }
   function selectTask(id) {
     if (busy || executing.current || (job && !["complete", "stopped"].includes(job.status))) return;
@@ -223,5 +244,12 @@ export function useMyNewt(adapter) {
     if (item) live.current.update(agent.id, { jobId: id, brief: item.brief, myNewtSummary: { status: item.status, spent: item.spent } });
   }
   const celebrating = !!completionBurst && completionBurst === taskKey && job?.status === "complete";
-  return { job, error, busy, control, history, selectTask, localPreview, focusNode: (id) => live.current.focusNode(id), celebrating, projectId: adapter.projectId, projectName: adapter.projectName };
+  const protectedNodes = myNewtProtectedNodes(adapter.getGraph());
+  const releaseProtection = (id) => {
+    if (busy || executing.current || (job && !["paused", "waiting", "complete", "stopped"].includes(job.status))) { setError("Pause Newt before releasing approved work."); return; }
+    live.current.snapshot();
+    live.current.update(id, { myNewtProtection: null });
+  };
+  const remote = useMyNewtRemote({ ...identity, projectName: adapter.projectName, jobId, budget: myNewtSettings(agent?.data).budget, busy, control, getControlError: () => controlError.current });
+  return { job, error, busy, control, history, selectTask, localPreview, protectedNodes, releaseProtection, remote, focusNode: (id) => live.current.focusNode(id), celebrating, projectId: adapter.projectId, projectName: adapter.projectName };
 }

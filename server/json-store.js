@@ -11,14 +11,14 @@ export async function readJsonFile(filePath, fallback) {
   }
 }
 
-export async function writeJsonAtomic(filePath, value) {
+export async function writeJsonAtomic(filePath, value, options = {}) {
   await mkdir(path.dirname(filePath), { recursive: true });
   const json = JSON.stringify(value, null, 2);
   JSON.parse(json);
   const tempPath = path.join(path.dirname(filePath), `.${path.basename(filePath)}.${process.pid}.${randomUUID()}.tmp`);
 
   try {
-    await writeFile(tempPath, json);
+    await writeFile(tempPath, json, options);
     try {
       await rename(tempPath, filePath);
     } catch (error) {

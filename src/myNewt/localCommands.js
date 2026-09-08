@@ -28,7 +28,7 @@ export function myNewtBackgroundCommand(text, snapshot, workflows) {
   }
   if (/^(?:list|show) (?:the |my )?(?:attached assets|connected assets|inputs)$|^what(?:'s| is) (?:attached|connected)\??$/i.test(text)) {
     const assets = localAttachedNodes(snapshot);
-    return action(assets.length ? `Attached assets: ${assets.map((node) => `${node.data?.title || node.type} (${node.type})`).join(", ")}.` : "No assets are attached to My Newt.", "report");
+    return action(assets.length ? `Attached assets: ${assets.map((node) => `${node.data?.title || node.type} (${node.type})`).join(", ")}.` : "No assets are attached to Newt.", "report");
   }
   if (/^(?:list|show) (?:the |my )?(?:saved )?presets$/i.test(text)) return action(`Saved presets: ${(snapshot.presets || []).map(newtPresetDisplayName).join(", ") || "none"}.`, "report");
   if (/^(?:list|show) (?:the |my )?nodes$/i.test(text)) return action(`Project nodes: ${(snapshot.nodes || []).filter((node) => node.type !== "myNewt").map((node) => node.data?.title || node.type).join(", ") || "none"}.`, "report");

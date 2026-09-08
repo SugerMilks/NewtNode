@@ -1,29 +1,30 @@
 import { nodeApi } from "../api/newtApi.js";
 import { workflowContextPayload } from "../workflowContext.js";
+import { smartTextOriginalPrompt, normalizeSmartTextGenerationContext } from "../smartTextPrompt.js";
 
 export async function runTextNodeProcessing({
   node,
   incoming,
+  imageInputs = [],
+  generationContext,
   workflowContext,
-  sourceLabel,
-  promptPiecesForSource
+  sourceLabel
 }) {
+  if ((incoming.imageIn?.length || 0) > imageInputs.length) throw new Error("A connected image is not ready. Generate or upload it before running Smart Text.");
   const { response, data } = await nodeApi.processText({
-    text: node.data.text,
-    textInputs: [
-      ...connectedTextInputItems(incoming.textIn, sourceLabel),
-      ...connectedStyleInputItems(incoming.styleIn, sourceLabel, promptPiecesForSource)
-    ],
-    imageInputs: connectedMediaInputItems(incoming.imageIn, "image", sourceLabel),
-    videoInputs: connectedMediaInputItems(incoming.videoIn, "video", sourceLabel),
+    text: smartTextOriginalPrompt(node.data.text, imageInputs.length > 0),
+    textInputs: connectedTextInputItems(incoming.textIn, sourceLabel),
+    imageInputs,
+    generationContext: normalizeSmartTextGenerationContext(generationContext),
     ...workflowContextPayload(workflowContext),
     nodeId: node.id,
     nodeTitle: node.data.title
   });
   if (!response.ok) throw new Error(data.error || "Text processing failed.");
+  if (typeof data.text !== "string" || !data.text.trim()) throw new Error("Smart Text returned no prompt. Your previous output has been kept.");
 
   return {
-    text: data.text || "",
+    text: data.text.trim(),
     model: data.model || ""
   };
 }
@@ -32,29 +33,7 @@ function connectedTextInputItems(items = [], sourceLabel) {
   return items
     .map(({ source }) => ({
       label: sourceLabel(source),
-      text: ["plainText", "text"].includes(source.type) ? source.data.resultText || source.data.text : source.data.resultText || source.data.prompt || source.data.title
+      text: source.type === "plainText" ? source.data.text : source.type === "text" ? source.data.resultText || source.data.text : source.data.resultText || source.data.prompt
     }))
     .filter((item) => item.text);
-}
-
-function connectedStyleInputItems(items = [], sourceLabel, promptPiecesForSource) {
-  return items
-    .map(({ source }) => ({
-      label: `Style: ${sourceLabel(source)}`,
-      text: promptPiecesForSource(source).join("\n\n")
-    }))
-    .filter((item) => item.text);
-}
-
-function connectedMediaInputItems(items = [], mediaType, sourceLabel) {
-  return items
-    .map(({ source }) => {
-      if (!source.data.resultUrl) return null;
-      return {
-        url: source.data.resultUrl,
-        label: sourceLabel(source),
-        type: mediaType
-      };
-    })
-    .filter(Boolean);
 }

@@ -5,6 +5,7 @@ import { NewtIcon } from "./components/NewtIcon.jsx";
 import { filmDirectorApproachOptions, filmDirectorSupportsMusic, filmDirectorUsesMusic, normalizeFilmDirectorApproach } from "./filmDirectorApproaches.js";
 import { useMyNewt } from "./myNewt/useMyNewt.js";
 import { buildMyNewtLocalWorkflow } from "./myNewt/localActions.js";
+import { myNewtFavoriteCreationPatch } from "./myNewt/favoriteModels.js";
 import { buildMyNewtDuplicateGraph } from "./myNewt/localCopies.js";
 import { useNewtPresets } from "./myNewt/useNewtPresets.js";
 import { bindNewtPresetInputs, buildNewtPresetGraph, instantiateNewtPreset, newtPresetOffset } from "./myNewt/presets.js";
@@ -55,6 +56,7 @@ import {
   X
 } from "lucide-react";
 import { composerApi, historyApi, nodeApi, settingsApi, systemApi } from "./api/newtApi.js";
+import { usePricingRevision } from "./usePricing.js";
 import { notifyGenerationTaskComplete, shouldNotifyNodeGenerationComplete } from "./generationChime.js";
 import { myNewtHighlightColor } from "./myNewt/completion.js";
 import { MyNewtConfetti } from "./components/MyNewtConfetti.jsx";
@@ -80,6 +82,7 @@ import { ComposerNodeBody, MediaAssetNodeBody, PlainTextNodeBody, SkillDirectorN
 import { NodeRow, OutputPortRow, PortHandle } from "./components/NodePorts.jsx";
 import { StyleCollage } from "./components/StyleCollage.jsx";
 import { canvasToBlob, createTransferCollageBlob, drawImageCover, loadCanvasImage } from "./canvasMedia.js";
+import { canDeleteCanvasSelection, focusCanvasSelection } from "./nodeKeyboardRouting.js";
 import { renderComposerViewport } from "./composerRender.js";
 import { cleanReferenceTag, promptHasReferenceTag, resolveTaggedImageReferences, taggedReferenceLabel } from "./referenceTags.js";
 import {
@@ -279,7 +282,7 @@ import {
   resizePlainTextNode,
   scenePortPoint
 } from "./nodeGeometry.js";
-import { nodeTypeDefinitions, nodeTypeForOutputItem, nodeTypeLabel } from "./nodeRegistry.js";
+import { nodeMenuEntries, nodeTypeDefinitions, nodeTypeForOutputItem, nodeTypeLabel } from "./nodeRegistry.js";
 import {
   canScrollableElementConsumeVerticalWheel,
   shouldStoryboardFrameTextareaConsumeWheel,
@@ -326,6 +329,7 @@ import {
   normalizeFilmDirectorAudioMode
 } from "./filmDirectorAudio.js";
 import { runTextNodeProcessing } from "./nodeRunners/textModels.js";
+import { smartTextGenerationContext } from "./smartTextPrompt.js";
 import {
   buildUtilityVideoRequest,
   buildVideoGenerationRequest,
@@ -403,7 +407,7 @@ const nodeHelpContent = {
     title: "Smart Text",
     lines: [
       "Turns connected references and written direction into cleaner prompt text.",
-      "Run the node, then use the yellow output wherever that text should drive another node."
+      "Uses text and image inputs, tailoring the prompt to the connected image or video workflow."
     ]
   },
   skillDirector: {
@@ -962,7 +966,8 @@ function sameRect(left, right, tolerance = 0.25) {
   return ["left", "top", "right", "bottom", "width", "height"].every((key) => Math.abs(left[key] - right[key]) <= tolerance);
 }
 
-export default function NodeEditor({ active = true, onStatusChange, modelPreferences, modelPreferencesReady = true } = {}) {
+export default function NodeEditor({ active = true, onStatusChange, modelPreferences, modelPreferencesReady = true, nodePreferences } = {}) {
+  const visibleNodeCatalog = React.useMemo(() => nodeMenuEntries(nodeCatalog, nodePreferences), [nodePreferences]);
   const canvasRef = React.useRef(null);
   const sceneRef = React.useRef(null);
   const zoomReadoutRef = React.useRef(null);
@@ -1009,6 +1014,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const selectedEdgeIdRef = React.useRef(null);
   const [composerEditorNodeId, setComposerEditorNodeId] = React.useState(null);
   const [generationProvider, setGenerationProvider] = React.useState("fal");
+  usePricingRevision();
   const generationNodeStatusesRef = React.useRef(new Map());
   const generationNodeProjectIdRef = React.useRef(savedDraft.projectId);
 
@@ -1320,12 +1326,18 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       const key = event.key.toLowerCase();
 
       if (event.key === "Backspace" || event.key === "Delete") {
-        const edgeId = selectedEdgeIdRef.current || selectedEdgeId;
-        if (!selectedNodeIds.length && edgeId && edgesRef.current.some((edge) => edge.id === edgeId)) {
+        if (!canDeleteCanvasSelection(event, canvasRef.current)) return;
+        if (selectedNodeIds.length) {
           event.preventDefault();
-          removeEdges([edgeId]);
+          removeNodes(selectedNodeIds);
           return;
         }
+        const edgeId = selectedEdgeIdRef.current || selectedEdgeId;
+        if (edgeId && edgesRef.current.some((edge) => edge.id === edgeId)) {
+          event.preventDefault();
+          removeEdges([edgeId]);
+        }
+        return;
       }
 
       const frameItControl = event.target.closest?.(".frame-it-node-body");
@@ -1398,12 +1410,6 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         return;
       }
 
-      if (event.key === "Backspace" || event.key === "Delete") {
-        if (selectedNodeIds.length) {
-          event.preventDefault();
-          removeNodes(selectedNodeIds);
-        }
-      }
     }
 
     window.addEventListener("keydown", handleKeyDown);
@@ -2007,6 +2013,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (event.target.closest("input, textarea, select, button, .group-resize-handle")) return;
     event.preventDefault();
     event.stopPropagation();
+    focusCanvasSelection(canvasRef.current);
     pushUndoSnapshot();
 
     const groupNodeIds = getNodeIdsInsideGroup(group);
@@ -4413,6 +4420,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (event.target.closest("input, textarea, select, button, label, summary, details, .preview-resize-handle, .storyboard-frame-card")) return;
     if (event.target.closest(".frame-it-canvas")) return;
     event.stopPropagation();
+    focusCanvasSelection(canvasRef.current);
     const selectedIds = selectNodeForDrag(node.id, event.shiftKey);
     pushUndoSnapshot();
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -4439,6 +4447,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     event.preventDefault();
     event.stopPropagation();
     if (!selectedNodeIds.length) return;
+    focusCanvasSelection(canvasRef.current);
     pushUndoSnapshot();
     event.currentTarget.setPointerCapture?.(event.pointerId);
     const pointer = screenToScene(event.clientX, event.clientY);
@@ -4619,6 +4628,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
     if (event.shiftKey) {
       event.preventDefault();
+      focusCanvasSelection(canvasRef.current);
       event.currentTarget.setPointerCapture(event.pointerId);
       setDragState({
         type: "marquee",
@@ -4637,6 +4647,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (event.button !== 0) return;
     event.preventDefault();
     event.stopPropagation();
+    focusCanvasSelection(canvasRef.current);
     canvasRef.current?.setPointerCapture?.(event.pointerId);
     setDragState({
       type: "pan",
@@ -4704,7 +4715,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   function selectEdge(event, edgeId) {
     event.preventDefault();
     event.stopPropagation();
-    document.activeElement?.blur?.();
+    focusCanvasSelection(canvasRef.current);
     setSelectedNodeIds([]);
     selectedEdgeIdRef.current = edgeId;
     setSelectedEdgeId(edgeId);
@@ -5084,8 +5095,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         preview: ["sourceIn"],
         videoModel: ["referenceVideoIn"],
         utility: ["referenceVideoIn", "maskVideoIn"],
-        skillDirector: ["referenceVideoIn"],
-        text: ["videoIn"]
+        skillDirector: ["referenceVideoIn"]
       },
       audio: {
         videoModel: ["referenceAudioIn"],
@@ -5096,8 +5106,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       },
       style: {
         imageModel: ["styleIn"],
-        storyboard: ["styleIn"],
-        text: ["styleIn"]
+        storyboard: ["styleIn"]
       },
       transfer: {
         imageModel: ["transferIn"],
@@ -5232,7 +5241,6 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         && (!source.data.stylePreset || source.data.stylePreset === "None")
       ) return "Add custom grade colors before connecting";
       if (target.type === "imageModel" && to.port === "styleIn") return "";
-      if (target.type === "text" && to.port === "styleIn") return "";
       if (target.type === "storyboard" && to.port === "styleIn") {
         if (target.data.useStoryboardStyle !== false) return "Disable Storyboard Style before connecting a custom Style";
         return "";
@@ -5282,7 +5290,6 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (source.type === "utility") {
       if (utilityOutputType(source) === "video") {
         if (target.type === "preview" && to.port === "sourceIn") return "";
-        if (target.type === "text" && to.port === "videoIn") return "";
         if (target.type === "videoModel" && to.port === "referenceVideoIn") return "";
         if (target.type === "skillDirector" && to.port === "referenceVideoIn") return "";
         if (target.type === "utility" && ["referenceVideoIn", "maskVideoIn"].includes(to.port)) return "";
@@ -5397,17 +5404,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         return "Image input accepts image outputs";
       }
 
-      if (to.port === "videoIn") {
-        if (["video", "videoModel"].includes(source.type)) return "";
-        return "Video input accepts video outputs";
-      }
-
-      if (to.port === "styleIn") {
-        if (source.type === "style") return "";
-        return "Style input accepts style outputs";
-      }
-      if (["image", "video", "imageModel", "videoModel", "utility", "transfer", "character"].includes(source?.type)) return "";
-      return "Preview accepts image and video sources";
+      return "Smart Text accepts text and image inputs";
     }
 
     if (target?.type === "preview") {
@@ -5688,9 +5685,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         const processed = await runTextNodeProcessing({
           node: currentNode,
           incoming,
+          imageInputs: connectedAssetItems(incoming.imageIn).filter((item) => item.type === "image"),
+          generationContext: smartTextGenerationContext(currentNode.id, nodesRef.current, edgesRef.current),
           workflowContext: requestContext,
-          sourceLabel,
-          promptPiecesForSource
+          sourceLabel
         });
         updateNode(currentNode.id, {
           status: "complete",
@@ -6287,7 +6285,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     },
     insert: (graph, bindings = {}, options = {}) => {
       const status = nodesRef.current.find((node) => node.type === "myNewt")?.data.myNewtSummary?.status;
-      if (status === "running" && !options.agent) throw new Error("Pause My Newt before inserting a preset.");
+      if (status === "running" && !options.agent) throw new Error("Pause Newt before inserting a preset.");
       const clean = buildNewtPresetGraph(graph);
       const offset = newtPresetOffset(clean, occupiedPlacementRects());
       const copied = bindNewtPresetInputs(instantiateNewtPreset(clean, offset), bindings, nodesRef.current);
@@ -6328,6 +6326,15 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       return { createdIds: inserted.nodes.map((node) => node.id) };
     }
   });
+  const newtCreationData = (type, data, explicitPatch = {}, context = {}) => {
+    const settings = nodesRef.current.find((node) => node.type === "myNewt")?.data;
+    const patch = { ...myNewtFavoriteCreationPatch(type, settings, myNewtCatalog, explicitPatch, context), ...explicitPatch };
+    validateMyNewtOptions(type, patch, data);
+    const selection = patch.model && type === "imageModel" ? imageModelSelectionPatch(data, patch.model)
+      : patch.model && type === "videoModel" ? videoModelSelectionPatch(data, patch.model)
+        : patch.model && type === "coverage" ? { resolution: normalizeImageModelResolutionForModel(data.resolution, patch.model), aspectRatio: normalizeImageModelAspectRatio(data.aspectRatio, patch.model) } : {};
+    return { ...data, ...selection, ...patch };
+  };
   const myNewtTaskController = useMyNewt({
     nodes, projectId, projectName,
     catalog: myNewtCatalog,
@@ -6336,7 +6343,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       const graph = buildMyNewtLocalWorkflow(id, {
         bindings: payload.bindings, copies: payload.copies, sourceNodes: nodesRef.current,
         catalog: myNewtCatalog,
-        createData: (type, label) => createNodeData(type, label, nodesRef.current.filter((node) => node.type === type).length + 1),
+        createData: (type, label) => newtCreationData(type, createNodeData(type, label, nodesRef.current.filter((node) => node.type === type).length + 1), {}, { musicRequired: id === "music-video" }),
         nodeWidth: (node) => { const rect = placementRect(node); return rect.right - rect.left; }
       });
       for (const edge of graph.edges) {
@@ -6384,8 +6391,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         const display = expandVideoDirectorPackageIncoming(incoming, byNode, { includeCharacters: videoModelSupportsCharacterInput(model) });
         const references = uniqueAssetItems([...connectedAssetItems(display.referenceImageIn), ...connectedCharacterReferences(display.characterIn).map((item) => ({ ...item, type: "image" })), ...connectedAssetItems(display.referenceVideoIn), ...connectedAssetItems(display.referenceAudioIn), ...connectedAssetItems(display.startFrameIn), ...connectedAssetItems(display.endFrameIn)]);
         const settings = { model, duration: pack ? filmDirectorVideoDuration(model, pack.durationSeconds, data.duration) : data.duration, resolution: pack ? filmDirectorVideoResolution(model, pack.resolution, data.resolution) : data.resolution, aspectRatio: pack ? filmDirectorVideoAspectRatio(model, pack.aspectRatio, data.aspectRatio) : data.aspectRatio, generateAudio: pack ? filmDirectorVideoGenerateAudio(pack.audioMode, normalizeVideoGenerateAudio(data.generateAudio)) : normalizeVideoGenerateAudio(data.generateAudio), batchCount: count, hasVideoReference: !!display.referenceVideoIn?.length, referenceImageCount: references.filter((item) => item.type === "image").length, provider: generationProvider };
-        if (/auto/i.test(String(settings.duration))) throw new Error("Choose an explicit video duration before running My Newt.");
-        return { ...base, ...settings, references, prompt: [connectedDirectorPackageText(incoming.directorIn, byNode), resolvedPromptText(incoming.promptIn) || data.prompt].filter(Boolean).join("\n\n"), audio: settings.generateAudio ? "Audio on" : "Audio off", estimatedCost: estimateVideoRunCost(settings) };
+        if (/auto/i.test(String(settings.duration))) throw new Error("Choose an explicit video duration before running Newt.");
+        const prompt = [connectedDirectorPackageText(incoming.directorIn, byNode), resolvedPromptText(incoming.promptIn) || data.prompt].filter(Boolean).join("\n\n");
+        return { ...base, ...settings, references, prompt: buildEffectiveVideoPrompt(prompt, display, byNode), audio: settings.generateAudio ? "Audio on" : "Audio off", estimatedCost: estimateVideoRunCost(settings) };
       }
       if (node.type === "storyboard") {
         const display = expandStoryboardDirectorIncoming(incoming, byNode), references = storyboardImagePromptItems(node, display, byNode);
@@ -6414,9 +6422,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       const data = createNodeData(type, label, graph.filter((node) => node.type === type).length + 1);
       const patch = { ...(request.patch || {}), ...(request.title ? { title: request.title } : {}) };
       validateMyNewtPatch({ id, type, data }, patch, { allowExisting: true }, [id]);
-      validateMyNewtOptions(type, patch, data);
-      const selectionPatch = patch.model && type === "imageModel" ? imageModelSelectionPatch(data, patch.model) : patch.model && type === "videoModel" ? videoModelSelectionPatch(data, patch.model) : {};
-      const next = { id, type, x: Number.isFinite(request.x) ? Math.min(50000, Math.max(-50000, request.x)) : graphBoundsForNodes(graph).right + 80, y: Number.isFinite(request.y) ? Math.min(50000, Math.max(-50000, request.y)) : 120, data: { ...data, ...selectionPatch, ...patch } };
+      const next = { id, type, x: Number.isFinite(request.x) ? Math.min(50000, Math.max(-50000, request.x)) : graphBoundsForNodes(graph).right + 80, y: Number.isFinite(request.y) ? Math.min(50000, Math.max(-50000, request.y)) : 120, data: newtCreationData(type, data, patch) };
       const rect = placementRect(next);
       Object.assign(next, nonOverlappingPosition({ width: rect.right - rect.left, height: rect.bottom - rect.top }, next, occupiedPlacementRects()));
       pushUndoSnapshot();
@@ -6455,7 +6461,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     }
   });
 
-  const myNewtController = { ...myNewtTaskController, presets: newtPresets };
+  const myNewtController = { ...myNewtTaskController, presets: newtPresets, modelOptions: { image: enabledImageModels, video: enabledVideoModels } };
 
   return (
     <section className={`node-workspace ${toolbarCollapsed ? "toolbar-collapsed" : ""} ${outputsCollapsed ? "outputs-collapsed" : "outputs-open"}`}>
@@ -6566,7 +6572,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
             )}
           </div>
         </div>
-        {nodeCatalog.map((item) => {
+        {visibleNodeCatalog.map((item) => {
           const Icon = item.icon;
           return (
             <button key={item.type} onClick={(event) => addNode(item.type, pointerNodePosition(event))} title={`Add ${item.label}`}>
@@ -6581,6 +6587,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       <div
         ref={canvasRef}
         className="node-canvas"
+        tabIndex={-1}
         style={{
           "--grid-size": `${28 * viewportRef.current.scale}px`,
           "--grid-x": `${positiveModulo(viewportRef.current.x, 28 * viewportRef.current.scale)}px`,
@@ -6709,7 +6716,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         )}
         {contextMenu && (
           <div ref={contextMenuRef} className={`node-context-menu ${contextMenu.pendingConnection ? "pending-connection" : ""}`} style={{ left: contextMenu.x, top: contextMenu.y }}>
-            {nodeCatalog.map((item) => {
+            {visibleNodeCatalog.map((item) => {
               const Icon = item.icon;
               return (
                 <button key={item.type} onClick={() => addNode(item.type, contextMenu.scene, { pendingConnection: contextMenu.pendingConnection })}>
@@ -12175,9 +12182,7 @@ function getNodeConfig(type) {
       icon: Type,
       input: [
         { id: "textIn", label: "Text", color: portColors.prompt },
-        { id: "imageIn", label: "Image", color: portColors.image },
-        { id: "videoIn", label: "Video", color: portColors.video },
-        { id: "styleIn", label: "Style", color: portColors.style }
+        { id: "imageIn", label: "Image", color: portColors.image }
       ],
       output: [{ id: "promptOut", label: "Prompt", color: portColors.prompt }]
     },
@@ -12319,7 +12324,7 @@ function getNodeConfig(type) {
 
 function createDefaultNodeData(type, label, count) {
   const title = `${label}${count > 1 ? ` ${count}` : ""}`;
-  if (type === "myNewt") return { title: "My Newt", ...myNewtDefaults };
+  if (type === "myNewt") return { title: nodeTypeLabel(type), ...myNewtDefaults };
 
   if (type === "plainText") return { title, text: "" };
   if (type === "text") return { title, text: "" };
@@ -15674,7 +15679,10 @@ function formatSkillDirectorFinalPromptForClient(text = "", audioMode = "product
 function normalizeCurrentNode(node) {
   const nextNode = clearStaleRunningState(node);
   const data = nextNode.data || {};
-  if (nextNode.type === "myNewt") return { ...nextNode, data: { ...myNewtDefaults, ...data } };
+  if (nextNode.type === "myNewt") {
+    const title = data.title === "My Newt" || !data.title ? nodeTypeLabel(nextNode.type) : data.title;
+    return { ...nextNode, data: { ...myNewtDefaults, ...data, title } };
+  }
 
   if (nextNode.type === "videoModel" && isWanFunControlModel(data.model)) {
     return {

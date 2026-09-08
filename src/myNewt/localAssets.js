@@ -25,7 +25,7 @@ export function localAssetChoices(snapshot, text) {
     let kind = normalizeLocalName(attached[1]);
     if (["image", "video", "character", "mood board"].includes(kind)) kind += "s";
     const nodes = localAttachedNodes(snapshot, kind);
-    if (!nodes.length) throw new Error(`Attach ${kind} to My Newt first.`);
+    if (!nodes.length) throw new Error(`Attach ${kind} to Newt first.`);
     const newt = snapshot.nodes.find((node) => node.type === "myNewt");
     return (snapshot.edges || []).filter((edge) => edge.to.nodeId === newt.id && nodes.some((node) => node.id === edge.from.nodeId))
       .map((edge) => ({ node: nodes.find((node) => node.id === edge.from.nodeId), role: defaultRole(nodes.find((node) => node.id === edge.from.nodeId)), sourcePort: edge.from.port, attachment: { from: edge.from, to: edge.to } }));

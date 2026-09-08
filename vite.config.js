@@ -8,7 +8,9 @@ const apiTarget = `http://127.0.0.1:${apiPort}`;
 export default defineConfig({
   plugins: [react()],
   build: {
+    manifest: true,
     rollupOptions: {
+      input: { main: "index.html", remote: "remote.html" },
       output: {
         manualChunks(id) {
           const moduleId = id.replace(/\\/g, "/");

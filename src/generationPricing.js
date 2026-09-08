@@ -3,7 +3,7 @@ import { estimateKreaSeedanceCost } from "./kreaSeedance.js";
 import { estimateMiniMaxH3FalCost } from "./minimaxH3.js";
 import { estimateNanoBanana2Cost } from "./nanoBanana2.js";
 import { estimateOpenAiImage2Cost } from "./openAiImage2.js";
-import { reve21CostPerImage } from "./reve21.js";
+import { estimateReve21ImageCost, reve21EndpointForReferenceCount } from "./reve21.js";
 import { estimateSeedance25FalCost } from "./seedance25.js";
 
 const falImageRates = Object.freeze({
@@ -78,7 +78,7 @@ export function estimateImageRunCost({
       ? estimateKreaImageCost({ modelName: model, resolution, referenceCount: references }).amountUsd
       : falImageRates[model][normalizedImageResolution(resolution)];
   } else if (model === "REVE 2.1") {
-    unitCost = reve21CostPerImage;
+    unitCost = estimateReve21ImageCost({ endpoint: reve21EndpointForReferenceCount(references) }).amountUsd;
   } else if (model === "Krea 2 Large") {
     unitCost = normalizedProvider === "krea"
       ? estimateKreaImageCost({ modelName: model, resolution, referenceCount: references }).amountUsd

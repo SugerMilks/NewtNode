@@ -15,6 +15,7 @@ export function MyNewtTaskDetails({ job, focusNode }) {
     {job.pending?.operation === "run" && <section className="my-newt-run-preview" aria-label="Planned generation">
       {!preview ? <span><Loader2 size={14} /> Preparing run details...</span> : <>
         <strong>{preview.title}</strong>
+        {job.pending.payload?.force === true && <div role="status">{preview.reuse ? "Unchanged inputs: additional generation" : "Requested repeat / new variant"}</div>}
         <div>{preview.model} {preview.provider ? `(${preview.provider})` : ""}</div>
         <div>{[preview.stage, preview.count ? `${preview.count} output${preview.count === 1 ? "" : "s"}` : "", preview.resolution, preview.aspectRatio, preview.duration, preview.quality, preview.audio].filter(Boolean).join(" | ")}</div>
         {!!preview.references?.length && <ul aria-label="Generation references">{preview.references.map((reference, index) => <li key={`${reference.url}-${index}`}>{reference.label || reference.url}</li>)}</ul>}

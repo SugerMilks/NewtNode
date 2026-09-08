@@ -11,6 +11,9 @@ import {
   Save
 } from "lucide-react";
 import { settingsApi } from "./api/newtApi.js";
+import { PricingSettings } from "./components/PricingSettings.jsx";
+import { WorkspaceSettings } from "./components/WorkspaceSettings.jsx";
+import { dispatchNodePreferences, normalizeNodePreferences } from "./nodePreferences.js";
 import {
   activateApiKeyVersion,
   addApiKeyVersion,
@@ -40,6 +43,7 @@ export default function SettingsPage() {
   const [visibleApiKeys, setVisibleApiKeys] = React.useState({});
   const [repository, setRepository] = React.useState("");
   const [modelPreferences, setModelPreferences] = React.useState(defaultModelPreferences);
+  const [nodePreferences, setNodePreferences] = React.useState(() => normalizeNodePreferences());
   const [providerPreferences, setProviderPreferences] = React.useState(defaultProviderPreferences);
   const [status, setStatus] = React.useState("loading");
   const [busy, setBusy] = React.useState("");
@@ -152,6 +156,24 @@ export default function SettingsPage() {
     providerPreferencesRef.current = nextProviderPreferences;
     setModelPreferences(nextModelPreferences);
     setProviderPreferences(nextProviderPreferences);
+    const nextNodePreferences = normalizeNodePreferences(data.nodePreferences);
+    setNodePreferences(nextNodePreferences);
+    dispatchNodePreferences(nextNodePreferences);
+  }
+
+  async function updateNewtPreference(enabled) {
+    setBusy("newt");
+    try {
+      const data = await queuePreferenceSave({ nodePreferences: { myNewt: enabled } });
+      if (data?.nodePreferences?.myNewt !== enabled) throw new Error("Restart the NewtNode backend to activate the Newt menu setting.");
+      const next = normalizeNodePreferences(data.nodePreferences);
+      setNodePreferences(next);
+      dispatchNodePreferences(next);
+    } catch (error) {
+      setMessage(error.message || "Could not save the Newt menu setting.");
+    } finally {
+      setBusy("");
+    }
   }
 
   function updateModelPreference(kind, model, enabled) {
@@ -218,6 +240,7 @@ export default function SettingsPage() {
       .catch((error) => {
         setMessage(error.message || "Could not save preference.");
       });
+    return saveTask;
   }
 
   return (
@@ -288,6 +311,7 @@ export default function SettingsPage() {
           </div>
         </section>
 
+        <PricingSettings />
         <section className="stats-panel settings-panel">
           <SettingsPanelTitle title="Repository" aside={settings?.branch || "Current branch"} />
           <label className="settings-field">
@@ -308,19 +332,9 @@ export default function SettingsPage() {
           </div>
         </section>
 
-        <section className="stats-panel settings-panel">
-          <SettingsPanelTitle title="Restart" aside={settings?.restartRequested ? "Queued" : "Ready"} />
-          <div className="settings-restart-panel">
-            <RotateCcw size={28} />
-            <strong>{busy === "restart" ? "Restarting" : "Server restart"}</strong>
-          </div>
-          <div className="settings-actions">
-            <button type="button" onClick={restartServer} disabled={actionsDisabled}>
-              <RotateCcw className={busy === "restart" ? "spin" : ""} size={15} />
-              <span>{busy === "restart" ? "Restarting" : "Restart"}</span>
-            </button>
-          </div>
-        </section>
+        <WorkspaceSettings enabled={nodePreferences.myNewt} onToggle={updateNewtPreference}
+          toggleDisabled={actionsDisabled || status !== "ready"} restarting={busy === "restart"}
+          restartRequested={settings?.restartRequested} onRestart={restartServer} restartDisabled={actionsDisabled} />
 
         {(message || updateLog) && (
           <section className="stats-panel settings-panel wide">

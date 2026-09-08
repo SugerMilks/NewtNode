@@ -51,6 +51,7 @@ test("ambiguous, negated, quoted and compound instructions never partially execu
   const duplicate = graph(); duplicate.nodes.push({ ...duplicate.nodes[1], id: "duplicate" });
   assert.match(compile('Rename "Image Model" to "New"', duplicate).error, /More than one/);
   assert.equal(compile("Add a My Newt node").route, "blocked");
+  assert.equal(compile("Add a Newt node").route, "blocked");
 });
 
 test("local updates honor existing-node permissions, locks, busy state and Director control", () => {

@@ -4,6 +4,7 @@ import {
   kreaEndpointForModel,
   resolveFalKreaProvider
 } from "./kreaApi.js";
+import { applyPricingQuote } from "./pricingCatalog.js";
 
 export { extractKreaJobResultUrl, kreaApiBaseUrl };
 
@@ -38,7 +39,7 @@ export function estimateKreaSeedanceCost({ modelName = "Seedance 2.0", durationS
   ];
   const seconds = Math.max(1, Number(durationSeconds) || 5);
 
-  return {
+  const cost = {
     amountUsd: roundCurrency(seconds * rate),
     currency: "USD",
     unitRateUsd: rate,
@@ -52,6 +53,9 @@ export function estimateKreaSeedanceCost({ modelName = "Seedance 2.0", durationS
       ? "krea-api-pricing-2026-08-29"
       : "krea-api-pricing-2026-07-12"
   };
+  return applyPricingQuote(cost, "krea", kreaSeedanceEndpoint(modelName), {
+    resolution: normalizedResolution, hasVideoReference: Boolean(hasVideoReference), duration: seconds
+  });
 }
 
 function roundCurrency(value) {

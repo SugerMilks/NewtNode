@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { normalizeMyNewtPlan } from "../src/myNewt/plan.js";
 import { verifyMyNewtLocalResult } from "../src/myNewt/localActions.js";
+import { myNewtRequiresPlanApproval } from "../src/myNewt/review.js";
 
 export function prepareMyNewtLocalJob(job, shortcut) {
   job.execution = "local";
@@ -8,7 +9,7 @@ export function prepareMyNewtLocalJob(job, shortcut) {
   job.localExpected = structuredClone(job.snapshot);
   job.plan = normalizeMyNewtPlan({ summary: shortcut.summary, steps: [{ id: "local", title: shortcut.summary }],
     deliverables: [{ kind: ["save-project", "rename-project", "report"].includes(shortcut.action.operation) ? "answer" : "workflow", label: shortcut.summary, nodeId: shortcut.action.payload.nodeId || "", count: 1 }], runs: [] });
-  job.plan.approved = !job.settings.approvePlan;
+  job.plan.approved = !myNewtRequiresPlanApproval(job.settings);
   job.status = job.plan.approved ? "running" : "plan-approval";
 }
 

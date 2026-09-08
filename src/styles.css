@@ -896,6 +896,36 @@ textarea::placeholder {
   grid-column: 1 / -1;
 }
 
+.pricing-settings-heading,
+.pricing-settings-actions,
+.pricing-settings-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.pricing-settings-heading { justify-content: space-between; }
+.pricing-settings-heading h2 { margin: 0; font-size: 16px; }
+.pricing-settings-meta { color: #aaa; font-size: 12px; column-gap: 24px; }
+.pricing-settings-status:empty { display: none; }
+.pricing-settings-status { font-size: 13px; color: #e1c938; overflow-wrap: anywhere; }
+.pricing-provider { border-top: 1px solid #343434; }
+.pricing-provider summary { display: grid; grid-template-columns: 90px minmax(0, 1fr) auto; gap: 12px; padding: 12px 0; cursor: pointer; font-size: 13px; }
+.pricing-provider summary > span:nth-child(2) { color: #aaa; }
+.pricing-current { color: #78c98a; }
+.pricing-review { color: #d4b86a; }
+.pricing-provider-details { padding: 0 0 12px; color: #aaa; font-size: 12px; overflow-wrap: anywhere; }
+.pricing-provider-details p { margin: 8px 0; }
+.pricing-provider-details a { color: #94bce7; }
+.pricing-change-log { font-size: 12px; color: #aaa; overflow-wrap: anywhere; }
+.pricing-change-log summary { cursor: pointer; color: #ddd; }
+@media (max-width: 600px) {
+  .pricing-provider summary { grid-template-columns: minmax(0, 1fr) auto; }
+  .pricing-provider summary > span:nth-child(2) { grid-column: 1 / -1; grid-row: 2; }
+  .pricing-settings-meta { align-items: flex-start; flex-direction: column; gap: 6px; }
+}
+
 .settings-form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1221,24 +1251,34 @@ textarea::placeholder {
   opacity: 0.42;
 }
 
-.settings-restart-panel {
-  display: grid;
-  min-height: 112px;
-  place-items: center;
-  gap: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: 8px;
-  color: rgba(244, 240, 232, 0.7);
-  background: rgba(0, 0, 0, 0.22);
+.settings-workspace-panel h2 {
+  margin: 0;
+  font-size: 17px;
 }
 
-.settings-restart-panel svg {
-  color: #ddc631;
+.settings-workspace-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  min-height: 38px;
+  font-size: 13px;
 }
 
-.settings-restart-panel strong {
-  color: #f4f0e8;
-  font-size: 14px;
+.settings-workspace-row + .settings-workspace-row {
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  padding-top: 14px;
+}
+
+.settings-workspace-row small {
+  margin-left: 8px;
+  color: #929292;
+  font-size: 11px;
+}
+
+.settings-workspace-row .settings-actions {
+  margin: 0;
 }
 
 .settings-message {

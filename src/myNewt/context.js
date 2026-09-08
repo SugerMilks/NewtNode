@@ -21,8 +21,9 @@ export function myNewtGraphContext(snapshot, { nodeId, createdIds = [], brief = 
   const includedIds = new Set(included.map((node) => node.id));
   return {
     projectId: snapshot.projectId, projectName: snapshot.projectName,
+    protectedNodes: nodes.filter((node) => node.data?.myNewtProtection?.approved).map((node) => ({ id: node.id, title: node.data.title, scope: "Entire node and its upstream dependencies. May be used as a reference." })),
     totalNodes: nodes.length, indexOffset: offset, nextOffset: offset + 80 < nodes.length ? offset + 80 : null,
-    index: nodes.slice(offset, offset + 80).map(({ id, type, data }) => ({ id, type, title: data?.title, status: data?.status })),
+    index: nodes.slice(offset, offset + 80).map(({ id, type, data }) => ({ id, type, title: data?.title, status: data?.status, approved: data?.myNewtProtection?.approved === true, trackedRuns: Array.isArray(data?.myNewtRunRecords) ? data.myNewtRunRecords.filter(Boolean).map((item) => ({ stage: item.stage, completedAt: item.completedAt })) : [] })),
     nodes: included,
     edges: edges.filter((edge) => includedIds.has(edge.from.nodeId) || includedIds.has(edge.to.nodeId)),
     omittedDetailIds: details.filter((node) => !includedIds.has(node.id)).map((node) => node.id),

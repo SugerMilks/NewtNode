@@ -1,9 +1,10 @@
 import { myNewtIntelligence } from "./intelligence.js";
+import { normalizeMyNewtFavoriteModels } from "./favoriteModels.js";
 
 export const MY_NEWT_MODEL = "gpt-6-astra";
 export const myNewtDefaults = Object.freeze({
-  brief: "", jobId: "", allowExisting: false, allowImages: false, allowVideos: false,
-  approveRuns: true, approvePlan: true, allowMediaInspection: true, localOnly: false, budget: 5, maxSteps: 40, maxMinutes: 60, intelligence: "high", reasoningMode: "auto"
+  brief: "", jobId: "", favoriteImageModel: "", favoriteVideoModel: "", allowExisting: false, allowImages: false, allowVideos: false,
+  approveRuns: true, approvePlan: true, autoReview: false, allowMediaInspection: true, localOnly: false, budget: 5, maxSteps: 40, maxMinutes: 60, intelligence: "high", reasoningMode: "auto"
 });
 
 // Only creative inputs are editable. Credentials, runtime flags, locks, and outputs never are.
@@ -24,9 +25,11 @@ export const myNewtFields = Object.freeze({
 export function myNewtSettings(data = {}) {
   const clamp = (value, fallback, min, max) => Number.isFinite(Number(value)) ? Math.min(max, Math.max(min, Number(value))) : fallback;
   return {
+    ...normalizeMyNewtFavoriteModels(data),
     allowExisting: data.allowExisting === true, allowImages: data.allowImages === true,
     allowVideos: data.allowVideos === true, approveRuns: data.approveRuns !== false,
     approvePlan: data.approvePlan !== false,
+    autoReview: data.autoReview === true,
     allowMediaInspection: data.allowMediaInspection !== false,
     localOnly: data.localOnly === true,
     intelligence: myNewtIntelligence(data.intelligence).value,
@@ -46,7 +49,8 @@ export function keepSingleMyNewt(graph) {
 }
 
 export function validateMyNewtPatch(node, patch, settings, createdIds = []) {
-  if (!node || node.type === "myNewt") throw new Error("Choose an existing creative node, not My Newt itself.");
+  if (!node || node.type === "myNewt") throw new Error("Choose an existing creative node, not Newt itself.");
+  if (node.data?.myNewtProtection?.approved) throw new Error("This node is approved and protected from Newt. Ask the user to release its protection first.");
   if (!createdIds.includes(node.id) && !settings.allowExisting) throw new Error("Editing existing nodes is disabled.");
   if (node.data?.locked) throw new Error("This node has locked content. Ask the user to unlock it first.");
   if (node.data?.status === "running") throw new Error("Wait for this node to finish before editing it.");
@@ -70,7 +74,7 @@ export function myNewtSnapshot({ nodes = [], edges = [], groups = [], selectedNo
     nodes: nodes.map((node) => ({
       id: node.id, type: node.type, x: node.x, y: node.y,
       data: Object.fromEntries(Object.entries(node.data || {}).filter(([key]) =>
-        ["title", "status", "error", "locked", "activated", "skillDirectorLocks", "skillDirectorBuilt", "resultText", "shotList", "storyboardFrames", "characterName", "fileName", "mimeType", "resultUrl", "url", "localUrl", "resultItems", "characterPortrait", "characterSheets", "characterSheetVariants", "characterCustomSheets", "customCharacterSheet", "useCustomCharacterSheet", "compiledCharacterSheetUrl", "characterWardrobes", "characterBaseSheet", "characterBaseVideoSheet", "activeCharacterSheetId", "activeWardrobeId", "transferImages", "storyboardBoardUrl", ...(myNewtFields[node.type] || [])].includes(key)
+        ["title", "status", "error", "locked", "activated", "myNewtProtection", "myNewtRunRecords", "skillDirectorLocks", "skillDirectorBuilt", "resultText", "shotList", "storyboardFrames", "characterName", "fileName", "mimeType", "resultUrl", "url", "localUrl", "resultItems", "characterPortrait", "characterSheets", "characterSheetVariants", "characterCustomSheets", "customCharacterSheet", "useCustomCharacterSheet", "compiledCharacterSheetUrl", "characterWardrobes", "characterBaseSheet", "characterBaseVideoSheet", "activeCharacterSheetId", "activeWardrobeId", "transferImages", "storyboardBoardUrl", ...(myNewtFields[node.type] || [])].includes(key)
       ).map(([key, value]) => [key, sanitize(value)]))
     })),
     edges: edges.map(({ from, to }) => ({ from, to }))

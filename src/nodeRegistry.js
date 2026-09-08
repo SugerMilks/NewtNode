@@ -1,7 +1,9 @@
+import { normalizeNodePreferences } from "./nodePreferences.js";
+
 export const nodeTypeDefinitions = [
+  { type: "myNewt", label: "Newt" },
   { type: "plainText", label: "Text" },
   { type: "text", label: "Smart Text" },
-  { type: "myNewt", label: "My Newt" },
   { type: "imageModel", label: "Image Model" },
   { type: "videoModel", label: "Video Model" },
   { type: "preview", label: "Preview" },
@@ -20,6 +22,11 @@ export const nodeTypeDefinitions = [
 ];
 
 const nodeTypeMap = new Map(nodeTypeDefinitions.map((definition) => [definition.type, definition]));
+
+export function nodeMenuEntries(catalog, preferences) {
+  const { myNewt } = normalizeNodePreferences(preferences);
+  return catalog.filter((entry) => entry.type !== "myNewt" || myNewt);
+}
 
 export function nodeTypeDefinition(type) {
   return nodeTypeMap.get(type) || null;

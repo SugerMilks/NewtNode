@@ -1359,6 +1359,14 @@
 .my-newt-message.error { color: #ffa38b; }
 .my-newt-body .my-newt-note textarea { min-height: 48px; height: 48px; max-height: 160px; }
 .my-newt-settings { display: flex; flex-direction: column; gap: 10px; padding: 10px 0; }
+.my-newt-review-settings { display: flex; flex-direction: column; gap: 10px; padding: 10px 0 0; }
+.my-newt-review-disabled { opacity: 0.5; }
+.my-newt-settings label.my-newt-favorite-model { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
+.my-newt-favorite-model select { width: 100%; min-width: 0; box-sizing: border-box; }
+.my-newt-approved { display: grid; gap: 6px; padding-bottom: 10px; border-bottom: 1px solid #454027; min-width: 0; font-size: 12px; }
+.my-newt-approved-row { display: grid; grid-template-columns: 15px minmax(0, 1fr) 36px; align-items: center; gap: 8px; min-width: 0; }
+.my-newt-approved-row > span { overflow-wrap: anywhere; }
+.my-newt-approved-row > svg { color: #a8d2a3; }
 .my-newt-settings label { display: flex; align-items: center; gap: 8px; font-size: 12px; }
 .my-newt-settings input[type=checkbox] { width: 15px; height: 15px; accent-color: #ddc631; margin: 0; }
 .my-newt-settings input[type=number] { width: 88px; height: 30px; box-sizing: border-box; margin-left: auto; padding: 5px 7px; background: #171717; color: #eee; border: 1px solid #3b3b3b; border-radius: 4px; font: inherit; }
@@ -7919,3 +7927,12 @@ video.newtnode-video-fallback {
     grid-template-columns: 1fr;
   }
 }
+.my-newt-remote-settings { display: grid; gap: 8px; min-width: 0; padding: 8px 0 12px; border-bottom: 1px solid #444; }
+.my-newt-remote-settings strong, .my-newt-remote-settings a, .my-newt-remote-actions { display: flex; align-items: center; gap: 8px; }
+.my-newt-remote-settings input { width: 100%; min-width: 0; }
+.my-newt-remote-settings button { display: inline-flex; justify-content: center; align-items: center; gap: 6px; min-height: 34px; }
+.my-newt-remote-settings a { color: #e6d337; overflow-wrap: anywhere; }
+.my-newt-remote-settings label { min-width: 0; }
+.my-newt-pair-code { font-family: monospace; overflow-wrap: anywhere; user-select: all; }
+.my-newt-remote-device { display: grid; grid-template-columns: 16px minmax(0, 1fr) 34px; align-items: center; gap: 8px; }
+.my-newt-remote-device span { overflow-wrap: anywhere; }

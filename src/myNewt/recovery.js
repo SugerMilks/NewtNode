@@ -1,6 +1,6 @@
 import { resetCopiedNodeRuntime } from "../workflowState.js";
 
-export function myNewtCheckpoint(graph, name = "Before My Newt task") {
+export function myNewtCheckpoint(graph, name = "Before Newt task") {
   const clean = (value) => {
     if (Array.isArray(value)) return value.map(clean);
     if (!value || typeof value !== "object") return value;

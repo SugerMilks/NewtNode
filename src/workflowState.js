@@ -13,7 +13,7 @@ export function workflowStateFingerprint(state = {}) {
   return JSON.stringify({
     nodes: (state.nodes || []).map((node) => {
       const copy = cloneNode(node);
-      // My Newt progress is journaled separately; finishing a Save must not dirty the canvas.
+      // Newt progress is journaled separately; finishing a Save must not dirty the canvas.
       if (node.type === "myNewt") delete copy.data.myNewtSummary;
       return copy;
     }),
@@ -38,7 +38,10 @@ export function createNodeId(type, suffix = "") {
 
 export function resetCopiedNodeRuntime(data = {}) {
   const next = clearStaleRunningState({ data }).data;
-  return data.jobId ? { ...next, jobId: "", myNewtSummary: null } : next;
+  const copy = { ...next };
+  delete copy.myNewtProtection;
+  delete copy.myNewtRunRecords;
+  return data.jobId ? { ...copy, jobId: "", myNewtSummary: null } : copy;
 }
 
 export function sameStringList(first = [], second = []) {

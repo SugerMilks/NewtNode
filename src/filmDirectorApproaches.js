@@ -85,8 +85,12 @@ export function filmDirectorSceneTreatment(approach = "cinematic") {
 export function filmDirectorMusicVideoError({ approach, audioInputs = [], videoModel = "" } = {}) {
   if (!filmDirectorUsesMusic(approach, audioInputs)) return "";
   if (!audioInputs.some((item) => typeof item?.url === "string" && item.url.trim())) return "Connect an audio file to the Director Music input before using Music Video.";
-  if (videoModel && !["Seedance 2.0", "Seedance 2.5", "MiniMax H3"].includes(videoModel)) return "Director music requires Seedance 2.0, Seedance 2.5 or MiniMax H3. Kling does not accept reference audio files.";
+  if (videoModel && !filmDirectorVideoModelSupportsMusic(videoModel)) return "Director music requires Seedance 2.0, Seedance 2.5 or MiniMax H3. Kling does not accept reference audio files.";
   return "";
+}
+
+export function filmDirectorVideoModelSupportsMusic(model) {
+  return ["Seedance 2.0", "Seedance 2.5", "MiniMax H3"].includes(model);
 }
 
 export function filmDirectorSupportsMusic(approach) {

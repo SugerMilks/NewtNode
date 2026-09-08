@@ -1,3 +1,5 @@
+import { currentOpenAiRates } from "../pricingCatalog.js";
+
 export const myNewtIntelligenceLevels = Object.freeze([
   { value: "low", label: "Low", maxOutputTokens: 4000 },
   { value: "medium", label: "Medium", maxOutputTokens: 6000 },
@@ -34,10 +36,11 @@ export function myNewtReasoningProfile(settings = {}, { brief = "", escalated = 
     : { model: "gpt-6-astra", effort: effort.value, maxOutputTokens: effort.maxOutputTokens, reason: escalated ? "Creative reasoning required" : "Creative or complex task" };
 }
 
-export function myNewtTokenCost(model, usage, rates = myNewtModelRates) {
-  const rate = rates[String(model || "").replace(/^openai\//, "")];
+export function myNewtTokenCost(model, usage, rates = currentOpenAiRates(myNewtModelRates)) {
+  let rate = rates[String(model || "").replace(/^openai\//, "")];
   if (!rate || !usage || !Number.isFinite(Number(usage.input_tokens ?? usage.prompt_tokens)) || !Number.isFinite(Number(usage.output_tokens ?? usage.completion_tokens))) return null;
   const input = Math.max(0, Number(usage.input_tokens ?? usage.prompt_tokens));
+  if (input > 272000 && rate.long) rate = rate.long;
   const output = Math.max(0, Number(usage.output_tokens ?? usage.completion_tokens));
   const details = usage.input_tokens_details || usage.prompt_tokens_details || {};
   const cached = Math.min(input, Math.max(0, Number(details.cached_tokens) || 0));
@@ -45,8 +48,9 @@ export function myNewtTokenCost(model, usage, rates = myNewtModelRates) {
   return ((input - cached - writes) * rate.input + cached * rate.cached + writes * rate.writes + output * rate.output) / 1e6;
 }
 
-export function myNewtReasoningAllowance(profile, inputBytes, inspection = false, rates = myNewtModelRates) {
-  const rate = rates[profile.model];
+export function myNewtReasoningAllowance(profile, inputBytes, inspection = false, rates = currentOpenAiRates(myNewtModelRates)) {
+  const base = rates[profile.model];
+  const rate = inputBytes > 272000 && base?.long ? base.long : base;
   if (!rate) return null;
   // Bytes conservatively bound text tokens. Media inspection has a separate allowance.
   return inputBytes * Math.max(rate.input, rate.writes) / 1e6 + profile.maxOutputTokens * rate.output / 1e6 + (inspection ? 0.5 : 0);

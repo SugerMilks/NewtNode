@@ -6,7 +6,7 @@ export function MyNewtVoiceButton({ voice, disabled }) {
   const requesting = voice.phase === "requesting";
   return <button type="button"
     className={`my-newt-icon my-newt-mic ${voice.phase === "recording" ? "is-recording" : ""}`}
-    aria-label={recording ? "Stop listening to My Newt" : requesting ? "Cancel microphone request" : "Speak to My Newt"}
+    aria-label={recording ? "Stop listening to Newt" : requesting ? "Cancel microphone request" : "Speak to Newt"}
     aria-pressed={recording || requesting}
     title="Click to speak; click again to finish. Stops after 3 seconds of silence (8 seconds if you have not spoken). End with 'Start task', 'Run task', or 'Begin task' to submit; otherwise your words stay as a draft. 'Send note' submits additional direction; 'Continue task' starts a follow-up. Approvals remain manual. Esc cancels. Uses your enabled OpenAI key (estimated $0.0045/minute, separate from the task budget; two-minute limit). Audio is sent to OpenAI and is not saved in your project."
     disabled={disabled || processing}

@@ -1,7 +1,7 @@
 const scopes = new Map();
 
 export async function withMyNewtRequestScope(nodeId, relay, action) {
-  if (scopes.has(nodeId)) throw new Error("My Newt is already working on this node.");
+  if (scopes.has(nodeId)) throw new Error("Newt is already working on this node.");
   let sequence = 0;
   scopes.set(nodeId, (path, body) => relay(path, body, ++sequence));
   try { return await action(); } finally { scopes.delete(nodeId); }

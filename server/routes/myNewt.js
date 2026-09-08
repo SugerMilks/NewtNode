@@ -17,7 +17,7 @@ export function registerMyNewtRoutes(app, dependencies) {
       }
       const result = await (method === "start" ? service.start(body) : service[method](req.params.id, body));
       res.json(result);
-    } catch (error) { res.status(400).json({ error: error.message || "My Newt request failed." }); }
+    } catch (error) { res.status(400).json({ error: error.message || "Newt request failed." }); }
   };
   app.post("/api/my-newt/jobs", wrap("start"));
   app.post("/api/my-newt/history", async (req, res) => {

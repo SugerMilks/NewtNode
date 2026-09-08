@@ -151,18 +151,43 @@ async function requireSystemPresetBackend() {
 }
 
 let myNewtBackendCheckedAt = 0;
-async function requireMyNewtBackend(force = false) {
-  if (!force && Date.now() - myNewtBackendCheckedAt < 30000) return;
-  const health = await getJson("/api/health", "Could not check My Newt backend.");
-  if (!health?.routes?.myNewtPlanning || !health?.routes?.myNewtLocalActions || !health?.routes?.myNewtBackgroundActions) throw new Error("Restart the NewtNode backend to activate My Newt background actions and cost controls. No new task was started.");
+let myNewtAutoReviewAvailable = false;
+let myNewtFavoriteModelsAvailable = false;
+async function requireMyNewtBackend(force = false, autoReview = false, favoriteModels = false) {
+  if (!force && (!autoReview || myNewtAutoReviewAvailable) && (!favoriteModels || myNewtFavoriteModelsAvailable) && Date.now() - myNewtBackendCheckedAt < 30000) return;
+  const health = await getJson("/api/health", "Could not check Newt backend.");
+  if (!health?.routes?.myNewtPlanning || !health?.routes?.myNewtLocalActions || !health?.routes?.myNewtBackgroundActions || !health?.routes?.myNewtApprovedWork) throw new Error("Restart the NewtNode backend to activate Newt approved-work protection and run reuse. No new task was started.");
+  myNewtAutoReviewAvailable = health.routes.myNewtAutoReview === true;
+  if (autoReview && !myNewtAutoReviewAvailable) throw new Error("Restart the NewtNode backend to activate Auto Review. No task or settings were submitted.");
+  myNewtFavoriteModelsAvailable = health.routes.myNewtFavoriteModels === true;
+  if (favoriteModels && !myNewtFavoriteModelsAvailable) throw new Error("Restart the NewtNode backend to activate favorite model preferences. No task or settings were submitted.");
   myNewtBackendCheckedAt = Date.now();
 }
 async function postMyNewt(path, body, message) {
-  await requireMyNewtBackend(path === "/api/my-newt/jobs" || path.endsWith("/control"));
+  await requireMyNewtBackend(path === "/api/my-newt/jobs" || path.endsWith("/control"), body.settings?.autoReview === true, Boolean(body.settings?.favoriteImageModel || body.settings?.favoriteVideoModel));
   return postJson(path, body, message);
 }
 
+async function postRemoteMyNewtOnce(path, body) {
+  await requireMyNewtBackend(true);
+  const response = await fetch(localApiFetchUrl(path), { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body), signal: AbortSignal.timeout(20000) });
+  return ensureOk(response, await readJsonResponse(response, "Remote Newt command"), "The remote command was not accepted.");
+}
+
 export const myNewtApi = {
+  startRemote: (body) => postRemoteMyNewtOnce("/api/my-newt/jobs", body),
+  controlRemote: (id, body) => postRemoteMyNewtOnce(`/api/my-newt/jobs/${encodeURIComponent(id)}/control`, body),
+  async remote(action, body) {
+    // Home credentials stay in memory; never replay remote-control requests on another API port.
+    const response = await fetch(localApiFetchUrl(`/api/my-newt/remote/${action}`), {
+      method: "POST", headers: { "Content-Type": "application/json", "X-Newt-Local": "1" },
+      body: JSON.stringify(body), signal: AbortSignal.timeout(10000)
+    });
+    const data = await readJsonResponse(response, "Newt Remote");
+    if (!response.ok) throw Object.assign(new Error(data?.error || "Could not update remote access."), { status: response.status });
+    return data;
+  },
   async transcribe(audio, context, signal) {
     const form = new FormData();
     form.append("audio", audio, "voice-recording");
@@ -173,15 +198,15 @@ export const myNewtApi = {
     });
     return ensureOk(response, await readJsonResponse(response, "Voice transcription"), "Voice transcription failed.");
   },
-  start: (body) => postMyNewt("/api/my-newt/jobs", body, "Could not start My Newt."),
-  history: (body) => postJson("/api/my-newt/history", body, "Could not load My Newt history."),
+  start: (body) => postMyNewt("/api/my-newt/jobs", body, "Could not start Newt."),
+  history: (body) => postJson("/api/my-newt/history", body, "Could not load Newt history."),
   prepare: (id, body) => postJson(`/api/my-newt/jobs/${encodeURIComponent(id)}/prepare`, body, "Could not prepare run approval."),
-  recover: (id, body) => postJson(`/api/my-newt/jobs/${encodeURIComponent(id)}/recover`, body, "Could not restore My Newt checkpoint."),
-  sync: (id, body) => postMyNewt(`/api/my-newt/jobs/${encodeURIComponent(id)}/sync`, body, "Could not sync My Newt."),
-  control: (id, body) => (["pause", "stop"].includes(body.action) ? postJson : postMyNewt)(`/api/my-newt/jobs/${encodeURIComponent(id)}/control`, body, "Could not update My Newt."),
-  claim: (id, body) => postMyNewt(`/api/my-newt/jobs/${encodeURIComponent(id)}/claim`, body, "Could not claim My Newt action."),
-  complete: (id, body) => postJson(`/api/my-newt/jobs/${encodeURIComponent(id)}/complete`, body, "Could not finish My Newt action."),
-  request: (id, body) => postJson(`/api/my-newt/jobs/${encodeURIComponent(id)}/request`, body, "My Newt request failed.")
+  recover: (id, body) => postJson(`/api/my-newt/jobs/${encodeURIComponent(id)}/recover`, body, "Could not restore Newt checkpoint."),
+  sync: (id, body) => postMyNewt(`/api/my-newt/jobs/${encodeURIComponent(id)}/sync`, body, "Could not sync Newt."),
+  control: (id, body) => (["pause", "stop"].includes(body.action) ? postJson : postMyNewt)(`/api/my-newt/jobs/${encodeURIComponent(id)}/control`, body, "Could not update Newt."),
+  claim: (id, body) => postMyNewt(`/api/my-newt/jobs/${encodeURIComponent(id)}/claim`, body, "Could not claim Newt action."),
+  complete: (id, body) => postJson(`/api/my-newt/jobs/${encodeURIComponent(id)}/complete`, body, "Could not finish Newt action."),
+  request: (id, body) => postJson(`/api/my-newt/jobs/${encodeURIComponent(id)}/request`, body, "Newt request failed.")
 };
 
 export async function deleteJson(path, fallbackMessage) {
@@ -334,6 +359,22 @@ export const settingsApi = {
 
   restart() {
     return postJson("/api/settings/restart", {}, "Could not restart NewtNode.");
+  }
+};
+
+export const pricingApi = {
+  load() { return getJson("/api/pricing", "Could not load pricing status."); },
+  async refresh() {
+    const { response, data } = await fetchJsonApi("/api/pricing/refresh", {
+      method: "POST", headers: { "Content-Type": "application/json", "X-Newt-Local": "1" }, body: "{}"
+    }, "Pricing refresh");
+    return ensureOk(response, data, "Could not refresh pricing.");
+  },
+  async setEnabled(enabled) {
+    const { response, data } = await fetchJsonApi("/api/pricing/settings", {
+      method: "POST", headers: { "Content-Type": "application/json", "X-Newt-Local": "1" }, body: JSON.stringify({ enabled })
+    }, "Pricing settings");
+    return ensureOk(response, data, "Could not save pricing settings.");
   }
 };
 

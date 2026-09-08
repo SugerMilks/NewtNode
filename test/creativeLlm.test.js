@@ -10,6 +10,7 @@ import { myNewtTokenCost } from "../src/myNewt/intelligence.js";
 import { storyboardDirectorExpansionInstruction } from "../src/storyboardShotExpansion.js";
 import { storyboardPlanIssues } from "../src/storyboardPlanValidation.js";
 import { myNewtRequestEstimate } from "../server/my-newt.js";
+import { processSmartText } from "../server/smart-text.js";
 
 const route = "film-director-style";
 const output = JSON.stringify({ styleDirection: "Muted color, motivated light, restrained performances." });
@@ -168,6 +169,33 @@ test("visual analysis uses full image content, image labels and the Astra schema
   } });
   const result = await api.runMediaDescriptionLlm({ ...request, route: "film-director-visual-analysis", inputs: [{ url: "/outputs/full.png", label: "@Hero" }] });
   assert.match(result.text, /@Hero/);
+});
+
+test("Smart Text sends images and the user's brief together through Fal and direct OpenAI", async () => {
+  for (const provider of ["openai", "fal"]) {
+    const calls = [];
+    const api = adapterFixture({ provider,
+      data: provider === "fal" ? { output: "@Park in soft light", usage: { cost: 0.02 } } : { output_text: "@Park in soft light", usage: { input_tokens: 1000, output_tokens: 100 } },
+      onRequest: (url, body) => calls.push({ url, body }) });
+    const result = await processSmartText({ text: "Keep @Park but warm the light", imageInputs: [{ url: "/outputs/full.png", label: "@Park" }], generationContext: { target: "image" } }, {
+      ...api, falTextModel: "openai/gpt-5.6-luna", falVisionTextModel: "openai/gpt-5.6-luna", openAiTextModel: "gpt-5.6-luna"
+    });
+    assert.equal(calls.length, 1);
+    const { url, body } = calls[0];
+    if (provider === "fal") {
+      assert.equal(url, "openrouter/router/vision"); assert.equal(body.model, "openai/gpt-5.6-luna");
+      assert.deepEqual(body.image_urls, ["/outputs/full.png"]);
+      assert.match(body.prompt, /Keep @Park but warm the light/);
+      assert.match(body.system_prompt, /one still composition/);
+    } else {
+      assert.equal(body.model, "gpt-5.6-luna");
+      assert.match(body.instructions, /one still composition/);
+      assert.match(body.input[0].content[0].text, /Keep @Park but warm the light/);
+      assert.equal(Buffer.from(body.input[0].content[2].image_url.split(",")[1], "base64").toString(), "full-resolution-reference");
+    }
+    assert.equal(result.text, "@Park in soft light"); assert.deepEqual(result.helperUsages, []);
+    assert.ok(result.usage.cost > 0);
+  }
 });
 
 test("Storyboard planning passes its verified Astra contract and rejects collapsed Director moves", async () => {

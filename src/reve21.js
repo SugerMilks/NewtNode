@@ -1,3 +1,5 @@
+import { applyPricingQuote } from "./pricingCatalog.js";
+
 export const reve21FalTextEndpoint = "reve/2.1/text-to-image";
 export const reve21FalEditEndpoint = "reve/2.1/edit";
 export const reve21FalRemixEndpoint = "reve/2.1/remix";
@@ -41,8 +43,8 @@ export function reve21EndpointForReferenceCount(referenceCount) {
   return reve21FalRemixEndpoint;
 }
 
-export function estimateReve21ImageCost({ endpoint } = {}) {
-  return {
+export function estimateReve21ImageCost({ endpoint = reve21FalTextEndpoint } = {}) {
+  return applyPricingQuote({
     amountUsd: reve21CostPerImage,
     currency: "USD",
     unitRateUsd: reve21CostPerImage,
@@ -53,7 +55,7 @@ export function estimateReve21ImageCost({ endpoint } = {}) {
     pricingBasis: "REVE 2.1 fal.ai fixed per-image price for generation, edit, and remix",
     pricingSource: "fal-pricing-api-2026-08-02",
     endpoint: String(endpoint || "")
-  };
+  }, "fal", endpoint);
 }
 
 export function buildReve21FalRequest({ prompt, imageUrls = [], imageLabels = [], aspectRatio = "16:9" } = {}) {

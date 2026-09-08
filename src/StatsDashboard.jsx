@@ -10,101 +10,7 @@ import {
   TrendingUp
 } from "lucide-react";
 import { statsApi } from "./api/newtApi.js";
-import { estimateOpenAiImage2Cost, openAiImage2Costs, openAiImage2Quality } from "./openAiImage2.js";
-import { estimateKreaSeedanceCost } from "./kreaSeedance.js";
-import { nanoBanana2Costs, normalizeNanoBanana2Resolution } from "./nanoBanana2.js";
-import { reve21CostPerImage } from "./reve21.js";
-import { estimateImageRunCost, estimateVideoRunCost } from "./generationPricing.js";
-
-const defaultPricing = {
-  seedance: {
-    standardCostPerSecond: 0.3024,
-    fastCostPerSecond: 0.2419,
-    standardCostPerThousandTokens: 0.014,
-    fastCostPerThousandTokens: 0.0112,
-    billingFps: 24
-  },
-  nanoBananaPro: {
-    cost1K2K: 0.15,
-    cost4K: 0.3
-  },
-  nanoBanana2: {
-    cost0_5K: nanoBanana2Costs["0.5K"],
-    cost1K: nanoBanana2Costs["1K"],
-    cost2K: nanoBanana2Costs["2K"],
-    cost4K: nanoBanana2Costs["4K"]
-  },
-  minimaxH3: {
-    costPerSecond480P: 0.05,
-    costPerSecond768P: 0.08,
-    costPerSecond2K: 0.13,
-    costPerSecond4K: 0.16,
-    extraReferenceImageCost: 0.08
-  },
-  openAiImage2: {
-    quality: openAiImage2Quality,
-    costs: openAiImage2Costs
-  },
-  krea2Large: {
-    cost: 0.06,
-    styleReferenceCost: 0.065
-  },
-  reve21: {
-    costPerImage: reve21CostPerImage
-  },
-  hunyuan3DPro: {
-    baseCost: 0.375,
-    addOnCost: 0.15
-  },
-  textProcessing: {
-    falRequestCost: 0.001,
-    falVisionUnitCost: 0.01,
-    falVideoUnitCost: 0.01
-  },
-  utility: {
-    wanFunControl: {
-      costPerSecond: 0.1
-    },
-    voidVideoInpainting: {
-      baseCost: 0.05,
-      pass2Cost: 0.05,
-      sam3QuadMaskCost: 0.05
-    },
-    sam3Image: {
-      costPerRequest: 0.005
-    },
-    sam3Video: {
-      costPer16Frames: 0.005
-    },
-    bytedanceUpscaler: {
-      costPerSecond1080p: 0.0072,
-      costPerSecond2K: 0.0144,
-      costPerSecond4K: 0.0288,
-      proMultiplier: 10,
-      fps60Multiplier: 2
-    },
-    topazUpscaler: {
-      costPerSecondUpTo720p: 0.01,
-      costPerSecond720pTo1080p: 0.02,
-      costPerSecondAbove1080p: 0.08,
-      fps60Multiplier: 2,
-      gaia2Multiplier: 0.5
-    },
-    dwpose: {
-      costPerComputeSecond: 0.0006
-    },
-    depthAnything: {
-      costPerComputeSecond: 0
-    },
-    birefnet: {
-      costPerComputeSecond: 0
-    },
-    patina: {
-      baseCost: 0.01,
-      mapCostPerMegapixel: 0.01
-    }
-  }
-};
+import { recordedCostAmount } from "./pricingCatalog.js";
 
 const mediaColors = {
   text: "#f0c83b",
@@ -115,7 +21,6 @@ const mediaColors = {
 
 export default function StatsDashboard() {
   const [history, setHistory] = React.useState([]);
-  const [pricing, setPricing] = React.useState(defaultPricing);
   const [status, setStatus] = React.useState("loading");
   const [lastUpdated, setLastUpdated] = React.useState(null);
 
@@ -125,14 +30,13 @@ export default function StatsDashboard() {
     return () => window.clearInterval(interval);
   }, []);
 
-  const stats = React.useMemo(() => buildUsageStats(history, pricing), [history, pricing]);
+  const stats = React.useMemo(() => buildUsageStats(history), [history]);
 
   async function refreshStats() {
     try {
       setStatus((current) => (current === "loading" ? "loading" : "refreshing"));
       const data = await statsApi.load();
       setHistory(Array.isArray(data.history) ? data.history : []);
-      setPricing(data.pricing || defaultPricing);
       setStatus("ready");
       setLastUpdated(new Date());
     } catch {
@@ -383,10 +287,10 @@ function RecentRuns({ rows }) {
   );
 }
 
-function buildUsageStats(history, pricing) {
+function buildUsageStats(history) {
   const days = makeThirtyDays();
   const dayMap = new Map(days.map((day) => [day.key, day]));
-  const normalized = history.map((item) => normalizeUsageItem(item, pricing)).filter((item) => item.inWindow);
+  const normalized = history.map((item) => normalizeUsageItem(item)).filter((item) => item.inWindow);
   const modelMap = new Map();
   const projectMap = new Map();
 
@@ -442,14 +346,14 @@ function buildUsageStats(history, pricing) {
   };
 }
 
-function normalizeUsageItem(item, pricing) {
+function normalizeUsageItem(item) {
   const date = new Date(item.createdAt || Date.now());
   const mediaType = item.mediaType || (item.localModel ? "model3d" : item.localImage ? "image" : "video");
   const settings = item.settings || {};
   const modelName = item.modelName || inferModelName(item, mediaType);
   const projectId = item.project?.id || (mediaType === "image" ? "image" : mediaType === "text" ? "text" : mediaType === "model3d" ? "model3d" : "video");
   const projectName = item.project?.name || (mediaType === "image" ? "Image" : mediaType === "text" ? "Text" : mediaType === "model3d" ? "3D" : "Video");
-  const cost = resolvedItemCost(item, mediaType, pricing);
+  const cost = recordedCostAmount(item.cost);
   const hasCostEstimate = Number.isFinite(cost);
   const durationSeconds = mediaType === "video" ? durationToSeconds(settings.duration) : 0;
   const cutoff = startOfDay(new Date());
@@ -471,372 +375,6 @@ function normalizeUsageItem(item, pricing) {
     durationSeconds,
     isFast: settings.speed === "fast" || String(item.endpoint || "").includes("/fast/")
   };
-}
-
-function resolvedItemCost(item, mediaType, pricing) {
-  const storedCost = numericCostAmount(item.cost);
-  const estimatedCost = estimateItemCost(item, mediaType, pricing);
-  const trustedSource = item.cost?.pricingSource && item.cost.pricingSource !== "configured-pricing-v1";
-
-  if (storedCost !== null && trustedSource) return storedCost;
-  if (estimatedCost !== null) return estimatedCost;
-  return storedCost;
-}
-
-function estimateItemCost(item, mediaType, pricing) {
-  const settings = item.settings || {};
-  const modelKey = [item.modelName, settings.model, item.endpoint, item.mode].filter(Boolean).join(" ").toLowerCase();
-
-  if (mediaType === "image") {
-    const currentImageModel = currentImageModelName(modelKey);
-    if (currentImageModel) {
-      return estimateImageRunCost({
-        model: currentImageModel,
-        resolution: settings.resolution,
-        aspectRatio: settings.aspectRatio,
-        quality: settings.quality,
-        referenceCount: Number(settings.imagePromptCount || settings.imageStyleReferenceCount || 0),
-        provider: usageProvider(item)
-      });
-    }
-
-    if (modelKey.includes("reve")) {
-      return pricing.reve21?.costPerImage ?? defaultPricing.reve21.costPerImage;
-    }
-
-    if (modelKey.includes("qwen")) {
-      return estimateMegapixelCost(item.remoteImage, 0.035);
-    }
-
-    if (modelKey.includes("sam 3") || modelKey.includes("sam-3")) {
-      return pricing.utility?.sam3Image?.costPerRequest ?? defaultPricing.utility.sam3Image.costPerRequest;
-    }
-
-    if (modelKey.includes("depth anything") || modelKey.includes("depth-anything") || modelKey.includes("birefnet")) {
-      return 0;
-    }
-
-    if (modelKey.includes("patina")) {
-      return estimatePatinaStatsCost(item, pricing);
-    }
-
-    if (modelKey.includes("dwpose")) {
-      return null;
-    }
-
-    if (modelKey.includes("openai")) {
-      return estimateOpenAiImage2Cost({
-        resolution: settings.resolution,
-        size: settings.imageSize,
-        quality: settings.quality || pricing.openAiImage2?.quality || defaultPricing.openAiImage2.quality,
-        edit: String(item.endpoint || "").includes("/edit"),
-        pricing: pricing.openAiImage2?.costs || defaultPricing.openAiImage2.costs
-      });
-    }
-
-    if (modelKey.includes("krea") && modelKey.includes("large")) {
-      const kreaPricing = pricing.krea2Large || defaultPricing.krea2Large;
-      return Number(settings.imageStyleReferenceCount || 0) > 0
-        ? kreaPricing.styleReferenceCost
-        : kreaPricing.cost;
-    }
-
-    if (modelKey.includes("nano banana 2") || modelKey.includes("nano-banana-2") || modelKey.includes("gemini 3.1 flash image")) {
-      const nano2Pricing = pricing.nanoBanana2 || defaultPricing.nanoBanana2;
-      const resolutionKey = normalizeNanoBanana2Resolution(settings.resolution).replace(".", "_");
-      return nano2Pricing[`cost${resolutionKey}`] ?? defaultPricing.nanoBanana2[`cost${resolutionKey}`];
-    }
-
-    if (modelKey.includes("nano") || modelKey.includes("banana") || modelKey.includes("gemini")) {
-      return String(settings.resolution || "").toUpperCase().includes("4K")
-        ? pricing.nanoBananaPro.cost4K
-        : pricing.nanoBananaPro.cost1K2K;
-    }
-
-    return null;
-  }
-
-  if (mediaType === "text") {
-    const textPricing = pricing.textProcessing || defaultPricing.textProcessing;
-    if (String(item.provider || settings.provider || "").toLowerCase() !== "fal") return null;
-
-    const usageAmount = usageCost(item.usage);
-    if (usageAmount !== null) return usageAmount;
-
-    return (
-      textPricing.falRequestCost +
-      (Number(settings.imageInputCount || 0) > 0 ? textPricing.falVisionUnitCost : 0) +
-      (Number(settings.videoInputCount || 0) > 0 ? textPricing.falVideoUnitCost : 0)
-    );
-  }
-
-  if (mediaType === "model3d") {
-    if (modelKey.includes("hunyuan") || modelKey.includes("3d")) {
-      return estimateHunyuan3DStatsCost(settings, pricing);
-    }
-    return null;
-  }
-
-  const currentVideoModel = currentVideoModelName(modelKey);
-  if (currentVideoModel) {
-    return estimateVideoRunCost({
-      model: currentVideoModel,
-      duration: settings.duration || item.cost?.durationSeconds || item.cost?.units,
-      resolution: settings.resolution || item.cost?.resolution,
-      aspectRatio: settings.aspectRatio || item.cost?.aspectRatio,
-      generateAudio: settings.generateAudio !== false,
-      hasVideoReference: Number(settings.referenceVideoCount || 0) > 0,
-      referenceImageCount: Number(settings.referenceImageCount || 0),
-      provider: usageProvider(item)
-    });
-  }
-
-  if (modelKey.includes("seedance") || modelKey.includes("bytedance/seedance")) {
-    return estimateSeedanceStatsCost(item, settings, pricing);
-  }
-
-  if (modelKey.includes("minimax") && modelKey.includes("h3")) {
-    const modelPricing = pricing.minimaxH3 || defaultPricing.minimaxH3;
-    const resolution = String(settings.resolution || "2K").toUpperCase();
-    const rate = modelPricing[`costPerSecond${resolution}`] ?? defaultPricing.minimaxH3[`costPerSecond${resolution}`];
-    const extraImages = Math.max(0, Number(settings.referenceImageCount || 0) - 5);
-    return durationToSeconds(settings.duration) * rate + extraImages * modelPricing.extraReferenceImageCost;
-  }
-
-  if (modelKey.includes("wan-fun-control") || modelKey.includes("wan fun control")) {
-    const utilityPricing = pricing.utility?.wanFunControl || defaultPricing.utility.wanFunControl;
-    const billingFrames = settings.matchInputNumFrames === false ? Number(settings.numFrames || 81) : 81;
-    return (billingFrames / 16) * utilityPricing.costPerSecond;
-  }
-
-  if (modelKey.includes("void") || modelKey.includes("video inpainting")) {
-    return estimateVoidStatsCost(settings, pricing);
-  }
-
-  if (modelKey.includes("bytedance") && modelKey.includes("upscal")) {
-    return estimateBytedanceUpscalerStatsCost(item, settings, pricing);
-  }
-
-  if (modelKey.includes("topaz")) {
-    return estimateTopazUpscalerStatsCost(item, settings, pricing);
-  }
-
-  if (modelKey.includes("sam 3") || modelKey.includes("sam-3")) {
-    return estimateSam3VideoStatsCost(item, settings, pricing);
-  }
-
-  if (modelKey.includes("birefnet")) {
-    return 0;
-  }
-
-  return null;
-}
-
-function numericCostAmount(cost) {
-  if (!cost || cost.amountUsd === null || cost.amountUsd === undefined || cost.amountUsd === "") return null;
-  const amount = Number(cost.amountUsd);
-  return Number.isFinite(amount) ? amount : null;
-}
-
-function currentImageModelName(modelKey) {
-  if (modelKey.includes("openai") && modelKey.includes("image")) return "OpenAI Image 2";
-  if (modelKey.includes("nano banana 2") || modelKey.includes("nano-banana-2") || modelKey.includes("gemini 3.1 flash image")) return "Nano Banana 2";
-  if (modelKey.includes("nano banana pro") || modelKey.includes("nano-banana-pro")) return "Nano Banana Pro";
-  if (modelKey.includes("reve") && modelKey.includes("2.1")) return "REVE 2.1";
-  if (modelKey.includes("krea") && modelKey.includes("large")) return "Krea 2 Large";
-  return "";
-}
-
-function currentVideoModelName(modelKey) {
-  if (modelKey.includes("seedance 2.5") || modelKey.includes("seedance-2.5")) return "Seedance 2.5";
-  if (modelKey.includes("seedance 2.0") || modelKey.includes("seedance-2.0")) return "Seedance 2.0";
-  if (modelKey.includes("kling") && (modelKey.includes("4k") || modelKey.includes("/4k/"))) return "Kling O3 4K";
-  if (modelKey.includes("kling") && (modelKey.includes("o3") || modelKey.includes("3.0"))) return "Kling O3 Pro";
-  if (modelKey.includes("minimax") && modelKey.includes("h3")) return "MiniMax H3";
-  return "";
-}
-
-function usageProvider(item) {
-  const provider = [item.provider, item.cost?.pricingSource, item.endpoint].filter(Boolean).join(" ").toLowerCase();
-  return provider.includes("krea") ? "krea" : "fal";
-}
-
-function usageCost(usage) {
-  if (!usage) return null;
-
-  if (Array.isArray(usage)) {
-    const amounts = usage.map(usageCost).filter((amount) => amount !== null);
-    return amounts.length ? amounts.reduce((sum, amount) => sum + amount, 0) : null;
-  }
-
-  if (typeof usage === "object") {
-    const nestedAmounts = [usage.request, ...(Array.isArray(usage.helpers) ? usage.helpers : [])].map(usageCost).filter((amount) => amount !== null);
-    if (nestedAmounts.length) return nestedAmounts.reduce((sum, amount) => sum + amount, 0);
-
-    for (const key of ["cost", "amountUsd", "amount_usd", "totalCost", "total_cost"]) {
-      const amount = Number(usage[key]);
-      if (usage[key] !== null && usage[key] !== undefined && Number.isFinite(amount)) return amount;
-    }
-  }
-
-  return null;
-}
-
-function estimateMegapixelCost(image, unitRateUsd) {
-  const width = Number(image?.width || 0);
-  const height = Number(image?.height || 0);
-  if (width <= 0 || height <= 0) return null;
-  return (width * height * unitRateUsd) / 1000000;
-}
-
-const seedanceResolutionDimensions = {
-  "480p": {
-    "21:9": [992, 432],
-    "16:9": [864, 496],
-    "4:3": [752, 560],
-    "1:1": [640, 640],
-    "3:4": [560, 752],
-    "9:16": [496, 864]
-  },
-  "720p": {
-    "21:9": [1470, 630],
-    "16:9": [1280, 720],
-    "4:3": [1112, 834],
-    "1:1": [960, 960],
-    "3:4": [834, 1112],
-    "9:16": [720, 1280]
-  },
-  "1080p": {
-    "21:9": [2352, 1008],
-    "16:9": [2048, 1152],
-    "4:3": [1792, 1344],
-    "1:1": [1536, 1536],
-    "3:4": [1344, 1792],
-    "9:16": [1152, 2048]
-  }
-};
-
-function estimateSeedanceStatsCost(item, settings, pricing) {
-  const modelKey = [item.modelName, item.endpoint].filter(Boolean).join(" ").toLowerCase();
-  if (String(item.provider || "").toLowerCase() === "krea" && (modelKey.includes("seedance 2.5") || modelKey.includes("seedance-2.5"))) {
-    return estimateKreaSeedanceCost({
-      modelName: "Seedance 2.5",
-      durationSeconds: durationToSeconds(settings.duration || item.cost?.durationSeconds || item.cost?.units),
-      resolution: settings.resolution || item.cost?.resolution,
-      hasVideoReference: Number(settings.referenceVideoCount || 0) > 0
-    }).amountUsd;
-  }
-
-  const seedancePricing = pricing.seedance || defaultPricing.seedance;
-  const isFast = settings.speed === "fast" || String(item.endpoint || "").includes("/fast/");
-  const fallbackTokenRate =
-    isFast && seedancePricing.fastCostPerSecond
-      ? seedancePricing.fastCostPerSecond / 21.6
-      : seedancePricing.standardCostPerSecond
-        ? seedancePricing.standardCostPerSecond / 21.6
-        : defaultPricing.seedance.standardCostPerThousandTokens;
-  const unitRate = isFast
-    ? seedancePricing.fastCostPerThousandTokens || fallbackTokenRate
-    : seedancePricing.standardCostPerThousandTokens || fallbackTokenRate;
-  const billingFps = Number(seedancePricing.billingFps || defaultPricing.seedance.billingFps);
-  const durationSeconds = durationToSeconds(settings.duration || item.cost?.durationSeconds || item.cost?.units);
-  const dimensions = seedanceBillingDimensions(settings.resolution || item.cost?.resolution, settings.aspectRatio || item.cost?.aspectRatio);
-  const billableUnits = (dimensions.width * dimensions.height * durationSeconds * billingFps) / 1024 / 1000;
-  return billableUnits * unitRate;
-}
-
-function seedanceBillingDimensions(resolution, aspectRatio) {
-  const normalizedResolution = normalizeChoice(resolution, ["480p", "720p", "1080p"], "720p");
-  const normalizedAspectRatio = normalizeAspectRatio(aspectRatio);
-  const [width, height] =
-    seedanceResolutionDimensions[normalizedResolution]?.[normalizedAspectRatio] ||
-    seedanceResolutionDimensions[normalizedResolution]?.["16:9"] ||
-    seedanceResolutionDimensions["720p"]["16:9"];
-  return { width, height };
-}
-
-function estimatePatinaStatsCost(item, pricing) {
-  const image = item.remoteImage || item.remoteImages?.[0];
-  const width = Number(image?.width || 0);
-  const height = Number(image?.height || 0);
-  if (width <= 0 || height <= 0) return null;
-
-  const utilityPricing = pricing.utility?.patina || defaultPricing.utility.patina;
-  const maps = Array.isArray(item.settings?.maps) ? item.settings.maps : [];
-  const mapCount = Math.max(1, maps.length || Number(item.settings?.mapCount || 0) || 1);
-  const megapixels = (width * height) / 1000000;
-  return utilityPricing.baseCost + megapixels * mapCount * utilityPricing.mapCostPerMegapixel;
-}
-
-function estimateVoidStatsCost(settings, pricing) {
-  const utilityPricing = pricing.utility?.voidVideoInpainting || defaultPricing.utility.voidVideoInpainting;
-  return (
-    utilityPricing.baseCost +
-    (settings.enablePass2Refinement ? utilityPricing.pass2Cost : 0) +
-    (Number(settings.maskVideoCount || 0) > 0 ? 0 : utilityPricing.sam3QuadMaskCost)
-  );
-}
-
-function estimateHunyuan3DStatsCost(settings, pricing) {
-  const modelPricing = pricing.hunyuan3DPro || defaultPricing.hunyuan3DPro;
-  const addOnCount =
-    (settings.enablePbr && settings.generateType !== "Geometry" ? 1 : 0) +
-    (Number(settings.faceCount || 500000) !== 500000 ? 1 : 0) +
-    (Number(settings.inputImageCount || 1) > 1 ? 1 : 0);
-  return modelPricing.baseCost + addOnCount * modelPricing.addOnCost;
-}
-
-function estimateBytedanceUpscalerStatsCost(item, settings, pricing) {
-  const utilityPricing = pricing.utility?.bytedanceUpscaler || defaultPricing.utility.bytedanceUpscaler;
-  const duration = Number(item.remoteVideo?.duration || settings.durationSeconds || item.cost?.durationSeconds || item.cost?.units || 0);
-  if (!Number.isFinite(duration) || duration <= 0) return null;
-  const resolution = String(settings.targetResolution || item.cost?.targetResolution || "1080p").toLowerCase();
-  const baseRate =
-    resolution === "4k"
-      ? utilityPricing.costPerSecond4K
-      : resolution === "2k"
-        ? utilityPricing.costPerSecond2K
-        : utilityPricing.costPerSecond1080p;
-  const fpsMultiplier = String(settings.targetFps || item.cost?.targetFps || "30fps") === "60fps" ? utilityPricing.fps60Multiplier : 1;
-  const tierMultiplier = String(settings.enhancementTier || item.cost?.enhancementTier || "standard") === "pro" ? utilityPricing.proMultiplier : 1;
-  return duration * baseRate * fpsMultiplier * tierMultiplier;
-}
-
-function estimateTopazUpscalerStatsCost(item, settings, pricing) {
-  const utilityPricing = pricing.utility?.topazUpscaler || defaultPricing.utility.topazUpscaler;
-  const duration = Number(item.remoteVideo?.duration || settings.durationSeconds || item.cost?.durationSeconds || item.cost?.units || 0);
-  if (!Number.isFinite(duration) || duration <= 0) return null;
-  const tier = resolveTopazStatsBillingTier(settings.billingResolutionTier || item.cost?.billingResolutionTier, item.remoteVideo);
-  const baseRate =
-    tier === "up-to-720p"
-      ? utilityPricing.costPerSecondUpTo720p
-      : tier === "720p-1080p"
-        ? utilityPricing.costPerSecond720pTo1080p
-        : utilityPricing.costPerSecondAbove1080p;
-  const fpsMultiplier = Number(settings.targetFps || item.cost?.targetFps || 0) >= 60 ? utilityPricing.fps60Multiplier : 1;
-  const modelMultiplier = String(settings.model || item.cost?.model || "").toLowerCase() === "gaia 2" ? utilityPricing.gaia2Multiplier : 1;
-  return duration * baseRate * fpsMultiplier * modelMultiplier;
-}
-
-function resolveTopazStatsBillingTier(value, remoteVideo) {
-  const configured = String(value || "auto");
-  if (["up-to-720p", "720p-1080p", "above-1080p"].includes(configured)) return configured;
-  const width = Number(remoteVideo?.width || remoteVideo?.metadata?.width || 0);
-  const height = Number(remoteVideo?.height || remoteVideo?.metadata?.height || 0);
-  const longSide = Math.max(width, height);
-  const shortSide = Math.min(width, height);
-  if (longSide > 0 && shortSide > 0) {
-    if (longSide <= 1280 && shortSide <= 720) return "up-to-720p";
-    if (longSide <= 1920 && shortSide <= 1080) return "720p-1080p";
-  }
-  return "above-1080p";
-}
-
-function estimateSam3VideoStatsCost(item, settings, pricing) {
-  const utilityPricing = pricing.utility?.sam3Video || defaultPricing.utility.sam3Video;
-  const frames = Number(item.remoteVideo?.num_frames || item.remoteVideo?.numFrames || settings.numFrames || 0);
-  if (!Number.isFinite(frames) || frames <= 0) return null;
-  return Math.ceil(frames / 16) * utilityPricing.costPer16Frames;
 }
 
 function inferModelName(item, mediaType) {
@@ -897,16 +435,6 @@ function durationToSeconds(duration) {
   if (duration === "auto") return 15;
   const match = String(duration || "15").match(/\d+/);
   return Number(match?.[0] || 15);
-}
-
-function normalizeChoice(value, choices, fallback) {
-  const normalized = String(value || fallback);
-  return choices.includes(normalized) ? normalized : fallback;
-}
-
-function normalizeAspectRatio(value) {
-  const normalized = String(value || "16:9").match(/\d+:\d+/)?.[0] || "16:9";
-  return normalizeChoice(normalized, ["auto", "21:9", "16:9", "4:3", "1:1", "3:4", "9:16"], "16:9");
 }
 
 function formatCostLabel(row) {

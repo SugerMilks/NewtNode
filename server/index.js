@@ -23,10 +23,15 @@ import { directoryStats, fileMetadata, readJsonFile, writeJsonAtomic } from "./j
 import { findRemoteHistoryAssetUrl } from "./local-asset-recovery.js";
 import { registerComposerPoseRoutes } from "./routes/composerPoses.js";
 import { registerCoreRoutes } from "./routes/core.js";
+import { PricingRefresh } from "./pricing-refresh.js";
+import { registerPricingRoutes } from "./routes/pricing.js";
+import { configurePricingReader, currentOpenAiRates } from "../src/pricingCatalog.js";
+import { normalizeNodePreferences } from "../src/nodePreferences.js";
 import { registerMyNewtRoutes } from "./routes/myNewt.js";
+import { registerMyNewtRemoteRoutes } from "./my-newt-remote.js";
 import { registerMyNewtVoiceRoutes } from "./routes/myNewtVoice.js";
 import { createMyNewtVoiceTranscriber } from "./my-newt-voice.js";
-import { MY_NEWT_VOICE_MODEL, MY_NEWT_VOICE_COST_PER_MINUTE } from "../src/myNewt/voiceConfig.js";
+import { MY_NEWT_VOICE_MODEL, myNewtVoiceCost } from "../src/myNewt/voiceConfig.js";
 import { registerNewtPresetRoutes } from "./routes/newtPresets.js";
 import { createMyNewtMediaInspector } from "./my-newt-media.js";
 import { myNewtTokenCost, myNewtModelRates } from "../src/myNewt/intelligence.js";
@@ -153,6 +158,8 @@ import {
 } from "../src/kreaApi.js";
 import { storyboardBoardGridForAspect } from "../src/storyboardBoardLayout.js";
 import { resolveSmartTextFalModel, resolveSmartTextOpenAiModel } from "../src/smartTextModel.js";
+import { normalizeSmartTextGenerationContext, smartTextOriginalPrompt } from "../src/smartTextPrompt.js";
+import { processSmartText } from "./smart-text.js";
 import {
   storyboardDirectorExpansionInstruction,
   storyboardDirectorFramePlan
@@ -340,7 +347,6 @@ const storyboardVisionOpenAiModel = process.env.STORYBOARD_VISION_OPENAI_MODEL |
 const reuseDirectorVisualAnalysis = createCreativeAnalysisCache();
 const creativeUsageContext = new AsyncLocalStorage();
 const falVisionTextModel = process.env.FAL_VISION_TEXT_MODEL || "openai/gpt-5.6-luna";
-const falVideoTextModel = process.env.FAL_VIDEO_TEXT_MODEL || "openai/gpt-5.6-luna";
 const sam3SegmentationModelsEnabled = false; // Flip back to true when revisiting SAM 3 segmentation.
 const birefnetModelOptions = ["General Use (Light)", "General Use (Light 2K)", "General Use (Heavy)", "Matting", "Portrait", "General Use (Dynamic)"];
 const birefnetResolutionOptions = ["1024x1024", "2048x2048", "2304x2304"];
@@ -437,6 +443,15 @@ await Promise.all([
 
 await refreshRuntimeConfigFromEnvFile();
 
+const pricingRefresh = new PricingRefresh({
+  filePath: path.join(dataDir, "pricing-catalog.json"),
+  getFalKey: () => process.env.FAL_KEY || "",
+  refreshKeys: refreshRuntimeConfigFromEnvFile
+});
+await pricingRefresh.ready;
+const generationPricingScope = new AsyncLocalStorage();
+configurePricingReader(() => generationPricingScope.getStore() || pricingRefresh.catalog());
+
 const storage = multer.diskStorage({
   destination: (_req, _file, callback) => callback(null, uploadsDir),
   filename: (_req, file, callback) => {
@@ -493,6 +508,10 @@ registerCoreRoutes(app, {
   pullRuntimeUpdate,
   requestServerRestart
 });
+registerPricingRoutes(app, pricingRefresh);
+app.use(["/api/node", "/api/generate", "/api/my-newt/transcribe"], (_req, _res, next) => {
+  generationPricingScope.run(pricingRefresh.catalog(), next);
+});
 
 app.post("/api/system/client-diagnostic", (req, res) => {
   queueClientDiagnostic(req.body);
@@ -522,14 +541,14 @@ registerMyNewtVoiceRoutes(app, {
   transcribe: createMyNewtVoiceTranscriber({ runFfmpeg, probeVideo: probeVideoFile }),
   recordUsage: ({ durationSeconds, amountUsd, projectId, projectName, nodeId }) => appendHistory({
     id: randomUUID(), createdAt: new Date().toISOString(), mediaType: "text", modelName: MY_NEWT_VOICE_MODEL,
-    endpoint: "https://api.openai.com/v1/audio/transcriptions", mode: "My Newt voice dictation", provider: "openai",
-    settings: { durationSeconds }, node: { id: nodeId, title: "My Newt" },
+    endpoint: "https://api.openai.com/v1/audio/transcriptions", mode: "Newt voice dictation", provider: "openai",
+    settings: { durationSeconds }, node: { id: nodeId, title: "Newt" },
     project: { id: projectId, name: projectName || "Node workspace" },
-    cost: { amountUsd, currency: "USD", source: "OpenAI transcription estimate", pricingSource: "openai-transcription-2026-09-04", estimated: true, durationSeconds, costPerMinute: MY_NEWT_VOICE_COST_PER_MINUTE }
+    cost: { amountUsd, currency: "USD", source: "OpenAI transcription estimate", pricingSource: "https://developers.openai.com/api/docs/pricing", estimated: true, durationSeconds, costPerMinute: myNewtVoiceCost(60) }
   })
 });
 
-registerMyNewtRoutes(app, {
+const myNewtService = registerMyNewtRoutes(app, {
   directory: path.join(rootDir, "server", "data", "my-newt"),
   getKey: () => process.env.OPENAI_API_KEY,
   provider: () => process.env.FAL_KEY ? "fal" : process.env.KREA_API_KEY ? "krea" : "fal",
@@ -544,13 +563,32 @@ registerMyNewtRoutes(app, {
   },
   recordUsage: ({ job, usage, amountUsd, profile, model }) => appendHistory({
     id: randomUUID(), createdAt: new Date().toISOString(), mediaType: "text", modelName: model,
-    endpoint: "https://api.openai.com/v1/responses", mode: "My Newt reasoning", usage,
+    endpoint: "https://api.openai.com/v1/responses", mode: "Newt reasoning", usage,
     settings: { reasoningEffort: profile.effort, maxOutputTokens: profile.maxOutputTokens },
-    prompt: job.brief, text: job.message, node: { id: job.nodeId, title: "My Newt" },
+    prompt: job.brief, text: job.message, node: { id: job.nodeId, title: "Newt" },
     project: { id: job.projectId, name: job.snapshot?.projectName || "Node workspace" }, provider: "openai",
     cost: { amountUsd, currency: "USD", source: "OpenAI usage", estimated: true, usage }
   })
 });
+
+await registerMyNewtRemoteRoutes(app, {
+  port: Number(process.env.NEWT_REMOTE_PORT || 3337),
+  trustPath: path.join(dataDir, "my-newt-remote-devices.json"),
+  distDirectory: path.join(rootDir, "dist"),
+  localOrigins: [...new Set([Number(process.env.VITE_CLIENT_PORT || 5176), port])].flatMap((value) => [`http://127.0.0.1:${value}`, `http://localhost:${value}`]),
+  getJob: (id, projectId, nodeId) => {
+    const job = myNewtService.jobs.get(id);
+    if (!job || job.projectId !== projectId || job.nodeId !== nodeId) return null;
+    const result = myNewtService.public(job);
+    result.outputs = result.outputs.map((item) => {
+      if (item.type !== "text") return item;
+      const data = job.snapshot?.nodes?.find((node) => node.id === item.nodeId)?.data;
+      return { ...item, text: String(data?.resultText || data?.text || "").slice(0, 16000) };
+    });
+    return result;
+  },
+  resolveAsset: resolveLocalAssetPath
+}).ready;
 
 function buildHealthPayload() {
   const apiKeysFound = Boolean(process.env.FAL_KEY || process.env.GOOGLE_API_KEY || process.env.KREA_API_KEY || process.env.OPENAI_API_KEY);
@@ -562,6 +600,13 @@ function buildHealthPayload() {
       myNewtPlanning: true,
       myNewtLocalActions: true,
       myNewtBackgroundActions: true,
+      myNewtApprovedWork: true,
+      myNewtAutoReview: true,
+      myNewtFavoriteModels: true,
+      myNewtRemote: true,
+      myNewtRemoteRemembered: true,
+      weeklyPricing: true,
+      smartTextPromptEditor: true,
       myNewtVoice: true,
       newtPresets: true,
       systemNewtPresets: true,
@@ -619,7 +664,6 @@ function buildHealthPayload() {
     storyboardVisionFalModel,
     storyboardVisionOpenAiModel,
     falVisionTextModel,
-    falVideoTextModel,
     imageGenerationConcurrency,
     outputDirectory: outputsDir
   };
@@ -700,6 +744,8 @@ async function readRuntimeSettings({ includeSecrets = false } = {}) {
     readEnvFileValues(["FAL_KEY", "GOOGLE_API_KEY", "KREA_API_KEY", "OPENAI_API_KEY"])
   ]);
   const branchStatus = await resolveBranchStatus(repository, branch);
+  await myNewtService.ready;
+  const nodePreferences = normalizeNodePreferences(settingsValues.nodePreferences, { hasUsedNewt: myNewtService.jobs.size > 0 });
   const resolvedApiKeys = resolveApiKeyVersions(settingsValues.apiKeyVersions, envValues);
   const providerPreferences = apiKeyProviderPreferences(settingsValues.apiKeyVersions);
   const configuredKeys = Object.fromEntries(
@@ -735,6 +781,7 @@ async function readRuntimeSettings({ includeSecrets = false } = {}) {
     branch,
     branchStatus,
     modelPreferences: normalizeModelPreferences(settingsValues.modelPreferences),
+    nodePreferences,
     updateInProgress: Boolean(updatePromise),
     restartRequested
   };
@@ -788,6 +835,10 @@ async function saveRuntimeSettings(body = {}) {
   }
   if (repository) updates.repository = repository;
   if (body.modelPreferences !== undefined) updates.modelPreferences = normalizeModelPreferences(body.modelPreferences);
+  if (body.nodePreferences !== undefined) {
+    if (typeof body.nodePreferences?.myNewt !== "boolean") throw Object.assign(new Error("Choose whether Newt is enabled in node menus."), { status: 400 });
+    updates.nodePreferences = normalizeNodePreferences(body.nodePreferences);
+  }
 
   if (Object.keys(updates).length) {
     await writeRuntimeSettingsStore(updates);
@@ -919,6 +970,7 @@ async function readRuntimeSettingsStore() {
     apiKeyVersions,
     repository: normalizeUpdateRepository(data?.repository),
     modelPreferences: normalizeModelPreferences(data?.modelPreferences),
+    nodePreferences: data?.nodePreferences,
     providerPreferences: apiKeyProviderPreferences(apiKeyVersions)
   };
 }
@@ -936,6 +988,7 @@ async function writeRuntimeSettingsStore(patch) {
   if (patch.apiKeyVersions !== undefined) next.apiKeyVersions = normalizeApiKeyVersions(patch.apiKeyVersions);
   if (patch.repository !== undefined) next.repository = normalizeUpdateRepository(patch.repository);
   if (patch.modelPreferences !== undefined) next.modelPreferences = normalizeModelPreferences(patch.modelPreferences);
+  if (patch.nodePreferences !== undefined) next.nodePreferences = normalizeNodePreferences(patch.nodePreferences);
   if (patch.providerPreferences !== undefined) next.providerPreferences = normalizeApiProviderPreferences(patch.providerPreferences);
   await writeJsonAtomic(runtimeSettingsPath, next);
 }
@@ -1254,8 +1307,9 @@ app.get("/api/stats", async (_req, res) => {
       history: await readHistory(),
       projects: await readNodeProjects(),
       pricing: {
-      myNewtVoice: { model: MY_NEWT_VOICE_MODEL, costPerMinute: MY_NEWT_VOICE_COST_PER_MINUTE, currency: "USD" },
-      myNewtReasoning: { models: myNewtModelRates, perTokens: 1000000, currency: "USD", pricingSource: "https://developers.openai.com/api/docs/pricing" },
+      myNewtVoice: { model: MY_NEWT_VOICE_MODEL, costPerMinute: myNewtVoiceCost(60), currency: "USD" },
+      currentCatalog: pricingRefresh.catalog(),
+      myNewtReasoning: { models: currentOpenAiRates(myNewtModelRates), perTokens: 1000000, currency: "USD", pricingSource: "https://developers.openai.com/api/docs/pricing" },
       seedance: {
         standardCostPerSecond: seedanceStandardCostPerSecond,
         standardCostPerThousandTokens: seedanceStandardCostPerThousandTokens,
@@ -1737,16 +1791,19 @@ app.post("/api/node/extract-video-frame", async (req, res) => {
 
 app.post("/api/node/process-text", async (req, res) => {
   try {
-    const text = String(req.body.text || "").trim();
     const textInputs = normalizedTextInputs(req.body.textInputs);
     const imageInputs = normalizedMediaInputs(req.body.imageInputs, "image");
-    const videoInputs = normalizedMediaInputs(req.body.videoInputs, "video");
-    if (!text && !textInputs.length && !imageInputs.length && !videoInputs.length) {
-      return res.status(400).json({ error: "Text is required." });
+    if (Array.isArray(req.body.imageInputs) && req.body.imageInputs.length !== imageInputs.length) {
+      return res.status(400).json({ error: "Smart Text supports up to six available local image references. Reconnect missing images or remove extra references." });
+    }
+    const text = smartTextOriginalPrompt(req.body.text, imageInputs.length > 0).trim();
+    const generationContext = normalizeSmartTextGenerationContext(req.body.generationContext);
+    if (!text && !textInputs.length && !imageInputs.length) {
+      return res.status(400).json({ error: "Add original prompt text or connect an image to Smart Text." });
     }
 
-    const result = await processTextWithLlm({ text, textInputs, imageInputs, videoInputs });
-    const cost = estimateTextProcessingCost({ provider: result.provider, usage: result.usage, helperUsages: result.helperUsages, imageInputs, videoInputs });
+    const result = await processTextWithLlm({ text, textInputs, imageInputs, generationContext });
+    const cost = estimateTextProcessingCost({ provider: result.provider, usage: result.usage, helperUsages: result.helperUsages, mainMediaType: imageInputs.length ? "image" : "text" });
     const usageRecord = result.usage || result.helperUsages?.length ? { request: result.usage || null, helpers: result.helperUsages || [] } : null;
 
     await appendHistory({
@@ -1766,7 +1823,7 @@ app.post("/api/node/process-text", async (req, res) => {
         provider: result.provider,
         textInputCount: textInputs.length,
         imageInputCount: imageInputs.length,
-        videoInputCount: videoInputs.length
+        generationContext
       },
       cost,
       text: result.text,
@@ -5743,7 +5800,9 @@ app.use("/api", (error, _req, res, _next) => {
 
 const httpServer = app.listen(port, "127.0.0.1", () => {
   console.log(`NewtNode server running on http://127.0.0.1:${port}`);
+  pricingRefresh.start();
 });
+httpServer.on("close", () => pricingRefresh.stop());
 
 httpServer.on("error", (error) => {
   console.error("NewtNode server failed to start.", error);
@@ -9240,14 +9299,15 @@ function estimateKrea2LargeCost({ endpoint, creativity, imageStyleReferenceCount
   };
 }
 
-function estimateTextProcessingCost({ provider, usage = null, helperUsages = [], imageInputs = [], videoInputs = [], hasMainRequest = true }) {
+function estimateTextProcessingCost({ provider, usage = null, helperUsages = [], imageInputs = [], videoInputs = [], hasMainRequest = true, mainMediaType = "text" }) {
   const normalizedProvider = String(provider || "").toLowerCase();
+  const mainRequestRate = mainMediaType === "image" ? falVisionTextUnitCost : falTextRequestCost;
   if (normalizedProvider === "local") return { amountUsd: 0, currency: "USD", units: 1, unit: "local assembly", mediaType: "text", pricingSource: "local" };
   const requestUsageCost = usageCost(usage);
   const helperUsageCosts = (Array.isArray(helperUsages) ? helperUsages : []).map(usageCost).filter((amount) => amount !== null);
 
   if ((requestUsageCost !== null || helperUsageCosts.length) && ["fal", "openai"].includes(normalizedProvider)) {
-    const fallbackRequestCost = hasMainRequest && requestUsageCost === null && normalizedProvider === "fal" ? falTextRequestCost : 0;
+    const fallbackRequestCost = hasMainRequest && requestUsageCost === null && normalizedProvider === "fal" ? mainRequestRate : 0;
     const amountUsd = roundCurrency((requestUsageCost || 0) + fallbackRequestCost + helperUsageCosts.reduce((sum, amount) => sum + amount, 0));
 
     return {
@@ -9275,7 +9335,7 @@ function estimateTextProcessingCost({ provider, usage = null, helperUsages = [],
     };
   }
 
-  const textRequestCost = falTextRequestCost;
+  const textRequestCost = mainRequestRate;
   const imageHelperCost = imageInputs.length ? falVisionTextUnitCost : 0;
   const videoHelperCost = videoInputs.length ? falVideoTextUnitCost : 0;
   const amountUsd = roundCurrency(textRequestCost + imageHelperCost + videoHelperCost);
@@ -9287,7 +9347,7 @@ function estimateTextProcessingCost({ provider, usage = null, helperUsages = [],
     units: 1,
     unit: "request",
     mediaType: "text",
-    pricingBasis: normalizedProvider === "fal" ? "fal.ai OpenRouter request estimate plus media helper calls" : "No local token estimate for direct LLM text",
+    pricingBasis: mainMediaType === "image" ? "fal.ai OpenRouter single image-aware request estimate" : "fal.ai OpenRouter request estimate plus media helper calls",
     pricingSource: "configured-pricing-v1"
   };
 }
@@ -9432,23 +9492,6 @@ function normalizeSkillDirectorDurationSeconds(value) {
 
 function skillDirectorDurationLabel(durationSeconds = "15") {
   return `${normalizeSkillDirectorDurationSeconds(durationSeconds)}-second`;
-}
-
-function textInputContext(textInputs) {
-  return textInputs.map((item, index) => `Text input ${index + 1} (${item.label}):\n${item.text}`).join("\n\n");
-}
-
-function buildTextProcessingPrompt({ text, textInputs, imageDescriptions = [], videoDescriptions = [] }) {
-  return [
-    textProcessingInstructions(),
-    text ? `Original prompt:\n${text}` : "",
-    textInputContext(textInputs),
-    imageDescriptions.length ? `Image context:\n${imageDescriptions.join("\n\n")}` : "",
-    videoDescriptions.length ? `Video context:\n${videoDescriptions.join("\n\n")}` : "",
-    "Return only the final processed prompt text."
-  ]
-    .filter(Boolean)
-    .join("\n\n");
 }
 
 function activeLlmProvider(preferredProvider = preferredTextLlmProvider) {
@@ -9605,27 +9648,8 @@ async function runMediaDescriptionLlm({
   throw httpError(500, `Unsupported LLM provider: ${provider}`);
 }
 
-async function processTextWithLlm({ text, textInputs, imageInputs, videoInputs }) {
-  const imageContext = await describeImageInputs(imageInputs);
-  const videoContext = await describeVideoInputs(videoInputs);
-  const prompt = buildTextProcessingPrompt({ text, textInputs, imageDescriptions: imageContext.descriptions, videoDescriptions: videoContext.descriptions });
-  const result = await runTextLlm({
-    prompt,
-    systemPrompt: textProcessingInstructions(),
-    falModel: falTextModel,
-    openAiModel: openAiTextModel,
-    route: "smart-text"
-  });
-
-  return {
-    text: result.text,
-    model: result.model,
-    provider: result.provider,
-    endpoint: result.endpoint,
-    submittedPrompt: prompt,
-    usage: result.usage,
-    helperUsages: [...imageContext.usages, ...videoContext.usages]
-  };
+async function processTextWithLlm(request) {
+  return processSmartText(request, { runTextLlm, runMediaDescriptionLlm, falTextModel, falVisionTextModel, openAiTextModel });
 }
 
 const skillDirectorFinalPromptMaxChars = 7000;
@@ -10767,47 +10791,6 @@ async function runFilmDirectorDraft({
   };
 }
 
-function textProcessingInstructions() {
-  return "Process the available text, image, and video context for use in a creative node workflow. Improve clarity, specificity, and usefulness while preserving the user's intent.";
-}
-
-async function describeImageInputs(imageInputs) {
-  if (!imageInputs.length) return { descriptions: [], usages: [] };
-
-  const referenceLabels = imageInputs
-    .map((item, index) => {
-      const typeLabel =
-        item.type === "character"
-          ? "Character asset"
-          : item.type === "location"
-            ? "Location asset"
-            : item.type === "element"
-              ? "Props asset"
-              : item.type === "style"
-                ? "Mood Board asset"
-                : "Image";
-      return `${typeLabel} ${index + 1}: ${item.tag || item.label}${item.label && item.label !== item.tag ? ` (${item.label})` : ""}`;
-    })
-    .join("\n");
-  const typeInstructions = [...new Set(imageInputs.map((item) => skillDirectorVisionInstructionForType(item.type)).filter(Boolean))].join("\n");
-  const result = await runMediaDescriptionLlm({
-    inputs: imageInputs,
-    mediaType: "image",
-    prompt: [
-      referenceLabels ? `Use these image labels while describing the connected references:\n${referenceLabels}` : "",
-      typeInstructions || "Describe these images as concise visual prompt context."
-    ].filter(Boolean).join("\n\n"),
-    falModel: falVisionTextModel,
-    openAiModel: openAiTextModel,
-    route: "smart-text-image-analysis"
-  });
-  const description = result.text;
-  return {
-    descriptions: description ? [`Connected images: ${description}`] : [],
-    usages: result.usages
-  };
-}
-
 async function describeFilmDirectorImageInputs(imageInputs) {
   if (!imageInputs.length) return { descriptions: [], usages: [] };
 
@@ -11268,24 +11251,6 @@ function skillDirectorVisionInstructionForType(type) {
     return "For Mood Board assets: Describe these images as concise visual prompt context for abstract cinematic style only. Focus on cinematic look, tone, pacing, lighting mood, color behavior, texture, atmosphere, image quality, and color grade. Do not describe, name, or reuse literal objects, subjects, locations, people, props, compositions, or story content.";
   }
   return "Describe these images as concise visual prompt context. Focus on subject, setting, composition, camera, lighting, palette, mood, materials, and any important details.";
-}
-
-async function describeVideoInputs(videoInputs) {
-  if (!videoInputs.length) return { descriptions: [], usages: [] };
-
-  const result = await runMediaDescriptionLlm({
-    inputs: videoInputs,
-    mediaType: "video",
-    prompt: "Describe these videos as concise visual prompt context. Focus on subjects, actions, setting, camera movement, lighting, style, mood, and any useful continuity details.",
-    falModel: falVideoTextModel,
-    openAiModel: openAiTextModel,
-    route: "smart-text-video-analysis"
-  });
-  const description = result.text;
-  return {
-    descriptions: description ? [`Connected videos: ${description}`] : [],
-    usages: result.usages
-  };
 }
 
 async function localAssetToFalUrl(publicPath) {

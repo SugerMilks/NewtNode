@@ -1,6 +1,7 @@
 import { myNewtSettings, validateMyNewtPatch } from "./contract.js";
 import { myNewtBackgroundCommand } from "./localCommands.js";
 import { newtPresetDisplayName } from "./presets.js";
+import { assertMyNewtProtection, myNewtProtectionCommand } from "./workProtection.js";
 
 export const myNewtLocalWorkflows = Object.freeze([
   { id: "image", label: "Image workflow", types: ["plainText", "imageModel", "preview"], inputs: ["promptIn", "sourceIn"] },
@@ -34,6 +35,8 @@ export function myNewtLocalAction(brief, snapshot = {}, settings = {}, createdId
   const catalog = snapshot.catalog || [], nodes = snapshot.nodes || [];
   const permissions = myNewtSettings(settings);
   try {
+    const protection = myNewtProtectionCommand(text, snapshot);
+    if (protection) return protection;
     const background = myNewtBackgroundCommand(text, snapshot, myNewtLocalWorkflows);
     if (background) return background;
     let match = text.match(/^(?:set up|setup|build|create|add|insert) (?:an? |the )?(image edit|music video|director storyboard|asset preview|image|video|coverage|director|storyboard) workflow$/i);
@@ -97,6 +100,7 @@ export function myNewtLocalAction(brief, snapshot = {}, settings = {}, createdId
 }
 
 export function validateLocalUpdate(node, patch, snapshot, settings, createdIds = []) {
+  assertMyNewtProtection(snapshot, { operation: "update", payload: { nodeId: node.id, patch } });
   validateMyNewtPatch(node, patch, settings, createdIds);
   if (["running", "planning", "compiling", "uploading", "generating"].includes(node.data?.status)) throw new Error("Wait for this node to finish before editing it.");
   if (node.type === "videoModel" && Object.keys(patch).some((key) => key !== "title") && snapshot.edges?.some((edge) => edge.to.nodeId === node.id && edge.to.port === "directorIn")) throw new Error("This Video Model is controlled by a Director. Change the setting in the Director instead.");
@@ -156,6 +160,12 @@ export function buildMyNewtLocalWorkflow(id, { catalog, createData, nodeWidth, b
 export function verifyMyNewtLocalResult(action, result, snapshot, expected) {
   if (!result || result.error) throw new Error(result?.error || "The local action returned no result.");
   const nodes = snapshot.nodes || [];
+  if (["protect", "release-protection"].includes(action.operation)) {
+    const approved = action.operation === "protect";
+    const targets = action.payload.nodeIds.map((id) => nodes.find((node) => node.id === id));
+    if (targets.some((node) => !node || (node.data?.myNewtProtection?.approved === true) !== approved)) throw new Error("The requested approval change was not applied.");
+    return targets;
+  }
   if (action.operation === "save-project") {
     if (result.saved !== true || snapshot.projectId !== expected.projectId) throw new Error("The project save did not complete.");
     return [];

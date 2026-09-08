@@ -37,6 +37,7 @@ import {
 import { MediaPreview, UploadIcon } from "./MediaViews.jsx";
 import { DirectorTaskStatus } from "./DirectorTaskStatus.jsx";
 import { NodeRow, OutputPortRow, PortHandle } from "./NodePorts.jsx";
+import { smartTextImagePrompt } from "../smartTextPrompt.js";
 
 export function PlainTextNodeBody({ node, outputPort, onUpdate, onConnectStart, onDisconnectInput, connectedPortKeys }) {
   return (
@@ -55,20 +56,23 @@ export function TextModelNodeBody({ node, config, outputPort, incoming, onUpdate
   const hasOutputPanel = Boolean(node.data.resultText) || node.data.status === "running" || node.data.status === "complete";
   const textPort = config.input.find((port) => port.id === "textIn");
   const imagePort = config.input.find((port) => port.id === "imageIn");
-  const videoPort = config.input.find((port) => port.id === "videoIn");
-  const stylePort = config.input.find((port) => port.id === "styleIn");
+  const hasImage = Boolean(incoming.imageIn?.length);
+  const previousImageConnection = useRef(null);
+  useEffect(() => {
+    const justConnected = hasImage && (previousImageConnection.current?.id !== node.id || !previousImageConnection.current?.hasImage);
+    previousImageConnection.current = { id: node.id, hasImage };
+    if (justConnected && !String(node.data.text || "").trim()) onUpdate(node.id, { text: smartTextImagePrompt });
+  }, [hasImage, node.id, node.data.text, onUpdate]);
   const hasRunInput =
     Boolean(String(node.data.text || "").trim()) ||
     Boolean(incoming.textIn?.length) ||
-    Boolean(incoming.imageIn?.length) ||
-    Boolean(incoming.videoIn?.length) ||
-    Boolean(incoming.styleIn?.length);
+    hasImage;
 
   return (
     <div className="node-body text-node-body">
       <OutputPortRow node={node} port={outputPort} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
       <div className="text-input-port-stack" aria-label="Smart Text Model node inputs">
-        {[textPort, imagePort, videoPort, stylePort].filter(Boolean).map((port) => (
+        {[textPort, imagePort].filter(Boolean).map((port) => (
           <PortHandle
             key={port.id}
             node={node}

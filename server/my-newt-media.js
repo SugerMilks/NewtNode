@@ -18,7 +18,7 @@ export function createMyNewtMediaInspector({ resolveAsset, probeVideo, runFfmpeg
         const metadata = await probeVideo(filePath);
         const duration = Math.min(120, Number(metadata.duration) || 120);
         const output = path.join(directory, "audio.mp3");
-        await runFfmpeg(["-y", "-i", filePath, "-t", String(duration), "-vn", "-ac", "1", "-ar", "16000", output], "My Newt audio inspection");
+        await runFfmpeg(["-y", "-i", filePath, "-t", String(duration), "-vn", "-ac", "1", "-ar", "16000", output], "Newt audio inspection");
         const form = new FormData(); form.append("model", "gpt-4o-transcribe");
         form.append("file", new File([await readFile(output)], "audio.mp3", { type: "audio/mpeg" }));
         const response = await fetch("https://api.openai.com/v1/audio/transcriptions", { method: "POST", headers: { Authorization: `Bearer ${key}` }, body: form, signal: AbortSignal.timeout(120000) });
@@ -32,7 +32,7 @@ export function createMyNewtMediaInspector({ resolveAsset, probeVideo, runFfmpeg
       for (let index = 0; index < count; index++) {
         const seconds = video ? Math.max(0, duration - 0.15) * index / (count - 1) : 0;
         const output = path.join(directory, `${index}.jpg`);
-        await runFfmpeg(["-y", ...(video ? ["-ss", String(seconds)] : []), "-i", filePath, "-frames:v", "1", "-vf", "scale=1024:1024:force_original_aspect_ratio=decrease", "-q:v", "3", output], "My Newt visual inspection");
+        await runFfmpeg(["-y", ...(video ? ["-ss", String(seconds)] : []), "-i", filePath, "-frames:v", "1", "-vf", "scale=1024:1024:force_original_aspect_ratio=decrease", "-q:v", "3", output], "Newt visual inspection");
         if (video) content.push({ type: "input_text", text: `${seconds.toFixed(2)} seconds` });
         content.push({ type: "input_image", image_url: `data:image/jpeg;base64,${(await readFile(output)).toString("base64")}`, detail: "high" });
       }

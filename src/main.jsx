@@ -17,6 +17,7 @@ import {
   X
 } from "lucide-react";
 import { generationApi, historyApi, settingsApi } from "./api/newtApi.js";
+import { nodePreferencesEvent, normalizeNodePreferences } from "./nodePreferences.js";
 import { installClientDiagnostics, reportClientDiagnostic } from "./clientDiagnostics.js";
 import { installGenerationChimeUnlock, notifyGenerationTaskComplete } from "./generationChime.js";
 import { FullResolutionImageContextMenu } from "./components/FullResolutionImageContextMenu.jsx";
@@ -61,6 +62,7 @@ import {
   minimaxH3ResolutionOptions
 } from "./minimaxH3.js";
 import "./styles.css";
+import { usePricingSync } from "./usePricing.js";
 
 installClientDiagnostics();
 installGenerationChimeUnlock();
@@ -114,6 +116,7 @@ function normalizeNodeStatus(status) {
 }
 
 function App() {
+  usePricingSync();
   const promptRef = React.useRef(null);
   const [prompt, setPrompt] = React.useState("");
   const [startFrame, setStartFrame] = React.useState(null);
@@ -127,6 +130,8 @@ function App() {
   const [videoModel, setVideoModel] = React.useState(videoModelNames.seedance);
   const [modelPreferences, setModelPreferences] = React.useState(defaultModelPreferences);
   const [modelPreferencesLoaded, setModelPreferencesLoaded] = React.useState(false);
+  const [nodePreferences, setNodePreferences] = React.useState(() => normalizeNodePreferences());
+  const nodePreferencesUpdatedRef = React.useRef(false);
   const [seed, setSeed] = React.useState("");
   const [status, setStatus] = React.useState("idle");
   const [message, setMessage] = React.useState("");
@@ -154,6 +159,15 @@ function App() {
   React.useEffect(() => {
     refreshHistory();
     refreshModelPreferences();
+  }, []);
+
+  React.useEffect(() => {
+    const update = (event) => {
+      nodePreferencesUpdatedRef.current = true;
+      setNodePreferences(normalizeNodePreferences(event.detail));
+    };
+    window.addEventListener(nodePreferencesEvent, update);
+    return () => window.removeEventListener(nodePreferencesEvent, update);
   }, []);
 
   React.useEffect(() => {
@@ -240,6 +254,7 @@ function App() {
     try {
       const data = await settingsApi.load();
       setModelPreferences(normalizeModelPreferences(data.modelPreferences));
+      if (!nodePreferencesUpdatedRef.current) setNodePreferences(normalizeNodePreferences(data.nodePreferences));
     } catch {
       setModelPreferences(defaultModelPreferences);
     } finally {
@@ -756,7 +771,7 @@ function App() {
       {nodeWorkspaceLoaded && (
         <div className={`nodes-tab-keepalive ${workspaceMode === "nodes" ? "active" : ""}`} aria-hidden={workspaceMode !== "nodes"}>
           <React.Suspense fallback={<WorkspaceFallback label="Loading nodes" />}>
-            <NodeEditor active={workspaceMode === "nodes"} onStatusChange={setNodeStatus} modelPreferences={modelPreferences} modelPreferencesReady={modelPreferencesLoaded} />
+            <NodeEditor active={workspaceMode === "nodes"} onStatusChange={setNodeStatus} modelPreferences={modelPreferences} modelPreferencesReady={modelPreferencesLoaded} nodePreferences={nodePreferences} />
           </React.Suspense>
         </div>
       )}

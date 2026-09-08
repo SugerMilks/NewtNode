@@ -26,3 +26,41 @@ test("My Newt shows preset origins, disables system deletion, and allows inserti
     if (selectedId === "system") assert.match(remove, /System presets cannot be deleted/);
   }
 });
+
+test("Newt Advanced presents Auto Review and disables individual approval controls only while enabled", () => {
+  for (const autoReview of [undefined, false, true]) {
+    const html = renderToStaticMarkup(React.createElement(module.exports.MyNewtNodeBody, {
+      node: { id: "newt", data: { autoReview } }, config: { input: [] }, incoming: {}, controller: {}
+    }));
+    assert.match(html, /<summary>Advanced<\/summary>/);
+    const toggle = html.match(/<input[^>]*\/>Auto Review/)[0];
+    assert.equal(toggle.includes('checked=""'), autoReview === true);
+    for (const label of ["Approve workflow plan", "Approve each node run"]) {
+      const input = html.match(new RegExp(`<input[^>]*\\/>${label}`))[0];
+      assert.equal(input.includes('disabled=""'), autoReview === true);
+      assert.equal(input.includes('checked=""'), autoReview !== true);
+    }
+    assert.doesNotMatch(html.match(/<input[^>]*\/>Generate images/)[0], /disabled|checked/);
+  }
+});
+
+test("Newt favorite dropdowns show saved selections and keep disabled models unavailable", () => {
+  for (const data of [{}, { favoriteImageModel: "Nano Banana Pro", favoriteVideoModel: "Seedance 2.5" }]) {
+    const html = renderToStaticMarkup(React.createElement(module.exports.MyNewtNodeBody, {
+      node: { id: "newt", data }, config: { input: [] }, incoming: {},
+      controller: { modelOptions: { image: ["OpenAI Image 2"], video: ["Seedance 2.5"] } }
+    }));
+    const image = html.match(/<select aria-label="Favorite image model"[\s\S]*?<\/select>/)[0];
+    const video = html.match(/<select aria-label="Favorite video model"[\s\S]*?<\/select>/)[0];
+    assert.match(image, /No preference/); assert.match(video, /No preference/);
+    assert.match(image, /<option value="Nano Banana Pro" disabled=""/);
+    assert.match(video, /<option value="Kling O3 Pro" disabled=""/);
+    if (data.favoriteImageModel) {
+      assert.match(image, /<option value="Nano Banana Pro" disabled="" selected=""/);
+      assert.match(video, /<option value="Seedance 2.5" selected=""/);
+    } else {
+      assert.match(image, /<option value="" selected="">No preference/);
+      assert.match(video, /<option value="" selected="">No preference/);
+    }
+  }
+});
