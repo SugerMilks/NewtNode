@@ -228,5 +228,5 @@ test("removed video models are no longer selectable", () => {
     videoModelNames.klingO34k,
     videoModelNames.minimaxH3
   ]);
-  assert.equal(imageModelOptions.length, 5);
+  assert.equal(imageModelOptions.length, 7);
 });

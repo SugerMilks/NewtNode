@@ -1,11 +1,12 @@
 import React from "react";
 import { applyCurveToImageData, applyImageAdjustmentsToCanvas, clampCurveNumber, curveLookup, defaultCurvePoints, defaultToneAdjustments, maxCurvePoints, normalizedToneAdjustments, sortedCurvePoints } from "../imageAdjustments.js";
-import { Box, Check, ChevronLeft, ChevronRight, Crop, Download, FileAudio, FileImage, Film, FlipHorizontal, FlipVertical, ImagePlus, PanelRightClose, Plus, RefreshCw, RotateCw, Sun, Type, Video, X } from "lucide-react";
+import { Box, Check, ChevronLeft, ChevronRight, Crop, Download, FileAudio, FileImage, Film, FlipHorizontal, FlipVertical, ImagePlus, PanelRightClose, Pencil, Plus, RefreshCw, RotateCw, Sun, Type, Video, X } from "lucide-react";
 import { capitalizeMediaType, finishOutputItemDragData, fullResolutionImageProps, outputDragMime as defaultOutputDragMime, previewImageUrl, setOutputItemDragData } from "../mediaAssets.js";
 import { clampCropRect, containedMediaSize, moveCropRect, resizeCropRect } from "../mediaPreviewLayout.js";
 import { normalizedResultItems, resultDownloadFileName } from "../mediaResults.js";
 
 const LazyModel3DViewer = React.lazy(() => import("./Model3DViewer.jsx").then((module) => ({ default: module.Model3DViewer })));
+const LazyImageEditStudio = React.lazy(() => import("./ImageEditStudio.jsx").then((module) => ({ default: module.ImageEditStudio })));
 
 export function MediaPreview({ node, onPreviewOpen }) {
   if (!node.data.resultUrl) {
@@ -261,7 +262,8 @@ async function createTonePreviewUrl(url, adjustments = defaultToneAdjustments, p
   return URL.createObjectURL(blob);
 }
 
-export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onRestoreImageEdit }) {
+export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onRestoreImageEdit, onAcceptAiEdit, workflowContext, falAvailable = false, imageEditProvider, showApiCosts = false }) {
+  const [aiMode, setAiMode] = React.useState(false);
   const imageEditorRef = React.useRef(null);
   const lightboxStageRef = React.useRef(null);
   const cropDragRef = React.useRef(null);
@@ -337,7 +339,7 @@ export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onResto
       observer?.disconnect();
       window.removeEventListener("resize", updateSize);
     };
-  }, [displayItem.type, imageNaturalSize.width, imageNaturalSize.height, curvesMode, toneMode, textMode]);
+  }, [displayItem.type, imageNaturalSize.width, imageNaturalSize.height, curvesMode, toneMode, textMode, aiMode]);
 
   function currentEditSnapshot() {
     return {
@@ -458,6 +460,7 @@ export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onResto
   }
 
   React.useEffect(() => {
+    if (aiMode) return undefined;
     function handleKeyDown(event) {
       const commandKey = event.metaKey || event.ctrlKey;
       const key = event.key.toLowerCase();
@@ -491,9 +494,10 @@ export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onResto
 
     window.addEventListener("keydown", handleKeyDown, true);
     return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, [canEditImage, cropMode, cropRect, curvePoints, curvesMode, editBusy, onClose, onRestoreImageEdit, textMode, textOverlay, toneAdjustments, toneMode]);
+  }, [canEditImage, cropMode, cropRect, curvePoints, curvesMode, editBusy, onClose, onRestoreImageEdit, textMode, textOverlay, toneAdjustments, toneMode, aiMode]);
 
   React.useEffect(() => {
+    setAiMode(false);
     setCropMode(false);
     setCropRect(defaultCropRect);
     setToneMode(false);
@@ -903,6 +907,12 @@ export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onResto
     }
   }
 
+  if (aiMode) return <div className="output-lightbox-backdrop ies-backdrop" role="presentation" onPointerDown={(event) => event.stopPropagation()}>
+    <React.Suspense fallback={<div className="image-edit-loading" role="status">Loading image editor...</div>}>
+      <LazyImageEditStudio item={displayItem} workflowContext={workflowContext} falAvailable={falAvailable} provider={imageEditProvider} showApiCosts={showApiCosts} canApply={canEditImage} onAccept={onAcceptAiEdit} onClose={() => setAiMode(false)} />
+    </React.Suspense>
+  </div>;
+
   return (
     <div className="output-lightbox-backdrop" role="presentation" onPointerDown={(event) => {
       if (event.target === event.currentTarget) onClose();
@@ -914,6 +924,7 @@ export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onResto
             {label}
           </span>
           <div className="output-lightbox-header-actions">
+            {displayItem.type === "image" && onAcceptAiEdit && <button type="button" onClick={() => setAiMode(true)} disabled={editBusy || cropMode || toneMode || curvesMode || textMode} title="Draw and edit with Image 2.5" aria-label="Draw and edit with Image 2.5"><Pencil size={15} /></button>}
             {canEditImage && (
               <div className="output-lightbox-tools" aria-label="Layout image editing tools">
                 <button type="button" className={cropMode ? "active" : ""} onClick={() => {
@@ -1278,6 +1289,7 @@ export function ResultPane({ label, resultUrl, resultItems = [], selectedIndex =
               />
             )}
             {activeItem.type === "video" && <video src={activeItem.url} controls loop playsInline preload="metadata" draggable={false} onError={useNewtNodeVideoFallback} />}
+            {activeItem.type === "audio" && <div className="result-audio"><FileAudio size={30} /><audio key={activeItem.url} src={activeItem.url} controls preload="metadata" draggable={false} /></div>}
             {activeItem.type === "model3d" && <Model3DViewer url={activeItem.url} label={activeItem.label || `3D model ${activeIndex + 1}`} />}
           </div>
           <button type="button" className="result-download-button" onClick={downloadActiveItem} title={`Download ${activeItem.type === "model3d" ? "3D model" : "result"}`} aria-label="Download result">

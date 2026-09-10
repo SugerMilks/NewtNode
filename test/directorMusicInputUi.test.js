@@ -7,7 +7,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { filmDirectorApproachOptions } from "../src/filmDirectorApproaches.js";
 
-const compiled = buildSync({ entryPoints: [fileURLToPath(new URL("../src/components/NodeBodies.jsx", import.meta.url))], bundle: true, write: false, platform: "node", format: "cjs", packages: "external", jsx: "automatic", define: { "import.meta.env": "{}" }, external: ["/newt-mark.png"] });
+const compiled = buildSync({ entryPoints: [fileURLToPath(new URL("../src/components/NodeBodies.jsx", import.meta.url))], bundle: true, write: false, platform: "node", format: "cjs", packages: "external", jsx: "automatic", loader: { ".css": "empty" }, define: { "import.meta.env": "{}" }, external: ["/newt-mark.png"] });
 const module = { exports: {} };
 new Function("require", "module", "exports", compiled.outputFiles[0].text)(createRequire(import.meta.url), module, module.exports);
 

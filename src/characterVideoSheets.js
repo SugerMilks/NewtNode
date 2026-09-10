@@ -39,21 +39,13 @@ export const characterVideoCustomSheetWardrobePrompt =
   "Wardrobe rule: preserve exactly the one selected outfit visible in the supplied completed character sheet. Reconstruct its clothing, footwear, fit, materials, colors, and styling consistently in both body panels and the visible neckline of the portrait. Do not introduce alternate clothing or a wardrobe comparison.";
 
 export { activeCharacterSheetVariant } from "./characterSheetLibrary.js";
-import { activeCharacterSheetVariant } from "./characterSheetLibrary.js";
+import { characterOutputReference } from "./characterSheetLibrary.js";
 
 export function characterVideoSheetForNode(node) {
-  if (!node?.data?.cuVideoGeneration) return null;
-  return activeCharacterSheetVariant(node.data)?.videoGenerated || null;
+  const reference = preferredCharacterReferenceForVideo(node);
+  return reference?.usesCuVideoSheet ? reference : null;
 }
 
 export function preferredCharacterReferenceForVideo(node) {
-  const videoSheet = characterVideoSheetForNode(node);
-  const videoSheetUrl = videoSheet?.url || videoSheet?.localUrl || "";
-  if (videoSheetUrl) return { ...videoSheet, url: videoSheetUrl, usesCuVideoSheet: true };
-
-  const imageSheet = activeCharacterSheetVariant(node?.data)?.generated;
-  const fallbackUrl = imageSheet?.url || imageSheet?.localUrl || node?.data?.resultUrl || "";
-  return fallbackUrl
-    ? { ...(imageSheet || {}), url: fallbackUrl, usesCuVideoSheet: false }
-    : null;
+  return characterOutputReference(node?.data, { video: true });
 }

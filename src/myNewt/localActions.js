@@ -85,7 +85,7 @@ export function myNewtLocalAction(brief, snapshot = {}, settings = {}, createdId
     if (match) {
       const node = unique(nodes, match[1], "node"), field = fieldNames[normalized(match[2])];
       const entry = catalog.find((item) => item.type === node.type);
-      const options = field === "generateAudio" && node.type === "videoModel" ? [true, false] : entry?.options?.[field] || entry?.modelControls?.[node.data?.model]?.[field];
+      const options = field === "generateAudio" && node.type === "videoModel" ? [true, false] : entry?.modelControls?.[node.data?.model]?.[field] || entry?.options?.[field];
       if (!options?.length) throw new Error(`That ${match[2]} is not available as a local setting for this node.`);
       let wanted = normalized(match[3] || match[4]);
       if (field === "generateAudio") wanted = ({ on: "true", off: "false" })[wanted] || wanted;

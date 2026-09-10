@@ -3,7 +3,7 @@ import { RefreshCcw } from "lucide-react";
 import { pricingApi } from "../api/newtApi.js";
 import { setPricingCatalog } from "../pricingCatalog.js";
 
-const providerLabels = { fal: "Fal", krea: "Krea", openai: "OpenAI", google: "Google" };
+const providerLabels = { fal: "Fal", krea: "Krea", atlas: "Atlas Cloud", openai: "OpenAI", google: "Google" };
 const date = (value) => value && Number.isFinite(Date.parse(value)) ? new Intl.DateTimeFormat("en-US", {
   month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/New_York", timeZoneName: "short"
 }).format(new Date(value)) : "Not checked yet";

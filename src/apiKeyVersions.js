@@ -1,4 +1,4 @@
-export const apiKeyProviderIds = Object.freeze(["fal", "google", "krea", "openAi"]);
+export const apiKeyProviderIds = Object.freeze(["fal", "google", "krea", "openAi", "elevenLabs", "atlas"]);
 export const maxApiKeyVersionsPerProvider = 20;
 
 export function migrateVsApiCredentials(credentials = {}, activeCredentialIds = {}) {

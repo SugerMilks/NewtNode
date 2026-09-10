@@ -3,6 +3,7 @@ import "dotenv/config";
 import cors from "cors";
 import express from "express";
 import multer from "multer";
+import sharp from "sharp";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { appendFile, copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
@@ -22,6 +23,14 @@ import ffprobeStatic from "ffprobe-static";
 import { directoryStats, fileMetadata, readJsonFile, writeJsonAtomic } from "./json-store.js";
 import { findRemoteHistoryAssetUrl } from "./local-asset-recovery.js";
 import { registerComposerPoseRoutes } from "./routes/composerPoses.js";
+import { registerAudioModelRoutes } from "./routes/audioModel.js";
+import { registerImageEditRoutes } from "./routes/imageEdit.js";
+import { elevenLabsRates } from "./elevenlabs.js";
+import { createAtlasClient } from "./atlas.js";
+import { createAtlasMedia } from "./atlas-media.js";
+import { validateAtlasVideoAssets } from "./atlas-validation.js";
+import { supportsAtlasImageModel } from "../src/atlasImages.js";
+import { supportsAtlasVideoModel } from "../src/atlasVideos.js";
 import { registerCoreRoutes } from "./routes/core.js";
 import { PricingRefresh } from "./pricing-refresh.js";
 import { registerPricingRoutes } from "./routes/pricing.js";
@@ -34,6 +43,8 @@ import { createMyNewtVoiceTranscriber } from "./my-newt-voice.js";
 import { MY_NEWT_VOICE_MODEL, myNewtVoiceCost } from "../src/myNewt/voiceConfig.js";
 import { registerNewtPresetRoutes } from "./routes/newtPresets.js";
 import { createMyNewtMediaInspector } from "./my-newt-media.js";
+import { relayLocalVideo } from "./local-video-request.js";
+import { isVideoGenerationRoute } from "../src/videoJobPolicy.js";
 import { myNewtTokenCost, myNewtModelRates } from "../src/myNewt/intelligence.js";
 import { creativeOpenAiModel, creativeFalModel, openAiLlmBody, falLlmInput, creativeFinalOutputText, validateCreativeResponse, directorReasoningSkill, storyboardReasoningSkill } from "./creative-llm.js";
 import { createCreativeAnalysisCache, creativeAnalysisKey } from "./creative-analysis-cache.js";
@@ -45,6 +56,7 @@ import {
   normalizeApiKeyVersions
 } from "../src/apiKeyVersions.js";
 import { estimateOpenAiImage2Cost as estimateOpenAiImage2OutputCost, normalizeOpenAiImage2Quality, openAiImage2Costs, openAiImage2HighCosts, openAiImage2Quality } from "../src/openAiImage2.js";
+import { openAiImage25Models, openAiImage25Variant, isOpenAiImage25Model, normalizeOpenAiImage25Quality, buildOpenAiImage25FalRequest, validateOpenAiImage25KreaRequest, openAiImage25KreaSelection, openAiImage25Cost } from "../src/openAiImage25.js";
 import { nanoBananaProFalThinkingMode, nanoBananaProThinkingConfig } from "../src/nanoBananaPro.js";
 import {
   buildNanoBanana2FalInput,
@@ -208,6 +220,23 @@ let restartRequested = false;
 let clientDiagnosticWriteQueue = Promise.resolve();
 let falDebugWriteQueue = Promise.resolve();
 const localAssetRecoveryJobs = new Map();
+const atlasMedia = createAtlasMedia({
+  client: createAtlasClient({ onProgress: (job) => console.info("Atlas Cloud prediction", job) }),
+  readLocalAsset,
+  validateVideoAssets: (request) => validateAtlasVideoAssets(request, async (source) => {
+    const asset = typeof source === "string" ? await readLocalAsset(source) : source;
+    const filePath = typeof source === "string" ? (await resolveLocalAssetPath(source)).filePath : source.filePath;
+    const metadata = asset.mimeType.startsWith("image/") ? await sharp(asset.buffer).metadata() : await probeVideoFile(filePath);
+    return { ...metadata, bytes: asset.buffer.length, mimeType: asset.mimeType };
+  }),
+  imageSize: normalizeOpenAiImageSize,
+  labelPrompt: promptWithReferenceLabels
+});
+
+function atlasMediaEnabled() {
+  return !process.env.FAL_KEY && !process.env.KREA_API_KEY && Boolean(process.env.ATLAS_API_KEY);
+}
+
 const runtimeThumbnailJobs = new Map();
 const execFile = promisify(execFileCallback);
 const updateRepositoryEnvKey = "NEWTNODE_UPDATE_REPOSITORY";
@@ -215,7 +244,9 @@ const apiKeyRuntimeConfig = Object.freeze({
   fal: Object.freeze({ envKey: "FAL_KEY" }),
   google: Object.freeze({ envKey: "GOOGLE_API_KEY" }),
   krea: Object.freeze({ envKey: "KREA_API_KEY" }),
-  openAi: Object.freeze({ envKey: "OPENAI_API_KEY" })
+  atlas: Object.freeze({ envKey: "ATLAS_API_KEY" }),
+  openAi: Object.freeze({ envKey: "OPENAI_API_KEY" }),
+  elevenLabs: Object.freeze({ envKey: "ELEVENLABS_API_KEY" })
 });
 const initialRuntimeApiKeyValues = Object.freeze(
   Object.fromEntries(
@@ -226,14 +257,18 @@ const runtimeConfigSources = {
   FAL_KEY: process.env.FAL_KEY ? "runtime" : "",
   GOOGLE_API_KEY: process.env.GOOGLE_API_KEY ? "runtime" : "",
   KREA_API_KEY: process.env.KREA_API_KEY ? "runtime" : "",
+  ATLAS_API_KEY: process.env.ATLAS_API_KEY ? "runtime" : "",
   OPENAI_API_KEY: process.env.OPENAI_API_KEY ? "runtime" : "",
+  ELEVENLABS_API_KEY: process.env.ELEVENLABS_API_KEY ? "runtime" : "",
   [updateRepositoryEnvKey]: process.env[updateRepositoryEnvKey] ? "runtime" : ""
 };
 const defaultApiProviderPreferences = Object.freeze({
   fal: true,
   google: true,
   krea: true,
-  openAi: true
+  atlas: true,
+  openAi: true,
+  elevenLabs: true
 });
 const ffmpegBinaryPath = process.env.FFMPEG_PATH || ffmpegStaticPath || "ffmpeg";
 const ffprobeBinaryPath = process.env.FFPROBE_PATH || ffprobeStatic?.path || "ffprobe";
@@ -262,6 +297,8 @@ const imageModelNames = {
   nanoBanana2: "Nano Banana 2",
   nanoBananaPro: "Nano Banana Pro",
   openAiImage2: "OpenAI Image 2",
+  openAiImage25Sunburst: openAiImage25Models.sunburst,
+  openAiImage25Flare: openAiImage25Models.flare,
   reve21: "REVE 2.1",
   krea2Large: "Krea 2 Large"
 };
@@ -269,6 +306,8 @@ const imageModelOptions = [
   imageModelNames.nanoBanana2,
   imageModelNames.nanoBananaPro,
   imageModelNames.openAiImage2,
+  imageModelNames.openAiImage25Sunburst,
+  imageModelNames.openAiImage25Flare,
   imageModelNames.reve21,
   imageModelNames.krea2Large
 ];
@@ -287,7 +326,7 @@ const videoModelOptions = [
   videoModelNames.minimaxH3
 ];
 const defaultModelPreferences = {
-  image: Object.fromEntries(imageModelOptions.map((model) => [model, model === imageModelNames.openAiImage2])),
+  image: Object.fromEntries(imageModelOptions.map((model) => [model, model === imageModelNames.openAiImage2 || isOpenAiImage25Model(model)])),
   video: Object.fromEntries(videoModelOptions.map((model) => [model, true]))
 };
 const falNanoBananaProEndpoint = process.env.FAL_NANO_BANANA_PRO_ENDPOINT || "fal-ai/nano-banana-pro";
@@ -446,6 +485,7 @@ await refreshRuntimeConfigFromEnvFile();
 
 const pricingRefresh = new PricingRefresh({
   filePath: path.join(dataDir, "pricing-catalog.json"),
+  enableAtlasPricing: true,
   getFalKey: () => process.env.FAL_KEY || "",
   refreshKeys: refreshRuntimeConfigFromEnvFile
 });
@@ -527,6 +567,60 @@ registerComposerPoseRoutes(app, {
   uniqueComposerPoseFileName
 });
 
+registerAudioModelRoutes(app, {
+  getKey: () => process.env.ELEVENLABS_API_KEY,
+  readAudio: async (url) => {
+    if (!isLocalAssetUrl(url)) throw new Error("Upload the speech recording into NewtNode first.");
+    const { filePath } = await resolveLocalAssetPathFromUrl(url);
+    const metadata = await stat(filePath);
+    if (metadata.size > 50 * 1024 * 1024) throw new Error("Speech-to-speech accepts an audio file up to 50 MB.");
+    const audio = await readLocalAsset(url);
+    if (!audio.mimeType.startsWith("audio/")) throw new Error("Speech-to-speech requires an audio file.");
+    return { ...audio, durationSeconds: (await probeVideoFile(filePath)).duration };
+  },
+  saveAudio: async (req, buffer) => {
+    const target = await createManagedAssetTarget(req, "elevenlabs-audio", ".mp3");
+    await writeFile(target.filePath, buffer);
+    return { url: target.publicPath, fileName: target.fileName, durationSeconds: (await probeVideoFile(target.filePath)).duration };
+  },
+  recordHistory: appendHistory
+});
+
+registerImageEditRoutes(app, {
+  limiter: imageGenerationRequestLimiter,
+  hasFal: () => Boolean(process.env.FAL_KEY),
+  getProvider: () => process.env.FAL_KEY ? "fal" : atlasMediaEnabled() ? "atlas" : "",
+  readSource: async (url) => {
+    if (!isLocalAssetUrl(url)) throw httpError(400, "Use an image uploaded or generated in NewtNode.");
+    const { filePath } = await resolveLocalAssetPathFromUrl(url);
+    if ((await stat(filePath)).size > 32 * 1024 * 1024) throw httpError(400, "Image editing supports source files up to 32 MB.");
+    return { buffer: await readFile(filePath) };
+  },
+  generate: async ({ provider, model, prompt, quality, size, images, mask }) => {
+    if (provider === "atlas") {
+      const key = String(process.env.ATLAS_API_KEY || "").trim();
+      return atlasMedia.image({ model, prompt, quality, size,
+        imageInputs: images.map((buffer, index) => ({ buffer, mimeType: "image/png", fileName: `edit-reference-${index + 1}.png` })),
+        editMaskInput: mask ? { buffer: mask, mimeType: "image/png", fileName: "edit-mask.png" } : undefined }, key);
+    }
+    const imageUrls = await Promise.all(images.map((buffer, index) => uploadImageInputToFal({ buffer, mimeType: "image/png", fileName: `edit-reference-${index + 1}.png` }, index)));
+    const maskUrl = mask ? await uploadImageInputToFal({ buffer: mask, mimeType: "image/png", fileName: "edit-mask.png" }, images.length) : undefined;
+    const { endpoint, input } = buildOpenAiImage25FalRequest({ model, prompt, quality, size, imageUrls, maskUrl });
+    const result = await subscribeFal(endpoint, { input, logs: true }, { route: "edit-image", model });
+    const remoteImage = firstFalImageResult(result?.data);
+    if (!remoteImage?.url) throw httpError(502, "The model returned no edited image. Check Fal history before rerunning.");
+    return { endpoint, remoteImage };
+  },
+  save: async (req, buffer) => {
+    const target = await createManagedAssetTarget(req, "image-edit", ".png");
+    await writeFile(target.filePath, buffer);
+    const thumbnail = await createImagePreview(req, target, "image-edit");
+    return { url: target.publicPath, fileName: target.fileName, thumbnailUrl: thumbnail?.publicPath || "" };
+  },
+  recordHistory: appendHistory,
+  sendError: sendApiError
+});
+
 registerNewtPresetRoutes(app, {
   directory: path.join(rootDir, "server", "data", "newt-presets"),
   systemDirectory: path.join(rootDir, "server", "system-newt-presets"),
@@ -552,12 +646,13 @@ registerMyNewtVoiceRoutes(app, {
 const myNewtService = registerMyNewtRoutes(app, {
   directory: path.join(rootDir, "server", "data", "my-newt"),
   getKey: () => process.env.OPENAI_API_KEY,
-  provider: () => process.env.FAL_KEY ? "fal" : process.env.KREA_API_KEY ? "krea" : "fal",
+  provider: () => process.env.FAL_KEY ? "fal" : process.env.KREA_API_KEY ? "krea" : process.env.ATLAS_API_KEY ? "atlas" : "fal",
   inspectAsset: createMyNewtMediaInspector({ resolveAsset: resolveLocalAssetPath, probeVideo: probeVideoFile, runFfmpeg }),
   verifyOutputs: async (outputs) => {
     for (const output of outputs || []) if (output.url) await resolveLocalAssetPath(output.url);
   },
   relay: async (route, body) => {
+    if (isVideoGenerationRoute(route)) return relayLocalVideo(port, route, body);
     const response = await fetch(`http://127.0.0.1:${port}${route}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(60 * 60 * 1000) });
     const data = await response.json().catch(() => ({ error: `The local runner returned HTTP ${response.status}. Check History before retrying.` }));
     return { status: response.status, data };
@@ -592,7 +687,7 @@ await registerMyNewtRemoteRoutes(app, {
 }).ready;
 
 function buildHealthPayload() {
-  const apiKeysFound = Boolean(process.env.FAL_KEY || process.env.GOOGLE_API_KEY || process.env.KREA_API_KEY || process.env.OPENAI_API_KEY);
+  const apiKeysFound = Object.values(apiKeyRuntimeConfig).some(({ envKey }) => Boolean(process.env[envKey]));
   return {
     ok: true,
     version: appVersion,
@@ -625,6 +720,12 @@ function buildHealthPayload() {
       sam3VideoMaskOutput: true,
       extractVideoFrame: true,
       generate3d: true,
+      gptImage25: true,
+      atlasCloud: true,
+      apiCostVisibility: true,
+      imageEditing: true,
+      generateAudio: true,
+      elevenLabsVoices: true,
       skillDirector: true,
       creativeReasoningV2: true,
       storyboardQc: true,
@@ -641,7 +742,10 @@ function buildHealthPayload() {
     falKeyConfigured: Boolean(process.env.FAL_KEY),
     googleApiKeyConfigured: Boolean(process.env.GOOGLE_API_KEY),
     kreaApiKeyConfigured: Boolean(process.env.KREA_API_KEY),
+    atlasApiKeyConfigured: Boolean(process.env.ATLAS_API_KEY),
+    atlasCloudApi: true,
     openAiApiKeyConfigured: Boolean(process.env.OPENAI_API_KEY),
+    elevenLabsApiKeyConfigured: Boolean(process.env.ELEVENLABS_API_KEY),
     apiKeysFound,
     apiKeyStatus: apiKeysFound ? "API keys configured" : "No API keys found",
     googleImageModelsUseGoogleDirect: Boolean(process.env.GOOGLE_API_KEY),
@@ -742,7 +846,7 @@ async function readRuntimeSettings({ includeSecrets = false } = {}) {
     resolveUpdateRepository(),
     currentGitBranch(),
     readRuntimeSettingsStore(),
-    readEnvFileValues(["FAL_KEY", "GOOGLE_API_KEY", "KREA_API_KEY", "OPENAI_API_KEY"])
+    readEnvFileValues(["FAL_KEY", "GOOGLE_API_KEY", "KREA_API_KEY", "ATLAS_API_KEY", "OPENAI_API_KEY", "ELEVENLABS_API_KEY"])
   ]);
   const branchStatus = await resolveBranchStatus(repository, branch);
   await myNewtService.ready;
@@ -766,7 +870,9 @@ async function readRuntimeSettings({ includeSecrets = false } = {}) {
     falKeyConfigured: configuredKeys.fal,
     googleApiKeyConfigured: configuredKeys.google,
     kreaApiKeyConfigured: configuredKeys.krea,
+    atlasApiKeyConfigured: configuredKeys.atlas,
     openAiApiKeyConfigured: configuredKeys.openAi,
+    elevenLabsApiKeyConfigured: configuredKeys.elevenLabs,
     apiKeysFound,
     activeApiKeysFound,
     apiKeyStatus: activeApiKeysFound ? "API keys configured" : apiKeysFound ? "API keys configured but disabled" : "No API keys found",
@@ -774,7 +880,9 @@ async function readRuntimeSettings({ includeSecrets = false } = {}) {
       fal: preferredApiKeySource(resolvedApiKeys.fal),
       google: preferredApiKeySource(resolvedApiKeys.google),
       krea: preferredApiKeySource(resolvedApiKeys.krea),
-      openAi: preferredApiKeySource(resolvedApiKeys.openAi)
+      atlas: preferredApiKeySource(resolvedApiKeys.atlas),
+      openAi: preferredApiKeySource(resolvedApiKeys.openAi),
+      elevenLabs: preferredApiKeySource(resolvedApiKeys.elevenLabs)
     },
     apiKeyVersions: publicApiKeyVersions(resolvedApiKeys),
     providerPreferences,
@@ -793,7 +901,9 @@ async function readRuntimeSettings({ includeSecrets = false } = {}) {
       falKey: settingsValues.apiKeyVersions.fal[0]?.value || "",
       googleApiKey: settingsValues.apiKeyVersions.google[0]?.value || "",
       kreaApiKey: settingsValues.apiKeyVersions.krea[0]?.value || "",
-      openAiApiKey: settingsValues.apiKeyVersions.openAi[0]?.value || ""
+      atlasApiKey: settingsValues.apiKeyVersions.atlas[0]?.value || "",
+      openAiApiKey: settingsValues.apiKeyVersions.openAi[0]?.value || "",
+      elevenLabsApiKey: settingsValues.apiKeyVersions.elevenLabs[0]?.value || ""
     };
   }
 
@@ -804,7 +914,9 @@ async function saveRuntimeSettings(body = {}) {
   const falKey = submittedRuntimeSetting(body.falKey);
   const googleApiKey = submittedRuntimeSetting(body.googleApiKey);
   const kreaApiKey = submittedRuntimeSetting(body.kreaApiKey);
+  const atlasApiKey = submittedRuntimeSetting(body.atlasApiKey);
   const openAiApiKey = submittedRuntimeSetting(body.openAiApiKey);
+  const elevenLabsApiKey = submittedRuntimeSetting(body.elevenLabsApiKey);
   const repository = normalizeUpdateRepository(body.repository);
   const current = await readRuntimeSettingsStore();
   const updates = {};
@@ -813,7 +925,7 @@ async function saveRuntimeSettings(body = {}) {
     updates.apiKeyVersions = normalizeApiKeyVersions(body.apiKeyVersions);
     updates.providerPreferences = apiKeyProviderPreferences(updates.apiKeyVersions);
   } else {
-    const legacyUpdates = { fal: falKey, google: googleApiKey, krea: kreaApiKey, openAi: openAiApiKey };
+    const legacyUpdates = { fal: falKey, google: googleApiKey, krea: kreaApiKey, atlas: atlasApiKey, openAi: openAiApiKey, elevenLabs: elevenLabsApiKey };
     if (Object.values(legacyUpdates).some((value) => value !== undefined)) {
       const nextVersions = normalizeApiKeyVersions(current.apiKeyVersions);
       for (const [provider, value] of Object.entries(legacyUpdates)) {
@@ -837,8 +949,13 @@ async function saveRuntimeSettings(body = {}) {
   if (repository) updates.repository = repository;
   if (body.modelPreferences !== undefined) updates.modelPreferences = normalizeModelPreferences(body.modelPreferences);
   if (body.nodePreferences !== undefined) {
-    if (typeof body.nodePreferences?.myNewt !== "boolean") throw Object.assign(new Error("Choose whether Newt is enabled in node menus."), { status: 400 });
-    updates.nodePreferences = normalizeNodePreferences(body.nodePreferences);
+    const preferences = body.nodePreferences;
+    if (!preferences || Array.isArray(preferences) || typeof preferences !== "object" || !Object.keys(preferences).length ||
+      Object.entries(preferences).some(([key, value]) => !["myNewt", "showApiCosts"].includes(key) || typeof value !== "boolean")) {
+      throw Object.assign(new Error("Choose enabled or disabled for each workspace setting."), { status: 400 });
+    }
+    await myNewtService.ready;
+    updates.nodePreferences = normalizeNodePreferences({ ...current.nodePreferences, ...preferences }, { hasUsedNewt: myNewtService.jobs.size > 0 });
   }
 
   if (Object.keys(updates).length) {
@@ -926,7 +1043,7 @@ async function requestServerRestart() {
 
 async function refreshRuntimeConfigFromEnvFile() {
   const [envValues, settingsValues] = await Promise.all([
-    readEnvFileValues(["FAL_KEY", "GOOGLE_API_KEY", "KREA_API_KEY", "OPENAI_API_KEY", updateRepositoryEnvKey]),
+    readEnvFileValues(["FAL_KEY", "GOOGLE_API_KEY", "KREA_API_KEY", "ATLAS_API_KEY", "OPENAI_API_KEY", "ELEVENLABS_API_KEY", updateRepositoryEnvKey]),
     readRuntimeSettingsStore()
   ]);
 
@@ -961,7 +1078,9 @@ async function readRuntimeSettingsStore() {
     fal: optionalRuntimeSetting(data?.falKey) || "",
     google: optionalRuntimeSetting(data?.googleApiKey) || "",
     krea: optionalRuntimeSetting(data?.kreaApiKey) || "",
-    openAi: optionalRuntimeSetting(data?.openAiApiKey) || ""
+    atlas: optionalRuntimeSetting(data?.atlasApiKey) || "",
+    openAi: optionalRuntimeSetting(data?.openAiApiKey) || "",
+    elevenLabs: optionalRuntimeSetting(data?.elevenLabsApiKey) || ""
   };
   const savedVersions = data?.apiKeyVersions ?? (
     Object.prototype.hasOwnProperty.call(data || {}, "credentials")
@@ -990,11 +1109,13 @@ async function writeRuntimeSettingsStore(patch) {
   if (patch.falKey !== undefined) next.falKey = String(patch.falKey || "");
   if (patch.googleApiKey !== undefined) next.googleApiKey = String(patch.googleApiKey || "");
   if (patch.kreaApiKey !== undefined) next.kreaApiKey = String(patch.kreaApiKey || "");
+  if (patch.atlasApiKey !== undefined) next.atlasApiKey = String(patch.atlasApiKey || "");
   if (patch.openAiApiKey !== undefined) next.openAiApiKey = String(patch.openAiApiKey || "");
+  if (patch.elevenLabsApiKey !== undefined) next.elevenLabsApiKey = String(patch.elevenLabsApiKey || "");
   if (patch.apiKeyVersions !== undefined) next.apiKeyVersions = normalizeApiKeyVersions(patch.apiKeyVersions);
   if (patch.repository !== undefined) next.repository = normalizeUpdateRepository(patch.repository);
   if (patch.modelPreferences !== undefined) next.modelPreferences = normalizeModelPreferences(patch.modelPreferences);
-  if (patch.nodePreferences !== undefined) next.nodePreferences = normalizeNodePreferences(patch.nodePreferences);
+  if (patch.nodePreferences !== undefined) next.nodePreferences = normalizeNodePreferences({ ...current?.nodePreferences, ...patch.nodePreferences });
   if (patch.providerPreferences !== undefined) next.providerPreferences = normalizeApiProviderPreferences(patch.providerPreferences);
   await writeJsonAtomic(runtimeSettingsPath, next);
 }
@@ -1313,6 +1434,7 @@ app.get("/api/stats", async (_req, res) => {
       history: await readHistory(),
       projects: await readNodeProjects(),
       pricing: {
+      elevenLabs: elevenLabsRates(),
       myNewtVoice: { model: MY_NEWT_VOICE_MODEL, costPerMinute: myNewtVoiceCost(60), currency: "USD" },
       currentCatalog: pricingRefresh.catalog(),
       myNewtReasoning: { models: currentOpenAiRates(myNewtModelRates), perTokens: 1000000, currency: "USD", pricingSource: "https://developers.openai.com/api/docs/pricing" },
@@ -1356,6 +1478,10 @@ app.get("/api/stats", async (_req, res) => {
         costs: openAiImage2Costs,
         highCosts: openAiImage2HighCosts,
         currency: "USD"
+      },
+      openAiImage25: {
+        models: Object.values(openAiImage25Models),
+        ...openAiImage25Cost()
       },
       krea2Large: {
         cost: krea2LargeCost,
@@ -2064,6 +2190,10 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
       return res.status(400).json({ error: `${selectedModel.displayName} is temporarily disabled.` });
     }
 
+    if (atlasMediaEnabled() && !supportsAtlasImageModel(selectedModel.displayName)) {
+      throw httpError(400, `${selectedModel.displayName} is not supported by NewtNode's Atlas Cloud integration. Enable its existing provider or choose a supported image model.`);
+    }
+
     if (selectedModel.provider === "fal-sam3-image") {
       return runSam3ImageSegmentation(req, res, {
         prompt,
@@ -2078,6 +2208,11 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
       imagePromptUrls,
       provider: selectedModel.provider
     });
+
+    if (atlasMediaEnabled()) {
+      return await runAtlasImageModel(req, res, { prompt, selectedModel, imagePromptUrls, imagePromptLabels,
+        cleanReferenceLabels, aspectRatio, requestedAspectRatio });
+    }
 
     if (
       !process.env.FAL_KEY &&
@@ -2096,12 +2231,14 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
       });
     }
 
-    if (selectedModel.provider === "fal-openai-image-2") {
+    if (["fal-openai-image-2", "fal-openai-image-25"].includes(selectedModel.provider)) {
       if (!process.env.FAL_KEY) {
-        return res.status(400).json({ error: "Missing FAL_KEY in .env." });
+        return res.status(400).json({ error: `${selectedModel.displayName} needs an enabled Fal or Krea API key in Settings.` });
       }
 
       const openAiImage = await generateFalOpenAiImage2({
+        model: selectedModel.displayName,
+        background: req.body.background,
         prompt,
         imagePromptUrls,
         imagePromptLabels,
@@ -2110,9 +2247,9 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
         quality: req.body.quality,
         editMaskDataUrl: req.body.editMaskDataUrl
       });
-      const output = await downloadImage(req, openAiImage.remoteImage.url, "openai-image-2", openAiImage.remoteImage.content_type || openAiImage.remoteImage.mimeType);
+      const output = await downloadImage(req, openAiImage.remoteImage.url, isOpenAiImage25Model(selectedModel.displayName) ? `openai-image-2.5-${openAiImage25Variant(selectedModel.displayName)}` : "openai-image-2", openAiImage.remoteImage.content_type || openAiImage.remoteImage.mimeType);
 
-      const cost = estimateOpenAiImage2Cost({
+      const cost = isOpenAiImage25Model(selectedModel.displayName) ? openAiImage25Cost({ model: selectedModel.displayName, provider: "fal.ai", endpoint: openAiImage.endpoint, resolution: req.body.resolution, size: openAiImage.size, quality: openAiImage.quality }) : estimateOpenAiImage2Cost({
         resolution: req.body.resolution,
         size: openAiImage.size,
         quality: openAiImage.quality,
@@ -2137,6 +2274,7 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
           resolution: req.body.resolution || "2K",
           imageSize: openAiImage.size,
           quality: openAiImage.quality,
+          ...(isOpenAiImage25Model(selectedModel.displayName) ? { background: req.body.background || "auto" } : {}),
           imagePromptCount: imagePromptUrls.length,
           imagePromptLabels: cleanReferenceLabels,
           maskedEdit: Boolean(req.body.editMaskDataUrl)
@@ -2479,14 +2617,35 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
       }
     });
   } catch (error) {
-    if (error.status) {
-      return res.status(error.status).json({ error: error.message || "Image generation failed.", text: error.text || "", raw: error.raw });
-    }
-
-    console.error(error);
-    res.status(500).json({ error: error.message || "Image generation failed." });
+    sendApiError(res, error, "Image generation failed.");
   }
 });
+
+async function runAtlasImageModel(req, res, { prompt, selectedModel, imagePromptUrls, imagePromptLabels, cleanReferenceLabels, aspectRatio, requestedAspectRatio }) {
+  const key = String(process.env.ATLAS_API_KEY || "").trim();
+  const imageInputs = [];
+  for (const [index, url] of imagePromptUrls.entries()) {
+    const asset = await readLocalAsset(url);
+    if (!asset.mimeType.startsWith("image/")) throw httpError(400, "Every image reference must be an image.");
+    imageInputs.push({ ...asset, label: cleanImagePromptLabel(imagePromptLabels[index]) });
+  }
+  const result = await atlasMedia.image({ model: selectedModel.displayName, prompt, imageInputs, aspectRatio,
+    resolution: req.body.resolution, quality: req.body.quality, background: req.body.background,
+    editMaskInput: req.body.editMaskDataUrl ? imageDataUrlAsset(req.body.editMaskDataUrl) : null }, key);
+  const output = await downloadImage(req, result.remoteImage.url, safePathSegment(selectedModel.displayName), "image/png");
+  await appendHistory({ id: result.requestId, createdAt: new Date().toISOString(), mediaType: "image",
+    provider: "Atlas Cloud", modelName: selectedModel.displayName, endpoint: result.endpoint,
+    mode: imageInputs.length ? "Image edit with references" : "Image generation", prompt, submittedPrompt: result.submittedPrompt,
+    project: projectFromBody(req.body), node: nodeFromBody(req.body),
+    settings: { model: selectedModel.displayName, aspectRatio, requestedAspectRatio, resolution: result.resolution,
+      quality: result.quality, background: req.body.background, size: result.size,
+      imagePromptCount: imageInputs.length, imagePromptLabels: cleanReferenceLabels, runtimeProvider: "atlas" },
+    cost: result.cost, remoteImage: result.remoteImage, localImage: output.publicPath,
+    localThumbnail: output.thumbnailPublicPath, outputFileName: output.fileName, outputBytes: output.bytes, text: "" });
+  return res.json({ requestId: result.requestId, endpoint: result.endpoint, provider: "Atlas Cloud", text: "", cost: result.cost,
+    image: { ...result.remoteImage, localUrl: output.publicPath, thumbnailUrl: output.thumbnailPublicPath,
+      fileName: output.fileName, mimeType: output.mimeType } });
+}
 
 async function runKreaImageModel(
   req,
@@ -2511,6 +2670,13 @@ async function runKreaImageModel(
     return res.status(400).json({ error: `${selectedModel.displayName} is not available through Krea.` });
   }
 
+  if (isOpenAiImage25Model(selectedModel.displayName)) {
+    if (String(requestedAspectRatio || "").toLowerCase() === "auto") {
+      aspectRatio = openAiImage25KreaSelection({ aspectRatio }).aspectRatio;
+    }
+    validateOpenAiImage25KreaRequest({ model: selectedModel.displayName, resolution: req.body.resolution,
+      aspectRatio, referenceCount: imagePromptUrls.length, background: req.body.background, editMaskDataUrl: req.body.editMaskDataUrl });
+  }
   const referenceUrls = await Promise.all(imagePromptUrls.map((url) => uploadLocalOutputToKrea(url, kreaApiKey)));
   const submittedPrompt = promptWithReferenceLabels(
     prompt,
@@ -2527,7 +2693,8 @@ async function runKreaImageModel(
     aspectRatio,
     resolution,
     quality: req.body.quality,
-    creativity: req.body.kreaCreativity
+    creativity: req.body.kreaCreativity,
+    background: req.body.background
   });
   const result = await runKreaGeneration({
     endpoint,
@@ -2551,7 +2718,7 @@ async function runKreaImageModel(
     safePathSegment(selectedModel.displayName).toLowerCase(),
     remoteImage.content_type
   );
-  const cost = estimateKreaImageCost({
+  const cost = isOpenAiImage25Model(selectedModel.displayName) ? openAiImage25Cost({ model: selectedModel.displayName, provider: "Krea", endpoint, resolution, quality: input.quality }) : estimateKreaImageCost({
     modelName: selectedModel.displayName,
     resolution,
     referenceCount: referenceUrls.length
@@ -2577,9 +2744,10 @@ async function runKreaImageModel(
       aspectRatio,
       requestedAspectRatio: requestedAspectRatio || aspectRatio,
       resolution,
-      quality: selectedModel.displayName === imageModelNames.openAiImage2
+      quality: isOpenAiImage25Model(selectedModel.displayName) ? input.quality : selectedModel.displayName === imageModelNames.openAiImage2
         ? normalizeOpenAiImage2Quality(req.body.quality)
         : undefined,
+      ...(isOpenAiImage25Model(selectedModel.displayName) ? { background: input.background || "auto" } : {}),
       creativity: selectedModel.displayName === imageModelNames.krea2Large
         ? normalizeKrea2Creativity(req.body.kreaCreativity)
         : undefined,
@@ -3631,9 +3799,14 @@ app.post("/api/node/generate-video", async (req, res) => {
       return res.status(400).json({ error: `${selectedVideoModel.displayName} is temporarily disabled.` });
     }
 
+    if (atlasMediaEnabled() && !supportsAtlasVideoModel(selectedVideoModel.displayName)) {
+      throw httpError(400, `${selectedVideoModel.displayName} is not supported by NewtNode's Atlas Cloud integration. Enable Fal or Krea for this model.`);
+    }
+
     if (
       selectedVideoModel.provider !== "fal-seedance" &&
       !process.env.FAL_KEY &&
+      !atlasMediaEnabled() &&
       !(process.env.KREA_API_KEY && supportsKreaModel("video", selectedVideoModel.displayName))
     ) {
       return res.status(400).json({
@@ -3650,7 +3823,7 @@ app.post("/api/node/generate-video", async (req, res) => {
     }
 
     if (selectedVideoModel.provider === "fal-minimax-h3") {
-      return runMiniMaxH3Video(req, res, { prompt, selectedVideoModel });
+      return await runMiniMaxH3Video(req, res, { prompt, selectedVideoModel });
     }
 
     if (selectedVideoModel.provider === "fal-wan-fun-control") {
@@ -3683,7 +3856,7 @@ app.post("/api/node/generate-video", async (req, res) => {
       directUrls: Array.isArray(req.body.referenceImageUrls) ? req.body.referenceImageUrls : [],
       directLabels: Array.isArray(req.body.referenceImageLabels) ? req.body.referenceImageLabels : [],
       directorReferences,
-      limit: imageReferenceLimit
+      limit: atlasMediaEnabled() ? Number.MAX_SAFE_INTEGER : imageReferenceLimit
     });
     const referenceImages = mergedReferenceImages.urls
       .map((url, index) => ({ url, label: mergedReferenceImages.labels[index] }))
@@ -3695,11 +3868,11 @@ app.post("/api/node/generate-video", async (req, res) => {
     const referenceVideos = rawReferenceVideoUrls
       .map((url, index) => ({ url, label: rawReferenceVideoLabels[index] }))
       .filter(({ url }) => isLocalAssetUrl(url))
-      .slice(0, videoReferenceLimit);
+      .slice(0, atlasMediaEnabled() ? undefined : videoReferenceLimit);
     const referenceVideoUrls = referenceVideos.map(({ url }) => url);
     const referenceVideoNames = normalizeReferenceNames(referenceVideos.map(({ label }) => label), referenceVideoUrls.length, "Video");
     const referenceAudioUrls = Array.isArray(req.body.referenceAudioUrls)
-      ? req.body.referenceAudioUrls.filter(isLocalAssetUrl).slice(0, audioReferenceLimit)
+      ? req.body.referenceAudioUrls.filter(isLocalAssetUrl).slice(0, atlasMediaEnabled() ? undefined : audioReferenceLimit)
       : [];
     const seedanceResolutionOptions = ["480p", "720p", "1080p", "4k"];
     const resolution = seedance25
@@ -3711,11 +3884,12 @@ app.post("/api/node/generate-video", async (req, res) => {
     const runtimeProvider = resolveSeedanceRuntimeProvider({
       falKey: process.env.FAL_KEY,
       kreaKey: process.env.KREA_API_KEY
-    });
+    }) || (atlasMediaEnabled() ? "atlas" : "");
     if (!runtimeProvider) {
-      return res.status(400).json({ error: "Seedance needs an enabled Fal or Krea API key in Settings." });
+      return res.status(400).json({ error: "Seedance needs an enabled Fal, Krea, or Atlas Cloud API key in Settings." });
     }
     const kreaApiKey = runtimeProvider === "krea" ? String(process.env.KREA_API_KEY || "").trim() : "";
+    const atlasApiKey = runtimeProvider === "atlas" ? String(process.env.ATLAS_API_KEY || "").trim() : "";
 
     let routeKind = "text-to-video";
     if (startFrameUrl) {
@@ -3724,7 +3898,7 @@ app.post("/api/node/generate-video", async (req, res) => {
       routeKind = "reference-to-video";
     }
 
-    const submittedPrompt =
+    let submittedPrompt =
       routeKind === "reference-to-video"
         ? rewriteSeedanceReferenceMentions(prompt, {
             imageNames: referenceImageNames,
@@ -3738,7 +3912,19 @@ app.post("/api/node/generate-video", async (req, res) => {
     let cost;
     let providerName;
 
-    if (runtimeProvider === "fal") {
+    if (runtimeProvider === "atlas") {
+      const result = await atlasMedia.video({ model: selectedVideoModel.displayName, prompt: submittedPrompt,
+        startImage: startFrameUrl, endImage: endFrameUrl, images: referenceImageUrls,
+        videos: referenceVideoUrls, audios: referenceAudioUrls, generateAudio,
+        resolution: req.body.resolution || resolution, duration: req.body.duration || duration,
+        aspectRatio: req.body.aspectRatio || aspectRatio, seed: optionalInteger(req.body.seed) }, atlasApiKey);
+      endpoint = result.endpoint;
+      requestId = result.requestId;
+      remoteVideo = result.remoteVideo;
+      submittedPrompt = result.input.prompt;
+      providerName = "Atlas Cloud";
+      cost = { ...result.cost, aspectRatio: result.sourceAspect ? "source frame" : aspectRatio, routeKind };
+    } else if (runtimeProvider === "fal") {
       const input = {
         prompt: submittedPrompt,
         resolution,
@@ -3832,7 +4018,7 @@ app.post("/api/node/generate-video", async (req, res) => {
       settings: {
         resolution,
         duration,
-        aspectRatio,
+        aspectRatio: runtimeProvider === "atlas" ? cost.aspectRatio : aspectRatio,
         generateAudio,
         audioEnforcement: videoAudioEnforcementMode(generateAudio),
         startFrameCount: startFrameUrl ? 1 : 0,
@@ -4142,7 +4328,7 @@ async function runKreaKlingO3Video(
         }))
       : undefined
   };
-  const result = await runKreaGeneration({ endpoint, input, label: selectedVideoModel.displayName, apiKey: kreaApiKey });
+  const result = await runKreaGeneration({ endpoint, input, label: selectedVideoModel.displayName, apiKey: kreaApiKey, waitUntilTerminal: true });
   const videoUrl = extractKreaJobResultUrl(result.job);
   if (!videoUrl) {
     throw httpError(502, `Krea completed ${selectedVideoModel.displayName} but returned no video URL.`, { body: result.job });
@@ -4567,6 +4753,8 @@ async function runSam3VideoSegmentation(req, res, { prompt, referenceVideoUrls }
 }
 
 async function runMiniMaxH3Video(req, res, { prompt, selectedVideoModel }) {
+  const useAtlas = atlasMediaEnabled();
+  const atlasApiKey = useAtlas ? String(process.env.ATLAS_API_KEY || "").trim() : "";
   const startFrameUrl = firstLocalOutput(req.body.startFrameUrls);
   const endFrameUrl = firstLocalOutput(req.body.endFrameUrls);
   const filmDirector = req.body.filmDirector && typeof req.body.filmDirector === "object" ? req.body.filmDirector : null;
@@ -4578,22 +4766,22 @@ async function runMiniMaxH3Video(req, res, { prompt, selectedVideoModel }) {
     directUrls: Array.isArray(req.body.referenceImageUrls) ? req.body.referenceImageUrls : [],
     directLabels: Array.isArray(req.body.referenceImageLabels) ? req.body.referenceImageLabels : [],
     directorReferences,
-    limit: minimaxH3ReferenceLimits.images
+    limit: useAtlas ? Number.MAX_SAFE_INTEGER : minimaxH3ReferenceLimits.images
   });
   const images = mergedImages.urls
     .map((url, index) => ({ url, label: mergedImages.labels[index], type: "image" }))
     .filter((item) => isLocalAssetUrl(item.url))
-    .slice(0, minimaxH3ReferenceLimits.images);
+    .slice(0, useAtlas ? undefined : minimaxH3ReferenceLimits.images);
   const videos = (Array.isArray(req.body.referenceVideoUrls) ? req.body.referenceVideoUrls : [])
     .map((url, index) => ({ url, label: req.body.referenceVideoLabels?.[index], type: "video" }))
     .filter((item) => isLocalAssetUrl(item.url))
-    .slice(0, minimaxH3ReferenceLimits.videos);
+    .slice(0, useAtlas ? undefined : minimaxH3ReferenceLimits.videos);
   const audio = (Array.isArray(req.body.referenceAudioUrls) ? req.body.referenceAudioUrls : [])
     .map((url, index) => ({ url, label: req.body.referenceAudioLabels?.[index], type: "audio" }))
     .filter((item) => isLocalAssetUrl(item.url))
-    .slice(0, minimaxH3ReferenceLimits.audio);
+    .slice(0, useAtlas ? undefined : minimaxH3ReferenceLimits.audio);
 
-  const references = [...images, ...videos, ...audio].slice(0, minimaxH3ReferenceLimits.total);
+  const references = [...images, ...videos, ...audio].slice(0, useAtlas ? undefined : minimaxH3ReferenceLimits.total);
   const referenceImages = references.filter((item) => item.type === "image");
   const referenceVideos = references.filter((item) => item.type === "video");
   const referenceAudio = references.filter((item) => item.type === "audio");
@@ -4606,15 +4794,15 @@ async function runMiniMaxH3Video(req, res, { prompt, selectedVideoModel }) {
   const duration = normalizeMiniMaxH3Duration(req.body.duration);
   const resolution = normalizeMiniMaxH3Resolution(req.body.resolution);
   const aspectRatio = normalizeMiniMaxH3AspectRatio(req.body.aspectRatio);
-  const submittedPrompt = hasReferences
+  let submittedPrompt = hasReferences
     ? rewriteMiniMaxH3ReferenceMentions(prompt, references)
     : prompt;
   const runtimeProvider = resolveFalKreaProvider({
     falKey: process.env.FAL_KEY,
     kreaKey: process.env.KREA_API_KEY
-  });
+  }) || (useAtlas ? "atlas" : "");
   if (!runtimeProvider) {
-    return res.status(400).json({ error: "MiniMax H3 needs an enabled Fal or Krea API key in Settings." });
+    return res.status(400).json({ error: "MiniMax H3 needs an enabled Fal, Krea, or Atlas Cloud API key in Settings." });
   }
 
   let endpoint;
@@ -4625,7 +4813,17 @@ async function runMiniMaxH3Video(req, res, { prompt, selectedVideoModel }) {
   let providerName;
   let input;
 
-  if (runtimeProvider === "fal") {
+  if (runtimeProvider === "atlas") {
+    const result = await atlasMedia.video({ model: selectedVideoModel.displayName, prompt: submittedPrompt,
+      startImage: startFrameUrl, endImage: endFrameUrl, images: referenceImages.map((item) => item.url),
+      videos: referenceVideos.map((item) => item.url), audios: referenceAudio.map((item) => item.url),
+      duration: req.body.duration || duration, resolution: req.body.resolution || resolution,
+      aspectRatio: req.body.aspectRatio || aspectRatio, generateAudio: normalizeVideoGenerateAudio(req.body.generateAudio),
+      seed: optionalInteger(req.body.seed) }, atlasApiKey);
+    ({ endpoint, requestId, remoteVideo, cost, input } = result);
+    submittedPrompt = input.prompt;
+    providerName = "Atlas Cloud";
+  } else if (runtimeProvider === "fal") {
     endpoint = miniMaxH3FalEndpoint({ startFrame: Boolean(startFrameUrl), references: hasReferences });
     input = {
       prompt: submittedPrompt,
@@ -4684,7 +4882,7 @@ async function runMiniMaxH3Video(req, res, { prompt, selectedVideoModel }) {
       aspectRatio,
       duration
     });
-    const result = await runKreaGeneration({ endpoint, input, label: "MiniMax H3", apiKey: kreaApiKey });
+    const result = await runKreaGeneration({ endpoint, input, label: "MiniMax H3", apiKey: kreaApiKey, waitUntilTerminal: true });
     requestId = result.requestId;
     const videoUrl = extractKreaJobResultUrl(result.job);
     if (!videoUrl) {
@@ -4695,7 +4893,7 @@ async function runMiniMaxH3Video(req, res, { prompt, selectedVideoModel }) {
     cost = estimateKreaMiniMaxH3Cost({ durationSeconds: duration, referenceImageCount: referenceImages.length });
   }
 
-  const output = await downloadVideo(req, remoteVideo.url, "minimax-h3");
+  const output = await downloadVideo(req, remoteVideo.url, "minimax-h3", useAtlas ? { removeAudio: !normalizeVideoGenerateAudio(req.body.generateAudio) } : {});
   await appendHistory({
     id: requestId || randomUUID(),
     createdAt: new Date().toISOString(),
@@ -4712,8 +4910,8 @@ async function runMiniMaxH3Video(req, res, { prompt, selectedVideoModel }) {
       model: selectedVideoModel.displayName,
       routeKind,
       duration,
-      resolution: runtimeProvider === "fal" ? resolution : "Krea provider default",
-      aspectRatio: runtimeProvider === "fal" && routeKind === "image-to-video" ? "source frame" : aspectRatio,
+      resolution: runtimeProvider !== "krea" ? resolution : "Krea provider default",
+      aspectRatio: runtimeProvider !== "krea" && routeKind === "image-to-video" ? "source frame" : aspectRatio,
       startFrameCount: startFrameUrl ? 1 : 0,
       endFrameCount: endFrameUrl ? 1 : 0,
       referenceImageCount: referenceImages.length,
@@ -5502,7 +5700,7 @@ async function runTopazVideoUpscaler(req, res, { referenceVideoUrls, selectedVid
       grain_strength: Number(options.grain || 0) > 0 ? clampNumber(options.grain, 0, 0.1, 0.02) : undefined,
       video_output_preset: Boolean(options.h264Output) ? "h264-high" : "h265-main"
     };
-    result = await runKreaGeneration({ endpoint, input, label: "Topaz Video Upscale" });
+    result = await runKreaGeneration({ endpoint, input, label: "Topaz Video Upscale", waitUntilTerminal: true });
     const remoteUrl = extractKreaJobResultUrl(result.job);
     remoteVideo = remoteUrl
       ? { url: remoteUrl, content_type: "video/mp4", file_name: "topaz-video-upscale.mp4" }
@@ -5604,14 +5802,15 @@ app.post(
       const runtimeProvider = resolveSeedanceRuntimeProvider({
         falKey: process.env.FAL_KEY,
         kreaKey: process.env.KREA_API_KEY
-      });
+      }) || (atlasMediaEnabled() ? "atlas" : "");
       if (!runtimeProvider) {
-        return res.status(400).json({ error: "Seedance needs an enabled Fal or Krea API key in Settings." });
+        return res.status(400).json({ error: "Seedance needs an enabled Fal, Krea, or Atlas Cloud API key in Settings." });
       }
+      const atlasApiKey = runtimeProvider === "atlas" ? String(process.env.ATLAS_API_KEY || "").trim() : "";
 
       const startFrame = req.files?.startFrame?.[0];
       const endFrame = req.files?.endFrame?.[0];
-      const references = (req.files?.references || []).slice(0, seedance25 ? seedance25ReferenceLimits.images : seedanceImageReferenceLimit);
+      const references = (req.files?.references || []).slice(0, runtimeProvider === "atlas" ? undefined : seedance25 ? seedance25ReferenceLimits.images : seedanceImageReferenceLimit);
       const referenceNames = parseReferenceNames(req.body.referenceNames, references.length);
 
       if (endFrame && !startFrame) {
@@ -5632,7 +5831,7 @@ app.post(
       const seed = req.body.seed ? Number(req.body.seed) : undefined;
 
       const route = resolveRoute({ startFrame, references, modelName: selectedVideoModel.displayName });
-      const promptForFal = route.kind === "reference-to-video"
+      let promptForFal = route.kind === "reference-to-video"
         ? rewriteSeedanceReferenceMentions(prompt, referenceNames, { bracketed: seedance25 })
         : prompt;
       const uploadedFiles = [];
@@ -5643,7 +5842,19 @@ app.post(
       let providerName;
       let cost;
 
-      if (runtimeProvider === "fal") {
+      if (runtimeProvider === "atlas") {
+        const asset = async (file) => file ? { buffer: await readFile(file.path), mimeType: file.mimetype, fileName: file.originalname, filePath: file.path } : "";
+        const imageAssets = [];
+        for (const file of references) imageAssets.push(await asset(file));
+        const result = await atlasMedia.video({ model: selectedVideoModel.displayName, prompt: promptForFal,
+          startImage: await asset(startFrame), endImage: await asset(endFrame), images: imageAssets,
+          duration: req.body.duration || duration, resolution: req.body.resolution || resolution,
+          aspectRatio: req.body.aspectRatio || aspectRatio, generateAudio, seed }, atlasApiKey);
+        ({ endpoint, requestId, remoteVideo, cost } = result);
+        promptForFal = result.input.prompt;
+        cost = { ...cost, aspectRatio: result.sourceAspect ? "source frame" : aspectRatio };
+        providerName = "Atlas Cloud";
+      } else if (runtimeProvider === "fal") {
         const input = {
           prompt: promptForFal,
           resolution,
@@ -6957,7 +7168,8 @@ function normalizeComposerPose(pose, index = 0) {
   };
 
   composerPoseFieldKeys.forEach((key) => {
-    normalized[key] = finiteNumber(pose[key], 0);
+    const value = Number(pose[key]);
+    normalized[key] = Number.isFinite(value) ? value : 0;
   });
 
   return normalized;
@@ -11451,6 +11663,13 @@ function resolveImageModel(model) {
     };
   }
 
+  if (isOpenAiImage25Model(model)) {
+    const variant = openAiImage25Variant(model);
+    return { provider: "fal-openai-image-25", displayName: openAiImage25Models[variant], id: `openai/gpt-image-2.5/${variant}/text-to-image` };
+  }
+  if (normalized.includes("image-2.5") || normalized.includes("image 2.5")) {
+    throw httpError(400, "Choose OpenAI Image 2.5 Sunburst or Flare.");
+  }
   if (normalized.includes("openai") || normalized.includes("gpt-image-2") || normalized.includes("image 2")) {
     return {
       provider: "fal-openai-image-2",
@@ -11732,7 +11951,7 @@ function normalizeImageAspectRatioForProvider(value, provider) {
 function imageAspectRatiosForProvider(provider) {
   if (provider === "fal-reve-2-1") return reve21AspectRatios;
   if (provider === "fal-krea-2-large") return krea2AspectRatios;
-  return provider === "fal-openai-image-2" ? openAiImageAspectRatios : nanoImageAspectRatios;
+  return ["fal-openai-image-2", "fal-openai-image-25"].includes(provider) ? openAiImageAspectRatios : nanoImageAspectRatios;
 }
 
 function isAutoImageAspectRatio(value) {
@@ -13149,7 +13368,7 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function generateFalOpenAiImage2({ prompt, imagePromptUrls, imagePromptLabels, aspectRatio, resolution, quality, editMaskDataUrl }) {
+async function generateFalOpenAiImage2({ model, background, prompt, imagePromptUrls, imagePromptLabels, aspectRatio, resolution, quality, editMaskDataUrl }) {
   const imageInputs = [];
 
   for (const [index, imagePromptUrl] of imagePromptUrls.entries()) {
@@ -13162,10 +13381,11 @@ async function generateFalOpenAiImage2({ prompt, imagePromptUrls, imagePromptLab
   }
 
   const editMaskInput = editMaskDataUrl ? imageDataUrlAsset(editMaskDataUrl, "character-wardrobe-mask.png") : null;
-  return generateFalOpenAiImage2FromInputs({ prompt, imageInputs, aspectRatio, resolution, quality, editMaskInput });
+  return generateFalOpenAiImage2FromInputs({ model, background, prompt, imageInputs, aspectRatio, resolution, quality, editMaskInput });
 }
 
 async function generateOpenAiImage2FromInputs(options) {
+  if (atlasMediaEnabled()) return atlasMedia.image({ model: imageModelNames.openAiImage2, ...options }, String(process.env.ATLAS_API_KEY || "").trim());
   const provider = resolveFalKreaProvider({
     falKey: process.env.FAL_KEY,
     kreaKey: process.env.KREA_API_KEY
@@ -13228,12 +13448,15 @@ async function generateKreaOpenAiImage2FromInputs({
   };
 }
 
-async function generateFalOpenAiImage2FromInputs({ prompt, imageInputs = [], aspectRatio, resolution, quality: requestedQuality, editMaskInput = null }) {
+async function generateFalOpenAiImage2FromInputs({ model = imageModelNames.openAiImage2, background, prompt, imageInputs = [], aspectRatio, resolution, quality: requestedQuality, editMaskInput = null }) {
   const size = normalizeOpenAiImageSize({ aspectRatio, resolution });
-  const quality = normalizeOpenAiImage2Quality(requestedQuality);
+  const isImage25 = isOpenAiImage25Model(model);
+  if (isImage25 && editMaskInput && !imageInputs.length) throw httpError(400, "An edit mask needs a reference image.");
+  const quality = isImage25 ? normalizeOpenAiImage25Quality(requestedQuality) : normalizeOpenAiImage2Quality(requestedQuality);
   const submittedPrompt = promptWithReferenceLabels(prompt, imageInputs);
-  const endpoint = imageInputs.length ? "openai/gpt-image-2/edit" : "openai/gpt-image-2";
-  const input = {
+  if (isImage25 && imageInputs.length > 16) throw httpError(400, "Fal GPT Image 2.5 accepts up to 16 reference images.");
+  let endpoint = imageInputs.length ? "openai/gpt-image-2/edit" : "openai/gpt-image-2";
+  let input = {
     prompt: submittedPrompt,
     image_size: openAiSizeToFalImageSize(size),
     quality,
@@ -13247,11 +13470,15 @@ async function generateFalOpenAiImage2FromInputs({ prompt, imageInputs = [], asp
     if (editMaskInput) input.mask_url = await uploadImageInputToFal(editMaskInput, imageInputs.length);
   }
 
-  const result = await fal.subscribe(endpoint, { input, logs: true });
+  if (isImage25) {
+    ({ endpoint, input } = buildOpenAiImage25FalRequest({ model, prompt: submittedPrompt, size, quality,
+      imageUrls: input.image_urls || [], maskUrl: input.mask_url, background }));
+  }
+  const result = await subscribeFal(endpoint, { input, logs: true }, { route: "generate-image", model });
   const remoteImage = firstFalImageResult(result?.data);
 
   if (!remoteImage?.url) {
-    throw new Error("Fal returned no OpenAI Image 2 image URL.");
+    throw new Error(`Fal returned no ${model} image URL.`);
   }
 
   return {
@@ -13573,7 +13800,7 @@ async function uploadAssetBufferToKrea({ fileName, buffer, mimeType }, apiKey = 
 }
 
 async function runKreaSeedanceGeneration({ endpoint, input, apiKey }) {
-  const result = await runKreaGeneration({ endpoint, input, label: "Seedance", apiKey });
+  const result = await runKreaGeneration({ endpoint, input, label: "Seedance", apiKey, waitUntilTerminal: true });
   const videoUrl = extractKreaJobResultUrl(result.job);
   if (!videoUrl) {
     throw httpError(502, "Krea completed the Seedance job but returned no video URL.", { body: result.job });
@@ -13589,7 +13816,7 @@ async function runKreaSeedanceGeneration({ endpoint, input, apiKey }) {
   };
 }
 
-async function runKreaGeneration({ endpoint, input, label = "generation", apiKey = process.env.KREA_API_KEY }) {
+async function runKreaGeneration({ endpoint, input, label = "generation", apiKey = process.env.KREA_API_KEY, waitUntilTerminal = false }) {
   const requestApiKey = String(apiKey || "").trim();
   if (!requestApiKey) {
     throw httpError(400, "Krea is disabled or its API key is missing in Settings.");
@@ -13614,40 +13841,48 @@ async function runKreaGeneration({ endpoint, input, label = "generation", apiKey
 
   return {
     requestId: jobId,
-    job: await waitForKreaJob(jobId, label, requestApiKey)
+    job: await waitForKreaJob(jobId, label, requestApiKey, { waitUntilTerminal })
   };
 }
 
-async function waitForKreaJob(jobId, label = "generation", apiKey = process.env.KREA_API_KEY) {
+async function waitForKreaJob(jobId, label = "generation", apiKey = process.env.KREA_API_KEY, { waitUntilTerminal = false } = {}) {
   const requestApiKey = String(apiKey || "").trim();
-  const maxAttempts = 600;
+  const maxAttempts = waitUntilTerminal ? Infinity : 600;
   let transientFailures = 0;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    if (attempt > 0) await delay(2000);
+    if (attempt > 0) await delay(waitUntilTerminal ? Math.min(30000, 2000 * 2 ** Math.min(transientFailures, 4)) : 2000);
     let response;
+    let job;
     try {
       response = await fetch(`${kreaApiBaseUrl}/jobs/${encodeURIComponent(jobId)}`, {
-        headers: kreaAuthorizationHeaders(requestApiKey)
+        headers: kreaAuthorizationHeaders(requestApiKey),
+        // Only the read-only status lookup expires, never the video job itself.
+        ...(waitUntilTerminal ? { signal: AbortSignal.timeout(60000) } : {})
       });
+      job = await responseJson(response);
     } catch (error) {
       transientFailures += 1;
-      if (transientFailures <= 5) continue;
+      if (waitUntilTerminal || transientFailures <= 5) continue;
       throw httpError(502, `Krea temporarily lost the connection while checking the ${label} job. The job may still be processing in Krea. Please check Krea history before retrying.`, {
         cause: error
       });
     }
-    const job = await responseJson(response);
     if (!response.ok) {
       transientFailures += 1;
+      if (waitUntilTerminal && ([408, 425, 429].includes(response.status) || response.status >= 500)) continue;
       if (shouldRetryKreaJobLookup({ status: response.status, attempt, transientAttempt: transientFailures - 1 })) continue;
       if (response.status === 404) {
         throw httpError(
           502,
-          `Krea could not retrieve the ${label} job with the API key that submitted it. The key may have been revoked or the job may have expired. Please retry the generation.`,
+          `Krea could not retrieve the ${label} job with the API key that submitted it. The key may have been revoked or the job may have expired. Check Krea history before running again; NewtNode did not cancel or resubmit this job.`,
           { body: job }
         );
       }
-      throw httpError(response.status, kreaErrorMessage(job, `Krea could not read the ${label} job status.`), { body: job });
+      throw httpError(response.status, `${kreaErrorMessage(job, `Krea could not read the ${label} job status.`)} Check Krea history before running again; NewtNode did not cancel or resubmit this job.`, { body: job });
+    }
+    if (waitUntilTerminal && !job?.status) {
+      transientFailures += 1;
+      continue;
     }
     transientFailures = 0;
 

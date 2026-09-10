@@ -18,7 +18,7 @@ export const myNewtFields = Object.freeze({
   preview: ["previewTab"],
   character: ["characterName", "characterPhysicalDetails", "characterReferenceNotes", "characterSheetModel", "cinematicCharacterSheet", "cuVideoGeneration"],
   skillDirector: ["sceneName", "sceneOverview", "text", "skillShotCount", "skillDurationSeconds", "skillVideoModel", "skillResolution", "skillAspectRatio", "skillDirectorAudioMode", "skillApproach", "styleDirection", "motionBrief", "motionDirection", "shotListNotes", "skillDirectorRevisionNotes"],
-  storyboard: ["sceneName", "sceneDescription", "storyboardNotes", "frameCount", "aspectRatio", "useStoryboardStyle", "useMoodBoard", "storyboardStylePreset"],
+  storyboard: ["sceneName", "sceneDescription", "storyboardNotes", "frameCount", "model", "resolution", "aspectRatio", "useStoryboardStyle", "useMoodBoard", "storyboardStylePreset"],
   image: [], video: [], audio: [], transfer: [], composer: [], utility: []
 });
 

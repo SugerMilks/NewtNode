@@ -896,6 +896,28 @@ textarea::placeholder {
   grid-column: 1 / -1;
 }
 
+.settings-repository-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 16px;
+  font-size: 12px;
+}
+
+.settings-repository-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.settings-repository-state svg { flex-shrink: 0; }
+.settings-repository-state.tone-good { color: #20f3a6; }
+.settings-repository-state.tone-warn { color: #f0c83b; }
+.settings-repository-detail { color: #aaa; overflow-wrap: anywhere; }
+
 .pricing-settings-heading,
 .pricing-settings-actions,
 .pricing-settings-meta {
@@ -1541,6 +1563,8 @@ textarea::placeholder {
   color: #111;
   background: #58ce63;
 }
+
+.media-pill.audio { color: #ff8b35; background: rgba(255, 139, 53, 0.12); }
 
 .media-pill.text {
   color: #111;

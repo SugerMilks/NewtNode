@@ -12,7 +12,7 @@ export function formatNodeBatchCount(value) {
 }
 
 export function nodeBatchStatusMessage(mediaType, total, completed, failures) {
-  const label = mediaType === "image" ? "image" : "video";
+  const label = mediaType === "audio" ? "audio" : mediaType === "image" ? "image" : "video";
   const firstError = failures[0]?.reason?.message || "";
   return `${completed} of ${total} ${label} generations complete.${firstError ? ` ${firstError}` : ""}`;
 }
@@ -62,7 +62,7 @@ export function isRunnableNode(node) {
     node?.data?.utilityMode === "image" &&
     String(node?.data?.utilityImageModel || "").toLowerCase().replace(/[^a-z0-9]/g, "") === "frameit"
   ) return false;
-  return ["text", "skillDirector", "imageModel", "videoModel", "utility", "model3d", "storyboard", "autoAspect", "coverage"].includes(node.type);
+  return ["text", "skillDirector", "imageModel", "videoModel", "audioModel", "utility", "model3d", "storyboard", "autoAspect", "coverage"].includes(node.type);
 }
 
 export function buildSelectedRunnableDependencies(nodes, edges) {
@@ -79,6 +79,7 @@ export function buildSelectedRunnableDependencies(nodes, edges) {
 
 export function nodeRunPriority(node) {
   if (node?.type === "text") return 0;
+  if (node?.type === "audioModel") return 1;
   if (node?.type === "skillDirector") return 0;
   if (node?.type === "imageModel") return 2;
   if (node?.type === "autoAspect") return 2;
@@ -92,6 +93,7 @@ export function nodeRunPriority(node) {
 
 export function runStageLabel(type) {
   if (type === "text") return "text model";
+  if (type === "audioModel") return "audio";
   if (type === "skillDirector") return "director";
   if (type === "imageModel") return "image";
   if (type === "autoAspect") return "auto aspect";

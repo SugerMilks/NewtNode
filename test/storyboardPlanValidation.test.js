@@ -52,7 +52,7 @@ test("the real editor planning failure path preserves frames, image URLs, analys
     nodesRef: { current: [node] }, edgesRef: { current: [] },
     buildIncomingByNode: () => ({}), expandStoryboardDirectorIncoming: () => ({}),
     storyboardSceneDescriptionForNode: () => "The scene", connectedDirectorPackageSource: () => null,
-    storyboardFrameCountForNode: () => 3,
+    storyboardFrameCountForNode: () => 3, assertCharacterOutputReferences: () => {},
     updateNode: (_id, patch) => Object.assign(node.data, patch), workflowRequestContext: () => ({}),
     storyboardCharacterSummariesForNode: () => [], storyboardSceneReferenceSummaries: () => [], storyboardPropReferenceSummaries: () => [],
     nodeApi: { planStoryboard: async () => ({ response: { ok: false }, data: { error: "Provider unavailable", plan: { frames: [frame(1, 1, "Old server fallback")] } } }) },

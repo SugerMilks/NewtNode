@@ -47,7 +47,8 @@ test("CU generation uses the original portrait while wardrobe edits preserve the
   assert.match(characterVideoSheetPrompt, /Use the face view from the Portrait/i);
   assert.match(characterVideoSheetPrompt, /ARRI Alexa 35/i);
   assert.match(characterVideoNeutralBaseWardrobePrompt, /For a female character, use a one-piece swimsuit/i);
-  assert.match(characterVideoNeutralBaseWardrobePrompt, /For a male character, use men's Speedo-style swim briefs/i);
+  assert.match(characterVideoNeutralBaseWardrobePrompt, /For a male character, use men's tight swim trunks/i);
+  assert.doesNotMatch(characterVideoNeutralBaseWardrobePrompt, /Speedo|swim briefs/i);
   assert.match(characterVideoWardrobeEditPrompt, /neutral foundation swimwear or existing reference garment/i);
   assert.doesNotMatch([characterVideoSheetPrompt, characterVideoIdentityContinuityPrompt].join(" "), /Base Identity Character Sheet|layout conversion|supporting identity check/i);
   assert.match(characterVideoWardrobeEditPrompt, /Base Identity CU Video Sheet remains the sole authority/i);

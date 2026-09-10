@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { writeJsonAtomic } from "./json-store.js";
+import { ATLAS_PRICING_URL, parseAtlasPricing } from "./atlas-pricing.js";
 import {
   FAL_PRICING_URL, GOOGLE_PRICING_URL, KREA_PRICING_URL, OPENAI_PRICING_URL,
   falFixedPricing, falPricingEndpoints, googlePricingTables, parseFalPricing, parseKreaPricing,
@@ -31,8 +32,8 @@ export function nextPricingSlot(now) {
 }
 
 export class PricingRefresh {
-  constructor({ filePath, getFalKey = () => "", refreshKeys = async () => {}, fetchImpl = fetch, now = Date.now, write = writeJsonAtomic }) {
-    Object.assign(this, { filePath, getFalKey, refreshKeys, fetchImpl, now, write });
+  constructor({ filePath, getFalKey = () => "", refreshKeys = async () => {}, fetchImpl = fetch, now = Date.now, write = writeJsonAtomic, enableAtlasPricing = false }) {
+    Object.assign(this, { filePath, getFalKey, refreshKeys, fetchImpl, now, write, enableAtlasPricing });
     this.state = blank(); this.running = null; this.timer = null; this.error = ""; this.lastFailureAt = -Infinity;
     this.settingsQueue = Promise.resolve();
     this.ready = this.load();
@@ -50,7 +51,7 @@ export class PricingRefresh {
         throw new Error("Invalid stored pricing catalog.");
       }
       for (const [id, entry] of Object.entries(state.entries)) {
-        if (!/^(fal|krea|openai):/.test(id)) throw new Error("Invalid stored pricing provider.");
+        if (!/^(fal|krea|openai|atlas):/.test(id)) throw new Error("Invalid stored pricing provider.");
         validatePricingEntry(entry);
       }
       this.state = { ...blank(), ...state };
@@ -156,6 +157,7 @@ export class PricingRefresh {
       next.falAccount = account;
     }
     const tasks = [
+      ...(this.enableAtlasPricing ? [["atlas", async () => parseAtlasPricing(JSON.parse(await this.read(ATLAS_PRICING_URL)))]] : []),
       ["krea", async () => parseKreaPricing(JSON.parse(await this.read(KREA_PRICING_URL)))],
       ["openai", async () => parseOpenAiPricing(await this.read(OPENAI_PRICING_URL))],
       ["fal", async () => key ? this.falResults(key) : null],

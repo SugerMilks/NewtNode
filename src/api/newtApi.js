@@ -1,4 +1,5 @@
 import { scopedMyNewtRequest } from "../myNewt/requestScope.js";
+import { isVideoGenerationRequest } from "../videoJobPolicy.js";
 const localApiPort = import.meta.env?.VITE_API_PORT || "3336";
 const localApiBaseUrl = `http://127.0.0.1:${localApiPort}`;
 
@@ -14,6 +15,16 @@ export async function fetchJsonApi(path, options = {}, label = "Request") {
   const scoped = scopedMyNewtRequest(path, options);
   if (scoped) return scoped;
   const requestUrl = localApiFetchUrl(path);
+  const videoRequest = isVideoGenerationRequest(path, options);
+  if (videoRequest || isImageModelRequest(path, options)) {
+    // Never replay a paid media POST after an uncertain response, including via Newt.
+    try {
+      const response = await fetch(requestUrl, options);
+      return { response, data: await readJsonResponse(response, label) };
+    } catch {
+      throw new Error(`${label}: the connection or response was interrupted. The ${videoRequest ? "video" : "image"} may still be generating. Check History and the provider before running again; NewtNode did not resubmit or cancel the job.`);
+    }
+  }
   let response;
   try {
     response = await fetch(requestUrl, options);
@@ -58,6 +69,13 @@ export async function fetchJsonApi(path, options = {}, label = "Request") {
   }
 }
 
+function isImageModelRequest(path, options) {
+  if (path === "/api/node/generate-image") return true;
+  if (!/^\/api\/my-newt\/jobs\/[^/]+\/request$/.test(path)) return false;
+  try { return JSON.parse(options.body).route === "/api/node/generate-image"; }
+  catch { return false; }
+}
+
 async function readJsonResponse(response, label) {
   const text = await response.text();
   try {
@@ -93,6 +111,7 @@ function canRetryLocalApi(path) {
 }
 
 function localApiRouteKey(path) {
+  if (path.includes("generate-audio")) return "generateAudio";
   if (path.includes("utility-image")) return "utilityImage";
   if (path.includes("utility-video")) return "utilityVideo";
   if (path.includes("extract-video-frame")) return "extractVideoFrame";
@@ -261,6 +280,16 @@ export const generationApi = {
 };
 
 export const nodeApi = {
+  async editImage(form) {
+    // Never replay a potentially billed edit through the localhost fallback.
+    let response;
+    try {
+      response = await fetch(localApiFetchUrl("/api/node/edit-image"), { method: "POST", body: form, signal: AbortSignal.timeout(960000) });
+    } catch {
+      throw new Error("The edit connection was interrupted. Check History and Fal before generating again; the request was not retried.");
+    }
+    return ensureOk(response, await readJsonResponse(response, "Image edit"), "Image edit failed.");
+  },
   uploadAsset(form, label = "Asset upload") {
     return fetchJsonApi("/api/node/upload-asset", { method: "POST", body: form }, label);
   },
@@ -327,6 +356,22 @@ export const nodeApi = {
 
   utilityVideo(body, label = "Utility video generation") {
     return fetchJsonApi("/api/node/utility-video", jsonBody(body), label);
+  }
+};
+
+export const audioModelApi = {
+  voices: (refresh = false) => getJson(`/api/elevenlabs/voices${refresh ? "?refresh=1" : ""}`, "Could not load ElevenLabs voices."),
+  async generate(body) {
+    // A paid audio POST must never be replayed by the generic localhost fallback.
+    let response;
+    try {
+      response = await fetch(localApiFetchUrl("/api/node/generate-audio"), {
+        ...jsonBody(body), signal: AbortSignal.timeout(960000)
+      });
+    } catch {
+      throw new Error("The audio generation connection was interrupted. Check ElevenLabs history before rerunning; the request was not retried.");
+    }
+    return ensureOk(response, await readJsonResponse(response, "Audio generation"), "Audio generation failed.");
   }
 };
 

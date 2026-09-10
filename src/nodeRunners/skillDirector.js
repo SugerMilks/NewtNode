@@ -1,4 +1,5 @@
 import { nodeApi } from "../api/newtApi.js";
+import { characterOutputReference, assertCharacterOutputReferences } from "../characterSheetLibrary.js";
 import { filmDirectorReferenceVideoMode, filmDirectorUsesReference } from "../filmDirectorScenes.js";
 import { filmDirectorShotListDraftsForRequest, filmDirectorShotListSourceSignature, filmDirectorStageDraftForRequest } from "../filmDirectorStageLocks.js";
 import { normalizeFilmDirectorAudioMode } from "../filmDirectorAudio.js";
@@ -16,6 +17,10 @@ export async function runSkillDirectorNode({
   const audioInputs = filmDirectorSupportsMusic(node.data.skillApproach) ? connectedMediaInputItems(incoming.musicIn, "audio", sourceLabel, {}).slice(-1) : [];
   const musicError = filmDirectorMusicVideoError({ approach: node.data.skillApproach, audioInputs, videoModel: node.data.skillVideoModel });
   if (musicError) throw new Error(musicError);
+  if (action !== "style") assertCharacterOutputReferences((incoming.characterIn || []).filter(({ source }) => filmDirectorUsesReference(node.data, {
+    tag: skillDirectorReferenceTag(source.data.characterName || source.data.title || sourceLabel(source)),
+    type: "character", categoryCount: incoming.characterIn.length, useSavedTags: ["build", "revise"].includes(action)
+  })));
   const characterInputs = connectedCharacterInputItems(incoming.characterIn, sourceLabel, node.data.skillReferenceNotes || {});
   const locationInputs = connectedMediaInputItems(incoming.locationIn, "location", sourceLabel, node.data.skillReferenceNotes || {});
   const elementInputs = connectedMediaInputItems(incoming.imageIn, "element", sourceLabel, node.data.skillReferenceNotes || {});
@@ -117,11 +122,13 @@ function activeSceneReferenceItems(items = [], data = {}, action = "build", type
 function connectedCharacterInputItems(items = [], sourceLabel, referenceNotes = {}) {
   return items
     .map(({ source }) => {
-      if (!source.data.locked || !source.data.activated || !source.data.resultUrl) return null;
+      if (!source.data.locked || !source.data.activated) return null;
+      const reference = characterOutputReference(source.data);
+      if (!reference) return null;
       const label = source.data.characterName || source.data.title || sourceLabel(source);
-      const referenceKey = `${source.id}:${source.data.resultUrl || source.data.fileName || ""}`;
+      const referenceKey = `${source.id}:${reference.url}`;
       return {
-        url: source.data.resultUrl,
+        url: reference.url,
         label,
         tag: skillDirectorReferenceTag(label),
         description: referenceNotes[referenceKey] || skillDirectorCharacterDescription(source),

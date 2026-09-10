@@ -15,7 +15,7 @@ Current release: `v3.0.0-beta.0`
 ## What It Does
 
 - Build media workflows visually with typed node ports and dependency-aware `Run All`.
-- Generate image, video, text, utility, and 3D outputs through local API routes.
+- Generate image, video, audio, text, utility, and 3D outputs through local API routes.
 - Use the Composer node to block camera, pose, image planes, props, maquettes, and guide frames before generation.
 - Keep multiple node results, preview them in-node, send them to Preview nodes, or browse recent project outputs in the right rail.
 - Drag outputs or external files onto the canvas to create matching Image, Video, Audio, 3D, or Text nodes.
@@ -26,16 +26,40 @@ Current release: `v3.0.0-beta.0`
 
 - **Local-first workflow files**: Save, Save As, Open, Import, Recent workflows, and unsaved-change prompts are handled locally.
 - **Portable packages**: Packaged workflows keep project assets together so they can move across machines or shared drives.
-- **Provider routing**: Enable or disable Fal, Google, Krea, and OpenAI independently in Settings. Seedance prefers Fal when both Fal and Krea are enabled, then falls back to Krea when Fal is disabled.
+- **Provider routing**: Enable or disable Fal, Google, Krea, Atlas Cloud, OpenAI, and ElevenLabs independently in Settings. Supported media routes select an enabled, configured provider in Fal > Krea > Atlas order before submission, never as an automatic paid retry. Existing LLM/OpenAI routing and direct ElevenLabs audio are unchanged.
 - **Director and Storyboard**: Build structured shot direction, continuity-aware boards, editable layouts, compiled board references, frame exports, and client-ready PDFs.
 - **Frame It**: Pose and frame multiple 3D figures, save complete compositions, and capture guide images for downstream generation.
 - **Preview editing**: Assemble mixed-aspect layouts and apply crop, rotate, curves, color, text, and masked inpainting edits while keeping full-resolution source assets.
-- **Current image models**: Work with GPT Image 2, Nano Banana Pro, Nano Banana 2, Seedream 5.0 Pro, REVE 2.1, Krea 2 Large, and Z-Image from the same reference-aware image workflow.
+- **Current image models**: Work with GPT Image 2, GPT Image 2.5 Sunburst and Flare, Nano Banana Pro, Nano Banana 2, REVE 2.1, and Krea 2 Large from the same reference-aware image workflow.
+- **GPT Image 2.5**: Sunburst and Flare are separate Image Model choices, using enabled providers in Fal > Krea > Atlas order. Both offer Low through Maximum quality. Fal supports 1K/2K/4K output, reference edits (up to 16 images), masks, and transparent PNGs. Krea's launch API supports 1K at 1:1, 3:2, or 2:3 with up to 10 references; only Flare exposes background controls there. Controls adapt to the active provider; Atlas uses its own size/reference limits. Pricing is variable and remains unpriced until a reliable estimate is available, so budget-limited Newt generation will not auto-run these models. Existing saved model choices and Utility defaults are unchanged.
+- **Creative model defaults**: New Character nodes default to Nano Banana Pro at 4K. Coverage and Storyboard default to GPT Image 2.5 Sunburst at High quality; Flare is not offered in these three nodes. Character retains 4K regular/CU bases and masked wardrobe edits, supported through Fal or Atlas for Sunburst. Coverage retains nine separate outputs. Storyboard's Advanced tab offers Sunburst or Image 2, keeping 1K frames, continuity and QC; its internal character preparation uses the selected model. Coverage and Storyboard adapt to Krea's supported sizes and also support Atlas. Existing projects retain their models and generated media until the user requests a change or generation.
 - **Composer**: Pose maquettes, save pose presets, bind Character nodes, add primitives and image planes, then capture a guide frame for downstream image models.
 - **Preview rail**: Recent project outputs lazy-load, support full-size lightbox preview, and can be dragged back into the graph.
 - **3D preview**: GLB results render in-node with the shared lazy Three.js viewer.
 - **Color ID Matte**: Image and video matte pickers support color sampling, tolerance controls, and enlarged picker views.
 - **Cross-platform launchers**: Windows and macOS launchers are included for local app-style startup.
+
+## Atlas Cloud
+
+Add an **Atlas Cloud API V1** key in **Settings > API Providers**. Additional versions use the existing key-version controls with one active version at a time; disabled versions remain saved. `ATLAS_API_KEY` is the optional environment alternative. Keys stay local, outside workflows and exports.
+
+Atlas supports **GPT Image 2, Image 2.5 Sunburst/Flare, Nano Banana 2/Pro, and REVE 2.1**, including compatible Character, Coverage, Storyboard, and Sunburst Image Edit workflows. REVE uses native 4K output; hidden resolution/quality defaults do not change it. Video support covers **Seedance 2.0, Seedance 2.5, and MiniMax H3**. Kling is excluded from Atlas routing until its reference contract is verified. This does not change LLM/OpenAI or direct ElevenLabs routing.
+
+Provider-specific reference, duration, resolution, mask, and audio limits are validated before upload/submission. Unsupported settings fail clearly instead of dropping inputs or silently switching providers. Atlas Seedance 2.5 does **not** expose a `1920p` or native `4k` output option; explicitly supported super-resolution tiers are distinct. Paid submissions are never automatically retried or moved to another provider after failure. Video jobs have no NewtNode job-duration cutoff; read-only status checks keep polling the submitted job with bounded backoff.
+
+Atlas estimates use verified standard prices only, without promotional or account discounts. Token-billed or unverified costs remain variable/unknown, never zero. Atlas is wired into the existing weekly/manual pricing refresh using its [public pricing catalog](https://api.atlascloud.ai/api/v1/pricing/models). Verification used public schemas/catalogs and mocked requests; no paid generation or live API-key test was performed. [Atlas API reference](https://www.atlascloud.ai/docs/en/openapi-index).
+
+## Audio Model
+
+**Audio Model**, directly below Video Model in the node menus, generates Text to Speech, Speech to Speech, Sound Effects, and Music through ElevenLabs. Add and enable an **ElevenLabs API V1** key in Settings; extra key versions use the existing mutually exclusive toggles. Allow Voices Read plus the generation features you intend to use. Account balance, model access, and voice permissions still apply. No key needs to be placed in a workflow or shared in chat.
+
+Text to Speech speaks the supplied text literally. Speech to Speech takes a connected or uploaded MP3, WAV, or M4A recording (up to 50 MB and five minutes), preserving its speech/performance rather than rewriting a prompt. Both provide **Default** and **Mine** voice groups from the current account, voice samples, model selection, and mode-appropriate voice controls. Mine includes voices saved to the account, including added library voices. Changing keys never silently substitutes a missing saved voice. Sound Effects supports duration, automatic duration, looping, and prompt influence. Music supports duration, automatic duration, and instrumental output; disable Instrumental and describe lyrics/vocals in the prompt when wanted.
+
+Outputs are MP3, with 128 kbps as the default. The 192 kbps speech option requires an eligible ElevenLabs plan. Generate one to four results per run, play/download them, and connect the orange output to Preview or compatible audio inputs, including Director music. Each batch chimes once when finished. Previous successful results remain available after a partial or failed run. Files save into the current workflow's managed output folder, with History and estimated costs in Stats.
+
+Run Audio displays a total batch estimate based on the [published standard API rates](https://elevenlabs.io/pricing/api), verified September 8, 2026. Account discounts, custom voice rates, and unknown automatic duration can make the actual bill differ; unknown prices display **cost varies**. Optional `ELEVENLABS_*_USD` overrides are listed in `.env.example`. ElevenLabs rates are not yet part of the automatic weekly pricing refresh. Requests are never automatically replayed after a timeout; check ElevenLabs history before rerunning. Audio Model generation is manual/Run All only, not agent-executable until Newt has dedicated audio budget permissions.
+
+API contracts: [speech](https://elevenlabs.io/docs/api-reference/text-to-speech/convert), [voice conversion](https://elevenlabs.io/docs/api-reference/speech-to-speech/convert), [sound effects](https://elevenlabs.io/docs/api-reference/text-to-sound-effects/convert), [music](https://elevenlabs.io/docs/api-reference/music/compose), [voice list](https://elevenlabs.io/docs/api-reference/voices/search).
 
 ## Director and Storyboard Intelligence
 
@@ -50,6 +74,8 @@ Compatibility sources: [OpenAI Astra migration](https://developers.openai.com/ap
 ## Newt (Experimental)
 
 Enable **Settings > Workspace > Newt** to show Newt at the top of the node menus. It starts hidden for new users; existing users with saved Newt tasks keep it visible. The switch saves immediately and hides only the menu entry, not Newt nodes already in projects.
+
+**Settings > Workspace > API Cost** shows or hides generation-button prices and variable-cost labels. It saves immediately and defaults off for new installations and upgrades without a saved choice. Stats, History, Newt approvals, and budget limits remain active regardless of this display preference.
 
 ### Newt Remote
 
@@ -111,7 +137,7 @@ The release retains VS Git ancestry so clean `main` checkouts can update without
 - npm.
 - At least one supported provider API key for remote generation.
 - Fal is required for Fal-hosted models and utilities.
-- Google, Krea, and OpenAI keys are optional and can be enabled independently.
+- Google, Krea, Atlas Cloud, OpenAI, and ElevenLabs keys are optional and can be enabled independently.
 
 ## Setup
 
@@ -123,7 +149,9 @@ You can alternatively copy `.env.example` to `.env` and add keys there:
 FAL_KEY=your_fal_key_here
 GOOGLE_API_KEY=your_google_api_key_here
 KREA_API_KEY=your_krea_key_here
+ATLAS_API_KEY=your_atlas_key_here
 OPENAI_API_KEY=your_openai_key_here
+ELEVENLABS_API_KEY=your_elevenlabs_key_here
 ```
 
 Settings takes priority for providers explicitly enabled or disabled there. Disabling a provider prevents NewtNode from using its `.env` key until it is enabled again.
@@ -194,6 +222,16 @@ WorkflowName/
     manifest.json
 ```
 
+## Image Editing
+
+Double-click an image thumbnail, then choose the pencil icon for **Image Edit**. Draw, circle, add arrows or text notes, or paint a separate selection to identify the area to change. Pen size, color, opacity, eraser, undo/redo, zoom and pan are available. **Edit image** interprets the marks and your prompt; **Render sketch** can start on a blank canvas; **Remove selected** fills a selected area from its surroundings.
+
+Edits use **Image 2.5 Sunburst through Fal or Atlas**, with High, Extra High and Maximum quality. Enable the intended provider in Settings; Krea does not currently expose the mask/custom-size features used here. Provider-specific limits still apply, with no automatic paid fallback. API cost is variable. No request is sent until Generate Edit is clicked, and failed requests are not automatically retried.
+
+Review results with the before/after slider, select earlier edits, or continue editing a result. **Add Image to Canvas** creates a separate Image node. **Apply to Source** is available for editable Image, Preview layout and Storyboard images; model/Character outputs stay protected. Generated edits are saved in project storage and History. Originals remain on disk, selection edits preserve untouched pixels locally, and downloaded results retain the original dimensions/aspect. Images up to 24 megapixels and aspect ratios from 1:3 to 3:1 are supported; AI rendering itself is limited to the model's supported size (up to 3840 pixels per edge), then restored to the original canvas dimensions.
+
+Drawing drafts are temporary and require confirmation before discarding; generated edits remain saved. For no-cost UI testing, run the development client and open `/test/browser/image-edit.html` for the isolated mock editor.
+
 ## Named References
 
 Reference images can be renamed in the thumbnail strip. Use those handles in your prompt with `@`, such as `@product` or `@talent`. The app translates your names to provider-specific reference tokens when needed.
@@ -203,6 +241,8 @@ Reference images can be renamed in the thumbnail strip. Use those handles in you
 Settings > API Pricing enables a local weekly check every Monday at 4 AM Eastern (`America/New_York`, including daylight saving). The backend must be running and online; missed checks catch up on startup or wake. Failed sources retry hourly up to three times. The refresh icon checks immediately, even when weekly updates are disabled. No LLM or paid generation is used, and no project, API-key preference, or source file is changed.
 
 Verified rates feed shared run estimates and Newt budgeting. Krea's official structured billing tables and OpenAI's Standard reasoning/transcription tables update automatically. Fal's authenticated unit-price API updates verified fixed-price REVE routes; models with variable billing rules are checked but marked for review rather than applying an unreliable multiplier. Missing Krea pricing and direct Google token-based image pricing also remain review-required. Settings shows per-provider coverage, failures, sources, and recent changes. Published prices are estimates, not a promise of an account's final invoice.
+
+Atlas's weekly/manual adapter reads its public catalog without a key or paid request, applying only verified standard `official_price` rows for supported Banana and H3 settings. Promotional/account prices and generic starting-price summaries are not used. OpenAI image and Seedance token billing, missing REVE rates, and ambiguous tiers such as Nano Banana Pro 2K stay variable/unknown or review-required. Atlas shares the existing runtime catalog; there is no separate pricing store.
 
 Missing, invalid, unusually changed, or ambiguous rates keep their previous estimate. Fal account-specific prices are invalidated when switching or disabling keys. In-flight generations keep their starting pricing snapshot; historical spending uses its recorded amount and unknown charges stay unknown. The owner-only runtime cache is `server/data/pricing-catalog.json`, ignored by Git and excluded from project exports.
 

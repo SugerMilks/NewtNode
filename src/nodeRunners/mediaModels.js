@@ -1,5 +1,7 @@
 import { nodeApi } from "../api/newtApi.js";
 import { characterSheetGenerationSettings } from "../characterSheetModels.js";
+import { storyboardCharacterImageSettings } from "../storyboardImageModels.js";
+import { isOpenAiImage25Model, openAiImage25KreaSelection } from "../openAiImage25.js";
 import { characterVideoBaseReferences } from "../characterVideoSheets.js";
 import { workflowContextPayload } from "../workflowContext.js";
 
@@ -11,6 +13,7 @@ export async function runImageModelGeneration({ node, prompt, aspectRatio, image
     requestedAspectRatio: node.data.aspectRatio,
     resolution: node.data.resolution,
     quality: node.data.quality,
+    background: node.data.background,
     kreaCreativity: node.data.kreaCreativity,
     imagePromptUrls: imagePromptItems.map((item) => item.url),
     imagePromptLabels: imagePromptItems.map((item) => item.label),
@@ -38,15 +41,17 @@ export async function runCoverageGeneration({
   shot,
   aspectRatio,
   workflowContext,
-  index
+  index,
+  provider = "fal"
 }) {
+  const settings = provider === "krea" && isOpenAiImage25Model(node.data.model)
+    ? openAiImage25KreaSelection({ ...node.data, aspectRatio })
+    : { aspectRatio, resolution: node.data.resolution, quality: node.data.quality };
   const { response, data } = await nodeApi.generateImage({
     prompt: shot.prompt,
     model: node.data.model,
-    aspectRatio,
-    requestedAspectRatio: aspectRatio,
-    resolution: node.data.resolution,
-    quality: node.data.quality,
+    ...settings,
+    requestedAspectRatio: "Auto",
     imagePromptUrls: [sourceImageUrl],
     imagePromptLabels: ["Coverage base image"],
     ...workflowContextPayload(workflowContext),
@@ -182,10 +187,13 @@ export async function runCharacterSheetGeneration({
   additionalReferences = [],
   workflowContext,
   characterTag,
-  sheetKind = "image"
+  sheetKind = "image",
+  provider = "fal"
 }) {
   const isVideoSheet = sheetKind === "video";
-  const generationSettings = characterSheetGenerationSettings(node.data.characterSheetModel);
+  const generationSettings = node.type === "storyboard"
+    ? storyboardCharacterImageSettings(node.data, provider)
+    : characterSheetGenerationSettings(node.data.characterSheetModel, provider);
   const portraitUrl = portrait?.localUrl || portrait?.url || "";
   if (!portraitUrl) throw new Error("Character sheet generation requires an identity reference.");
   const references = isVideoSheet ? characterVideoBaseReferences(portrait) : [
@@ -201,14 +209,14 @@ export async function runCharacterSheetGeneration({
   const { response, data } = await nodeApi.generateImage({
     prompt,
     ...generationSettings,
-    aspectRatio: "16:9",
+    aspectRatio: generationSettings.aspectRatio || "16:9",
     imagePromptUrls: references.map((item) => item.url),
     imagePromptLabels: references.map((item) => item.label),
     ...workflowContextPayload(workflowContext),
     nodeId: node.id,
     nodeTitle: `${node.data.title || "Character"}${isVideoSheet ? " CU Video" : ""} Character Sheet`
   }, "Character sheet generation");
-  if (!response.ok) throw new Error(data.error || "Character sheet generation failed.");
+  if (!response.ok) throw new Error(`${isVideoSheet ? "CU video base sheet" : "Character sheet"}: ${data.error || "Generation failed."}`);
   if (!data.image?.localUrl) throw new Error("Character sheet generation returned no image.");
 
   return {
@@ -230,10 +238,11 @@ export async function runCharacterWardrobeEdit({
   editMaskDataUrl = "",
   workflowContext,
   characterTag,
-  sheetKind = "image"
+  sheetKind = "image",
+  provider = "fal"
 }) {
   const isVideoSheet = sheetKind === "video";
-  const generationSettings = characterSheetGenerationSettings(node.data.characterSheetModel);
+  const generationSettings = characterSheetGenerationSettings(node.data.characterSheetModel, provider);
   const baseUrl = baseSheet?.localUrl || baseSheet?.url || "";
   const wardrobeUrl = wardrobe?.localUrl || wardrobe?.url || "";
   if (!baseUrl) throw new Error("Generate the Base Identity sheet before applying wardrobe.");
@@ -254,7 +263,7 @@ export async function runCharacterWardrobeEdit({
     nodeId: node.id,
     nodeTitle: `${node.data.title || "Character"}${isVideoSheet ? " CU Video" : ""} Wardrobe Edit`
   }, "Character wardrobe edit");
-  if (!response.ok) throw new Error(data.error || "Character wardrobe edit failed.");
+  if (!response.ok) throw new Error(`${isVideoSheet ? "CU video wardrobe sheet" : "Wardrobe sheet"}: ${data.error || "Generation failed."}`);
   if (!data.image?.localUrl) throw new Error("Character wardrobe edit returned no image.");
 
   return {

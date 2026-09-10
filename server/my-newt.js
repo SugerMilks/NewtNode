@@ -459,7 +459,7 @@ export class MyNewtService {
       if (job.uncertainNodes.includes(body.nodeId) && !job.pending.approved) throw new Error("An earlier request may have been billed. Explicit approval is required to run this node again.");
       const amount = myNewtRequestEstimate(route, body, this.provider?.() || "fal");
       const approvedProvider = job.pending.preview?.provider;
-      if (route.includes("/generate-") && ["fal", "krea"].includes(approvedProvider) && approvedProvider !== (this.provider?.() || "fal")) throw new Error("The provider changed after approval. Replan this run before generating.");
+      if (route.includes("/generate-") && ["fal", "krea", "atlas"].includes(approvedProvider) && approvedProvider !== (this.provider?.() || "fal")) throw new Error("The provider changed after approval. Replan this run before generating.");
       this.reserve(job, amount, route.split("/").at(-1), key);
       job.receipts[key] = { hash, amount, nodeId: body.nodeId, startedAt: this.now() };
       return { amount };

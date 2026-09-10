@@ -1,7 +1,10 @@
 export const nodePreferencesEvent = "newtnode:node-settings-updated";
 
 export function normalizeNodePreferences(value, { hasUsedNewt = false } = {}) {
-  return { myNewt: typeof value?.myNewt === "boolean" ? value.myNewt : hasUsedNewt === true };
+  return {
+    myNewt: typeof value?.myNewt === "boolean" ? value.myNewt : hasUsedNewt === true,
+    showApiCosts: value?.showApiCosts === true
+  };
 }
 
 export function dispatchNodePreferences(value) {

@@ -60,27 +60,38 @@ export const SelectionActionBar = React.memo(function SelectionActionBar({ bound
   );
 });
 
-export function UnsavedWorkflowPrompt({ actionLabel, onDecision }) {
+export function UnsavedWorkflowPrompt({ actionLabel, saving = false, error = "", onDecision }) {
+  const dialogRef = React.useRef(null);
+  React.useEffect(() => { dialogRef.current?.focus(); }, []);
   React.useEffect(() => {
     function handleKeyDown(event) {
-      if (event.key === "Escape") onDecision("cancel");
+      if (event.key === "Escape" && !saving) onDecision("cancel");
     }
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onDecision]);
+  }, [onDecision, saving]);
 
   return (
     <div className="workflow-prompt-backdrop" role="presentation" onPointerDown={(event) => {
-      if (event.target === event.currentTarget) onDecision("cancel");
+      if (!saving && event.target === event.currentTarget) onDecision("cancel");
     }}>
-      <section className="workflow-prompt" role="dialog" aria-modal="true" aria-labelledby="workflow-prompt-title" onPointerDown={(event) => event.stopPropagation()}>
+      <section ref={dialogRef} tabIndex={-1} className="workflow-prompt" role="dialog" aria-modal="true" aria-busy={saving} aria-labelledby="workflow-prompt-title" onPointerDown={(event) => event.stopPropagation()} onKeyDown={(event) => {
+        if (event.key !== "Tab") return;
+        const buttons = [...event.currentTarget.querySelectorAll("button:not(:disabled)")];
+        const index = buttons.indexOf(document.activeElement);
+        event.preventDefault();
+        const nextIndex = index < 0 ? (event.shiftKey ? buttons.length - 1 : 0) : (index + (event.shiftKey ? -1 : 1) + buttons.length) % buttons.length;
+        buttons[nextIndex]?.focus();
+      }}>
         <h2 id="workflow-prompt-title">Unsaved workflow</h2>
         <p>Save changes before you {actionLabel || "change workflows"}?</p>
+        {saving && <p role="status">Saving your project and its assets before continuing...</p>}
+        {error && <p className="workflow-prompt-error" role="alert">{error}</p>}
         <div className="workflow-prompt-actions">
-          <button type="button" className="primary" onClick={() => onDecision("save")}>Save</button>
-          <button type="button" onClick={() => onDecision("discard")}>Don't Save</button>
-          <button type="button" onClick={() => onDecision("cancel")}>Cancel</button>
+          <button type="button" className="primary" disabled={saving} onClick={() => onDecision("save")}>{saving ? "Saving..." : "Save"}</button>
+          <button type="button" disabled={saving} onClick={() => onDecision("discard")}>Don't Save</button>
+          <button type="button" disabled={saving} onClick={() => onDecision("cancel")}>Cancel</button>
         </div>
       </section>
     </div>

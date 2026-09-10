@@ -71,7 +71,7 @@ function createDataFactory(settings = favorites) {
   const start = editor.indexOf("  const newtCreationData ="), end = editor.indexOf("  const myNewtTaskController =", start);
   assert.ok(start >= 0 && end > start);
   const deps = { ...models, isSeedance25Model, isMiniMaxH3Model, myNewtFavoriteCreationPatch,
-    nodesRef: { current: [{ type: "myNewt", data: settings }] }, myNewtCatalog: catalog,
+    nodesRef: { current: [{ type: "myNewt", data: settings }] }, myNewtCatalog: catalog, generationProvider: "fal",
     validateMyNewtOptions: (type, patch) => { const choices = catalog.find((entry) => entry.type === type)?.options || {}; for (const [key, value] of Object.entries(patch)) if (choices[key]) assert.ok(choices[key].includes(value)); },
     imageModelSelectionPatch: (data, model) => ({ model, resolution: data.resolution || "2K", quality: data.quality || "high" }),
     normalizeImageModelResolutionForModel: (value) => value || "2K", normalizeImageModelAspectRatio: (value) => value || "16:9"

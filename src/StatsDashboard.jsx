@@ -16,6 +16,7 @@ const mediaColors = {
   text: "#f0c83b",
   image: "#3d85ff",
   video: "#58ce63",
+  audio: "#ff8b35",
   model3d: "#14d8c8"
 };
 
@@ -66,7 +67,7 @@ export default function StatsDashboard() {
 
       <div className="stats-metrics">
         <MetricCard icon={<DollarSign size={20} />} label="Estimated spend" value={formatCurrency(stats.totalCost)} detail={`${formatCurrency(stats.averageCost)} avg / priced run${unpricedSuffix(stats.unpricedCount)}`} />
-        <MetricCard icon={<Activity size={20} />} label="Generations" value={stats.totalCount} detail={`${stats.videoCount} video, ${stats.imageCount} image, ${stats.textCount} text, ${stats.model3dCount} 3D`} />
+        <MetricCard icon={<Activity size={20} />} label="Generations" value={stats.totalCount} detail={`${stats.videoCount} video, ${stats.imageCount} image, ${stats.audioCount} audio, ${stats.textCount} text, ${stats.model3dCount} 3D`} />
         <MetricCard icon={<Film size={20} />} label="Video seconds" value={`${stats.videoSeconds}s`} detail={`${stats.fastCount} fast runs`} />
         <MetricCard icon={<Layers3 size={20} />} label="Top project" value={stats.topProject?.name || "None yet"} detail={stats.topProject ? `${formatCostLabel(stats.topProject)} tracked${unpricedSuffix(stats.topProject.unpricedCount)}` : "Waiting for runs"} />
       </div>
@@ -84,7 +85,7 @@ export default function StatsDashboard() {
 
         <section className="stats-panel">
           <PanelTitle icon={<Image size={17} />} title="Media mix" aside={`${stats.totalCount} total`} />
-          <MediaSplit imageCount={stats.imageCount} videoCount={stats.videoCount} textCount={stats.textCount} model3dCount={stats.model3dCount} />
+          <MediaSplit imageCount={stats.imageCount} videoCount={stats.videoCount} audioCount={stats.audioCount} textCount={stats.textCount} model3dCount={stats.model3dCount} />
         </section>
 
         <section className="stats-panel">
@@ -188,8 +189,8 @@ function VolumeBars({ days }) {
   );
 }
 
-function MediaSplit({ imageCount, videoCount, textCount, model3dCount }) {
-  const totalCount = imageCount + videoCount + textCount + model3dCount;
+function MediaSplit({ imageCount, videoCount, audioCount, textCount, model3dCount }) {
+  const totalCount = imageCount + videoCount + audioCount + textCount + model3dCount;
   const total = Math.max(1, totalCount);
   const imagePercent = Math.round((imageCount / total) * 100);
   const videoPercent = Math.round((videoCount / total) * 100);
@@ -197,14 +198,16 @@ function MediaSplit({ imageCount, videoCount, textCount, model3dCount }) {
   const imageStop = imagePercent;
   const videoStop = imagePercent + videoPercent;
   const textStop = videoStop + textPercent;
+  const audioStop = textStop + Math.round((audioCount / total) * 100);
   const dominant = [
     { label: "image", count: imageCount },
     { label: "video", count: videoCount },
     { label: "text", count: textCount },
+    { label: "audio", count: audioCount },
     { label: "3D", count: model3dCount }
   ].sort((a, b) => b.count - a.count)[0];
   const donutBackground = totalCount
-    ? `conic-gradient(${mediaColors.image} 0 ${imageStop}%, ${mediaColors.video} ${imageStop}% ${videoStop}%, ${mediaColors.text} ${videoStop}% ${textStop}%, ${mediaColors.model3d} ${textStop}% 100%)`
+    ? `conic-gradient(${mediaColors.image} 0 ${imageStop}%, ${mediaColors.video} ${imageStop}% ${videoStop}%, ${mediaColors.text} ${videoStop}% ${textStop}%, ${mediaColors.audio} ${textStop}% ${audioStop}%, ${mediaColors.model3d} ${audioStop}% 100%)`
     : "rgba(255, 255, 255, 0.08)";
 
   return (
@@ -213,6 +216,7 @@ function MediaSplit({ imageCount, videoCount, textCount, model3dCount }) {
         <span>{totalCount}</span>
       </div>
       <div className="media-legend">
+        <span><i style={{ background: mediaColors.audio }} />Audio<strong>{audioCount}</strong></span>
         <span>
           <i className="image-dot" />
           Images
@@ -303,6 +307,7 @@ function buildUsageStats(history) {
       if (item.mediaType === "image") day.imageCount += 1;
       if (item.mediaType === "video") day.videoCount += 1;
       if (item.mediaType === "text") day.textCount += 1;
+      if (item.mediaType === "audio") day.audioCount += 1;
       if (item.mediaType === "model3d") day.model3dCount += 1;
     }
 
@@ -321,6 +326,7 @@ function buildUsageStats(history) {
   const pricedCount = normalized.filter((item) => item.hasCostEstimate).length;
   const unpricedCount = totalCount - pricedCount;
   const videoCount = normalized.filter((item) => item.mediaType === "video").length;
+  const audioCount = normalized.filter((item) => item.mediaType === "audio").length;
   const imageCount = normalized.filter((item) => item.mediaType === "image").length;
   const textCount = normalized.filter((item) => item.mediaType === "text").length;
   const model3dCount = normalized.filter((item) => item.mediaType === "model3d").length;
@@ -332,6 +338,7 @@ function buildUsageStats(history) {
     totalCount,
     imageCount,
     videoCount,
+    audioCount,
     textCount,
     model3dCount,
     pricedCount,
@@ -348,11 +355,11 @@ function buildUsageStats(history) {
 
 function normalizeUsageItem(item) {
   const date = new Date(item.createdAt || Date.now());
-  const mediaType = item.mediaType || (item.localModel ? "model3d" : item.localImage ? "image" : "video");
+  const mediaType = item.mediaType || (item.localAudio ? "audio" : item.localModel ? "model3d" : item.localImage ? "image" : "video");
   const settings = item.settings || {};
   const modelName = item.modelName || inferModelName(item, mediaType);
-  const projectId = item.project?.id || (mediaType === "image" ? "image" : mediaType === "text" ? "text" : mediaType === "model3d" ? "model3d" : "video");
-  const projectName = item.project?.name || (mediaType === "image" ? "Image" : mediaType === "text" ? "Text" : mediaType === "model3d" ? "3D" : "Video");
+  const projectId = item.project?.id || (mediaType === "audio" ? "audio" : mediaType === "image" ? "image" : mediaType === "text" ? "text" : mediaType === "model3d" ? "model3d" : "video");
+  const projectName = item.project?.name || (mediaType === "audio" ? "Audio" : mediaType === "image" ? "Image" : mediaType === "text" ? "Text" : mediaType === "model3d" ? "3D" : "Video");
   const cost = recordedCostAmount(item.cost);
   const hasCostEstimate = Number.isFinite(cost);
   const durationSeconds = mediaType === "video" ? durationToSeconds(settings.duration) : 0;
@@ -380,6 +387,7 @@ function normalizeUsageItem(item) {
 function inferModelName(item, mediaType) {
   if (mediaType === "image") return "Nano Banana Pro";
   if (mediaType === "text") return item.settings?.model || "Text processing";
+  if (mediaType === "audio") return "ElevenLabs Audio";
   if (mediaType === "model3d") return "Hunyuan 3D 3.1 Pro";
   if (String(item.endpoint || "").includes("seedance-2.5")) return "Seedance 2.5";
   return item.settings?.speed === "fast" || String(item.endpoint || "").includes("/fast/") ? "Seedance 2.0 Fast" : "Seedance 2.0";
@@ -415,6 +423,7 @@ function makeThirtyDays() {
       imageCount: 0,
       videoCount: 0,
       textCount: 0,
+      audioCount: 0,
       model3dCount: 0,
       unpricedCount: 0
     };

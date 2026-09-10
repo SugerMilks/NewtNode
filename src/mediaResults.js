@@ -22,6 +22,7 @@ export function appendResultItems(previousItems = [], newItems = [], type) {
 export function mediaResultLabel(type) {
   if (type === "image") return "Image";
   if (type === "video") return "Video";
+  if (type === "audio") return "Audio";
   if (type === "model3d") return "3D";
   return "Result";
 }
@@ -32,5 +33,6 @@ export function resultDownloadFileName(item) {
   if (cleanUrlName) return cleanUrlName;
   if (item?.type === "model3d") return "newt-node-model.glb";
   if (item?.type === "video") return "newt-node-video.mp4";
+  if (item?.type === "audio") return "newt-node-audio.mp3";
   return "newt-node-image.png";
 }

@@ -1,4 +1,5 @@
 export { reve21AspectRatios, reve21ResolutionOptions } from "./reve21.js";
+import { openAiImage25Models, isOpenAiImage25Model } from "./openAiImage25.js";
 import {
   seedance25AspectRatioOptions,
   seedance25DurationOptions,
@@ -30,6 +31,8 @@ export const imageModelNames = {
   nanoBanana2: "Nano Banana 2",
   nanoBananaPro: "Nano Banana Pro",
   openAiImage2: "OpenAI Image 2",
+  openAiImage25Sunburst: openAiImage25Models.sunburst,
+  openAiImage25Flare: openAiImage25Models.flare,
   reve21: "REVE 2.1",
   krea2Large: "Krea 2 Large"
 };
@@ -37,8 +40,21 @@ export const imageModelOptions = [
   imageModelNames.nanoBanana2,
   imageModelNames.nanoBananaPro,
   imageModelNames.openAiImage2,
+  imageModelNames.openAiImage25Sunburst,
+  imageModelNames.openAiImage25Flare,
   imageModelNames.reve21,
   imageModelNames.krea2Large
+];
+export const creativeImageDefaultModel = imageModelNames.openAiImage25Sunburst;
+export const coverageModelOptions = [
+  creativeImageDefaultModel,
+  imageModelNames.openAiImage2,
+  imageModelNames.nanoBananaPro,
+  imageModelNames.reve21
+];
+export const storyboardImageModelOptions = [
+  creativeImageDefaultModel,
+  imageModelNames.openAiImage2
 ];
 export const nanoImageAspectRatios = ["21:9", "16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3", "4:5", "5:4"];
 export const openAiImageAspectRatios = nanoImageAspectRatios;
@@ -169,7 +185,7 @@ export const videoModelOptions = [
 ];
 export const videoWorkspaceModelOptions = [...videoModelOptions];
 export const defaultModelPreferences = {
-  image: Object.fromEntries(imageModelOptions.map((model) => [model, model === imageModelNames.openAiImage2])),
+  image: Object.fromEntries(imageModelOptions.map((model) => [model, model === imageModelNames.openAiImage2 || isOpenAiImage25Model(model)])),
   video: Object.fromEntries(videoModelOptions.map((model) => [model, true]))
 };
 export function normalizeModelPreferences(value = {}) {

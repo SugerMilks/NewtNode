@@ -7,7 +7,6 @@ import {
   Minus,
   Plus,
   RefreshCcw,
-  RotateCcw,
   Save
 } from "lucide-react";
 import { settingsApi } from "./api/newtApi.js";
@@ -29,12 +28,14 @@ import {
   videoModelOptions
 } from "./modelOptions.js";
 
-const defaultProviderPreferences = Object.freeze({ fal: true, google: true, krea: true, openAi: true });
+const defaultProviderPreferences = Object.freeze({ fal: true, google: true, krea: true, openAi: true, elevenLabs: true, atlas: true });
 const apiKeyProviders = Object.freeze([
   Object.freeze({ id: "fal", label: "Fal Key", placeholder: "Fal" }),
   Object.freeze({ id: "google", label: "Google API", placeholder: "Google API" }),
   Object.freeze({ id: "krea", label: "Krea API", placeholder: "Krea API" }),
-  Object.freeze({ id: "openAi", label: "OpenAI API", placeholder: "OpenAI API" })
+  Object.freeze({ id: "openAi", label: "OpenAI API", placeholder: "OpenAI API" }),
+  Object.freeze({ id: "elevenLabs", label: "ElevenLabs API", placeholder: "ElevenLabs API" }),
+  Object.freeze({ id: "atlas", label: "Atlas Cloud API", placeholder: "Atlas Cloud API" })
 ]);
 
 export default function SettingsPage() {
@@ -145,6 +146,7 @@ export default function SettingsPage() {
   }
 
   function applyLoadedSettings(data) {
+    window.dispatchEvent(new Event("newtnode:provider-settings-updated"));
     const nextApiKeyVersions = hydrateApiKeyVersions(data);
     setSettings(data);
     setApiKeyVersions(nextApiKeyVersions);
@@ -162,15 +164,23 @@ export default function SettingsPage() {
   }
 
   async function updateNewtPreference(enabled) {
-    setBusy("newt");
+    return updateWorkspacePreference("myNewt", enabled, "newt", "Newt menu");
+  }
+
+  async function updateApiCostPreference(enabled) {
+    return updateWorkspacePreference("showApiCosts", enabled, "api-cost", "API Cost");
+  }
+
+  async function updateWorkspacePreference(key, enabled, busyState, label) {
+    setBusy(busyState);
     try {
-      const data = await queuePreferenceSave({ nodePreferences: { myNewt: enabled } });
-      if (data?.nodePreferences?.myNewt !== enabled) throw new Error("Restart the NewtNode backend to activate the Newt menu setting.");
+      const data = await queuePreferenceSave({ nodePreferences: { [key]: enabled } });
+      if (data?.nodePreferences?.[key] !== enabled) throw new Error(`Restart the NewtNode backend to activate the ${label} setting.`);
       const next = normalizeNodePreferences(data.nodePreferences);
       setNodePreferences(next);
       dispatchNodePreferences(next);
     } catch (error) {
-      setMessage(error.message || "Could not save the Newt menu setting.");
+      setMessage(error.message || `Could not save the ${label} setting.`);
     } finally {
       setBusy("");
     }
@@ -261,8 +271,8 @@ export default function SettingsPage() {
         <SettingsMetric icon={<KeyRound size={20} />} label="Google API" value={providerMetricValue(settings?.googleApiKeyConfigured, providerPreferences.google)} detail={providerKeyDetail(settings, "google", status, providerPreferences.google)} tone={providerMetricTone(settings?.googleApiKeyConfigured, providerPreferences.google)} />
         <SettingsMetric icon={<KeyRound size={20} />} label="Krea API" value={providerMetricValue(settings?.kreaApiKeyConfigured, providerPreferences.krea)} detail={providerKeyDetail(settings, "krea", status, providerPreferences.krea)} tone={providerMetricTone(settings?.kreaApiKeyConfigured, providerPreferences.krea)} />
         <SettingsMetric icon={<KeyRound size={20} />} label="OpenAI API" value={providerMetricValue(settings?.openAiApiKeyConfigured, providerPreferences.openAi)} detail={providerKeyDetail(settings, "openAi", status, providerPreferences.openAi)} tone={providerMetricTone(settings?.openAiApiKeyConfigured, providerPreferences.openAi)} />
-        <SettingsMetric icon={<GitPullRequest size={20} />} label="Branch" value={branchMetricValue(settings)} detail={branchMetricDetail(settings)} tone={settings?.branchStatus?.state === "up-to-date" ? "good" : settings?.branchStatus?.state === "update-available" ? "warn" : ""} />
-        <SettingsMetric icon={<RotateCcw size={20} />} label="Server" value={settings?.restartRequested ? "Restarting" : "Running"} detail="Local app" tone={settings?.restartRequested ? "warn" : "good"} />
+        <SettingsMetric icon={<KeyRound size={20} />} label="ElevenLabs API" value={providerMetricValue(settings?.elevenLabsApiKeyConfigured, providerPreferences.elevenLabs)} detail={providerKeyDetail(settings, "elevenLabs", status, providerPreferences.elevenLabs)} tone={providerMetricTone(settings?.elevenLabsApiKeyConfigured, providerPreferences.elevenLabs)} />
+        <SettingsMetric icon={<KeyRound size={20} />} label="Atlas Cloud API" value={providerMetricValue(settings?.atlasApiKeyConfigured, providerPreferences.atlas)} detail={providerKeyDetail(settings, "atlas", status, providerPreferences.atlas)} tone={providerMetricTone(settings?.atlasApiKeyConfigured, providerPreferences.atlas)} />
       </div>
 
       <div className="settings-grid">
@@ -314,6 +324,7 @@ export default function SettingsPage() {
         <PricingSettings />
         <section className="stats-panel settings-panel">
           <SettingsPanelTitle title="Repository" aside={settings?.branch || "Current branch"} />
+          <RepositoryStatus settings={settings} loading={status === "loading"} updating={busy === "update" || settings?.updateInProgress} />
           <label className="settings-field">
             <span>Repository Field</span>
             <input
@@ -333,6 +344,7 @@ export default function SettingsPage() {
         </section>
 
         <WorkspaceSettings enabled={nodePreferences.myNewt} onToggle={updateNewtPreference}
+          showApiCosts={nodePreferences.showApiCosts} onApiCostToggle={updateApiCostPreference}
           toggleDisabled={actionsDisabled || status !== "ready"} restarting={busy === "restart"}
           restartRequested={settings?.restartRequested} onRestart={restartServer} restartDisabled={actionsDisabled} />
 
@@ -493,7 +505,9 @@ function hydrateApiKeyVersions(data = {}) {
     fal: data.secrets?.falKey || "",
     google: data.secrets?.googleApiKey || "",
     krea: data.secrets?.kreaApiKey || "",
-    openAi: data.secrets?.openAiApiKey || ""
+    openAi: data.secrets?.openAiApiKey || "",
+    elevenLabs: data.secrets?.elevenLabsApiKey || "",
+    atlas: data.secrets?.atlasApiKey || ""
   };
   const combined = Object.fromEntries(
     apiKeyProviderIds.map((provider) => {
@@ -561,6 +575,20 @@ function secretPlaceholder(source, label) {
   if (source === "env") return "Using .env key";
   if (source === "settings") return "Settings override";
   return `Paste ${label} key`;
+}
+
+export function RepositoryStatus({ settings, loading = false, updating = false }) {
+  const state = settings?.branchStatus?.state;
+  const tone = !loading && !updating && state === "up-to-date" ? "good" : !loading && !updating && state === "update-available" ? "warn" : "";
+  return (
+    <div className="settings-repository-status" role="status">
+      <span className={`settings-repository-state ${tone ? `tone-${tone}` : ""}`}>
+        <GitPullRequest size={16} aria-hidden="true" />
+        <span>{updating ? "Updating..." : loading ? "Checking..." : branchMetricValue(settings)}</span>
+      </span>
+      {settings && <span className="settings-repository-detail">{branchMetricDetail(settings)}</span>}
+    </div>
+  );
 }
 
 function branchMetricValue(settings) {

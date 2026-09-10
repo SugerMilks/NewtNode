@@ -1,4 +1,5 @@
 import React from "react";
+import { createWorkflowChangeGuard } from "./workflowChangeGuard.js";
 import { systemApi, workflowApi } from "./api/newtApi.js";
 import {
   buildWorkflowDocument,
@@ -49,8 +50,11 @@ export function useWorkflowPersistence({
 }) {
   const workflowFileInputRef = React.useRef(null);
   const localWorkflowHandleRef = React.useRef(null);
-  const unsavedPromptResolverRef = React.useRef(null);
   const saveInFlightRef = React.useRef(null);
+  const lastSaveErrorRef = React.useRef("");
+  const lastSavedStateRef = React.useRef(null);
+  const latestWorkflowRef = React.useRef(null);
+  const changeGuardRef = React.useRef(null);
   const [cleanWorkflowFingerprint, setCleanWorkflowFingerprint] = React.useState(() => workflowStateFingerprint(savedDraft));
   const [projects, setProjects] = React.useState([]);
   const [localWorkflowFileName, setLocalWorkflowFileName] = React.useState("");
@@ -63,6 +67,24 @@ export function useWorkflowPersistence({
     [nodes, edges, groups, projectName, projectPackagePath]
   );
   const hasUnsavedChanges = currentWorkflowFingerprint !== cleanWorkflowFingerprint;
+  latestWorkflowRef.current = { nodes, edges, groups, projectName, hasUnsavedChanges, saveProject };
+  if (!changeGuardRef.current) {
+    changeGuardRef.current = createWorkflowChangeGuard({
+      needsSave: () => latestWorkflowRef.current.hasUnsavedChanges || Boolean(saveInFlightRef.current),
+      save: async () => {
+        if (!await latestWorkflowRef.current.saveProject()) throw new Error(lastSaveErrorRef.current || "Could not save this workflow. Your current project is still open.");
+        const saved = lastSavedStateRef.current;
+        const current = latestWorkflowRef.current;
+        const graphState = (state) => ({ nodes: state.nodes, edges: state.edges, groups: state.groups, projectName: state.projectName });
+        if (!saved || workflowStateFingerprint(graphState(current)) !== workflowStateFingerprint(graphState(saved))) {
+          throw new Error("New changes arrived while saving. Save again before switching projects.");
+        }
+        return true;
+      },
+      onPrompt: setUnsavedPrompt
+    });
+  }
+  React.useEffect(() => () => changeGuardRef.current.dispose(), []);
   const currentWorkflowPath = React.useMemo(
     () => currentWorkflowDisplayPath({ workflowFilePath, projectPackagePath, localWorkflowFileName, savedProjectName, projectName }),
     [workflowFilePath, projectPackagePath, localWorkflowFileName, savedProjectName, projectName]
@@ -103,7 +125,9 @@ export function useWorkflowPersistence({
   }
 
   function nodesForSave() {
-    return typeof prepareNodesForSave === "function" ? prepareNodesForSave(nodes) : nodes;
+    const prepared = typeof prepareNodesForSave === "function" ? prepareNodesForSave(nodes) : nodes;
+    if (latestWorkflowRef.current.nodes === nodes) latestWorkflowRef.current.nodes = prepared;
+    return prepared;
   }
 
   function currentWorkflowDocument({ id = projectId || createNodeId("workflow"), name = projectName, fileName = null, createdAt = null, graphNodes = nodes } = {}) {
@@ -121,39 +145,17 @@ export function useWorkflowPersistence({
   }
 
   function markWorkflowClean(overrides = {}) {
-    setCleanWorkflowFingerprint(
-      workflowStateFingerprint({
-        nodes,
-        edges,
-        groups,
-        projectName,
-        projectPackagePath,
-        ...overrides
-      })
-    );
-  }
-
-  function requestUnsavedWorkflowDecision(actionLabel) {
-    if (!hasUnsavedChanges) return Promise.resolve("discard");
-    return new Promise((resolve) => {
-      unsavedPromptResolverRef.current = resolve;
-      setUnsavedPrompt({ actionLabel });
-    });
+    const state = { nodes, edges, groups, projectName, projectPackagePath, ...overrides };
+    lastSavedStateRef.current = state;
+    setCleanWorkflowFingerprint(workflowStateFingerprint(state));
   }
 
   function resolveUnsavedWorkflowPrompt(decision) {
-    const resolver = unsavedPromptResolverRef.current;
-    unsavedPromptResolverRef.current = null;
-    setUnsavedPrompt(null);
-    resolver?.(decision);
+    return changeGuardRef.current.decide(decision);
   }
 
-  async function guardUnsavedWorkflowChange(actionLabel) {
-    if (!hasUnsavedChanges) return true;
-    const decision = await requestUnsavedWorkflowDecision(actionLabel);
-    if (decision === "cancel") return false;
-    if (decision === "save") return saveProject();
-    return true;
+  function guardUnsavedWorkflowChange(actionLabel) {
+    return changeGuardRef.current.request(actionLabel);
   }
 
   async function saveProjectToLocalHandle(handle) {
@@ -250,13 +252,15 @@ export function useWorkflowPersistence({
       void loadProjects({ reportError: false });
       return true;
     } catch (error) {
-      setSaveStatus(error.message);
+      lastSaveErrorRef.current = error.message || "Could not save workflow.";
+      setSaveStatus(lastSaveErrorRef.current);
       return false;
     }
   }
 
   async function saveProject(options = {}) {
     if (saveInFlightRef.current) return saveInFlightRef.current;
+    lastSaveErrorRef.current = "";
 
     saveInFlightRef.current = (async () => {
       if (localWorkflowHandleRef.current) {
@@ -264,7 +268,8 @@ export function useWorkflowPersistence({
           setSaveStatus("Saving local workflow...");
           await saveProjectToLocalHandle(localWorkflowHandleRef.current);
         } catch (error) {
-          setSaveStatus(error.message || "Could not save workflow JSON.");
+          lastSaveErrorRef.current = error.message || "Could not save workflow JSON.";
+          setSaveStatus(lastSaveErrorRef.current);
           return false;
         }
         return true;
@@ -526,6 +531,7 @@ export function useWorkflowPersistence({
       if (!(await guardUnsavedWorkflowChange("load another workflow"))) return;
       const selectedProject = projects.find((project) => project.id === id || project.fileName === id);
       const fileName = selectedProject?.registryFileName || selectedProject?.fileName || id;
+      setSaveStatus("Opening workflow...");
       const project = await workflowApi.open(fileName);
       applyWorkflow(project, "Loaded");
     } catch (error) {

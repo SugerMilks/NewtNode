@@ -15,6 +15,8 @@ export const kreaPricingModels = [
   ["/generate/video/kling/kling-3.0", ["mode", "generateAudio", "duration"]],
   ["/generate/video/minimax/hailuo-3", ["billableSeconds", "referenceImageCount"]],
   ["/generate/image/openai/gpt-image-2", null],
+  ["/generate/image/openai/gpt-image-2.5-sunburst", null],
+  ["/generate/image/openai/gpt-image-2.5-flare", null],
   ["/generate/3d/tencent/hunyuan3d-3.1-pro", null]
 ];
 
@@ -27,6 +29,7 @@ export const falFixedPricing = {
 export const falPricingEndpoints = [
   ...Object.keys(falFixedPricing), "fal-ai/nano-banana-pro", "fal-ai/nano-banana-pro/edit",
   "fal-ai/nano-banana-2", "fal-ai/nano-banana-2/edit", "openai/gpt-image-2", "openai/gpt-image-2/edit",
+  ...["sunburst", "flare"].flatMap((variant) => ["text-to-image", "edit"].map((route) => `openai/gpt-image-2.5/${variant}/${route}`)),
   "krea/v2/large/text-to-image",
   ...["2.0", "2.5"].flatMap((version) => ["text-to-video", "image-to-video", "reference-to-video"].map((route) => `bytedance/seedance-${version}/${route}`)),
   ...["pro", "4k"].flatMap((mode) => (mode === "pro" ? ["text-to-video", "reference-to-video"] : ["text-to-video", "image-to-video", "reference-to-video"]).map((route) => `fal-ai/kling-video/o3/${mode}/${route}`)),

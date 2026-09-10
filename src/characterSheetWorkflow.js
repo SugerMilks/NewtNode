@@ -5,7 +5,7 @@ export const characterBaseSheetPromptVersion = 2;
 export const characterVideoSheetPromptVersion = 5;
 
 export const characterNeutralBaseWardrobePrompt =
-  "Foundation wardrobe rule: create the identity master without a designed wardrobe. Dress the character only in minimal, seamless, form-fitting, plain matte charcoal swimwear. For a male character, use men's Speedo-style swim briefs with no top. For a female character, use a one-piece swimsuit. Keep the same swimwear consistently across all views wherever it is visible within the existing panel crops; do not reframe a close-up to show the swimwear. Do not change the character's anatomy or body proportions to fit the garment. Do not add styling, branding, patterns, accessories, jewelry, hats, outerwear, layers, or fashion details. This is an anatomy and identity foundation, not a wardrobe look. No nudity.";
+  "Foundation wardrobe rule: create the identity master without a designed wardrobe. Dress the character only in minimal, seamless, form-fitting, plain matte charcoal swimwear. For a male character, use men's tight swim trunks with no top. For a female character, use a one-piece swimsuit. Keep the same swimwear consistently across all views wherever it is visible within the existing panel crops; do not reframe a close-up to show the swimwear. Do not change the character's anatomy or body proportions to fit the garment. Do not add styling, branding, patterns, accessories, jewelry, hats, outerwear, layers, or fashion details. This is an anatomy and identity foundation, not a wardrobe look. No nudity.";
 
 export const characterVideoNeutralBaseWardrobePrompt = characterNeutralBaseWardrobePrompt;
 

@@ -51,6 +51,7 @@ async function playGenerationCompleteChime() {
 const notifyingNodeTypes = new Set([
   "imageModel",
   "videoModel",
+  "audioModel",
   "autoAspect",
   "coverage",
   "utility",

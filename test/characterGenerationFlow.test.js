@@ -54,15 +54,18 @@ function existingCharacter({ legacyCu = false } = {}) {
   return data;
 }
 
-function editor(t, data) {
+function editor(t, data, { failAt = 0, error = "Provider rejected the request." } = {}) {
   let node = { id: "character", type: "character", data: structuredClone(data) };
   const nodesRef = { current: [node] };
   const progress = [];
-  const generate = t.mock.method(nodeApi, "generateImage", async () => ({
-    response: { ok: true },
-    data: { image: { localUrl: `/outputs/new-${generate.mock.callCount() + 1}.png` } }
-  }));
+  const generate = t.mock.method(nodeApi, "generateImage", async () => {
+    const call = generate.mock.callCount() + 1;
+    return call === failAt
+      ? { response: { ok: false }, data: { error } }
+      : { response: { ok: true }, data: { image: { localUrl: `/outputs/new-${call}.png` } } };
+  });
   const deps = {
+    generationProvider: "fal",
     ...workflow, ...library, characterVideoSheetPrompt,
     runCharacterSheetGeneration, runCharacterWardrobeEdit, nodesRef,
     characterSheetPrompt: "Regular base", cinematicCharacterSheetPrompt: "Cinematic regular base",
@@ -72,6 +75,7 @@ function editor(t, data) {
     updateNode: (_id, patch) => {
       if (patch.characterBatchProgress) progress.push(patch.characterBatchProgress);
       node = { ...node, data: { ...node.data, ...patch } };
+      Object.assign(node.data, library.characterOutputState(node.data));
       nodesRef.current = [node];
     }
   };
@@ -182,3 +186,18 @@ test("real automatic wardrobe addition reuses both independent bases and existin
   assert.equal(app.data().characterSheetVariants[3].wardrobeId, "green");
   assert.deepEqual(app.progress.at(-1), { completed: 2, total: 2 });
 });
+
+for (const failAt of [1, 2]) {
+  test(`Character lock stops at rejected base stage ${failAt} and preserves saved work`, async (t) => {
+    const before = existingCharacter();
+    const error = "prompt: The content could not be processed because it contained material flagged by a content checker.";
+    const app = editor(t, before, { failAt, error });
+    await app.activate({ forceRegenerateBase: true });
+    assert.equal(app.requests().length, failAt, "No retry or subsequent wardrobe generation");
+    assert.equal(app.data().status, "error");
+    assert.equal(app.data().characterBatchProgress, null);
+    assert.equal(app.data().error, `${failAt === 1 ? "Character sheet" : "CU video base sheet"}: ${error}`);
+    assert.deepEqual(app.data().characterCustomSheets, before.characterCustomSheets);
+    assert.equal(app.data().characterBaseSheet.url, failAt === 1 ? before.characterBaseSheet.url : "/outputs/new-1.png");
+  });
+}

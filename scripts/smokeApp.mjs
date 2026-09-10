@@ -22,6 +22,11 @@ const requiredHealthRoutes = [
   "composerPoses",
   "extractVideoFrame",
   "generate3d",
+  "generateAudio",
+  "imageEditing",
+  "atlasCloud",
+  "apiCostVisibility",
+  "elevenLabsVoices",
   "utilityImage",
   "utilityVideo"
 ];

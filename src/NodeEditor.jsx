@@ -1,4 +1,7 @@
 import React from "react";
+import { AudioModelNodeBody } from "./components/AudioModelNodeBody.jsx";
+import { audioInputEnabled, audioModelDefaults, normalizeAudioModelData } from "./audioModel.js";
+import { runAudioModelGeneration } from "./nodeRunners/audioModels.js";
 import { applyCurveToImageData, applyImageAdjustmentsToCanvas } from "./imageAdjustments.js";
 import { MyNewtNodeBody } from "./components/MyNewtNodeBody.jsx";
 import { NewtIcon } from "./components/NewtIcon.jsx";
@@ -159,11 +162,15 @@ import {
   characterDefaultWardrobeId,
   characterSheetChoices,
   characterSheetVariantForSelection,
+  characterOutputReference,
+  characterOutputState,
+  assertCharacterOutputReferences,
   customCharacterSheetId,
   generatedCharacterSheetId,
   normalizeCharacterCustomSheets
 } from "./characterSheetLibrary.js";
-import { characterSheetModelOptions, normalizeCharacterSheetModel } from "./characterSheetModels.js";
+import { characterSheetDefaultModel, characterSheetModelOptions, normalizeCharacterSheetModel } from "./characterSheetModels.js";
+import { normalizeStoryboardImageModel, storyboardImageSettings } from "./storyboardImageModels.js";
 import {
   characterBaseGenerationSignature,
   characterBaseVariant,
@@ -179,6 +186,7 @@ import {
   upsertCharacterWardrobeVariant
 } from "./characterSheetWorkflow.js";
 import { normalizeOpenAiImage2Quality, openAiImage2Quality, openAiImage2QualityOptions } from "./openAiImage2.js";
+import { isOpenAiImage25Model, openAiImage25Variant, normalizeOpenAiImage25Quality, normalizeOpenAiImage25Background, openAiImage25QualityOptions, openAiImage25BackgroundOptions, openAiImage25KreaAspectRatios, openAiImage25KreaSelection } from "./openAiImage25.js";
 import { coverageMethods, coveragePreviewItems, coverageShotsForMethod, normalizeCoverageMethod } from "./coveragePresets.js";
 import {
   batchOptions,
@@ -198,6 +206,9 @@ import {
   firstEnabledVideoModel,
   imageModelNames,
   imageModelOptions,
+  creativeImageDefaultModel,
+  coverageModelOptions,
+  storyboardImageModelOptions,
   imageModelAutoAspectRatio,
   imageResolutionOptions,
   krea2AspectRatios,
@@ -248,6 +259,7 @@ import {
   wanVaceSamplerOptions
 } from "./modelOptions.js";
 import { isSeedance25Model } from "./seedance25.js";
+import { supportsAtlasVideoModel } from "./atlasVideos.js";
 import {
   isMiniMaxH3Model,
   minimaxH3AspectRatioOptions,
@@ -385,6 +397,7 @@ const nodeIcons = {
   coverage: Aperture,
   imageModel: ImagePlus,
   videoModel: Film,
+  audioModel: Volume2,
   storyboard: Clapperboard,
   skillDirector: Megaphone,
   text: Type
@@ -437,6 +450,10 @@ const nodeHelpContent = {
       "Holds an uploaded audio file.",
       "Use the orange output when a video model supports dialogue or audio reference."
     ]
+  },
+  audioModel: {
+    title: "Audio Model",
+    lines: ["Generates speech, voice conversions, sound effects, and music with ElevenLabs.", "Connect the orange audio output to Preview, Newt, or a compatible Director or Video Model input."]
   },
   preview: {
     title: "Preview",
@@ -557,11 +574,6 @@ const maxTransferImages = 6;
 const moodBoardOutputFileName = "MOOD_BOARD.png";
 const autoAspectDefaultRatios = [];
 const autoAspectModelOptions = [imageModelNames.openAiImage2, imageModelNames.nanoBananaPro];
-const coverageModelOptions = [
-  imageModelNames.openAiImage2,
-  imageModelNames.nanoBananaPro,
-  imageModelNames.reve21
-];
 const composerCharacterPortPrefix = "characterIn:";
 const maxCharacterWardrobes = 8;
 const maxCharacterVoices = 8;
@@ -790,10 +802,9 @@ const storyboardDefaultMoodBoardUrl = "/storyboard/MOOD_BOARD.png";
 const storyboardMaxCharacters = 6;
 const storyboardCharacterSheetVersion = 2;
 const storyboardDefaultAspectRatio = "16:9";
-const storyboardAspectRatioOptions = ["16:9", "21:9", "9:16", "1:1"];
+const storyboardAspectRatioOptions = ["16:9", "21:9", "9:16", "1:1", "3:2", "2:3"];
 const storyboardDefaultResolution = "1K";
 const storyboardHighResolution = "4K";
-const storyboardFixedModel = imageModelNames.openAiImage2;
 const storyboardPreviousFrameLabel = "PREVIOUS_FRAME.png";
 const storyboardSpatialAnchorLabel = "SPATIAL_ANCHOR.png";
 const storyboardBoardOutputPortId = "storyboardOut";
@@ -1014,6 +1025,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const selectedEdgeIdRef = React.useRef(null);
   const [composerEditorNodeId, setComposerEditorNodeId] = React.useState(null);
   const [generationProvider, setGenerationProvider] = React.useState("fal");
+  const [imageEditProvider, setImageEditProvider] = React.useState("");
   usePricingRevision();
   const generationNodeStatusesRef = React.useRef(new Map());
   const generationNodeProjectIdRef = React.useRef(savedDraft.projectId);
@@ -1042,15 +1054,37 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   React.useEffect(() => {
     if (!active) return undefined;
     let cancelled = false;
-    settingsApi.load()
+    const refresh = () => settingsApi.load()
       .then((settings) => {
-        if (!cancelled) setGenerationProvider(generationProviderFromSettings(settings));
+        if (!cancelled) {
+          const provider = generationProviderFromSettings(settings);
+          setGenerationProvider(provider);
+          setImageEditProvider(provider === "atlas" ? "atlas" : settings.falKeyConfigured && settings.providerPreferences?.fal !== false ? "fal" : "");
+        }
       })
-      .catch(() => {});
+      .catch(() => { if (!cancelled) setImageEditProvider(""); });
+    refresh();
+    window.addEventListener("newtnode:provider-settings-updated", refresh);
     return () => {
       cancelled = true;
+      window.removeEventListener("newtnode:provider-settings-updated", refresh);
     };
   }, [active]);
+
+  React.useEffect(() => {
+    if (generationProvider !== "krea") return;
+    setNodes((current) => {
+      let changed = false;
+      const next = current.map((node) => {
+        if (!["imageModel", "coverage", "storyboard"].includes(node.type) || ["running", "planning", "exporting", "compiling-board", "compiling-characters"].includes(node.data.status) || !isOpenAiImage25Model(node.data.model)) return node;
+        const patch = openAiImage25KreaSelection(node.data);
+        if (Object.entries(patch).every(([key, value]) => node.data[key] === value)) return node;
+        changed = true;
+        return { ...node, data: { ...node.data, ...patch } };
+      });
+      return changed ? next : current;
+    });
+  }, [generationProvider, nodes]);
 
   const incomingByNode = React.useMemo(() => buildIncomingByNode(nodes, edges), [nodes, edges]);
   const connectedPortKeys = React.useMemo(() => buildConnectedPortKeys(edges), [edges]);
@@ -1688,13 +1722,15 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       };
     }
     if (type === "coverage") {
-      const model = enabledCoverageModels[0] || imageModelNames.openAiImage2;
+      const model = enabledCoverageModels[0] || creativeImageDefaultModel;
       return {
         ...data,
         model,
-        resolution: normalizeImageModelResolutionForModel(data.resolution, model)
+        resolution: normalizeImageModelResolutionForModel(data.resolution, model),
+        ...(isOpenAiImage25Model(model) && generationProvider === "krea" ? openAiImage25KreaSelection({ ...data, model }) : {})
       };
     }
+    if (type === "storyboard") return { ...data, ...storyboardImageSettings(data, generationProvider) };
     if (type === "videoModel") {
       const model = enabledVideoModels[0] || videoModelNames.seedance;
       return {
@@ -2092,6 +2128,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
               if (node.type === "style") nextStyleData = data;
               if (node.type === "skillDirector") nextSkillDirectorData = data;
               if (node.type === "videoModel") nextVideoModelData = data;
+              if (node.type === "character") Object.assign(data, characterOutputState(data));
               return {
                 ...node,
                 data
@@ -2157,6 +2194,17 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
   async function uploadMediaAsset(node, file) {
     if (!file) return;
+    if (node.type === "audioModel") {
+      if (node.data.status === "running") return;
+      pushUndoSnapshot();
+      updateNode(node.id, { status: "uploading", error: "" });
+      try {
+        if (!/\.(mp3|wav|m4a)$/i.test(file.name)) throw new Error("Upload an MP3, WAV, or M4A speech recording.");
+        const asset = await uploadNodeAsset(file, "audio");
+        updateNode(node.id, { sourceAudioUrl: asset.localUrl, sourceAudioName: asset.fileName, status: "idle", error: "" });
+      } catch (error) { updateNode(node.id, { status: "error", error: error.message }); }
+      return;
+    }
     const isModel3DUpload = isModel3DNode(node);
 
     if (isModel3DUpload && !/\.glb$/i.test(file.name || "")) {
@@ -2869,6 +2917,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       const imageMask = await createCharacterWardrobeEditMaskDataUrl(baseSheet, "image");
       generated = await runCharacterWardrobeEdit({
         node,
+        provider: generationProvider,
         prompt: characterWardrobeEditPrompt,
         baseSheet,
         wardrobe,
@@ -2890,6 +2939,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         const videoMask = await createCharacterWardrobeEditMaskDataUrl(baseVideoSheet, "video");
         videoGenerated = await runCharacterWardrobeEdit({
           node,
+          provider: generationProvider,
           prompt: characterVideoWardrobeEditPrompt,
           baseSheet: baseVideoSheet,
           wardrobe,
@@ -3143,6 +3193,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         includeVideo: generateCuVideoSheet,
         generateBase: () => runCharacterSheetGeneration({
           node,
+          provider: generationProvider,
           prompt: [baseCharacterSheetPrompt, characterNeutralBaseWardrobePrompt, physicalDetailsPrompt].filter(Boolean).join("\n\n"),
           portrait,
           wardrobe: null,
@@ -3151,6 +3202,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         }),
         generateVideo: () => runCharacterSheetGeneration({
           node,
+          provider: generationProvider,
           prompt: [characterVideoSheetPrompt, characterVideoNeutralBaseWardrobePrompt, characterVideoIdentityContinuityPrompt, physicalDetailsPrompt].filter(Boolean).join("\n\n"),
           portrait,
           wardrobe: null,
@@ -3633,6 +3685,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         };
         const generated = await runCharacterSheetGeneration({
           node: generationNode,
+          provider: generationProvider,
           prompt: storyboardCharacterSheetPromptForNode(currentNode),
           portrait: character.portrait,
           wardrobe: null,
@@ -3687,6 +3740,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
     try {
       updateNode(currentNode.id, { status: "planning", error: "" });
+      assertCharacterOutputReferences(incoming.characterIn);
       const { response, data } = await nodeApi.planStoryboard({
         nodeId: currentNode.id,
         nodeTitle: currentNode.data.title,
@@ -3727,6 +3781,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
   async function generateStoryboardNode(node, frameIds = null) {
     let currentNode = nodesRef.current.find((item) => item.id === node.id) || node;
+    currentNode = { ...currentNode, data: { ...currentNode.data, ...storyboardImageSettings(currentNode.data, generationProvider) } };
     let currentIncomingByNode = buildIncomingByNode(nodesRef.current, edgesRef.current);
     let incoming = expandStoryboardDirectorIncoming(currentIncomingByNode[currentNode.id] || {}, currentIncomingByNode);
     let frames = normalizedStoryboardFrames(currentNode.data.storyboardFrames);
@@ -3750,11 +3805,15 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const workflowContext = workflowRequestContext();
     const directorControlsInitialScene = Boolean(connectedDirectorPackageSource(incoming.directorIn || []));
     try {
+      assertCharacterOutputReferences(incoming.characterIn);
       if (!directorControlsInitialScene) currentNode = await ensureStoryboardCharactersReady(currentNode);
     } catch (error) {
+      updateNode(currentNode.id, { status: "error", error: error.message });
       return { status: "error", error };
     }
     currentNode = storyboardNodeWithMostPreparedCharacters(currentNode, nodesRef.current.find((item) => item.id === currentNode.id));
+    const imageSettings = storyboardImageSettings(currentNode.data, generationProvider);
+    currentNode = { ...currentNode, data: { ...currentNode.data, ...imageSettings } };
     currentIncomingByNode = buildIncomingByNode(nodesRef.current, edgesRef.current);
     incoming = expandStoryboardDirectorIncoming(currentIncomingByNode[currentNode.id] || {}, currentIncomingByNode);
     const directorControlsScene = Boolean(connectedDirectorPackageSource(incoming.directorIn || []));
@@ -3764,7 +3823,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const successes = [];
     const failures = [];
 
-    updateNode(currentNode.id, { status: "running", storyboardTab: "view", error: "" });
+    updateNode(currentNode.id, { ...imageSettings, status: "running", storyboardTab: "view", error: "" });
     const queuedVersion = Date.now();
     for (const frame of targetFrames) {
       patchStoryboardFrame(currentNode.id, frame.id, { status: "queued", error: "", resultVersion: queuedVersion });
@@ -3821,7 +3880,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
               data: {
                 ...currentNode.data,
                 title: `${currentNode.data.title || "Storyboard"} Frame ${String(frame.number).padStart(3, "0")}`,
-                model: storyboardFixedModel,
+                model: normalizeStoryboardImageModel(currentNode.data.model),
+                quality: "high",
+                background: "auto",
                 aspectRatio,
                 resolution
               }
@@ -4155,6 +4216,37 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         previewLayoutExportError: error.message || "Preview layout export failed."
       });
     }
+  }
+
+  async function acceptAiImageEdit(source, result, action) {
+    if (!result?.url) throw new Error("No edited image is available.");
+    const { before: _before, ...savedResult } = result;
+    if (action === "apply") {
+      const context = source.editContext;
+      const node = nodesRef.current.find((item) => item.id === context?.nodeId);
+      if (node?.data.status === "running" || node?.data.status === "generating") throw new Error("This node is generating. Add the edit as a new Image instead.");
+      const currentUrl = context?.type === "nodeResult"
+        ? normalizedResultItems(node?.data.resultItems, node?.data.resultUrl, "image")[context.itemIndex || 0]?.url
+        : context?.type === "previewLayout"
+          ? node?.data.previewLayoutItems?.find((item) => item.id === context.itemId)?.url
+          : node?.data.storyboardFrames?.find((item) => item.id === context?.itemId)?.exportUrl || node?.data.storyboardFrames?.find((item) => item.id === context?.itemId)?.resultUrl;
+      if (!currentUrl || currentUrl !== source.url) throw new Error("The source has changed since editing began. Add this edit as a new Image instead.");
+      pushUndoSnapshot();
+      await restorePreviewLayoutImageEdit({ ...source, ...savedResult, editContext: context });
+      return;
+    }
+    const id = createNodeId("image");
+    const anchor = nodesRef.current.find((node) => node.id === source.editContext?.nodeId);
+    const position = nonOverlappingPosition({ width: 380, height: 400 }, anchor ? { x: anchor.x + 440, y: anchor.y } : defaultNodePosition(1), occupiedPlacementRects());
+    const next = { id, type: "image", ...position, data: {
+      ...createNodeData("image", "Image Edit", 1), title: "Image Edit", resultUrl: result.url, thumbnailUrl: result.thumbnailUrl || "",
+      resultItems: [savedResult], selectedResultIndex: 0, fileName: result.fileName, mimeType: "image/png", mediaType: "image", resultType: "image", status: "complete"
+    } };
+    pushUndoSnapshot();
+    nodesRef.current = [...nodesRef.current, next];
+    setNodes(nodesRef.current); setSelectedNodeIds([id]);
+    await settleNewNodePlacement(id);
+    setPreviewLightboxItem({ ...savedResult, editContext: { type: "nodeResult", nodeId: id, itemIndex: 0 } });
   }
 
   async function applyPreviewLayoutImageEdit(item, edit = {}) {
@@ -5003,8 +5095,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           const replacesSingleComposerCharacterInput = isComposerCharacterInputPort(to.port, targetNodeForConnection);
           const replacesSingleAutoAspectInput = isAutoAspectNode(targetNodeForConnection) && to.port === "imageIn";
           const replacesSingleCoverageInput = targetNodeForConnection?.type === "coverage" && to.port === "imageIn";
+          const replacesSingleAudioInput = targetNodeForConnection?.type === "audioModel" && to.port === "audioIn";
           const replacesSingleStoryboardSceneInput = targetNodeForConnection?.type === "storyboard" && to.port === "sceneDescriptionIn";
           let nextEdges = current.filter((edge) => {
+            if (replacesSingleAudioInput && edge.to.nodeId === to.nodeId && edge.to.port === to.port) return false;
             if (replacesSingleComposerCharacterInput && edge.to.nodeId === to.nodeId && edge.to.port === to.port) return false;
             if (replacesSingleAutoAspectInput && edge.to.nodeId === to.nodeId && edge.to.port === to.port) return false;
             if (replacesSingleCoverageInput && edge.to.nodeId === to.nodeId && edge.to.port === to.port) return false;
@@ -5067,6 +5161,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (target.type === "myNewt") return [{ video: "videoIn", audio: "audioIn", character: "characterIn", transfer: "transferIn" }[outputKind] || "imageIn"];
     const inputs = {
       prompt: {
+        audioModel: ["promptIn"],
         imageModel: ["promptIn"],
         videoModel: ["promptIn"],
         utility: ["promptIn"],
@@ -5098,6 +5193,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         skillDirector: ["referenceVideoIn"]
       },
       audio: {
+        audioModel: ["audioIn"],
+        preview: ["sourceIn"],
         videoModel: ["referenceAudioIn"],
         skillDirector: ["musicIn"]
       },
@@ -5149,7 +5246,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (source.type === "character") return from.port === "voiceOut" ? "audio" : "character";
     if (source.type === "model3d") return "model3d";
     if (source.type === "video" || source.type === "videoModel") return "video";
-    if (source.type === "audio") return "audio";
+    if (source.type === "audio" || source.type === "audioModel") return "audio";
     if (source.type === "skillDirector") return "director";
     if (source.type === "plainText" || source.type === "text") return "prompt";
     if (source.type === "image" || source.type === "imageModel") return "image";
@@ -5179,6 +5276,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const compatibilityError = getPortCompatibilityError(source, from.port, target, to.port);
     if (compatibilityError) return compatibilityError;
     if (target.type === "myNewt") return "";
+    if (target.type === "audioModel") return audioInputEnabled(target.data.audioMode, to.port) ? "" : "Select Speech to Speech for an audio input, or a text-driven mode for a prompt input";
 
     if (source.type === "storyboard") {
       if (!storyboardOutputItem(source, { from })?.url) return from.port === storyboardBoardOutputPortId ? "Lock this Storyboard board before connecting it" : "Generate this Storyboard frame before connecting it";
@@ -5265,12 +5363,13 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     }
 
     if (source.type === "character") {
-      if (!source.data.locked || !source.data.activated || !source.data.resultUrl) return "Lock Character to enable output";
+      if (!source.data.locked || !source.data.activated) return "Lock Character to enable output";
       if (from.port === "voiceOut") {
         if (!activeCharacterVoice(source)?.localUrl) return "Select a character voice before connecting";
         if (target.type === "videoModel" && to.port === "referenceAudioIn") return "";
-        return "Character voice connects to a Video Model audio input";
+        return "Character voice connects to a Video Model or Audio Model audio input";
       }
+      if (!characterOutputReference(source.data)) return "Generate or upload a non-base character sheet to enable output";
       if (target.type === "storyboard" && to.port === "characterIn") {
         if (target.data.useStoryboardStyle !== false) return "Disable Storyboard Style before connecting custom characters";
         return "";
@@ -5408,8 +5507,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     }
 
     if (target?.type === "preview") {
-      if (["image", "video", "imageModel", "videoModel", "utility", "transfer", "composer", "frameIt", "coverage", "model3d"].includes(source?.type)) return "";
-      return "Preview accepts image, video, and 3D sources";
+      if (["image", "video", "audio", "audioModel", "imageModel", "videoModel", "utility", "transfer", "composer", "frameIt", "coverage", "model3d"].includes(source?.type)) return "";
+      return "Preview accepts image, video, audio, and 3D sources";
     }
 
     return "";
@@ -5928,6 +6027,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
             shot,
             aspectRatio,
             workflowContext: requestContext,
+            provider: generationProvider,
             index
           }),
           imageRunStaggerMs
@@ -6071,12 +6171,33 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         return { status: "complete" };
       }
 
+      if (currentNode.type === "audioModel") {
+        const sourceAudioUrl = incoming.audioIn?.length ? connectedAudioUrls(incoming.audioIn)[0] || "" : currentNode.data.sourceAudioUrl;
+        const settled = await settleSequential(nodeRunIndexes(batchCount), async (index) => {
+          try {
+            return await runAudioModelGeneration({ node: currentNode, prompt: basePrompt, sourceAudioUrl, workflowContext: requestContext, index });
+          } catch (error) { throw new Error(`Run ${index + 1}: ${error.message}`); }
+        });
+        const successes = fulfilledRunValues(settled);
+        const failures = rejectedRunResults(settled);
+        ensureRunSuccesses(successes, failures, "Audio generation failed.");
+        const { resultItems, firstNewIndex } = appendedNodeResultState(existingResultItemsForNode(currentNode, "audio"), successes, "audio");
+        updateNode(currentNode.id, {
+          status: "complete", resultUrl: successes[0].url, resultItems, selectedResultIndex: firstNewIndex, resultType: "audio",
+          error: [batchRunError("audio", batchCount, successes, failures), ...successes.map((item) => item.warning)].filter(Boolean).join(" ")
+        });
+        loadOutputHistory();
+        return failures.length ? { status: "error", error: new Error(batchRunError("audio", batchCount, successes, failures)) } : { status: "complete" };
+      }
+
       if (currentNode.type === "imageModel") {
         const isSegmentation = isSam3ImageModel(currentNode.data.model);
+        const referenceConnections = isSegmentation ? incoming.imagePromptIn || [] : imageReferenceConnectionsForModel(currentNode.data.model, incoming);
+        assertCharacterOutputReferences(referenceConnections);
         const aspectRatio = isSegmentation ? currentNode.data.aspectRatio : await resolveImageModelAspectRatio(currentNode, incoming);
         const imageInstructionSources = imageInstructionSourcesForModel(currentNode.data.model, incoming);
         const imagePromptItems = connectedImagePromptItems(
-          isSegmentation ? incoming.imagePromptIn || [] : imageReferenceConnectionsForModel(currentNode.data.model, incoming),
+          referenceConnections,
           currentIncomingByNode,
           { includeComposerCharacterBindings: true, prompt: basePrompt }
         );
@@ -6142,6 +6263,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       const videoIncoming = expandVideoDirectorPackageIncoming(compatibleVideoIncoming, currentIncomingByNode, {
         includeCharacters: supportsVideoCharacters
       });
+      assertCharacterOutputReferences(videoIncoming.characterIn);
       const prompt = buildEffectiveVideoPrompt(basePrompt, videoIncoming, currentIncomingByNode);
       const runs = nodeRunIndexes(batchCount).map((index) =>
         runVideoModelGeneration({
@@ -6246,12 +6368,14 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     imageModel: { model: enabledImageModels, quality: ["low", "medium", "high"], batchCount: ["1", "2", "3", "4", "5", "6", "7", "8", "9"] },
     videoModel: { model: enabledVideoModels, batchCount: ["1", "2", "3", "4"] },
     coverage: { model: enabledCoverageModels, coverageMethod: ["Standard", "Dynamic", "Insane"] },
+    storyboard: { model: storyboardImageModelOptions },
     character: { characterSheetModel: characterSheetModelOptions },
     preview: { previewTab: ["preview", "layout"] },
     skillDirector: { skillVideoModel: enabledVideoModels.filter(videoModelSupportsFilmDirector), skillApproach: filmDirectorApproachOptions.map((option) => option.value) }
   }), [enabledImageModels, enabledVideoModels, enabledCoverageModels]);
   const myNewtModelControls = (type, model) => {
-    if (["imageModel", "coverage"].includes(type)) return { resolution: imageModelResolutionOptions(model), aspectRatio: imageModelAspectRatioOptions(model) };
+    if (type === "storyboard") return { resolution: imageModelResolutionOptions(model, generationProvider), aspectRatio: generationProvider === "krea" && isOpenAiImage25Model(model) ? openAiImage25KreaAspectRatios : storyboardAspectRatioOptions };
+    if (["imageModel", "coverage"].includes(type)) return { resolution: imageModelResolutionOptions(model, generationProvider), aspectRatio: imageModelAspectRatioOptions(model, generationProvider), quality: isOpenAiImage25Model(model) ? openAiImage25QualityOptions : openAiImage2QualityOptions };
     if (type !== "videoModel") return {};
     if (isMiniMaxH3Model(model)) return { duration: minimaxH3DurationOptions, resolution: minimaxH3ResolutionOptions, aspectRatio: minimaxH3AspectRatioOptions };
     if (isSeedance25Model(model)) return { duration: seedance25DurationOptions.filter((value) => value !== "Auto"), resolution: seedance25ResolutionOptions, aspectRatio: seedance25AspectRatioOptions };
@@ -6261,7 +6385,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const validateMyNewtOptions = (type, patch, currentData = {}) => {
     const controls = myNewtModelControls(type, patch.model || currentData.model);
     for (const [key, value] of Object.entries(patch)) {
-      const options = myNewtOptions[type]?.[key] || controls[key];
+      const options = controls[key] || myNewtOptions[type]?.[key];
       if (options && !options.includes(value)) throw new Error(`Choose a supported ${key}: ${options.join(", ")}`);
     }
   };
@@ -6271,8 +6395,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     return { type, label, ports: { input, output }, editableFields: ["title", ...(myNewtFields[type] || [])],
       defaults: Object.fromEntries((myNewtFields[type] || []).filter((key) => defaults[key] !== undefined).map((key) => [key, defaults[key]])),
       options: myNewtOptions[type] || {}, modelControls: Object.fromEntries((myNewtOptions[type]?.model || []).map((model) => [model, myNewtModelControls(type, model)])),
-      stages: myNewtRunStages[type] || [], manualOnly: ["composer", "utility", "transfer"].includes(type) };
-  }), [myNewtOptions]);
+      stages: myNewtRunStages[type] || [], manualOnly: ["composer", "utility", "transfer", "audioModel"].includes(type) };
+  }), [myNewtOptions, generationProvider]);
   const newtPresets = useNewtPresets({
     projectId, onStatus: setSaveStatus,
     getNodes: () => nodesRef.current,
@@ -6330,7 +6454,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const settings = nodesRef.current.find((node) => node.type === "myNewt")?.data;
     const patch = { ...myNewtFavoriteCreationPatch(type, settings, myNewtCatalog, explicitPatch, context), ...explicitPatch };
     validateMyNewtOptions(type, patch, data);
-    const selection = patch.model && type === "imageModel" ? imageModelSelectionPatch(data, patch.model)
+    const selection = patch.model && type === "imageModel" ? imageModelSelectionPatch(data, patch.model, generationProvider)
       : patch.model && type === "videoModel" ? videoModelSelectionPatch(data, patch.model)
         : patch.model && type === "coverage" ? { resolution: normalizeImageModelResolutionForModel(data.resolution, patch.model), aspectRatio: normalizeImageModelAspectRatio(data.aspectRatio, patch.model) } : {};
     return { ...data, ...selection, ...patch };
@@ -6379,9 +6503,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       const data = node.data, count = Math.max(1, Number(data.batchCount) || 1);
       const base = { title: data.title || node.type, stage, provider: generationProvider, count, references: [] };
       if (node.type === "imageModel" || node.type === "coverage") {
-        const prompt = resolvedPromptText(incoming.promptIn) || data.prompt || "";
+        const prompt = connectedText(incoming.promptIn) || data.prompt || "";
         const references = connectedImagePromptItems(node.type === "coverage" ? incoming.imageIn || [] : imageReferenceConnectionsForModel(data.model, incoming), byNode, { includeComposerCharacterBindings: true, prompt });
-        const settings = { model: data.model, resolution: data.resolution, aspectRatio: data.aspectRatio, quality: data.quality || "high", batchCount: node.type === "coverage" ? 9 : count, referenceCount: references.length, provider: generationProvider };
+        const settings = { model: data.model, resolution: data.resolution, aspectRatio: data.aspectRatio, quality: data.quality || "high", ...(isOpenAiImage25Model(data.model) ? { background: normalizeOpenAiImage25Background(data.background) } : {}), batchCount: node.type === "coverage" ? 9 : count, referenceCount: references.length, provider: generationProvider };
         return { ...base, ...settings, count: settings.batchCount, references, prompt: node.type === "coverage" ? `Nine ${data.coverageMethod || "Standard"} camera-angle generations` : buildEffectiveImagePrompt(prompt, imageInstructionSourcesForModel(data.model, incoming), data.aspectRatio, byNode), estimatedCost: estimateImageRunCost(settings) };
       }
       if (node.type === "videoModel") {
@@ -6392,13 +6516,13 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         const references = uniqueAssetItems([...connectedAssetItems(display.referenceImageIn), ...connectedCharacterReferences(display.characterIn).map((item) => ({ ...item, type: "image" })), ...connectedAssetItems(display.referenceVideoIn), ...connectedAssetItems(display.referenceAudioIn), ...connectedAssetItems(display.startFrameIn), ...connectedAssetItems(display.endFrameIn)]);
         const settings = { model, duration: pack ? filmDirectorVideoDuration(model, pack.durationSeconds, data.duration) : data.duration, resolution: pack ? filmDirectorVideoResolution(model, pack.resolution, data.resolution) : data.resolution, aspectRatio: pack ? filmDirectorVideoAspectRatio(model, pack.aspectRatio, data.aspectRatio) : data.aspectRatio, generateAudio: pack ? filmDirectorVideoGenerateAudio(pack.audioMode, normalizeVideoGenerateAudio(data.generateAudio)) : normalizeVideoGenerateAudio(data.generateAudio), batchCount: count, hasVideoReference: !!display.referenceVideoIn?.length, referenceImageCount: references.filter((item) => item.type === "image").length, provider: generationProvider };
         if (/auto/i.test(String(settings.duration))) throw new Error("Choose an explicit video duration before running Newt.");
-        const prompt = [connectedDirectorPackageText(incoming.directorIn, byNode), resolvedPromptText(incoming.promptIn) || data.prompt].filter(Boolean).join("\n\n");
+        const prompt = [connectedDirectorPackageText(incoming.directorIn, byNode), connectedText(incoming.promptIn) || data.prompt].filter(Boolean).join("\n\n");
         return { ...base, ...settings, references, prompt: buildEffectiveVideoPrompt(prompt, display, byNode), audio: settings.generateAudio ? "Audio on" : "Audio off", estimatedCost: estimateVideoRunCost(settings) };
       }
       if (node.type === "storyboard") {
         const display = expandStoryboardDirectorIncoming(incoming, byNode), references = storyboardImagePromptItems(node, display, byNode);
         const count = normalizedStoryboardFrames(data.storyboardFrames).length;
-        const settings = { model: storyboardFixedModel, resolution: storyboardResolutionForNode(node), aspectRatio: storyboardAspectRatioForNode(node), quality: "high", batchCount: count, referenceCount: references.length, provider: generationProvider };
+        const settings = { ...storyboardImageSettings({ ...data, resolution: storyboardResolutionForNode(node), aspectRatio: storyboardAspectRatioForNode(node) }, generationProvider), batchCount: count, referenceCount: references.length, provider: generationProvider };
         return { ...base, ...settings, count: stage === "generate" ? count : undefined, references, estimatedCost: stage === "generate" ? estimateImageRunCost(settings) : stage === "export" ? 0 : null, additionalUsage: stage !== "export" };
       }
       if (node.type === "character") {
@@ -6478,6 +6602,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       {unsavedPrompt && (
         <UnsavedWorkflowPrompt
           actionLabel={unsavedPrompt.actionLabel}
+          saving={unsavedPrompt.saving}
+          error={unsavedPrompt.error}
           onDecision={resolveUnsavedWorkflowPrompt}
         />
       )}
@@ -6486,6 +6612,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           item={previewLightboxItem}
           onApplyImageEdit={applyPreviewLayoutImageEdit}
           onRestoreImageEdit={restorePreviewLayoutImageEdit}
+          onAcceptAiEdit={acceptAiImageEdit}
+          workflowContext={workflowRequestContext()}
+          imageEditProvider={imageEditProvider}
+          showApiCosts={nodePreferences?.showApiCosts === true}
           onClose={() => setPreviewLightboxItem(null)}
         />
       )}
@@ -6699,6 +6829,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
               imageModelOptions={enabledImageModels}
               videoModelOptions={enabledVideoModels}
               generationProvider={generationProvider}
+              showApiCosts={nodePreferences?.showApiCosts === true}
             />
           ))}
         </div>
@@ -6991,7 +7122,8 @@ function NodeCard({
   tagHighlight,
   imageModelOptions,
   videoModelOptions,
-  generationProvider
+  generationProvider,
+  showApiCosts = false
 }) {
   const config = getNodeConfig(node.type);
   const Icon = config.icon;
@@ -7189,6 +7321,7 @@ function NodeCard({
         onStoryboardCharacterImport={onStoryboardCharacterImport}
         onStoryboardCharacterUpdate={onStoryboardCharacterUpdate}
         onStoryboardCharacterRemove={onStoryboardCharacterRemove}
+        onStoryboardFrameImport={onStoryboardFrameImport}
         onUndoSnapshot={onUndoSnapshot}
         onPreviewResizeStart={onPreviewResizeStart}
         onPreviewOpen={onPreviewOpen}
@@ -7201,6 +7334,7 @@ function NodeCard({
         imageModelOptions={imageModelOptions}
         videoModelOptions={videoModelOptions}
         generationProvider={generationProvider}
+        showApiCosts={showApiCosts}
       />
       {node.type === "plainText" && (
         <button
@@ -8086,6 +8220,7 @@ function NodeBody({
   onStoryboardCharacterImport,
   onStoryboardCharacterUpdate,
   onStoryboardCharacterRemove,
+  onStoryboardFrameImport,
   onUndoSnapshot,
   onPreviewResizeStart,
   onPreviewOpen,
@@ -8098,7 +8233,8 @@ function NodeBody({
   transferCompiling,
   imageModelOptions,
   videoModelOptions,
-  generationProvider
+  generationProvider,
+  showApiCosts = false
 }) {
   const config = getNodeConfig(node.type);
   const outputPort = config.output[0];
@@ -8117,6 +8253,13 @@ function NodeBody({
 
   if (node.type === "myNewt") {
     return <MyNewtNodeBody node={node} config={config} incoming={incoming} onUpdate={onUpdate} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} controller={myNewtController} />;
+  }
+  if (node.type === "audioModel") {
+    return <AudioModelNodeBody node={node} config={config} prompt={connectedText(incoming.promptIn) || node.data.prompt}
+      showApiCosts={showApiCosts}
+      promptConnected={Boolean(connectedText(incoming.promptIn))} sourceAudio={connectedAssetItems(incoming.audioIn)[0]}
+      audioConnected={Boolean(incoming.audioIn?.length)} onUpdate={onUpdate} onRun={onRun} onUpload={onUpload} onPreviewOpen={onPreviewOpen}
+      onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />;
   }
   if (node.type === "plainText") {
     return (
@@ -8244,7 +8387,8 @@ function NodeBody({
     const variantCount = characterVariants.length;
     const cuVideoVariantCount = characterVariants.filter((variant) => variant?.videoGenerated?.url || variant?.videoGenerated?.localUrl).length;
     const batchProgress = node.data.characterBatchProgress;
-    const locked = Boolean(node.data.locked && node.data.activated && node.data.resultUrl);
+    const locked = Boolean(node.data.locked && node.data.activated);
+    const hasOutputSheet = Boolean(characterOutputReference(node.data));
     const compiling = node.data.status === "compiling";
     const activeTab = node.data.characterTab === "sheet" && sheetChoices.length ? "sheet" : "build";
     const characterResultItems = normalizedResultItems(node.data.resultItems, node.data.resultUrl, "image");
@@ -8344,7 +8488,7 @@ function NodeBody({
             <button type="button" role="tab" aria-selected={activeTab === "build"} className={activeTab === "build" ? "active" : ""} onClick={() => onUpdate(node.id, { characterTab: "build" })}>
               Character Build
             </button>
-            {sheetChoices.map((choice, index) => (
+            {sheetChoices.map((choice) => (
               <button
                 key={choice.id}
                 type="button"
@@ -8354,15 +8498,15 @@ function NodeBody({
                 onClick={() => selectCharacterSheet(choice)}
                 title={choice.label}
               >
-                Sheet {index + 1}
+                {choice.tabLabel}
               </button>
             ))}
           </div>
           <div className="character-port-bar">
-            {locked || outputConnected ? (
+            {(locked && hasOutputSheet) || outputConnected ? (
               <OutputPortRow node={node} port={characterPort} label={`@${characterTag(node)} Character`} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
             ) : (
-              <span>Lock character to enable output</span>
+              <span>{locked ? "Add a wardrobe or custom sheet to enable output" : "Lock character to enable output"}</span>
             )}
             {locked && activeVoice && (
               <OutputPortRow node={node} port={voicePort} label="Selected Voice" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
@@ -8471,6 +8615,7 @@ function NodeBody({
                   <span className="character-section-label">Sheet Model</span>
                   <select
                     value={normalizeCharacterSheetModel(node.data.characterSheetModel)}
+                    title={generationProvider === "krea" && isOpenAiImage25Model(node.data.characterSheetModel) ? "GPT Image 2.5 Character sheets require Fal for 4K and protected wardrobe edits." : "Character sheet model"}
                     disabled={compiling || locked}
                     onChange={(event) => onUpdate(node.id, { characterSheetModel: normalizeCharacterSheetModel(event.target.value) })}
                   >
@@ -9093,16 +9238,21 @@ function NodeBody({
                   </button>
                   <small>Disable Storyboard Style for access to custom node inputs for style, mood board and character.</small>
                 </div>
+                <NodeRow label="Image Model">
+                  <select className={isOpenAiImage25Model(node.data.model) ? "image-model-long-name" : undefined} title="Storyboard image model" value={normalizeStoryboardImageModel(node.data.model)} disabled={storyboardLocked} onChange={(event) => onUpdate(node.id, storyboardImageSettings({ ...node.data, model: event.target.value }, generationProvider))}>
+                    {storyboardImageModelOptions.map((model) => <option key={model} value={model}>{model}</option>)}
+                  </select>
+                </NodeRow>
                 <NodeRow label="Resolution">
                   <select value={storyboardResolutionForNode(node)} disabled={storyboardLocked} onChange={(event) => onUpdate(node.id, { resolution: event.target.value })}>
-                    {imageResolutionOptions.map((option) => (
+                    {imageModelResolutionOptions(node.data.model, generationProvider).map((option) => (
                       <option key={option}>{option}</option>
                     ))}
                   </select>
                 </NodeRow>
                 <NodeRow label="Aspect Ratio">
                   <select value={storyboardAspectRatioForNode(node)} disabled={storyboardLocked} onChange={(event) => onUpdate(node.id, { aspectRatio: event.target.value })}>
-                    {storyboardAspectRatioOptions.map((ratio) => (
+                    {(generationProvider === "krea" && isOpenAiImage25Model(node.data.model) ? openAiImage25KreaAspectRatios : storyboardAspectRatioOptions).map((ratio) => (
                       <option key={ratio}>{ratio}</option>
                     ))}
                   </select>
@@ -9853,6 +10003,7 @@ function NodeBody({
             <div className={`preview-stage ${previewItem ? "has-preview" : ""}`} onDragStart={(event) => event.preventDefault()}>
               {previewItem?.type === "image" && fullResolutionImageUrl(previewItem) && <img {...fullResolutionImageProps(previewItem)} key={previewItem.url} src={fullResolutionImageUrl(previewItem)} alt={previewItem.label || previewSource.label} draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />}
               {previewItem?.type === "video" && <video key={previewItem.url} src={previewItem.url} controls loop draggable={false} data-preview-video-node-id={node.id} onError={useNewtNodeVideoFallback} />}
+              {previewItem?.type === "audio" && <audio key={previewItem.url} src={previewItem.url} controls preload="metadata" />}
               {previewItem?.type === "model3d" && <Model3DViewer key={previewItem.url} url={previewItem.url} label={previewItem.label || previewSource.label} />}
               {!previewItem && <span>Preview will appear here</span>}
             </div>
@@ -9884,6 +10035,7 @@ function NodeBody({
                     >
                       {item.type === "image" && fullResolutionImageUrl(item) && <img {...fullResolutionImageProps(item)} src={fullResolutionImageUrl(item)} alt={item.label || `Preview ${index + 1}`} draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />}
                       {item.type === "video" && <video src={item.url} muted playsInline preload="metadata" draggable={false} onError={useNewtNodeVideoFallback} />}
+                      {item.type === "audio" && <FileAudio size={22} />}
                       {item.type === "model3d" && (
                         <span className="preview-thumb-model">
                           <Box size={18} />
@@ -10132,7 +10284,7 @@ function NodeBody({
     const sourceConnected = Boolean(incoming.imageIn?.length);
     const sourceSummary = autoAspectSourceSummary(incoming.imageIn, "Connect image");
     const availableModels = coverageModelOptions.filter((model) => imageModelOptions.includes(model));
-    const modelChoices = availableModels.length ? availableModels : [node.data.model || imageModelNames.openAiImage2];
+    const modelChoices = availableModels.length ? availableModels : [node.data.model || creativeImageDefaultModel];
     const model = modelChoices.includes(node.data.model) ? node.data.model : modelChoices[0];
     const method = normalizeCoverageMethod(node.data.coverageMethod);
     const resetResults = () => resetCoverageOutputPatch();
@@ -10157,13 +10309,16 @@ function NodeBody({
           <NodeRow label="Model">
             <select
               value={model}
+              className={isOpenAiImage25Model(model) ? "image-model-long-name" : undefined}
+              title={model}
               disabled={running}
               onChange={(event) => {
                 const nextModel = event.target.value;
                 onUpdate(node.id, {
-                  ...resetResults(),
                   model: nextModel,
-                  resolution: normalizeImageModelResolutionForModel("2K", nextModel)
+                  resolution: normalizeImageModelResolutionForModel("2K", nextModel),
+                  quality: "high",
+                  ...(isOpenAiImage25Model(nextModel) && generationProvider === "krea" ? openAiImage25KreaSelection({ model: nextModel }) : {})
                 });
               }}
             >
@@ -10186,7 +10341,7 @@ function NodeBody({
         </div>
         <OutputPortRow node={node} port={coverageOutputPort} label="Coverage output" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
         <button className="run-node-button" onClick={() => onRun(node)} disabled={running || !sourceConnected}>
-          {running ? "Generating 9 angles..." : "Generate Coverage"}
+          {running ? "Generating 9 angles..." : showApiCosts && isOpenAiImage25Model(model) ? "Generate Coverage (Variable cost)" : "Generate Coverage"}
         </button>
       </div>
     );
@@ -11132,7 +11287,9 @@ function NodeBody({
     const promptConnected = Boolean(resolvedPromptText(incoming.promptIn));
     const isSam3Image = isSam3ImageModel(node.data.model);
     const isKrea2Large = isKrea2LargeImageModel(node.data.model);
-    const isOpenAiImage2 = node.data.model === imageModelNames.openAiImage2;
+    const isImage25 = isOpenAiImage25Model(node.data.model);
+    const isOpenAiImage2 = node.data.model === imageModelNames.openAiImage2 || isImage25;
+    const normalizeQuality = isImage25 ? normalizeOpenAiImage25Quality : normalizeOpenAiImage2Quality;
     const imageInstructionSources = imageInstructionSourcesForModel(node.data.model, incoming);
     const imagePromptConnections = imagePromptInputConnectionsForModel(node.data.model, incoming);
     const effectivePromptValue = isSam3Image
@@ -11220,7 +11377,7 @@ function NodeBody({
         <button className="run-node-button" onClick={() => onRun(node)} disabled={running}>
           {running
             ? `Running ${formatNodeBatchCount(isSam3Image ? 1 : node.data.batchCount)}...`
-            : formatPricedRunLabel("Run Image", imageRunCost)}
+            : !showApiCosts ? "Run Image" : (isImage25 || generationProvider === "atlas") && imageRunCost == null ? "Run Image (Variable cost)" : formatPricedRunLabel("Run Image", imageRunCost)}
         </button>
         <details className="model-settings-drawer" open={settingsOpen} onToggle={(event) => onUpdate(node.id, { settingsOpen: event.currentTarget.open })}>
           <summary>Settings</summary>
@@ -11248,7 +11405,7 @@ function NodeBody({
             </div>
           )}
           <NodeRow label="Model">
-            <select value={node.data.model} onChange={(event) => onUpdate(node.id, imageModelSelectionPatch(node.data, event.target.value))}>
+            <select className={isImage25 ? "image-model-long-name" : undefined} title={node.data.model} value={node.data.model} onChange={(event) => onUpdate(node.id, imageModelSelectionPatch(node.data, event.target.value, generationProvider))}>
               {imageModelOptions.map((model) => (
                 <option key={model}>{model}</option>
               ))}
@@ -11257,10 +11414,17 @@ function NodeBody({
           </NodeRow>
           {isOpenAiImage2 && (
             <NodeRow label="Quality">
-              <select value={normalizeOpenAiImage2Quality(node.data.quality)} onChange={(event) => onUpdate(node.id, { quality: normalizeOpenAiImage2Quality(event.target.value) })}>
-                {openAiImage2QualityOptions.map((option) => (
+              <select value={normalizeQuality(node.data.quality)} onChange={(event) => onUpdate(node.id, { quality: normalizeQuality(event.target.value) })}>
+                {(isImage25 ? openAiImage25QualityOptions : openAiImage2QualityOptions).map((option) => (
                   <option key={option} value={option}>{formatOpenAiImage2Quality(option)}</option>
                 ))}
+              </select>
+            </NodeRow>
+          )}
+          {isImage25 && !(generationProvider === "krea" && openAiImage25Variant(node.data.model) === "sunburst") && (
+            <NodeRow label="Background">
+              <select value={normalizeOpenAiImage25Background(node.data.background)} onChange={(event) => onUpdate(node.id, { background: event.target.value })}>
+                {openAiImage25BackgroundOptions.map((option) => <option key={option} value={option}>{option.charAt(0).toUpperCase() + option.slice(1)}</option>)}
               </select>
             </NodeRow>
           )}
@@ -11311,7 +11475,7 @@ function NodeBody({
               </NodeRow>
               <NodeRow label="Aspect Ratio">
                 <select value={node.data.aspectRatio} onChange={(event) => onUpdate(node.id, { aspectRatio: event.target.value })}>
-                  {imageModelAspectRatioOptions(node.data.model).map((option) => (
+                  {imageModelAspectRatioOptions(node.data.model, generationProvider).map((option) => (
                     <option key={option} value={option}>
                       {option}
                     </option>
@@ -11320,7 +11484,7 @@ function NodeBody({
               </NodeRow>
               <NodeRow label="Resolution">
                 <select value={node.data.resolution} onChange={(event) => onUpdate(node.id, { resolution: event.target.value })}>
-                  {imageModelResolutionOptions(node.data.model).map((option) => (
+                  {imageModelResolutionOptions(node.data.model, generationProvider).map((option) => (
                     <option key={option}>{option}</option>
                   ))}
                 </select>
@@ -11365,6 +11529,8 @@ function NodeBody({
   const isKlingO3Pro = isKlingO3ProModel(effectiveVideoModel);
   const isKlingO3 = isKlingO34k || isKlingO3Pro;
   const isSeedance25 = isSeedance25Model(effectiveVideoModel);
+  const isAtlasVideo = generationProvider === "atlas";
+  const atlasVideoUnsupported = isAtlasVideo && !supportsAtlasVideoModel(effectiveVideoModel);
   const isSam3Video = isSam3VideoModel(effectiveVideoModel);
   const supportsCharacterInput = videoModelSupportsCharacterInput(effectiveVideoModel);
   const activeDirectorPort = supportsDirectorInput ? directorPort : null;
@@ -11383,6 +11549,11 @@ function NodeBody({
   const effectiveVideoAspectRatio = directorConnected && directorSettings
     ? filmDirectorVideoAspectRatio(effectiveVideoModel, directorSettings.aspectRatio, node.data.aspectRatio)
     : node.data.aspectRatio;
+  const atlasSourceFrameAspect = isAtlasVideo && (isSeedance25 || isMiniMaxH3) && Boolean(displayIncoming.startFrameIn?.length);
+  const videoResolutionOptions = isSeedance25 ? seedance25ResolutionOptions : seedanceVideoResolutionOptions;
+  const displayedVideoResolutionOptions = isAtlasVideo && isSeedance25 && effectiveVideoResolution && !videoResolutionOptions.includes(effectiveVideoResolution)
+    ? [...videoResolutionOptions, effectiveVideoResolution]
+    : videoResolutionOptions;
   const storedVideoGenerateAudio = normalizeVideoGenerateAudio(node.data.generateAudio);
   const effectiveVideoGenerateAudio = directorConnected && directorSettings
     ? filmDirectorVideoGenerateAudio(directorSettings.audioMode, storedVideoGenerateAudio)
@@ -11400,6 +11571,11 @@ function NodeBody({
     ...pricedCharacterReferences.map((item) => ({ url: item.url, label: item.label, type: "image" }))
   ]);
   const pricedReferenceVideos = uniqueAssetItems(connectedAssetItems(displayIncoming.referenceVideoIn));
+  const atlasSeedance25ReferenceCounts = isAtlasVideo && isSeedance25 ? {
+    images: pricedReferenceImages.length,
+    videos: pricedReferenceVideos.length,
+    audios: uniqueAssetItems(connectedAssetItems(displayIncoming.referenceAudioIn)).length
+  } : null;
   const videoRunCost = estimateVideoRunCost({
     model: effectiveVideoModel,
     duration: effectiveVideoDuration,
@@ -11433,10 +11609,10 @@ function NodeBody({
         error={node.data.error}
         onSelectResult={(index, item) => onUpdate(node.id, { selectedResultIndex: index, resultUrl: item.url })}
       />
-      <button className="run-node-button" onClick={() => onRun(node)} disabled={running || !hasVideoPrompt}>
+      <button className="run-node-button" onClick={() => onRun(node)} disabled={running || !hasVideoPrompt || atlasVideoUnsupported} title={atlasVideoUnsupported ? "This video model is unavailable through Atlas Cloud" : undefined}>
         {running
           ? `Running ${formatNodeBatchCount(isSam3Video ? 1 : node.data.batchCount)}...`
-          : formatPricedRunLabel("Run Video", videoRunCost)}
+          : !showApiCosts ? "Run Video" : generationProvider === "atlas" && videoRunCost == null ? "Run Video (Variable cost)" : formatPricedRunLabel("Run Video", videoRunCost)}
       </button>
       <OutputPortRow node={node} port={outputPort} label="Video output" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
       {!settingsOpen && (
@@ -11465,9 +11641,9 @@ function NodeBody({
             onChange={(event) => onUpdate(node.id, videoModelSelectionPatch(node.data, event.target.value))}
           >
             {videoModelOptions.map((model) => (
-              <option key={model}>{model}</option>
+              <option key={model} disabled={isAtlasVideo && !supportsAtlasVideoModel(model)}>{model}</option>
             ))}
-            {sam3SegmentationModelsEnabled && <option>{videoModelNames.sam3Video}</option>}
+            {sam3SegmentationModelsEnabled && <option disabled={isAtlasVideo && !supportsAtlasVideoModel(videoModelNames.sam3Video)}>{videoModelNames.sam3Video}</option>}
           </select>
         </NodeRow>
         <NodeRow label="Prompt" inputPort={settingsOpen ? promptPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
@@ -11613,19 +11789,19 @@ function NodeBody({
             </NodeRow>
             <NodeRow label="Resolution">
               <select value={effectiveVideoResolution} disabled={directorConnected} onChange={(event) => onUpdate(node.id, { resolution: event.target.value })}>
-                {minimaxH3ResolutionOptions.map((option) => <option key={option}>{option}</option>)}
+                {minimaxH3ResolutionOptions.map((option) => <option key={option} disabled={isAtlasVideo && ["480P", "4K"].includes(option)}>{option}</option>)}
               </select>
             </NodeRow>
             <NodeRow label="Aspect Ratio">
-              <select value={effectiveVideoAspectRatio} disabled={directorConnected} onChange={(event) => onUpdate(node.id, { aspectRatio: event.target.value })}>
-                {minimaxH3AspectRatioOptions.map((option) => <option key={option}>{option}</option>)}
+              <select value={atlasSourceFrameAspect ? "source-frame" : effectiveVideoAspectRatio} disabled={directorConnected || atlasSourceFrameAspect} onChange={(event) => onUpdate(node.id, { aspectRatio: event.target.value })}>
+                {atlasSourceFrameAspect ? <option value="source-frame">Source frame</option> : minimaxH3AspectRatioOptions.map((option) => <option key={option}>{option}</option>)}
               </select>
             </NodeRow>
             <NodeRow label="Seed">
-              <input value={node.data.seed || ""} onChange={(event) => onUpdate(node.id, { seed: event.target.value })} placeholder="Random" />
+              <input value={node.data.seed || ""} disabled={isAtlasVideo} title={isAtlasVideo ? "Seed is unavailable through Atlas Cloud" : undefined} onChange={(event) => onUpdate(node.id, { seed: event.target.value })} placeholder="Random" />
             </NodeRow>
             <NodeRow label="Safety Check">
-              <button className={`node-toggle ${node.data.enableSafetyChecker !== false ? "enabled" : ""}`} onClick={() => onUpdate(node.id, { enableSafetyChecker: node.data.enableSafetyChecker === false })}>
+              <button className={`node-toggle ${node.data.enableSafetyChecker !== false ? "enabled" : ""}`} disabled={isAtlasVideo} title={isAtlasVideo ? "Safety control is unavailable through Atlas Cloud" : undefined} onClick={() => onUpdate(node.id, { enableSafetyChecker: node.data.enableSafetyChecker === false })}>
                 <span />
               </button>
             </NodeRow>
@@ -11699,13 +11875,13 @@ function NodeBody({
               <button className={incoming.endFrameIn?.length ? "connected-field" : ""}>{connectedSummary(incoming.endFrameIn, "Add file")}</button>
             </NodeRow>
             <NodeRow label="Reference Image" inputPort={settingsOpen ? referenceImagePort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-              <button className={displayIncoming.referenceImageIn?.length ? "connected-field" : ""}>{connectedSummary(displayIncoming.referenceImageIn, "Add file")}</button>
+              <button className={displayIncoming.referenceImageIn?.length ? "connected-field" : ""}>{atlasSeedance25ReferenceCounts ? `Add Images ( ${atlasSeedance25ReferenceCounts.images}/30 )` : connectedSummary(displayIncoming.referenceImageIn, "Add file")}</button>
             </NodeRow>
             <NodeRow label="Reference Video" inputPort={settingsOpen ? referenceVideoPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-              <button className={incoming.referenceVideoIn?.length ? "connected-field" : ""}>{connectedSummary(incoming.referenceVideoIn, "Add file")}</button>
+              <button className={incoming.referenceVideoIn?.length ? "connected-field" : ""}>{atlasSeedance25ReferenceCounts ? `Add Videos ( ${atlasSeedance25ReferenceCounts.videos}/10 )` : connectedSummary(incoming.referenceVideoIn, "Add file")}</button>
             </NodeRow>
             <NodeRow label="Reference Audio" inputPort={settingsOpen ? referenceAudioPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-              <button className={displayIncoming.referenceAudioIn?.length ? "connected-field" : ""}>{connectedSummary(displayIncoming.referenceAudioIn, "Add file")}</button>
+              <button className={displayIncoming.referenceAudioIn?.length ? "connected-field" : ""}>{atlasSeedance25ReferenceCounts ? `Add Audio ( ${atlasSeedance25ReferenceCounts.audios}/10 )` : connectedSummary(displayIncoming.referenceAudioIn, "Add file")}</button>
             </NodeRow>
             <NodeRow label="Character" inputPort={settingsOpen ? characterPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
               <button className={displayIncoming.characterIn?.length ? "connected-field" : ""}>{connectedSummary(displayIncoming.characterIn, "Add character")}</button>
@@ -11719,14 +11895,14 @@ function NodeBody({
             </NodeRow>
             <NodeRow label="Resolution">
               <select value={effectiveVideoResolution} disabled={directorConnected} onChange={(event) => onUpdate(node.id, { resolution: event.target.value })}>
-                {(isSeedance25 ? seedance25ResolutionOptions : seedanceVideoResolutionOptions).map((option) => (
-                  <option key={option}>{option}</option>
+                {displayedVideoResolutionOptions.map((option) => (
+                  <option key={option} disabled={isAtlasVideo && isSeedance25 && /^(?:1920p|4k)$/i.test(option)}>{option}</option>
                 ))}
               </select>
             </NodeRow>
             <NodeRow label="Aspect Ratio">
-              <select value={effectiveVideoAspectRatio} disabled={directorConnected} onChange={(event) => onUpdate(node.id, { aspectRatio: event.target.value })}>
-                {(isSeedance25 ? seedance25AspectRatioOptions : seedanceVideoAspectRatioOptions).map((option) => (
+              <select value={atlasSourceFrameAspect ? "source-frame" : effectiveVideoAspectRatio} disabled={directorConnected || atlasSourceFrameAspect} onChange={(event) => onUpdate(node.id, { aspectRatio: event.target.value })}>
+                {atlasSourceFrameAspect ? <option value="source-frame">Source frame</option> : (isSeedance25 ? seedance25AspectRatioOptions : seedanceVideoAspectRatioOptions).map((option) => (
                   <option key={option}>{option}</option>
                 ))}
               </select>
@@ -12258,6 +12434,11 @@ function getNodeConfig(type) {
       input: [],
       output: [{ id: "audioOut", label: "Audio", color: portColors.audio }]
     },
+    audioModel: {
+      icon: Volume2,
+      input: [{ id: "promptIn", label: "Prompt", color: portColors.prompt }, { id: "audioIn", label: "Audio", color: portColors.audio }],
+      output: [{ id: "audioOut", label: "Audio", color: portColors.audio }]
+    },
     preview: {
       icon: MonitorPlay,
       input: [{ id: "sourceIn", label: "Source", color: portColors.preview }],
@@ -12325,6 +12506,7 @@ function getNodeConfig(type) {
 function createDefaultNodeData(type, label, count) {
   const title = `${label}${count > 1 ? ` ${count}` : ""}`;
   if (type === "myNewt") return { title: nodeTypeLabel(type), ...myNewtDefaults };
+  if (type === "audioModel") return { title, ...audioModelDefaults };
 
   if (type === "plainText") return { title, text: "" };
   if (type === "text") return { title, text: "" };
@@ -12411,7 +12593,7 @@ function createDefaultNodeData(type, label, count) {
   if (type === "coverage") {
     return {
       title,
-      model: imageModelNames.openAiImage2,
+      model: creativeImageDefaultModel,
       coverageMethod: "Standard",
       resolution: "2K",
       quality: openAiImage2Quality,
@@ -12430,7 +12612,8 @@ function createDefaultNodeData(type, label, count) {
       storyboardNotes: "",
       storyboardAutoQc: true,
       frameCount: "Auto",
-      model: storyboardFixedModel,
+      model: creativeImageDefaultModel,
+      quality: "high",
       aspectRatio: storyboardDefaultAspectRatio,
       resolution: storyboardDefaultResolution,
       useStoryboardStyle: true,
@@ -12522,7 +12705,7 @@ function createDefaultNodeData(type, label, count) {
       characterReferenceNotes: "",
       characterTraits: [],
       customCharacterTraits: "",
-      characterSheetModel: imageModelNames.nanoBanana2,
+      characterSheetModel: characterSheetDefaultModel,
       cinematicCharacterSheet: false,
       cuVideoGeneration: false,
       useCustomCharacterSheet: false,
@@ -12699,14 +12882,16 @@ function createDefaultNodeData(type, label, count) {
   };
 }
 
-function imageModelSelectionPatch(data = {}, model) {
+function imageModelSelectionPatch(data = {}, model, provider = "fal") {
   return {
     model,
     aspectRatio: normalizeImageModelAspectRatio(data.aspectRatio, model),
     resolution: normalizeImageModelResolutionForModel(data.resolution, model),
-    quality: normalizeOpenAiImage2Quality(data.quality),
+    quality: isOpenAiImage25Model(model) ? normalizeOpenAiImage25Quality(data.quality) : normalizeOpenAiImage2Quality(data.quality),
+    background: normalizeOpenAiImage25Background(data.background),
     kreaCreativity: normalizeKrea2Creativity(data.kreaCreativity),
-    batchCount: data.batchCount || "1"
+    batchCount: data.batchCount || "1",
+    ...(isOpenAiImage25Model(model) && provider === "krea" ? openAiImage25KreaSelection({ ...data, model }) : {})
   };
 }
 
@@ -12728,7 +12913,8 @@ function isModel3DImageInputPort(portId) {
   return model3DInputPortIds().includes(portId) || portId === "imageIn";
 }
 
-function imageModelAspectRatioOptions(model) {
+function imageModelAspectRatioOptions(model, provider = "fal") {
+  if (isOpenAiImage25Model(model) && provider === "krea") return [imageModelAutoAspectRatio, ...openAiImage25KreaAspectRatios];
   return [imageModelAutoAspectRatio, ...imageModelSupportedAspectRatios(model)];
 }
 
@@ -12753,6 +12939,8 @@ function isOpenAiImageModel(model) {
 }
 
 function formatOpenAiImage2Quality(value) {
+  if (value === "xhigh") return "Extra High";
+  if (value === "max") return "Maximum";
   const quality = normalizeOpenAiImage2Quality(value);
   if (quality === "low") return "Low (Economy)";
   if (quality === "medium") return "Medium (Draft)";
@@ -12912,7 +13100,8 @@ function normalizeImageModelResolution(value) {
   return imageResolutionOptions.includes(value) ? value : "2K";
 }
 
-function imageModelResolutionOptions(model) {
+function imageModelResolutionOptions(model, provider = "fal") {
+  if (isOpenAiImage25Model(model) && provider === "krea") return ["1K"];
   if (isReve21Model(model)) return reve21ResolutionOptions;
   if (isNanoBanana2Model(model)) return nanoBanana2ResolutionOptions;
   return imageResolutionOptions;
@@ -13189,6 +13378,7 @@ function inputPortIdsForNode(node) {
 }
 
 function activeInputPortIdsForNode(node) {
+  if (node?.type === "audioModel") return inputPortIdsForNode(node).filter((port) => audioInputEnabled(node.data.audioMode, port));
   if (node?.type === "utility") {
     return utilityInputPortIds(node.data?.utilityMode, node.data?.utilityImageModel, node.data?.utilityVideoModel);
   }
@@ -13241,7 +13431,7 @@ function portKindForNodePort(node, portId, role) {
 function acceptedInputPortKinds(node, portId) {
   if (node?.type === "myNewt" && portId === "imageIn") return ["image", "character", "transfer"];
   const inputKind = portKindForNodePort(node, portId, "input");
-  if (inputKind === "preview") return ["image", "video", "model3d", "transfer", "character"];
+  if (inputKind === "preview") return ["image", "video", "audio", "model3d", "transfer", "character"];
   return inputKind ? [inputKind] : [];
 }
 
@@ -13255,7 +13445,7 @@ function getPortCompatibilityError(source, fromPort, target, toPort) {
   if (portsAreCompatible(source, fromPort, target, toPort)) return "";
   const outputKind = portKindForNodePort(source, fromPort, "output");
   const inputKind = portKindForNodePort(target, toPort, "input");
-  if (inputKind === "preview") return "Preview accepts image, video, 3D, Mood Board, or Character outputs";
+  if (inputKind === "preview") return "Preview accepts image, video, audio, 3D, Mood Board, or Character outputs";
   if (!outputKind || !inputKind) return "Choose a valid connection";
   return `Connect matching port colors only: ${humanPortKindLabel(inputKind)} inputs do not accept ${humanPortKindLabel(outputKind)} outputs`;
 }
@@ -13522,6 +13712,7 @@ function nodeResultMediaType(node) {
   if (node.type === "utility") return utilityResultType(node);
   if (node.type === "image" || node.type === "video" || node.type === "audio" || node.type === "model3d") return node.type;
   if (node.type === "videoModel") return "video";
+  if (node.type === "audioModel") return "audio";
   if (node.type === "imageModel" || node.type === "autoAspect" || node.type === "coverage" || node.type === "camera" || node.type === "composer" || node.type === "frameIt" || node.type === "character" || node.type === "storyboard") return "image";
   return "";
 }
@@ -13622,6 +13813,7 @@ function buildInactiveEdgeIds(nodes, edges) {
         if (isImageModelUnsupportedInput(target, edge.to.port)) return true;
         if (isImageModelUnsupportedSource(target, source)) return true;
         if (isVideoModelUnsupportedInput(target, edge.to.port)) return true;
+        if (target?.type === "audioModel" && !audioInputEnabled(target.data.audioMode, edge.to.port)) return true;
         if (source?.type === "autoAspect" && !autoAspectOutputItem(source, edge)?.url) return true;
         if (
           source?.type === "utility" &&
@@ -13843,6 +14035,15 @@ function expandStoryboardDirectorIncoming(incoming = {}, incomingByNode = {}) {
 }
 
 function connectedOutputItem(source, edge) {
+  if (source?.type === "character") {
+    if (!source.data?.locked || !source.data?.activated) return null;
+    if (edge?.from?.port === "voiceOut") {
+      const voice = activeCharacterVoice(source);
+      return voice?.localUrl ? { ...voice, url: voice.localUrl, type: "audio" } : null;
+    }
+    const reference = characterOutputReference(source.data);
+    return reference ? { ...reference, type: "image", label: sourceLabel(source) } : null;
+  }
   if (source?.type === "storyboard") return storyboardOutputItem(source, edge);
   if (source?.type === "autoAspect") return autoAspectOutputItem(source, edge);
   if (source?.type === "utility" && isUtilityAutoAspectModel(source.data?.utilityImageModel) && autoAspectRatioFromOutputPort(edge?.from?.port)) {
@@ -13898,7 +14099,7 @@ function connectedAssetLabels(items = []) {
 
 function connectedCharacterReferences(items = []) {
   return items
-    .filter(({ source }) => source.type === "character" && source.data.locked && source.data.activated && source.data.resultUrl)
+    .filter(({ source }) => source.type === "character" && source.data.locked && source.data.activated)
     .map(({ source }) => {
       const reference = preferredCharacterReferenceForVideo(source);
       if (!reference?.url) return null;
@@ -14033,7 +14234,7 @@ function referenceTagCandidates(items = [], colorOffset = 0, fallbackPrefix = "I
 
 function characterTagCandidates(items = [], colorOffset = 0) {
   return items
-    .filter(({ source }) => source.type === "character" && source.data.locked && source.data.activated && source.data.resultUrl)
+    .filter(({ source }) => source.type === "character" && source.data.locked && source.data.activated && characterOutputReference(source.data))
     .map(({ source }, index) => ({
       nodeId: source.id,
       tag: characterTag(source),
@@ -14746,6 +14947,7 @@ function selectedPreviewSource(sources = [], selectedId) {
 }
 
 function previewMediaType(source, edge) {
+  if (source.type === "audio" || source.type === "audioModel" || (source.type === "character" && edge?.from?.port === "voiceOut")) return "audio";
   if (source.type === "storyboard" && storyboardOutputItem(source, edge)) return "image";
   if (source.type === "autoAspect" && autoAspectOutputItem(source, edge)) return "image";
   if (source.type === "utility" && isUtilityAutoAspectModel(source.data?.utilityImageModel) && autoAspectOutputItem(source, edge)) return "image";
@@ -14778,7 +14980,7 @@ function connectedImagePromptItems(items = [], incomingByNode = null, options = 
         return [
           { url: outputUrl, label: "Input guide image" },
           ...composerCharacterBindingsForSource(source, incomingByNode).map((binding) => ({
-            url: binding.source.data.resultUrl,
+            url: characterOutputReference(binding.source.data)?.url || "",
             label: composerCharacterReferenceLabel(binding, namedCharacterReferences)
           }))
         ];
@@ -14824,7 +15026,7 @@ function composerCharacterBindingsForSource(source, incomingByNode = null) {
           characterSource.type === "character" &&
           characterSource.data.locked &&
           characterSource.data.activated &&
-          characterSource.data.resultUrl
+          characterOutputReference(characterSource.data)
         )
         .at(-1);
       if (!connection) return null;
@@ -15027,7 +15229,7 @@ function promptPiecesForSource(source, { namedCharacterReferences = false } = {}
     return [];
   }
 
-  if (source.type === "character" && source.data.locked && source.data.activated && source.data.resultUrl) {
+  if (source.type === "character" && source.data.locked && source.data.activated && characterOutputReference(source.data)) {
     return characterImagePromptPieces(source, namedCharacterReferences);
   }
 
@@ -15313,7 +15515,7 @@ function characterImagePromptPieces(source, namedCharacterReferences = false) {
 }
 
 function characterVideoPromptPieces(source, audioIndex) {
-  if (!source.data.locked || !source.data.activated || !source.data.resultUrl) return [];
+  if (!source.data.locked || !source.data.activated || !characterOutputReference(source.data)) return [];
   return [
     "The connected character sheet defines the character's visual identity and selected wardrobe. Keep the character consistent throughout the shot.",
     characterGenerationPhysicalDetailsPrompt(source.data),
@@ -15412,7 +15614,7 @@ function activeConnectedCharacterSources(items = [], incomingByNode = null) {
   const sources = [
     ...items
       .map(({ source }) => source)
-      .filter((source) => source.type === "character" && source.data.locked && source.data.activated && source.data.resultUrl),
+      .filter((source) => source.type === "character" && source.data.locked && source.data.activated && characterOutputReference(source.data)),
     ...composerCharacterBindingsForItems(items, incomingByNode).map((binding) => binding.source)
   ];
   const uniqueSources = new Map();
@@ -15497,6 +15699,7 @@ function autoAspectSourceSummary(items = [], fallback) {
 }
 
 function sourceLabel(source) {
+  if (source.type === "audioModel") return source.data.title || "Audio Model";
   if (source.type === "camera") return cameraLabel(source);
   if (source.type === "composer") return source.data.title || "Composer";
   if (source.type === "storyboard") return source.data.title || "Storyboard";
@@ -15869,6 +16072,8 @@ function normalizeCurrentNode(node) {
     };
   }
 
+  if (nextNode.type === "audioModel") return { ...nextNode, data: normalizeAudioModelData(data) };
+
   if (nextNode.type === "coverage") {
     return {
       ...nextNode,
@@ -15932,7 +16137,7 @@ function normalizeCurrentNode(node) {
       characterWardrobes: Array.isArray(data.characterWardrobes) ? data.characterWardrobes : [],
       characterVoices: Array.isArray(data.characterVoices) ? data.characterVoices : [],
       characterTraits: Array.isArray(data.characterTraits) ? data.characterTraits : [],
-      characterSheetModel: normalizeCharacterSheetModel(data.characterSheetModel),
+      characterSheetModel: normalizeCharacterSheetModel(data.characterSheetModel || imageModelNames.nanoBanana2),
       characterSheetVariants,
       characterBaseSheet,
       characterBaseSignature: String(data.characterBaseSignature || ""),
@@ -15942,15 +16147,12 @@ function normalizeCurrentNode(node) {
       customCharacterSheet: null,
       useCustomCharacterSheet: false,
       characterBatchProgress: null,
-      characterTab: data.characterTab === "sheet" && data.resultUrl ? "sheet" : "build"
+      characterTab: data.characterTab === "sheet" && characterSheetChoices({ ...data, characterSheetVariants, characterCustomSheets }).length ? "sheet" : "build"
     };
     normalizedData.activeCharacterSheetId = activeCharacterSheetId(normalizedData);
-    const selectedVariant = activeCharacterSheetVariant(normalizedData);
     return {
       ...nextNode,
-      data: selectedVariant && normalizedData.locked && normalizedData.activated
-        ? { ...normalizedData, ...characterVariantDisplayPatch(selectedVariant) }
-        : normalizedData
+      data: { ...normalizedData, ...characterOutputState(normalizedData) }
     };
   }
 
@@ -16022,7 +16224,8 @@ function normalizeStoryboardData(data = {}) {
     storyboardTab: ["setup", "view", "advanced"].includes(data.storyboardTab) ? data.storyboardTab : "setup",
     sceneName: data.sceneName || "Scene 1",
     frameCount: normalizeStoryboardFrameCountValue(data.frameCount),
-    model: storyboardFixedModel,
+    model: normalizeStoryboardImageModel(data.model || imageModelNames.openAiImage2),
+    quality: "high",
     aspectRatio: normalizeChoice(data.aspectRatio || storyboardDefaultAspectRatio, storyboardAspectRatioOptions, storyboardDefaultAspectRatio),
     resolution: normalizeChoice(data.resolution || legacyResolution, imageResolutionOptions, storyboardDefaultResolution),
     storyboardAutoQc: data.storyboardAutoQc !== false,
@@ -16506,7 +16709,7 @@ function storyboardCharacterReferenceItems(node, externalItems = [], incomingByN
 
 function storyboardCharacterReferenceItemForSource(source) {
   return {
-    url: source.data.resultUrl,
+    url: characterOutputReference(source.data)?.url || "",
     label: characterReferenceLabel(source, true)
   };
 }
@@ -16916,7 +17119,8 @@ function normalizeImageModelData(data = {}) {
     prompt: data.prompt || "",
     aspectRatio: normalizeImageModelAspectRatio(data.aspectRatio, model),
     resolution: normalizeImageModelResolutionForModel(data.resolution, model),
-    quality: normalizeOpenAiImage2Quality(data.quality),
+    quality: isOpenAiImage25Model(model) ? normalizeOpenAiImage25Quality(data.quality) : normalizeOpenAiImage2Quality(data.quality),
+    background: normalizeOpenAiImage25Background(data.background),
     kreaCreativity: normalizeKrea2Creativity(data.kreaCreativity),
     batchCount: data.batchCount || "1",
     settingsOpen: data.settingsOpen !== false
@@ -17020,7 +17224,7 @@ function normalizeComposerData(data = {}) {
 
 function normalizeCharacterSheetVariants(data = {}) {
   const existing = Array.isArray(data.characterSheetVariants)
-    ? data.characterSheetVariants.filter((variant) => variant?.wardrobeId && variant?.generated?.url)
+    ? data.characterSheetVariants.filter((variant) => variant?.wardrobeId && (variant?.generated?.url || variant?.generated?.localUrl))
     : [];
   if (existing.length || !data.resultUrl) return existing;
 

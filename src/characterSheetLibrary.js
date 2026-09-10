@@ -143,5 +143,70 @@ export function characterSheetChoices(data = {}) {
     })
     .filter((choice) => choice.item?.url);
 
-  return [...generated, ...custom];
+  let sheetNumber = 0;
+  return [...generated, ...custom].map((choice) => ({
+    ...choice,
+    tabLabel: choice.isBase ? "Base" : `Sheet ${++sheetNumber}`
+  }));
+}
+
+function characterBaseUrls(data) {
+  const bases = (Array.isArray(data.characterSheetVariants) ? data.characterSheetVariants : []).filter((variant) =>
+    variant?.isBase || variant?.wardrobeId === characterDefaultWardrobeId
+  );
+  return new Set([data.characterBaseSheet, data.characterBaseVideoSheet,
+    ...bases.flatMap((variant) => [variant.generated, variant.videoGenerated])
+  ].flatMap((item) => [item?.url, item?.localUrl].filter(Boolean)));
+}
+
+export function characterOutputSheetVariant(data = {}) {
+  const choices = characterSheetChoices(data);
+  const baseUrls = characterBaseUrls(data);
+  const selectedIndex = Math.max(0, choices.findIndex((choice) => choice.id === activeCharacterSheetId(data)));
+  const ordered = [...choices.slice(selectedIndex), ...choices.slice(0, selectedIndex)];
+  const selected = ordered.find((choice) => !choice.isBase
+    && ![choice.item?.url, choice.item?.localUrl].some((url) => baseUrls.has(url)));
+  if (selected) return selected.variant;
+
+  // Pre-library completed sheets (including Storyboard's internal characters)
+  // remain usable. Never fall back to stale resultUrl in a modern sheet library.
+  if (!choices.length && !data.characterSheetVariants?.length && !data.characterCustomSheets?.length
+    && !data.customCharacterSheet && !baseUrls.size && data.resultUrl) {
+    return { generated: { url: data.resultUrl, fileName: data.fileName || "", type: "image" } };
+  }
+  return null;
+}
+
+export function characterOutputReference(data = {}, { video = false } = {}) {
+  const variant = characterOutputSheetVariant(data);
+  if (!variant) return null;
+  const baseUrls = characterBaseUrls(data);
+  const cu = video && data.cuVideoGeneration ? variant.videoGenerated : null;
+  const usesCuVideoSheet = Boolean((cu?.localUrl || cu?.url)
+    && ![cu?.url, cu?.localUrl].some((url) => baseUrls.has(url)));
+  const item = usesCuVideoSheet ? cu : variant.generated;
+  const url = item?.localUrl || item?.url || "";
+  return url ? { ...item, url, usesCuVideoSheet } : null;
+}
+
+export function characterOutputState(data = {}) {
+  if (!data.locked || !data.activated) return {};
+  const variant = characterOutputSheetVariant(data);
+  const item = characterOutputReference(data);
+  return {
+    resultUrl: item?.url || "",
+    resultItems: item ? [item] : [],
+    selectedResultIndex: 0,
+    fileName: item?.fileName || "",
+    compiledWardrobeUrl: variant?.wardrobeUrl || ""
+  };
+}
+
+export function assertCharacterOutputReferences(items = []) {
+  for (const { source, edge } of items) {
+    if (source?.type !== "character" || edge?.from?.port === "voiceOut") continue;
+    if (!source.data?.locked || !source.data?.activated || !characterOutputReference(source.data)) {
+      throw new Error(`${source.data?.characterName || source.data?.title || "Character"}: generate or upload a non-base sheet and lock the character before generating. Base sheets are for wardrobe preparation only.`);
+    }
+  }
 }

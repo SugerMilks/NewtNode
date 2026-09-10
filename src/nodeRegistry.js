@@ -6,6 +6,7 @@ export const nodeTypeDefinitions = [
   { type: "text", label: "Smart Text" },
   { type: "imageModel", label: "Image Model" },
   { type: "videoModel", label: "Video Model" },
+  { type: "audioModel", label: "Audio Model" },
   { type: "preview", label: "Preview" },
   { type: "style", label: "Style" },
   { type: "transfer", label: "Mood Board" },

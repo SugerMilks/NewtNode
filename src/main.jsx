@@ -53,6 +53,8 @@ import {
   videoModelNames
 } from "./modelOptions.js";
 import { isNanoBanana2Model, nanoBanana2ResolutionOptions } from "./nanoBanana2.js";
+import { isOpenAiImage25Model, openAiImage25Variant, openAiImage25KreaAspectRatios, openAiImage25KreaSelection, openAiImage25QualityOptions, openAiImage25BackgroundOptions } from "./openAiImage25.js";
+import { generationProviderFromSettings } from "./generationPricing.js";
 import { isReve21Model } from "./reve21.js";
 import { isSeedance25Model } from "./seedance25.js";
 import {
@@ -142,6 +144,9 @@ function App() {
   const [imageModel, setImageModel] = React.useState(imageModelNames.openAiImage2);
   const [imageReferences, setImageReferences] = React.useState([]);
   const [imageResolution, setImageResolution] = React.useState("2K");
+  const [imageQuality, setImageQuality] = React.useState("high");
+  const [imageBackground, setImageBackground] = React.useState("auto");
+  const [imageProvider, setImageProvider] = React.useState("fal");
   const [imageAspectRatio, setImageAspectRatio] = React.useState("16:9");
   const [imageKreaCreativity, setImageKreaCreativity] = React.useState("raw");
   const [imageStatus, setImageStatus] = React.useState("idle");
@@ -159,6 +164,9 @@ function App() {
   React.useEffect(() => {
     refreshHistory();
     refreshModelPreferences();
+    const refreshProvider = () => settingsApi.load().then((settings) => setImageProvider(generationProviderFromSettings(settings))).catch(() => {});
+    window.addEventListener("newtnode:provider-settings-updated", refreshProvider);
+    return () => window.removeEventListener("newtnode:provider-settings-updated", refreshProvider);
   }, []);
 
   React.useEffect(() => {
@@ -194,8 +202,8 @@ function App() {
   }, [references.length, startFrame]);
 
   const activeImageAspectRatios = React.useMemo(
-    () => imageAspectRatiosForModel(imageModel),
-    [imageModel]
+    () => imageProvider === "krea" && isOpenAiImage25Model(imageModel) ? openAiImage25KreaAspectRatios : imageAspectRatiosForModel(imageModel),
+    [imageModel, imageProvider]
   );
   const activeVideoSettings = React.useMemo(() => videoSettingsForModel(videoModel), [videoModel]);
   const supportsVideoAudio = isSeedanceVideoModel(videoModel) || isKlingO3VideoModel(videoModel);
@@ -217,15 +225,19 @@ function App() {
   }, [enabledVideoWorkspaceOptions, modelPreferences, modelPreferencesLoaded, videoModel]);
 
   React.useEffect(() => {
-    if (!activeImageAspectRatios.includes(imageAspectRatio)) {
+    if (isOpenAiImage25Model(imageModel) && imageProvider === "krea") {
+      const selection = openAiImage25KreaSelection({ model: imageModel, aspectRatio: imageAspectRatio, background: imageBackground });
+      setImageAspectRatio(selection.aspectRatio);
+      setImageBackground(selection.background);
+    } else if (!activeImageAspectRatios.includes(imageAspectRatio)) {
       setImageAspectRatio(activeImageAspectRatios[0]);
     }
-  }, [activeImageAspectRatios, imageAspectRatio]);
+  }, [activeImageAspectRatios, imageAspectRatio, imageModel, imageProvider, imageBackground]);
 
   React.useEffect(() => {
-    const options = imageResolutionOptionsForModel(imageModel);
+    const options = imageResolutionOptionsForModel(imageModel, imageProvider);
     if (!options.includes(imageResolution)) setImageResolution(options[0]);
-  }, [imageModel, imageResolution]);
+  }, [imageModel, imageResolution, imageProvider]);
 
   React.useEffect(() => {
     if (!activeVideoSettings.resolutions.includes(resolution)) {
@@ -253,6 +265,7 @@ function App() {
   async function refreshModelPreferences() {
     try {
       const data = await settingsApi.load();
+      setImageProvider(generationProviderFromSettings(data));
       setModelPreferences(normalizeModelPreferences(data.modelPreferences));
       if (!nodePreferencesUpdatedRef.current) setNodePreferences(normalizeNodePreferences(data.nodePreferences));
     } catch {
@@ -368,6 +381,7 @@ function App() {
         model: imageModel,
         aspectRatio: imageAspectRatio,
         resolution: imageResolution,
+        ...(isOpenAiImage25Model(imageModel) ? { quality: imageQuality, background: imageBackground } : {}),
         kreaCreativity: imageKreaCreativity,
         imagePromptUrls,
         projectId: "image",
@@ -568,6 +582,8 @@ function App() {
 
               <div className="control-row">
                 <SelectChip icon={<Wand2 size={17} />} value={imageModel} options={enabledImageOptions} onChange={setImageModel} />
+                {isOpenAiImage25Model(imageModel) && <SelectChip value={imageQuality} options={openAiImage25QualityOptions} onChange={setImageQuality} formatter={(value) => ({ low: "Low", medium: "Medium", high: "High", xhigh: "Extra High", max: "Maximum" })[value]} />}
+                {isOpenAiImage25Model(imageModel) && !(imageProvider === "krea" && openAiImage25Variant(imageModel) === "sunburst") && <SelectChip value={imageBackground} options={openAiImage25BackgroundOptions} onChange={setImageBackground} formatter={(value) => `${value.charAt(0).toUpperCase()}${value.slice(1)}`} />}
 
                 {isKrea2LargeImageModel(imageModel) && (
                   <SelectChip value={imageKreaCreativity} options={krea2CreativityOptions} onChange={setImageKreaCreativity} formatter={formatKrea2Creativity} />
@@ -577,7 +593,7 @@ function App() {
 
                 <ReferenceChip count={imageReferences.length} onSelect={addImageReferences} />
 
-                <SelectChip icon={<Maximize2 size={16} />} value={imageResolution} options={imageResolutionOptionsForModel(imageModel)} onChange={setImageResolution} />
+                <SelectChip icon={<Maximize2 size={16} />} value={imageResolution} options={imageResolutionOptionsForModel(imageModel, imageProvider)} onChange={setImageResolution} />
 
                 <SelectChip value={imageAspectRatio} options={activeImageAspectRatios} onChange={setImageAspectRatio} />
 
@@ -1016,7 +1032,8 @@ function isKrea2LargeImageModel(model) {
   return normalized.includes("krea") && normalized.includes("large");
 }
 
-function imageResolutionOptionsForModel(model) {
+function imageResolutionOptionsForModel(model, provider = "fal") {
+  if (provider === "krea" && isOpenAiImage25Model(model)) return ["1K"];
   if (isReve21Model(model)) return reve21ResolutionOptions;
   if (isNanoBanana2Model(model)) return nanoBanana2ResolutionOptions;
   return imageResolutionOptions;

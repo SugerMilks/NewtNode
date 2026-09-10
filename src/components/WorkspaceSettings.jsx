@@ -1,7 +1,7 @@
 import React from "react";
 import { RotateCcw } from "lucide-react";
 
-export function WorkspaceSettings({ enabled, onToggle, toggleDisabled, restarting, restartRequested, onRestart, restartDisabled }) {
+export function WorkspaceSettings({ enabled, onToggle, showApiCosts = false, onApiCostToggle, toggleDisabled, restarting, restartRequested, onRestart, restartDisabled }) {
   return <section className="stats-panel settings-panel settings-workspace-panel">
     <h2>Workspace</h2>
     <div className="settings-workspace-row">
@@ -12,6 +12,16 @@ export function WorkspaceSettings({ enabled, onToggle, toggleDisabled, restartin
         onClick={() => onToggle(!enabled)}>
         <span className="settings-key-toggle-track" aria-hidden="true"><span /></span>
         <em>{enabled ? "Enabled" : "Disabled"}</em>
+      </button>
+    </div>
+    <div className="settings-workspace-row">
+      <span>API Cost</span>
+      <button type="button" className={`settings-key-toggle ${showApiCosts ? "enabled" : ""}`} role="switch"
+        aria-label="Show API costs on generation buttons" aria-checked={showApiCosts} disabled={toggleDisabled}
+        title="Show or hide prices on generation buttons. Cost tracking and budget limits stay active."
+        onClick={() => onApiCostToggle(!showApiCosts)}>
+        <span className="settings-key-toggle-track" aria-hidden="true"><span /></span>
+        <em>{showApiCosts ? "Enabled" : "Disabled"}</em>
       </button>
     </div>
     <div className="settings-workspace-row">

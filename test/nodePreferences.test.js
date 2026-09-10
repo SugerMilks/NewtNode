@@ -24,11 +24,11 @@ function serverFunction(name, dependencies) {
 
 test("Newt defaults off for first-time users and on for legacy users with actual task history", () => {
   for (const value of [undefined, null, {}, { myNewt: "true" }, { myNewt: 1 }]) {
-    assert.deepEqual(normalizeNodePreferences(value), { myNewt: false });
-    assert.deepEqual(normalizeNodePreferences(value, { hasUsedNewt: true }), { myNewt: true });
+    assert.deepEqual(normalizeNodePreferences(value), { myNewt: false, showApiCosts: false });
+    assert.deepEqual(normalizeNodePreferences(value, { hasUsedNewt: true }), { myNewt: true, showApiCosts: false });
   }
   for (const myNewt of [true, false]) {
-    for (const hasUsedNewt of [true, false]) assert.deepEqual(normalizeNodePreferences({ myNewt, unrelated: true }, { hasUsedNewt }), { myNewt });
+    for (const hasUsedNewt of [true, false]) assert.deepEqual(normalizeNodePreferences({ myNewt, unrelated: true }, { hasUsedNewt }), { myNewt, showApiCosts: false });
   }
 });
 
@@ -54,11 +54,17 @@ test("the real runtime store persists explicit choices and never overwrites unre
     await write({ nodePreferences: { myNewt } });
     await write({ repository: "updated" });
     const saved = await readJsonFile(runtimeSettingsPath, {});
-    assert.deepEqual(saved.nodePreferences, { myNewt });
+    assert.deepEqual(saved.nodePreferences, { myNewt, showApiCosts: false });
     assert.deepEqual(saved.apiKeyVersions, { test: "test-only-sentinel" });
     assert.deepEqual(saved.modelPreferences, { image: {} });
     assert.equal(saved.repository, "updated");
   }
+  await write({ nodePreferences: { showApiCosts: true } });
+  await write({ nodePreferences: { myNewt: true } });
+  await write({ repository: "another repository" });
+  assert.deepEqual((await readJsonFile(runtimeSettingsPath, {})).nodePreferences, { myNewt: true, showApiCosts: true });
+  await write({ nodePreferences: { showApiCosts: false } });
+  assert.deepEqual((await readJsonFile(runtimeSettingsPath, {})).nodePreferences, { myNewt: true, showApiCosts: false });
 });
 
 test("the real settings reader resolves history only when the user has not saved a preference", async () => {
@@ -84,13 +90,14 @@ test("settings saves accept only an explicit boolean and do not reset visibility
   const save = serverFunction("saveRuntimeSettings", {
     submittedRuntimeSetting: (value) => value, normalizeUpdateRepository: (value) => value,
     readRuntimeSettingsStore: async () => ({}), normalizeNodePreferences, normalizeModelPreferences: (value) => value,
-    writeRuntimeSettingsStore: async (patch) => patches.push(patch), refreshRuntimeConfigFromEnvFile: async () => {}, readRuntimeSettings: async () => ({})
+    writeRuntimeSettingsStore: async (patch) => patches.push(patch), refreshRuntimeConfigFromEnvFile: async () => {}, readRuntimeSettings: async () => ({}),
+    myNewtService: { ready: Promise.resolve(), jobs: new Map() }
   });
   await save({ nodePreferences: { myNewt: false } });
-  assert.deepEqual(patches.pop(), { nodePreferences: { myNewt: false } });
+  assert.deepEqual(patches.pop(), { nodePreferences: { myNewt: false, showApiCosts: false } });
   await save({ modelPreferences: { image: {} } });
   assert.deepEqual(patches.pop(), { modelPreferences: { image: {} } });
-  for (const nodePreferences of [null, {}, { myNewt: "false" }, { myNewt: 1 }]) await assert.rejects(save({ nodePreferences }), { status: 400 });
+  for (const nodePreferences of [null, {}, [], { myNewt: "false" }, { myNewt: 1 }, { showApiCosts: "false" }, { showApiCosts: 1 }, { extra: true }]) await assert.rejects(save({ nodePreferences }), { status: 400 });
   assert.equal(patches.length, 0);
 });
 
@@ -108,7 +115,7 @@ test("the Newt switch publishes visibility only after a confirmed save, never on
     assert.deepEqual(events, []);
     finish(); await pending;
     assert.deepEqual(busy, ["newt", ""]);
-    if (outcome === "success") { assert.deepEqual(events, [["state", { myNewt: false }], ["dispatch", { myNewt: false }]]); assert.equal(messages.length, 0); }
+    if (outcome === "success") { assert.deepEqual(events, [["state", { myNewt: false, showApiCosts: false }], ["dispatch", { myNewt: false, showApiCosts: false }]]); assert.equal(messages.length, 0); }
     else { assert.deepEqual(events, []); assert.match(messages[0], outcome === "failure" ? /Offline/ : /Restart/); }
   }
 });
@@ -128,10 +135,69 @@ test("compact Workspace controls keep an accessible Newt switch and distinct res
     assert.match(html, new RegExp(`role="switch"[^>]*aria-label="Show Newt in node menus"[^>]*aria-checked="${enabled}"`));
     assert.doesNotMatch(html, /settings-restart-panel/);
     tree.props.children[1].props.children[1].props.onClick();
-    tree.props.children[2].props.children[1].props.children.props.onClick();
+    tree.props.children[3].props.children[1].props.children.props.onClick();
   }
   assert.deepEqual(toggles, [false, true]); assert.equal(restarts.length, 2);
   const disabled = renderToStaticMarkup(React.createElement(module.exports.WorkspaceSettings, { enabled: false, toggleDisabled: true, restarting: true, restartDisabled: true }));
-  assert.equal(disabled.match(/disabled=""/g).length, 2);
+  assert.equal(disabled.match(/disabled=""/g).length, 3);
   assert.match(disabled, /Restarting/);
+});
+
+test("API Cost defaults off for both new and upgrading users and preserves explicit choices", () => {
+  for (const hasUsedNewt of [true, false]) {
+    for (const value of [undefined, {}, { myNewt: true }, { showApiCosts: "true" }]) {
+      assert.equal(normalizeNodePreferences(value, { hasUsedNewt }).showApiCosts, false);
+    }
+    for (const showApiCosts of [true, false]) assert.equal(normalizeNodePreferences({ showApiCosts }, { hasUsedNewt }).showApiCosts, showApiCosts);
+  }
+});
+
+test("partial workspace saves preserve the other toggle, including legacy Newt visibility", async () => {
+  let stored = {};
+  const save = serverFunction("saveRuntimeSettings", {
+    submittedRuntimeSetting: (value) => value, normalizeUpdateRepository: (value) => value,
+    readRuntimeSettingsStore: async () => stored, normalizeNodePreferences, normalizeModelPreferences: (value) => value,
+    writeRuntimeSettingsStore: async (patch) => { stored = { ...stored, ...patch }; },
+    refreshRuntimeConfigFromEnvFile: async () => {}, readRuntimeSettings: async () => stored,
+    myNewtService: { ready: Promise.resolve(), jobs: new Map([["prior-task", {}]]) }
+  });
+  await save({ nodePreferences: { showApiCosts: true } });
+  assert.deepEqual(stored.nodePreferences, { myNewt: true, showApiCosts: true });
+  await save({ nodePreferences: { myNewt: false } });
+  assert.deepEqual(stored.nodePreferences, { myNewt: false, showApiCosts: true });
+  await save({ nodePreferences: { showApiCosts: false } });
+  assert.deepEqual(stored.nodePreferences, { myNewt: false, showApiCosts: false });
+  await save({ repository: "updated" });
+  assert.deepEqual(stored.nodePreferences, { myNewt: false, showApiCosts: false });
+});
+
+test("API Cost switch appears between Newt and Server and toggles independently", () => {
+  const values = [];
+  for (const showApiCosts of [undefined, true, false]) {
+    const tree = module.exports.WorkspaceSettings({ enabled: true, showApiCosts, onApiCostToggle: (value) => values.push(value) });
+    const html = renderToStaticMarkup(tree);
+    assert.ok(html.indexOf('>Newt ') < html.indexOf('>API Cost<'));
+    assert.ok(html.indexOf('>API Cost<') < html.indexOf('>Server '));
+    assert.match(html, new RegExp(`aria-label="Show API costs on generation buttons" aria-checked="${showApiCosts === true}"`));
+    tree.props.children[2].props.children[1].props.onClick();
+  }
+  assert.deepEqual(values, [true, false, true]);
+});
+
+test("API Cost saves publish immediately only on confirmation and retain the Newt setting", async () => {
+  const start = settings.indexOf("  async function updateNewtPreference(");
+  const source = settings.slice(start, settings.indexOf("\n  function updateModelPreference", start));
+  for (const outcome of ["success", "failure", "old-backend"]) {
+    const events = [], messages = [];
+    let finish;
+    const request = new Promise((resolve, reject) => { finish = () => outcome === "failure" ? reject(new Error("Offline")) : resolve({ nodePreferences: outcome === "success" ? { myNewt: true, showApiCosts: true } : { myNewt: true } }); });
+    const deps = { setBusy: () => {}, queuePreferenceSave: (payload) => { assert.deepEqual(payload, { nodePreferences: { showApiCosts: true } }); return request; },
+      normalizeNodePreferences, setNodePreferences: (value) => events.push(value), dispatchNodePreferences: (value) => events.push(value), setMessage: (value) => messages.push(value) };
+    const update = new Function(...Object.keys(deps), `${source}; return updateApiCostPreference;`)(...Object.values(deps));
+    const pending = update(true);
+    assert.deepEqual(events, []);
+    finish(); await pending;
+    if (outcome === "success") assert.deepEqual(events, [{ myNewt: true, showApiCosts: true }, { myNewt: true, showApiCosts: true }]);
+    else { assert.deepEqual(events, []); assert.match(messages[0], outcome === "failure" ? /Offline/ : /Restart/); }
+  }
 });

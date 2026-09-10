@@ -1,4 +1,5 @@
 import { applyPricingQuote } from "./pricingCatalog.js";
+import { isOpenAiImage25Model, normalizeOpenAiImage25Quality, normalizeOpenAiImage25Background, openAiImage25Variant, validateOpenAiImage25KreaRequest } from "./openAiImage25.js";
 
 export const kreaApiBaseUrl = "https://api.krea.ai";
 
@@ -7,6 +8,8 @@ export const kreaEndpoints = Object.freeze({
     "Nano Banana 2": "/generate/image/google/nano-banana-2",
     "Nano Banana Pro": "/generate/image/google/nano-banana-pro",
     "OpenAI Image 2": "/generate/image/openai/gpt-image-2",
+    "OpenAI Image 2.5 Sunburst": "/generate/image/openai/gpt-image-2.5-sunburst",
+    "OpenAI Image 2.5 Flare": "/generate/image/openai/gpt-image-2.5-flare",
     "Krea 2 Large": "/generate/image/krea/krea-2/large"
   }),
   video: Object.freeze({
@@ -112,12 +115,20 @@ export function buildKreaImageInput({
   aspectRatio = "16:9",
   resolution = "2K",
   quality = "high",
+  background = "auto",
   creativity = "raw"
 } = {}) {
   const normalizedResolution = normalizeKreaImageResolution(modelName, resolution);
   const normalizedAspectRatio = normalizeKreaImageAspectRatio(modelName, aspectRatio);
   const refs = referenceUrls.filter(Boolean);
   const input = { prompt: String(prompt || "").trim() };
+
+  if (isOpenAiImage25Model(modelName)) {
+    validateOpenAiImage25KreaRequest({ model: modelName, resolution, aspectRatio, referenceCount: refs.length, background });
+    return compact({ ...input, quality: normalizeOpenAiImage25Quality(quality), image_urls: refs,
+      aspect_ratio: aspectRatio, resolution: "1K",
+      ...(openAiImage25Variant(modelName) === "flare" ? { background: normalizeOpenAiImage25Background(background) } : {}) });
+  }
 
   if (modelName === "OpenAI Image 2") {
     return compact({
@@ -157,6 +168,7 @@ export function buildKreaImageInput({
 }
 
 export function normalizeKreaImageResolution(modelName, value) {
+  if (isOpenAiImage25Model(modelName)) return "1K";
   const requested = String(value || "2K").toUpperCase();
   if (modelName === "Krea 2 Large") return "1K";
   return normalizeChoice(requested, ["1K", "2K", "4K"], "2K");

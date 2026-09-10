@@ -3,8 +3,10 @@ import { estimateKreaSeedanceCost } from "./kreaSeedance.js";
 import { estimateMiniMaxH3FalCost } from "./minimaxH3.js";
 import { estimateNanoBanana2Cost } from "./nanoBanana2.js";
 import { estimateOpenAiImage2Cost } from "./openAiImage2.js";
+import { isOpenAiImage25Model } from "./openAiImage25.js";
 import { estimateReve21ImageCost, reve21EndpointForReferenceCount } from "./reve21.js";
 import { estimateSeedance25FalCost } from "./seedance25.js";
+import { estimateAtlasImageCost, estimateAtlasVideoCost } from "./atlasPricing.js";
 
 const falImageRates = Object.freeze({
   "Nano Banana Pro": Object.freeze({ "1K": 0.15, "2K": 0.15, "4K": 0.3 }),
@@ -45,6 +47,7 @@ export function generationProviderFromSettings(settings = {}) {
   const preferences = settings.providerPreferences || {};
   if (preferences.fal !== false && settings.falKeyConfigured) return "fal";
   if (preferences.krea !== false && settings.kreaApiKeyConfigured) return "krea";
+  if (preferences.atlas !== false && settings.atlasApiKeyConfigured) return "atlas";
   if (preferences.krea === true && preferences.fal === false) return "krea";
   return "fal";
 }
@@ -58,9 +61,12 @@ export function estimateImageRunCost({
   batchCount = 1,
   provider = "fal"
 } = {}) {
+  if (provider === "atlas") return totalEstimate(estimateAtlasImageCost({ model, resolution, aspectRatio, quality, referenceCount }).amountUsd, batchCount);
   const normalizedProvider = provider === "krea" ? "krea" : "fal";
   const references = Math.max(0, Number(referenceCount) || 0);
   let unitCost = null;
+
+  if (isOpenAiImage25Model(model)) return null;
 
   if (model === "OpenAI Image 2") {
     unitCost = estimateOpenAiImage2Cost({
@@ -99,6 +105,7 @@ export function estimateVideoRunCost({
   batchCount = 1,
   provider = "fal"
 } = {}) {
+  if (provider === "atlas") return totalEstimate(estimateAtlasVideoCost({ model, duration, resolution, aspectRatio, generateAudio, hasVideoReference, referenceImageCount }).amountUsd, batchCount);
   const normalizedProvider = provider === "krea" ? "krea" : "fal";
   const seconds = durationSeconds(duration, model === "Seedance 2.5" ? 15 : 5);
   let unitCost = null;

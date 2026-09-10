@@ -1,0 +1,68 @@
+.image-edit-studio { position: relative; display: flex; flex-direction: column; width: min(1440px, calc(100vw - 32px)); height: min(940px, calc(100dvh - 32px)); min-width: 0; overflow: hidden; border: 1px solid #414141; border-radius: 8px; background: #161616; color: #eee; letter-spacing: 0; box-shadow: 0 24px 70px #0008; font: 13px/1.4 Inter, Arial, sans-serif; outline: none; }
+.output-lightbox-backdrop.ies-backdrop { padding: 16px; }
+.image-edit-studio * { box-sizing: border-box; }
+.image-edit-studio button, .image-edit-studio select, .image-edit-studio input, .image-edit-studio textarea { font: inherit; letter-spacing: 0; }
+.image-edit-studio button, .ies-result-actions a { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 34px; padding: 8px 12px; border: 1px solid #424242; border-radius: 6px; color: #eee; background: #282828; cursor: pointer; text-decoration: none; }
+.image-edit-studio button:disabled { opacity: .35; cursor: not-allowed; }
+.image-edit-studio button:hover:not(:disabled), .ies-result-actions a:hover { background: #393939; }
+.image-edit-studio :focus-visible { outline: 2px solid #6fb8ed; outline-offset: 2px; }
+.ies-header { display: flex; flex: 0 0 52px; align-items: center; justify-content: space-between; padding: 0 16px; gap: 12px; border-bottom: 1px solid #343434; }
+.ies-header > span { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.ies-header strong { white-space: nowrap; font-size: 15px; }
+.ies-header small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #a7a7a7; }
+.ies-workspace { display: grid; grid-template-columns: minmax(0, 1fr) 276px; flex: 1; min-height: 0; }
+.ies-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.ies-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; padding: 10px 12px; border-bottom: 1px solid #343434; }
+.image-edit-studio .ies-icon { flex: 0 0 34px; width: 34px; height: 34px; padding: 0; }
+.image-edit-studio .active { color: #f2db51; border-color: #948333; background: #393622; }
+.ies-divider { width: 1px; height: 24px; background: #444; margin: 0 4px; }
+.ies-segment { display: inline-flex; gap: 3px; background: #101010; border-radius: 6px; padding: 3px; }
+.ies-segment button { padding: 5px 8px; border-color: transparent; }
+.ies-stage { position: relative; flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #0d0e10; overscroll-behavior: contain; }
+.ies-surface { position: relative; flex: none; background-color: #fff; cursor: crosshair; touch-action: none; user-select: none; box-shadow: 0 4px 30px #0006; }
+.ies-surface.panning { cursor: grab; }
+.ies-surface.panning:active { cursor: grabbing; }
+.ies-brush-cursor { position: absolute; pointer-events: none; transform: translate(-50%, -50%); border: 1px solid; border-radius: 50%; box-shadow: 0 0 0 1px #0008; }
+.ies-surface > img, .ies-surface > canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; max-width: none; max-height: none; object-fit: fill; pointer-events: none; }
+.ies-surface .ies-selection { opacity: .45; filter: sepia(1) saturate(8) hue-rotate(110deg); }
+.ies-split-line { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; box-shadow: 0 0 3px #000; pointer-events: none; }
+.ies-viewbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; min-height: 50px; color: #aaa; border-top: 1px solid #343434; font-size: 11px; }
+.ies-zoom, .ies-review-controls { display: flex; align-items: center; gap: 5px; }
+.ies-zoom output { min-width: 34px; text-align: center; font-variant-numeric: tabular-nums; }
+.ies-review-controls > input { width: 90px; accent-color: #e4cf37; }
+.ies-sidebar { display: flex; flex-direction: column; gap: 16px; min-width: 0; padding: 18px; overflow-y: auto; overscroll-behavior: contain; border-left: 1px solid #343434; background: #1c1c1c; }
+.ies-sidebar fieldset { display: flex; flex-direction: column; gap: 17px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.ies-sidebar label { display: flex; flex-direction: column; gap: 7px; color: #bbb; font-weight: 500; }
+.ies-sidebar select, .ies-sidebar textarea { width: 100%; min-width: 0; max-width: 100%; padding: 9px; border: 1px solid #444; border-radius: 5px; background: #121212; color: #eee; }
+.ies-sidebar textarea { resize: vertical; min-height: 60px; max-height: 240px; }
+.ies-sidebar .ies-prompt { min-height: 110px; }
+.ies-sidebar :disabled { opacity: .45; }
+.ies-color-row { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+.image-edit-studio .ies-swatch { flex: 0 0 20px; width: 20px; height: 20px; min-height: 20px; border: 1px solid #ffffff45; border-radius: 50%; padding: 0; }
+.image-edit-studio .ies-swatch.active { outline: 2px solid #e4cf37; outline-offset: 2px; }
+.ies-color-row input { width: 23px; height: 23px; border: 0; padding: 0; background: transparent; cursor: pointer; }
+.ies-sidebar .ies-slider { display: grid; grid-template-columns: 1fr auto; }
+.ies-slider output { color: #eee; font-variant-numeric: tabular-nums; }
+.ies-slider input { grid-column: 1 / -1; width: 100%; margin: 0; accent-color: #e4cf37; }
+.ies-sidebar .ies-checkbox { flex-direction: row; align-items: center; }
+.ies-checkbox input { accent-color: #e4cf37; }
+.ies-run-section { border-top: 1px solid #393939; padding-top: 14px; display: flex; flex-direction: column; gap: 10px; }
+.ies-run-section small { color: #aaa; font-size: 11px; display: flex; justify-content: space-between; gap: 8px; }
+.ies-run-section .ies-cost { justify-content: center; }
+.image-edit-studio .ies-primary { color: #101010; background: #e4cf37; border-color: #e4cf37; font-weight: 700; }
+.image-edit-studio .ies-primary:hover:not(:disabled) { background: #f0df65; }
+.ies-result-actions { display: flex; flex-direction: column; gap: 8px; }
+.ies-error, .ies-warning { margin: 0; overflow-wrap: anywhere; font-size: 12px; color: #ffad95; }
+.ies-warning { color: #dfcf8b; }
+.ies-progress { position: absolute; display: flex; align-items: center; gap: 10px; bottom: 20px; padding: 12px 16px; border: 1px solid #545454; border-radius: 6px; background: #202020f0; color: #f0df65; }
+.ies-spinning { animation: ies-spin 1s linear infinite; }
+.ies-progress time { min-width: 34px; color: #bbb; font-variant-numeric: tabular-nums; }
+.ies-confirm { position: absolute; inset: 0; background: #000a; display: grid; place-items: center; z-index: 4; padding: 24px; }
+.ies-confirm > div { width: min(390px, 100%); padding: 24px; border: 1px solid #555; border-radius: 8px; background: #222; }
+.ies-confirm h3 { margin: 0 0 10px; font-size: 17px; }
+.ies-confirm p { color: #bbb; }
+.ies-confirm > div > div { display: flex; justify-content: flex-end; gap: 8px; }
+@keyframes ies-spin { to { transform: rotate(360deg); } }
+@media (max-width: 760px) { .image-edit-studio { width: calc(100vw - 12px); height: calc(100dvh - 12px); } .ies-workspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(230px, 1fr) minmax(150px, 36%); } .ies-sidebar { border-left: 0; border-top: 1px solid #343434; padding: 12px; } .ies-sidebar fieldset { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; } .ies-sidebar label:has(textarea) { grid-column: 1 / -1; } .ies-toolbar { gap: 3px; padding: 6px; } .ies-header small { display: none; } .ies-viewbar { padding: 5px; } .ies-review-controls > input { width: 65px; } }
+@media (prefers-reduced-motion: reduce) { .ies-spinning { animation: none; } }
+@media (max-width: 760px) { .output-lightbox-backdrop.ies-backdrop { padding: 6px; } }

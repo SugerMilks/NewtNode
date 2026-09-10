@@ -21,9 +21,10 @@ test("the identity base uses a neutral reference garment instead of a designed w
   assert.match(characterNeutralBaseWardrobePrompt, /no nudity/i);
 });
 
-test("regular and CU foundations share the same men's briefs and women's one-piece instructions", () => {
+test("regular and CU foundations share the same men's swim trunks and women's one-piece instructions", () => {
   assert.equal(characterVideoNeutralBaseWardrobePrompt, characterNeutralBaseWardrobePrompt);
-  assert.match(characterNeutralBaseWardrobePrompt, /For a male character, use men's Speedo-style swim briefs with no top/);
+  assert.match(characterNeutralBaseWardrobePrompt, /For a male character, use men's tight swim trunks with no top/);
+  assert.doesNotMatch(characterNeutralBaseWardrobePrompt, /Speedo|swim briefs/i);
   assert.match(characterNeutralBaseWardrobePrompt, /For a female character, use a one-piece swimsuit/);
   assert.match(characterNeutralBaseWardrobePrompt, /plain matte charcoal swimwear/);
   assert.match(characterNeutralBaseWardrobePrompt, /do not reframe a close-up/);
