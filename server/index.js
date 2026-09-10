@@ -17,7 +17,7 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
 import { deflateSync, inflateSync } from "node:zlib";
-import { fal } from "@fal-ai/client";
+import { fal, createFalClient } from "@fal-ai/client";
 import ffmpegStaticPath from "ffmpeg-static";
 import ffprobeStatic from "ffprobe-static";
 import { directoryStats, fileMetadata, readJsonFile, writeJsonAtomic } from "./json-store.js";
@@ -47,6 +47,8 @@ import { relayLocalVideo } from "./local-video-request.js";
 import { isVideoGenerationRoute } from "../src/videoJobPolicy.js";
 import { myNewtTokenCost, myNewtModelRates } from "../src/myNewt/intelligence.js";
 import { creativeOpenAiModel, creativeFalModel, openAiLlmBody, falLlmInput, creativeFinalOutputText, validateCreativeResponse, directorReasoningSkill, storyboardReasoningSkill } from "./creative-llm.js";
+import { llmResponseEndpoints, llmResponseModel, llmUsageCost, requestLlmResponse } from "./llm-responses.js";
+import { currentAtlasLlmRates } from "../src/atlasLlmPricing.js";
 import { createCreativeAnalysisCache, creativeAnalysisKey } from "./creative-analysis-cache.js";
 import { storyboardPlanIssues, storyboardQcUnavailable } from "../src/storyboardPlanValidation.js";
 import {
@@ -646,6 +648,11 @@ registerMyNewtVoiceRoutes(app, {
 const myNewtService = registerMyNewtRoutes(app, {
   directory: path.join(rootDir, "server", "data", "my-newt"),
   getKey: () => process.env.OPENAI_API_KEY,
+  getLlmConnection: newtLlmConnection,
+  invoke: (body, key, connection) => requestLlmResponse(body, { ...connection, key }, {
+    falRequest: (input, credential) => subscribeFal("openrouter/router/openai/v1/responses", { input, logs: true },
+      { route: "my-newt-reasoning", model: input.model }, createFalClient({ credentials: credential }))
+  }),
   provider: () => process.env.FAL_KEY ? "fal" : process.env.KREA_API_KEY ? "krea" : process.env.ATLAS_API_KEY ? "atlas" : "fal",
   inspectAsset: createMyNewtMediaInspector({ resolveAsset: resolveLocalAssetPath, probeVideo: probeVideoFile, runFfmpeg }),
   verifyOutputs: async (outputs) => {
@@ -657,13 +664,13 @@ const myNewtService = registerMyNewtRoutes(app, {
     const data = await response.json().catch(() => ({ error: `The local runner returned HTTP ${response.status}. Check History before retrying.` }));
     return { status: response.status, data };
   },
-  recordUsage: ({ job, usage, amountUsd, profile, model }) => appendHistory({
+  recordUsage: ({ job, usage, amountUsd, profile, model, provider = "openai", endpoint = llmResponseEndpoints.openai }) => appendHistory({
     id: randomUUID(), createdAt: new Date().toISOString(), mediaType: "text", modelName: model,
-    endpoint: "https://api.openai.com/v1/responses", mode: "Newt reasoning", usage,
+    endpoint, mode: "Newt reasoning", usage,
     settings: { reasoningEffort: profile.effort, maxOutputTokens: profile.maxOutputTokens },
     prompt: job.brief, text: job.message, node: { id: job.nodeId, title: "Newt" },
-    project: { id: job.projectId, name: job.snapshot?.projectName || "Node workspace" }, provider: "openai",
-    cost: { amountUsd, currency: "USD", source: "OpenAI usage", estimated: true, usage }
+    project: { id: job.projectId, name: job.snapshot?.projectName || "Node workspace" }, provider,
+    cost: { amountUsd, currency: "USD", source: `${provider} LLM usage`, estimated: usage?.cost == null, usage }
   })
 });
 
@@ -759,6 +766,8 @@ function buildHealthPayload() {
     openAiTextKeyConfigured: Boolean(openAiTextApiKey),
     openAiImage2ViaFalConfigured: Boolean(process.env.FAL_KEY),
     textLlmProvider: activeLlmProvider(),
+    llmGatewayRouting: true,
+    agentLlmProvider: activeLlmProvider("openai"),
     preferredTextLlmProvider,
     falTextModel,
     skillDirectorFalModel,
@@ -2834,7 +2843,7 @@ app.post("/api/node/storyboard-qc", async (req, res) => {
       };
     const reviewed = qcProvider
       ? await reviewStoryboardFrameWithOpenAi(qcInput)
-      : { qc: storyboardQcUnavailable("Storyboard QC needs an enabled Fal or OpenAI API key."), cost: { amountUsd: 0, currency: "USD", source: "Local fallback" } };
+      : { qc: storyboardQcUnavailable(llmProviderUnavailableMessage({ kreaKey: process.env.KREA_API_KEY })), cost: { amountUsd: 0, currency: "USD", source: "Local fallback" } };
 
     await recordStoryboardLlmUsage(reviewed, req.body, "Storyboard QC");
     res.json({ qc: reviewed.qc, cost: reviewed.cost });
@@ -8761,7 +8770,7 @@ function pageHistorySummaries(items, req) {
   return paged.slice(0, limit);
 }
 
-async function subscribeFal(endpoint, options = {}, context = {}) {
+async function subscribeFal(endpoint, options = {}, context = {}, client = fal) {
   const startedAt = Date.now();
   const inputSummary = summarizeFalValue(options.input, "input");
   const originalOnEnqueue = options.onEnqueue;
@@ -8779,7 +8788,7 @@ async function subscribeFal(endpoint, options = {}, context = {}) {
   });
 
   try {
-    const result = await fal.subscribe(endpoint, {
+    const result = await client.subscribe(endpoint, {
       ...options,
       logs: options.logs ?? true,
       onEnqueue: (nextRequestId) => {
@@ -9523,8 +9532,12 @@ function estimateTextProcessingCost({ provider, usage = null, helperUsages = [],
   if (normalizedProvider === "local") return { amountUsd: 0, currency: "USD", units: 1, unit: "local assembly", mediaType: "text", pricingSource: "local" };
   const requestUsageCost = usageCost(usage);
   const helperUsageCosts = (Array.isArray(helperUsages) ? helperUsages : []).map(usageCost).filter((amount) => amount !== null);
+  if (normalizedProvider === "atlas" && ((hasMainRequest && requestUsageCost === null)
+    || helperUsageCosts.length !== (Array.isArray(helperUsages) ? helperUsages.length : 0))) {
+    return { amountUsd: null, currency: "USD", mediaType: "text", pricingSource: "usage-no-local-pricing", pricingBasis: "Atlas did not report enough usage to price every request." };
+  }
 
-  if ((requestUsageCost !== null || helperUsageCosts.length) && ["fal", "openai"].includes(normalizedProvider)) {
+  if ((requestUsageCost !== null || helperUsageCosts.length) && ["fal", "openai", "atlas"].includes(normalizedProvider)) {
     const fallbackRequestCost = hasMainRequest && requestUsageCost === null && normalizedProvider === "fal" ? mainRequestRate : 0;
     const amountUsd = roundCurrency((requestUsageCost || 0) + fallbackRequestCost + helperUsageCosts.reduce((sum, amount) => sum + amount, 0));
 
@@ -9535,8 +9548,8 @@ function estimateTextProcessingCost({ provider, usage = null, helperUsages = [],
       units: 1 + helperUsageCosts.length,
       unit: "reported request",
       mediaType: "text",
-      pricingBasis: normalizedProvider === "fal" ? "fal.ai reported OpenRouter token usage plus base request fallback when needed" : "OpenAI token usage at Standard API rates",
-      pricingSource: normalizedProvider === "fal" ? "fal-usage-response" : "openai-api-pricing-2026-09-04"
+      pricingBasis: normalizedProvider === "fal" ? "fal.ai reported OpenRouter token usage plus base request fallback when needed" : normalizedProvider === "atlas" ? "Atlas reported cost or published standard token-rate estimate" : "OpenAI token usage at Standard API rates",
+      pricingSource: normalizedProvider === "fal" ? "fal-usage-response" : normalizedProvider === "atlas" ? "https://api.atlascloud.ai/api/v1/pricing/models" : "openai-api-pricing-2026-09-04"
     };
   }
 
@@ -9716,7 +9729,8 @@ function activeLlmProvider(preferredProvider = preferredTextLlmProvider) {
   return resolveLlmProvider({
     preferredProvider,
     falKey: process.env.FAL_KEY,
-    openAiKey: openAiTextApiKey
+    openAiKey: openAiTextApiKey,
+    atlasKey: process.env.ATLAS_API_KEY
   });
 }
 
@@ -9724,6 +9738,17 @@ function requireActiveLlmProvider(preferredProvider = preferredTextLlmProvider) 
   const provider = activeLlmProvider(preferredProvider);
   if (provider) return provider;
   throw httpError(400, llmProviderUnavailableMessage({ kreaKey: process.env.KREA_API_KEY }));
+}
+
+function activeLlmCredential(provider) {
+  return provider === "fal" ? process.env.FAL_KEY : provider === "atlas" ? process.env.ATLAS_API_KEY : openAiTextApiKey;
+}
+
+function newtLlmConnection() {
+  // Keep existing direct-OpenAI agent projects on their original route when enabled.
+  const provider = requireActiveLlmProvider("openai");
+  return { provider, key: activeLlmCredential(provider), endpoint: llmResponseEndpoints[provider],
+    ...(provider === "atlas" ? { rates: currentAtlasLlmRates() } : {}) };
 }
 
 async function runTextLlm({
@@ -9737,12 +9762,14 @@ async function runTextLlm({
   route = "text-llm"
 }) {
   const provider = requireActiveLlmProvider(preferredProvider);
+  const key = activeLlmCredential(provider);
+  const rates = provider === "atlas" ? currentAtlasLlmRates() : undefined;
 
   if (provider === "fal") {
     const data = await subscribeFal(skillDirectorLlmEndpoint, {
       input: falLlmInput({ model: falModel, prompt, systemPrompt, route }),
       logs: true
-    }, { route, model: falModel });
+    }, { route, model: falModel }, createFalClient({ credentials: key }));
     const text = extractFalText(data).trim();
     return checkedCreativeLlmResult({
       text,
@@ -9753,25 +9780,15 @@ async function runTextLlm({
     }, data, route);
   }
 
-  if (provider === "openai") {
-    const response = await fetch("https://api.openai.com/v1/responses", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${openAiTextApiKey}`
-      },
-      body: JSON.stringify(openAiLlmBody({ model: openAiModel, prompt, systemPrompt, reasoningEffort, responseMimeType, route })),
-      signal: AbortSignal.timeout(300000)
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw httpError(response.status, data?.error?.message || "OpenAI text generation failed.", { raw: data });
+  if (provider === "openai" || provider === "atlas") {
+    const data = await requestLlmResponse(openAiLlmBody({ model: openAiModel, prompt, systemPrompt, reasoningEffort, responseMimeType, route }), { provider, key });
     const text = extractOpenAiResponseText(data).trim();
     return checkedCreativeLlmResult({
       text,
-      model: openAiModel,
-      provider: "OpenAI",
-      endpoint: openAiModel,
-      usage: data.usage ? { ...data.usage, cost: myNewtTokenCost(openAiModel, data.usage) } : null
+      model: llmResponseModel(provider, openAiModel),
+      provider: provider === "openai" ? "OpenAI" : "atlas",
+      endpoint: provider === "openai" ? openAiModel : llmResponseEndpoints[provider],
+      usage: data.usage ? { ...data.usage, cost: llmUsageCost(provider, openAiModel, data.usage, rates) } : null
     }, data, route);
   }
 
@@ -9784,6 +9801,10 @@ function checkedCreativeLlmResult(result, data, route) {
   }
   creativeUsageContext.getStore()?.push(result);
   try {
+    const payload = data?.data || data;
+    if (payload?.error || (payload?.status && payload.status !== "completed") || payload?.partial) {
+      throw new Error(`${result.provider} returned an incomplete or failed response. Existing work has been preserved.`);
+    }
     validateCreativeResponse(data, { ...result, route });
     if (!result.text) throw new Error(`${result.provider} returned no text.`);
     return result;
@@ -9804,10 +9825,13 @@ async function runMediaDescriptionLlm({
   openAiModel = openAiTextModel,
   responseMimeType = "text/plain",
   reasoningEffort = "low",
-  route = "media-description"
+  route = "media-description",
+  connection = null
 }) {
   if (!inputs.length) return { text: "", usages: [], provider: "", model: "", endpoint: "" };
-  const provider = requireActiveLlmProvider(preferredProvider);
+  const provider = connection?.provider || requireActiveLlmProvider(preferredProvider);
+  const key = connection?.key || activeLlmCredential(provider);
+  const rates = provider === "atlas" ? currentAtlasLlmRates() : undefined;
 
   if (provider === "fal") {
     const mediaUrls = await Promise.all(inputs.map((item) => localAssetToFalUrl(item.url)));
@@ -9819,7 +9843,7 @@ async function runMediaDescriptionLlm({
         ...falLlmInput({ model: falModel, prompt, systemPrompt, route })
       },
       logs: true
-    }, { route, model: falModel });
+    }, { route, model: falModel }, createFalClient({ credentials: key }));
     return checkedCreativeLlmResult({
       text: extractFalText(data).trim(),
       usages: [falResultUsage(data)].filter(Boolean),
@@ -9829,7 +9853,7 @@ async function runMediaDescriptionLlm({
     }, data, route);
   }
 
-  if (provider === "openai") {
+  if (provider === "openai" || provider === "atlas") {
     const content = [{ type: "input_text", text: prompt }];
     for (const item of inputs) {
       if (mediaType !== "image") {
@@ -9843,23 +9867,13 @@ async function runMediaDescriptionLlm({
         image_url: `data:${asset.mimeType || "image/png"};base64,${asset.buffer.toString("base64")}`
       });
     }
-    const response = await fetch("https://api.openai.com/v1/responses", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${openAiTextApiKey}`
-      },
-      body: JSON.stringify(openAiLlmBody({ model: openAiModel, input: [{ role: "user", content }], systemPrompt, reasoningEffort, responseMimeType, route })),
-      signal: AbortSignal.timeout(300000)
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw httpError(response.status, data?.error?.message || "OpenAI media analysis failed.", { raw: data });
+    const data = await requestLlmResponse(openAiLlmBody({ model: openAiModel, input: [{ role: "user", content }], systemPrompt, reasoningEffort, responseMimeType, route }), { provider, key });
     return checkedCreativeLlmResult({
       text: extractOpenAiResponseText(data).trim(),
-      usages: data.usage ? [{ ...data.usage, cost: myNewtTokenCost(openAiModel, data.usage) }] : [],
-      provider: "OpenAI",
-      model: openAiModel,
-      endpoint: openAiModel
+      usages: data.usage ? [{ ...data.usage, cost: llmUsageCost(provider, openAiModel, data.usage, rates) }] : [],
+      provider: provider === "openai" ? "OpenAI" : "atlas",
+      model: llmResponseModel(provider, openAiModel),
+      endpoint: provider === "openai" ? openAiModel : llmResponseEndpoints[provider]
     }, data, route);
   }
 
@@ -11021,12 +11035,13 @@ async function describeFilmDirectorImageInputs(imageInputs) {
     "Return one asset object for every image, in the same order. Preserve each supplied @tag exactly. Do not blend details between assets. Do not use markdown or add keys outside the schema."
   ].join("\n");
   const provider = requireActiveLlmProvider();
+  const credential = activeLlmCredential(provider);
   const assets = [];
   for (const item of imageInputs) assets.push({ ...item, ...await readLocalAsset(item.url) });
   const key = creativeAnalysisKey({
     provider,
     model: provider === "fal" ? skillDirectorVisionFalModel : skillDirectorOpenAiModel,
-    credential: provider === "fal" ? process.env.FAL_KEY : openAiTextApiKey,
+    credential,
     instructions: `${referenceLabels}\n${typeInstructions}`,
     assets
   });
@@ -11042,7 +11057,8 @@ async function describeFilmDirectorImageInputs(imageInputs) {
       openAiModel: skillDirectorOpenAiModel,
       responseMimeType: "application/json",
       reasoningEffort: "high",
-      route: "film-director-visual-analysis"
+      route: "film-director-visual-analysis",
+      connection: { provider, key: credential }
     });
     const rawText = result.text;
     const parsed = skillDirectorStructuredObject(rawText);

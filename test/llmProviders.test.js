@@ -16,15 +16,21 @@ test("LLM provider resolution falls back at request time when the preferred key 
   assert.equal(resolveLlmProvider({ preferredProvider: "fal", openAiKey: "openai" }), "openai");
   assert.equal(resolveLlmProvider({ preferredProvider: "google", falKey: "fal", googleKey: "google" }), "fal");
   assert.equal(resolveLlmProvider({ kreaKey: "krea" }), "");
+  assert.equal(resolveLlmProvider({ atlasKey: "atlas" }), "atlas");
+  assert.equal(resolveLlmProvider({ kreaKey: "krea", atlasKey: "atlas" }), "atlas");
+  assert.equal(resolveLlmProvider({ preferredProvider: "krea", falKey: "fal", atlasKey: "atlas" }), "fal");
+  assert.equal(resolveLlmProvider({ preferredProvider: "atlas", falKey: "fal", atlasKey: "atlas" }), "atlas");
+  assert.equal(resolveLlmProvider({ falKey: "", atlasKey: " ", openAiKey: "" }), "");
 });
 
 test("LLM provider names normalize common settings labels", () => {
   assert.equal(normalizeLlmProvider("fal.ai"), "fal");
   assert.equal(normalizeLlmProvider("Gemini"), "");
   assert.equal(normalizeLlmProvider("Open AI"), "openai");
+  assert.equal(normalizeLlmProvider("Atlas Cloud"), "atlas");
 });
 
 test("Krea-only LLM errors explain the companion-key requirement", () => {
   assert.match(llmProviderUnavailableMessage({ kreaKey: "configured" }), /Krea can remain enabled/);
-  assert.match(llmProviderUnavailableMessage({ kreaKey: "configured" }), /Fal or OpenAI/);
+  assert.match(llmProviderUnavailableMessage({ kreaKey: "configured" }), /Fal, Atlas Cloud, or OpenAI/);
 });

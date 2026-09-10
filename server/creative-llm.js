@@ -75,7 +75,8 @@ export function openAiLlmBody({ model, prompt, systemPrompt, input = prompt, rea
 export function falLlmInput({ model, prompt, systemPrompt, route = "" }) {
   // Fal defaults to false even when omitted; Astra requires reasoning enabled.
   return { model, prompt, system_prompt: systemPrompt,
-    ...(creativeSchemas[route] ? { max_tokens: creativeOutputBudget(route), reasoning: true } : {}) };
+    ...(creativeSchemas[route] ? { max_tokens: creativeOutputBudget(route) } : {}),
+    ...(creativeSchemas[route] || /^openai\/gpt-(?:5|6)/.test(model) ? { reasoning: true } : {}) };
 }
 
 export function creativeFinalOutputText(value) {

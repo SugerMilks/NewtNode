@@ -1,5 +1,6 @@
 import { ATLAS_PRICING_URL, atlasPricingEndpoints, atlasPricingSpecs, atlasPriceRows, atlasPricingEntry } from "../src/atlasPricing.js";
 import { validatePricingEntry } from "./pricing-sources.js";
+import { atlasLlmRates } from "../src/atlasLlmPricing.js";
 
 export { ATLAS_PRICING_URL };
 const sorted = (values) => JSON.stringify([...values].sort());
@@ -24,7 +25,7 @@ const ruleText = (lines) => JSON.stringify(lines.map((line) => line.replace(/\$\
 
 export function parseAtlasPricing(data) {
   if (data?.code !== 200 || !Array.isArray(data.data) || data.data.length > 2000) throw new Error("Atlas did not return its public pricing catalog.");
-  return atlasPricingEndpoints.map((endpoint) => {
+  const media = atlasPricingEndpoints.map((endpoint) => {
     const result = { id: `atlas:${endpoint}`, label: endpoint, source: ATLAS_PRICING_URL };
     const matches = data.data.filter((model) => model.id === endpoint);
     if (matches.length !== 1) return { ...result, issue: "Atlas standard route is missing or ambiguous; existing estimate retained." };
@@ -57,5 +58,36 @@ export function parseAtlasPricing(data) {
       const entry = validatePricingEntry(atlasPricingEntry(endpoint, rows), atlasPricingEntry(endpoint));
       return { ...result, observed, entry: { ...entry, sourcePriceVersion: model.price_version } };
     } catch (error) { return { ...result, observed, issue: error.message }; }
+  });
+  return [...media, ...parseAtlasLlmPricing(data)];
+}
+
+export function parseAtlasLlmPricing(data) {
+  const metrics = { input: "input", cached: "cache_read", writes: "cache_write", output: "output" };
+  return Object.entries(atlasLlmRates).map(([id, baseline]) => {
+    const modelId = `openai/${id}`;
+    const result = { id: `atlas:${modelId}`, label: modelId, source: ATLAS_PRICING_URL };
+    try {
+      const matches = data.data?.filter(model => model.id === modelId) || [];
+      const model = matches[0];
+      if (matches.length !== 1 || !model.display || model.billing_category !== "llm_token" || model.type !== "chat"
+        || (model.currency != null && model.currency !== "USD") || model.price_rows?.length !== 8
+        || model.requires_runtime_quote !== false) throw new Error("Atlas LLM billing contract unavailable or changed; existing rates retained.");
+      const points = [], basePoints = [];
+      for (const context of ["short", "long"]) for (const [metric, name] of Object.entries(metrics)) {
+        const rowId = context === "short" ? name : `${name.replaceAll("_", "-")}-threshold-272000`;
+        const rows = model.price_rows.filter(row => row.row_id === rowId);
+        const row = rows[0];
+        if (rows.length !== 1 || row.billing_unit !== "/1M tokens" || row.estimated !== false || row.requires_quote !== false
+          || typeof row.official_price !== "string" || !/^\d+(?:\.\d+)?$/.test(row.official_price)
+          || (context === "long" && !equalRecord(row.quote_defaults, { application: "whole_request", metric: "billable_input_tokens", operator: "gte", threshold: 272000 }))
+          || (context === "short" && row.quote_defaults != null)) throw new Error("Atlas LLM token tiers changed; review required.");
+        points.push({ amount: Number(row.official_price), dimensions: { context, metric } });
+        basePoints.push({ amount: (context === "short" ? baseline : baseline.long)[metric], dimensions: { context, metric } });
+      }
+      const entry = validatePricingEntry({ currency: "USD", unit: "million tokens", source: ATLAS_PRICING_URL, points },
+        { currency: "USD", unit: "million tokens", points: basePoints });
+      return { ...result, entry };
+    } catch (error) { return { ...result, issue: error.message }; }
   });
 }

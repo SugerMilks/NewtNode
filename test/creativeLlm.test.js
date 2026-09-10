@@ -11,6 +11,8 @@ import { storyboardDirectorExpansionInstruction } from "../src/storyboardShotExp
 import { storyboardPlanIssues } from "../src/storyboardPlanValidation.js";
 import { myNewtRequestEstimate } from "../server/my-newt.js";
 import { processSmartText } from "../server/smart-text.js";
+import { llmResponseEndpoints, llmResponseModel, llmUsageCost, requestLlmResponse } from "../server/llm-responses.js";
+import { currentAtlasLlmRates } from "../src/atlasLlmPricing.js";
 
 const route = "film-director-style";
 const output = JSON.stringify({ styleDirection: "Muted color, motivated light, restrained performances." });
@@ -87,6 +89,11 @@ function adapterFixture({ provider = "openai", data, onRequest = () => {} } = {}
     falTextModel: creativeFalModel, falVisionTextModel: creativeFalModel, openAiTextModel: creativeOpenAiModel,
     skillDirectorLlmEndpoint: "openrouter/router", openAiTextApiKey: "mock-key",
     openAiLlmBody, falLlmInput, creativeFinalOutputText, validateCreativeResponse, myNewtTokenCost,
+    llmResponseEndpoints, llmResponseModel, llmUsageCost, currentAtlasLlmRates,
+    activeLlmCredential: () => "mock-key", createFalClient: (options) => options,
+    requestLlmResponse: (body, connection) => requestLlmResponse(body, connection, {
+      request: async (url, options) => { onRequest(url, JSON.parse(options.body), options); return { ok: true, json: async () => data }; }
+    }),
     creativeUsageContext: new AsyncLocalStorage(),
     estimateTextProcessingCost: ({ usage }) => ({ amountUsd: usage?.cost ?? 0 }),
     fetch: async (url, options) => { onRequest(url, JSON.parse(options.body)); return { ok: true, json: async () => data }; },
@@ -171,8 +178,8 @@ test("visual analysis uses full image content, image labels and the Astra schema
   assert.match(result.text, /@Hero/);
 });
 
-test("Smart Text sends images and the user's brief together through Fal and direct OpenAI", async () => {
-  for (const provider of ["openai", "fal"]) {
+test("Smart Text sends images and the user's brief together through Fal, Atlas and direct OpenAI", async () => {
+  for (const provider of ["openai", "fal", "atlas"]) {
     const calls = [];
     const api = adapterFixture({ provider,
       data: provider === "fal" ? { output: "@Park in soft light", usage: { cost: 0.02 } } : { output_text: "@Park in soft light", usage: { input_tokens: 1000, output_tokens: 100 } },
@@ -188,7 +195,7 @@ test("Smart Text sends images and the user's brief together through Fal and dire
       assert.match(body.prompt, /Keep @Park but warm the light/);
       assert.match(body.system_prompt, /one still composition/);
     } else {
-      assert.equal(body.model, "gpt-5.6-luna");
+      assert.equal(body.model, provider === "atlas" ? "openai/gpt-5.6-luna" : "gpt-5.6-luna");
       assert.match(body.instructions, /one still composition/);
       assert.match(body.input[0].content[0].text, /Keep @Park but warm the light/);
       assert.equal(Buffer.from(body.input[0].content[2].image_url.split(",")[1], "base64").toString(), "full-resolution-reference");
@@ -253,5 +260,45 @@ test("local Director assembly is free and standalone Fal visual QC adds no ficti
   assert.equal(estimate({ provider: "local" }).amountUsd, 0);
   assert.equal(estimate({ provider: "fal", helperUsages: [{ cost: 0.03 }], hasMainRequest: false }).amountUsd, 0.03);
   assert.equal(estimate({ provider: "fal", usage: { cost: 0.02 }, helperUsages: [{ cost: 0.03 }] }).amountUsd, 0.05);
+  assert.equal(estimate({ provider: "atlas", usage: { cost: 0.02 }, helperUsages: [{ cost: 0.03 }] }).amountUsd, 0.05);
+  assert.equal(estimate({ provider: "atlas", usage: { cost: null }, helperUsages: [{ cost: 0.03 }] }).amountUsd, null);
+  assert.equal(estimate({ provider: "atlas", usage: { cost: 0.02 }, helperUsages: [{ cost: null }] }).amountUsd, null);
   assert.equal(myNewtRequestEstimate("/api/node/run-skill-director", { action: "build" }), 0);
+});
+
+test("Atlas Director revision preserves Astra High, all scene fields and strict JSON", async () => {
+  const revised = { changeSummary: "Tighter coverage", sceneName: "Scene 2", videoModel: "Seedance 2.5", durationSeconds: "10", resolution: "1080p", aspectRatio: "21:9", audioMode: "production", approach: "cinematic", activeReferenceTags: ["@Hero"], styleDirection: "Muted daylight", cameraDirection: "Locked camera", sceneOverview: "@Hero reacts", recommendedShotCount: 1, continuityLedger: "Same room", mustHaveActions: "Reaction", cuts: [{ number: 1, shotFrame: "CU", cameraMovement: "Static", shotType: "Reaction", description: "@Hero reacts." }] };
+  const api = adapterFixture({ provider: "atlas", data: { output_text: JSON.stringify(revised), usage: { input_tokens: 1000, output_tokens: 100 } }, onRequest: (url, body, options) => {
+    assert.equal(url, llmResponseEndpoints.atlas);
+    assert.equal(options.headers.Authorization, "Bearer mock-key");
+    assert.equal(body.model, "openai/gpt-6-astra");
+    assert.equal(body.reasoning.effort, "high");
+    assert.equal(body.text.format.name, "film_director_revision");
+    assert.equal(body.text.format.strict, true);
+  } });
+  const result = await api.runTextLlm({ ...request, route: "film-director-revision" });
+  assert.deepEqual(JSON.parse(result.text), revised);
+  assert.equal(result.provider, "atlas");
+  assert.equal(result.usage.cost, 0.015);
+});
+
+test("Atlas image analysis retains labels and full-resolution content without Fal uploads", async () => {
+  const api = adapterFixture({ provider: "atlas", data: { output_text: JSON.stringify({ assets: [{ tag: "@Hero", description: "Same hero." }] }), usage: { cost: 0.018 } }, onRequest: (url, body) => {
+    assert.equal(url, llmResponseEndpoints.atlas);
+    assert.equal(body.input[0].content[1].text, "@Hero");
+    assert.match(body.input[0].content[2].image_url, /^data:image\/png;base64,/);
+  } });
+  const result = await api.runMediaDescriptionLlm({ ...request, route: "film-director-visual-analysis", inputs: [{ url: "/outputs/hero.png", label: "@Hero" }] });
+  assert.equal(result.usages[0].cost, 0.018);
+});
+
+test("Atlas incomplete and malformed creative responses preserve usage and never replace drafts", async () => {
+  for (const data of [ { status: "incomplete", output_text: output }, { output_text: "{}" }, { output_text: "" } ]) {
+    const api = adapterFixture({ provider: "atlas", data: { ...data, usage: { cost: 0.015 } } });
+    await assert.rejects(api.runTextLlm(request), (error) => {
+      assert.equal(error.llmResult.provider, "atlas");
+      assert.equal(error.cost.amountUsd, 0.015);
+      return true;
+    });
+  }
 });

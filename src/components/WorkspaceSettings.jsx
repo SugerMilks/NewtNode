@@ -15,7 +15,7 @@ export function WorkspaceSettings({ enabled, onToggle, showApiCosts = false, onA
       </button>
     </div>
     <div className="settings-workspace-row">
-      <span>API Cost</span>
+      <span>API Cost <small><em>Access to a price display next to Run Generation buttons</em></small></span>
       <button type="button" className={`settings-key-toggle ${showApiCosts ? "enabled" : ""}`} role="switch"
         aria-label="Show API costs on generation buttons" aria-checked={showApiCosts} disabled={toggleDisabled}
         title="Show or hide prices on generation buttons. Cost tracking and budget limits stay active."

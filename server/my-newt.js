@@ -16,6 +16,7 @@ import { myNewtReusableRun } from "../src/myNewt/runReuse.js";
 import { remoteControlVersion } from "./my-newt-remote.js";
 import { myNewtRequiresPlanApproval, myNewtRequiresRunApproval, myNewtReviewInstructions } from "../src/myNewt/review.js";
 import { myNewtFavoriteModelInstructions } from "../src/myNewt/favoriteModels.js";
+import { llmUsageCost, requestLlmResponse } from "./llm-responses.js";
 
 const tool = {
   type: "function", name: "project_action", strict: true,
@@ -52,9 +53,9 @@ export function myNewtRequestEstimate(route, body, provider = "fal") {
 }
 
 export class MyNewtService {
-  constructor({ directory, getKey, invoke, relay, inspectAsset, provider, recordUsage, verifyOutputs, rates = myNewtModelRates, now = Date.now }) {
-    Object.assign(this, { directory, getKey, relay, inspectAsset, provider, recordUsage, verifyOutputs, rates, now });
-    this.invoke = invoke || ((body, key) => this.openai(body, key));
+  constructor({ directory, getKey, getLlmConnection, invoke, relay, inspectAsset, provider, recordUsage, verifyOutputs, rates = myNewtModelRates, now = Date.now }) {
+    Object.assign(this, { directory, getKey, getLlmConnection, relay, inspectAsset, provider, recordUsage, verifyOutputs, rates, now });
+    this.invoke = invoke || ((body, key, connection) => requestLlmResponse(body, connection || { provider: "openai", key }));
     this.jobs = new Map(); this.queues = new Map(); this.loops = new Set(); this.requests = new Map();
     this.ready = this.load();
   }
@@ -130,7 +131,7 @@ export class MyNewtService {
     if (shortcut.route === "blocked") throw new Error(shortcut.error);
     if (shortcut.action) assertMyNewtProtection(snapshot, shortcut.action, { local: shortcut.route === "local" });
     if (executionRoute && executionRoute !== shortcut.route) throw new Error("The task route changed. Review the brief before starting; no paid fallback was submitted.");
-    if (shortcut.route === "ai" && !this.getKey()) throw new Error("Enable an OpenAI API key in Settings for AI tasks, or choose a local quick action.");
+    if (shortcut.route === "ai") this.llmConnection();
     const id = randomUUID();
     const job = { id, projectId, nodeId, settings: myNewtSettings(settings), snapshot, brief: String(brief).slice(0, 16000),
       status: "running", startedAt: this.now(), heartbeat: this.now(), steps: 0, spent: 0, reservations: {}, activity: [], createdIds: parent?.createdIds?.filter((id) => snapshot.nodes.some((node) => node.id === id)) || [],
@@ -317,6 +318,11 @@ export class MyNewtService {
       await this.edit(id, (job) => { if (job.status !== "stopped") job.status = "paused"; job.thinking = false; this.event(job, error.message || "Newt paused after an error."); });
     }).finally(() => { this.loops.delete(id); this.kick(id); });
   }
+  llmConnection() {
+    const connection = this.getLlmConnection ? this.getLlmConnection() : { provider: "openai", key: this.getKey?.(), endpoint: "https://api.openai.com/v1/responses" };
+    if (!connection?.key) throw new Error("Enable a Fal, Atlas Cloud, or OpenAI API key in Settings for AI tasks. Local commands do not need a key.");
+    return connection;
+  }
   async loop(id) {
     for (;;) {
       const request = await this.edit(id, (job) => {
@@ -325,11 +331,16 @@ export class MyNewtService {
         if (job.execution === "local") { advanceMyNewtLocalJob(job, (task, message) => this.event(task, message)); return null; }
         if (job.settings.localOnly) throw new Error("Local actions only is enabled. Stop this AI task before starting a local action.");
         if (job.steps >= job.settings.maxSteps || (job.activeMs || 0) > job.settings.maxMinutes * 60000) throw new Error("Task step or active time limit reached. Review progress before continuing.");
-        const key = this.getKey();
-        if (!key) throw new Error("The OpenAI API key is disabled or missing.");
+        const connection = this.llmConnection();
+        const key = connection.key;
+        const transcriptionKey = this.getKey?.();
+        if (job.evidence && /\.(mp3|wav|m4a|aac|ogg|flac)(?:\?|$)/i.test(job.evidence) && !transcriptionKey) {
+          throw new Error("Audio inspection requires an enabled OpenAI transcription key. Image and video-frame inspection can use Fal or Atlas.");
+        }
         const profile = myNewtReasoningProfile(job.settings, { brief: [job.brief, ...(job.notes || [])].join("\n"), escalated: job.escalated });
-        const modelChanged = job.profile?.model !== profile.model;
+        const modelChanged = job.profile?.model !== profile.model || (job.llmProvider || "openai") !== connection.provider;
         job.profile = profile;
+        job.llmProvider = connection.provider;
         const graph = myNewtGraphContext(job.snapshot, { nodeId: job.nodeId, createdIds: job.createdIds, brief: job.brief, focusIds: job.focusIds });
         const context = JSON.stringify({ remainingEstimatedBudget: job.settings.budget - job.spent - reservedTotal(job), permissions: job.settings, profile, plan: job.plan || null, graph });
         job.messages = myNewtConversation(job.messages, { modelChanged });
@@ -338,35 +349,42 @@ export class MyNewtService {
         if (bytes > 220000) throw new Error("This task has reached its context limit. Start a focused follow-up task using the existing nodes.");
         // Reserve conservatively; actual usage replaces this allowance after the response.
         const intelligence = myNewtIntelligence(profile.effort);
-        const rates = this.rates === myNewtModelRates ? currentOpenAiRates(this.rates) : this.rates;
+        const rates = connection.rates || (this.rates === myNewtModelRates ? currentOpenAiRates(this.rates) : this.rates);
         const reviewInstructions = `${instructions}\n${myNewtReviewInstructions(job.settings)}\n${myNewtFavoriteModelInstructions}`;
         const allowance = myNewtReasoningAllowance(profile, bytes + Buffer.byteLength(reviewInstructions) + Buffer.byteLength(JSON.stringify(tool)), !!job.evidence, rates);
         const reservationId = this.reserve(job, allowance, `${profile.model} reasoning`); job.thinking = true; job.steps += 1;
-        return { input, instructions: reviewInstructions, reservationId, profile, intelligence, rates, snapshot: job.snapshot, evidence: job.evidence, key, noteVersion: job.noteVersion || 0 };
+        return { input, instructions: reviewInstructions, reservationId, profile, intelligence, rates, snapshot: job.snapshot, evidence: job.evidence, key, connection, transcriptionKey, noteVersion: job.noteVersion || 0 };
       });
       if (!request) return;
       let input = request.input, inspectionCost = 0;
       let response;
       try {
         if (request.evidence) {
-          const evidence = await this.inspectAsset(request.evidence, request.key);
+          const evidence = await this.inspectAsset(request.evidence, request.transcriptionKey);
           inspectionCost = evidence.cost || 0;
           input = [...input, { role: "user", content: evidence.content }];
         }
         response = await this.invoke({ model: request.profile.model, instructions: request.instructions, input, tools: [tool], parallel_tool_calls: false,
-          reasoning: { effort: request.profile.effort }, max_output_tokens: request.profile.maxOutputTokens, store: false, include: ["reasoning.encrypted_content"] }, request.key);
+          reasoning: { effort: request.profile.effort }, max_output_tokens: request.profile.maxOutputTokens, store: false, include: ["reasoning.encrypted_content"] }, request.key, request.connection);
       } catch (error) {
         await this.edit(id, (job) => settleMyNewtCost(job, request.reservationId, null));
         throw error;
       }
       const usage = response.usage || {};
-      const tokenCost = myNewtTokenCost(request.profile.model, response.usage, request.rates);
+      const tokenCost = request.connection.provider === "openai"
+        ? myNewtTokenCost(request.profile.model, response.usage, request.rates)
+        : llmUsageCost(request.connection.provider, request.profile.model, response.usage, request.rates);
       const actual = tokenCost == null ? null : tokenCost + inspectionCost;
-      if (this.recordUsage) await this.recordUsage({ job: this.jobs.get(id), usage, amountUsd: actual, model: request.profile.model, intelligence: request.intelligence, profile: request.profile }).catch(() => {});
+      if (this.recordUsage) await this.recordUsage({ job: this.jobs.get(id), usage, amountUsd: actual, model: request.profile.model, intelligence: request.intelligence, profile: request.profile,
+        provider: request.connection.provider, endpoint: request.connection.endpoint }).catch(() => {});
       await this.edit(id, async (job) => {
         job.thinking = false; job.evidence = null;
         settleMyNewtCost(job, request.reservationId, actual);
         if (response.status === "incomplete") throw new Error("The reasoning response reached its limit. Refine the brief and resume.");
+        if (response.error || (response.status && response.status !== "completed")
+          || response.output?.some?.(item => item.content?.some?.(content => content.type === "refusal"))) {
+          throw new Error("The reasoning provider could not complete the response. No project action was executed.");
+        }
         const output = response.output || [];
         job.messages.push(...output);
         const text = output.filter((item) => item.type === "message").flatMap((item) => item.content || []).map((item) => item.text || "").join("\n");
@@ -491,11 +509,5 @@ export class MyNewtService {
       const count = (this.requests.get(id) || 1) - 1;
       if (count) this.requests.set(id, count); else this.requests.delete(id);
     }
-  }
-  async openai(body, key) {
-    const response = await fetch("https://api.openai.com/v1/responses", { method: "POST", headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(180000) });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.error?.message || `OpenAI returned HTTP ${response.status}.`);
-    return data;
   }
 }

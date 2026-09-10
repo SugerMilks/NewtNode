@@ -176,8 +176,9 @@ test("API Cost switch appears between Newt and Server and toggles independently"
   for (const showApiCosts of [undefined, true, false]) {
     const tree = module.exports.WorkspaceSettings({ enabled: true, showApiCosts, onApiCostToggle: (value) => values.push(value) });
     const html = renderToStaticMarkup(tree);
-    assert.ok(html.indexOf('>Newt ') < html.indexOf('>API Cost<'));
-    assert.ok(html.indexOf('>API Cost<') < html.indexOf('>Server '));
+    assert.ok(html.indexOf('>Newt ') < html.indexOf('>API Cost '));
+    assert.ok(html.indexOf('>API Cost ') < html.indexOf('>Server '));
+    assert.match(html, /API Cost <small><em>Access to a price display next to Run Generation buttons<\/em><\/small>/);
     assert.match(html, new RegExp(`aria-label="Show API costs on generation buttons" aria-checked="${showApiCosts === true}"`));
     tree.props.children[2].props.children[1].props.onClick();
   }

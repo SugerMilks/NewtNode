@@ -15,6 +15,7 @@ export function createMyNewtMediaInspector({ resolveAsset, probeVideo, runFfmpeg
     const directory = await mkdtemp(path.join(tmpdir(), "newt-inspect-"));
     try {
       if (audio) {
+        if (!key) throw new Error("Audio inspection requires an enabled OpenAI transcription key.");
         const metadata = await probeVideo(filePath);
         const duration = Math.min(120, Number(metadata.duration) || 120);
         const output = path.join(directory, "audio.mp3");

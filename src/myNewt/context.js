@@ -63,7 +63,11 @@ export function myNewtConversation(messages = [], { maxCharacters = 70000, model
   const kept = [];
   let characters = 0;
   for (const group of groups.reverse()) {
-    const filtered = group.filter((item) => item.type !== "reasoning" || (!modelChanged && characters < 20000));
+    const filtered = group.filter((item) => item.type !== "reasoning" || (!modelChanged && characters < 20000)).map((item) => {
+      if (!modelChanged) return item;
+      const { id, ...portable } = item;
+      return portable;
+    });
     if (filtered.some((item) => item.type === "function_call") && !filtered.some((item) => item.type === "function_call_output")) continue;
     const size = JSON.stringify(filtered).length;
     if (characters + size > maxCharacters) break;
