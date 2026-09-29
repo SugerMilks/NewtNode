@@ -1,4 +1,5 @@
 import { openAiImage25Models, isOpenAiImage25Model } from "./openAiImage25.js";
+import { seedream5ProModelName, isSeedream5ProModel } from "./seedream5Pro.js";
 import {
   seedance25AspectRatioOptions,
   seedance25DurationOptions,
@@ -27,6 +28,7 @@ export const batchOptions = ["1", "2", "3", "4"];
 export const imageBatchOptions = Array.from({ length: 9 }, (_value, index) => String(index + 1));
 export const imageModelAutoAspectRatio = "Auto";
 export const imageModelNames = {
+  seedream5Pro: seedream5ProModelName,
   nanoBanana2: "Nano Banana 2",
   nanoBananaPro: "Nano Banana Pro",
   openAiImage2: "OpenAI Image 2",
@@ -38,19 +40,22 @@ export const imageModelOptions = [
   imageModelNames.nanoBananaPro,
   imageModelNames.openAiImage2,
   imageModelNames.openAiImage25Sunburst,
-  imageModelNames.openAiImage25Flare
+  imageModelNames.openAiImage25Flare,
+  imageModelNames.seedream5Pro
 ];
 export const creativeImageDefaultModel = imageModelNames.openAiImage25Sunburst;
 export const storyboardImageDefaultModel = imageModelNames.openAiImage25Flare;
 export const coverageModelOptions = [
   creativeImageDefaultModel,
   imageModelNames.openAiImage2,
-  imageModelNames.nanoBananaPro
+  imageModelNames.nanoBananaPro,
+  imageModelNames.seedream5Pro
 ];
 export const storyboardImageModelOptions = [
   storyboardImageDefaultModel,
   creativeImageDefaultModel,
-  imageModelNames.openAiImage2
+  imageModelNames.openAiImage2,
+  imageModelNames.seedream5Pro
 ];
 export const nanoImageAspectRatios = ["21:9", "16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3", "4:5", "5:4"];
 export const openAiImageAspectRatios = [...nanoImageAspectRatios, "2:1", "1:2"];
@@ -179,7 +184,7 @@ export const videoModelOptions = [
 ];
 export const videoWorkspaceModelOptions = [...videoModelOptions];
 export const defaultModelPreferences = {
-  image: Object.fromEntries(imageModelOptions.map((model) => [model, model === imageModelNames.openAiImage2 || isOpenAiImage25Model(model)])),
+  image: Object.fromEntries(imageModelOptions.map((model) => [model, model === imageModelNames.openAiImage2 || isOpenAiImage25Model(model) || isSeedream5ProModel(model)])),
   video: Object.fromEntries(videoModelOptions.map((model) => [model, true]))
 };
 export function normalizeModelPreferences(value = {}) {

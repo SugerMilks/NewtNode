@@ -16,6 +16,8 @@ server/data/recent-workflows.json
 server/data/runtime-settings.json
 server/data/my-newt-remote-devices.json
 server/data/pricing-catalog.json
+server/data/output-receipts.json
+server/data/output-receipts.json.lock
 server/data/*-index.json
 server/data/.*.tmp
 server/data/*.log

@@ -1,6 +1,7 @@
 import { creativeImageDefaultModel, imageModelNames } from "./modelOptions.js";
 import { openAiImage2Quality } from "./openAiImage2.js";
 import { isOpenAiImage25Model } from "./openAiImage25.js";
+import { isSeedream5ProModel } from "./seedream5Pro.js";
 
 export const characterSheetDefaultModel = imageModelNames.nanoBananaPro;
 
@@ -8,7 +9,8 @@ export const characterSheetModelOptions = [
   creativeImageDefaultModel,
   imageModelNames.nanoBanana2,
   imageModelNames.nanoBananaPro,
-  imageModelNames.openAiImage2
+  imageModelNames.openAiImage2,
+  imageModelNames.seedream5Pro
 ];
 
 export function normalizeCharacterSheetModel(value) {
@@ -22,7 +24,7 @@ export function characterSheetGenerationSettings(value, provider = "fal") {
   }
   return {
     model,
-    resolution: "4K",
+    resolution: isSeedream5ProModel(model) ? "2K" : "4K",
     ...(model === imageModelNames.openAiImage2 || isOpenAiImage25Model(model) ? { quality: openAiImage2Quality } : {})
   };
 }

@@ -22,6 +22,50 @@ function renderModel(model, provider = "fal") {
   }));
 }
 
+test("Storyboard QC defaults to Balanced while saved Deep and explicit Off survive reopening", () => {
+  assert.equal(createDefaultNodeData("storyboard", "Board", 1).storyboardQcMode, "balanced");
+  for (const [saved, mode, enabled] of [[{}, "balanced", true], [{ storyboardAutoQc: false }, "balanced", false], [{ storyboardQcMode: "deep", storyboardAutoQc: true }, "deep", true], [{ storyboardQcMode: "unknown" }, "balanced", true]]) {
+    const data = normalizeCurrentNode({ id: "board", type: "storyboard", data: { ...saved, storyboardTab: "advanced" } }).data;
+    assert.equal(data.storyboardAutoQc, enabled);
+    assert.equal(data.storyboardQcMode, mode);
+    const html = renderToStaticMarkup(React.createElement(NodeBody, {
+      node: { id: "board", type: "storyboard", data }, incoming: {}, incomingByNode: {}, connectedPortKeys: new Set(),
+      imageModelOptions, generationProvider: "fal", onUpdate: () => {}
+    }));
+    assert.match(html, /aria-label="Storyboard quality control"/);
+    assert.match(html, new RegExp(`<option value="${enabled ? mode : "off"}" selected="">`));
+  }
+});
+
+test("Seedream Pro controls keep defaults, formats and saved content consistent across image tools", () => {
+  const model = "Seedream 5.0 Pro";
+  for (const provider of ["fal", "krea", "atlas"]) {
+    const html = renderModel(model, provider);
+    assert.match(html, /selected="">Seedream 5\.0 Pro/);
+    assert.match(html, />2K</);
+    assert.match(html, />1K</);
+    assert.match(html, />16:9</);
+    assert.match(html, />21:9</);
+    assert.doesNotMatch(html, />4K<|>Maximum<|>Transparent</);
+    const patch = imageModelSelectionPatch({ model: "OpenAI Image 2.5 Flare", resolution: "4K", aspectRatio: "21:9", background: "transparent" }, model, provider);
+    assert.equal(patch.resolution, "2K");
+    assert.equal(patch.background, "auto");
+    assert.equal(patch.aspectRatio, "21:9");
+    for (const type of ["character", "storyboard", "coverage", "autoAspect", "utility"]) {
+      const field = type === "character" ? "characterSheetModel" : "model";
+      const node = normalizeCurrentNode({ id: type, type, data: { ...createDefaultNodeData(type, type, 1),
+        [field]: model, resolution: "2K", aspectRatio: "16:9", advancedOpen: true,
+        utilityMode: "image", utilityImageModel: "Coverage", storyboardTab: "advanced", prompt: "Keep my prompt" } });
+      assert.equal(node.data[type === "autoAspect" ? "autoAspectModel" : field], model, `${type} restores Pro`);
+      const rendered = renderToStaticMarkup(React.createElement(NodeBody, { node,
+        incoming: {}, incomingByNode: {}, connectedPortKeys: new Set(), imageModelOptions, generationProvider: provider,
+        onUpdate: () => {}, onRun: () => {}
+      }));
+      assert.ok(rendered.includes(`selected="">${model}`), `${type} ${provider} retains selected Pro`);
+    }
+  }
+});
+
 test("2.5 image controls display new quality levels, provider sizes and variable cost", () => {
   for (const model of Object.values(openAiImage25Models)) {
     const fal = renderModel(model);

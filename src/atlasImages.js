@@ -1,8 +1,10 @@
 import { imageModelNames, nanoImageAspectRatios } from "./modelOptions.js";
+import { seedream5ProAtlasBase, validateSeedream5ProRequest } from "./seedream5Pro.js";
 
 // Verified 2026-09-10 against https://static.atlascloud.ai/model/schema/<model-id-with-dashes>.json.
 // The 2.5 schemas also appear in https://www.atlascloud.ai/models/openai/gpt-image-2.5-sunburst/edit.
 const models = {
+  [imageModelNames.seedream5Pro]: { id: seedream5ProAtlasBase, family: "seedream", maxReferences: 10 },
   [imageModelNames.openAiImage2]: { id: "openai/gpt-image-2", family: "openai", maxReferences: 10 },
   [imageModelNames.openAiImage25Sunburst]: { id: "openai/gpt-image-2.5-sunburst", family: "openai25", maxReferences: 16 },
   [imageModelNames.openAiImage25Flare]: { id: "openai/gpt-image-2.5-flare", family: "openai25", maxReferences: 16 },
@@ -107,6 +109,12 @@ export function buildAtlasImageRequest(options = {}) {
   if (Object.keys(unsupported).length) fail(`Atlas ${model}: unsupported setting ${Object.keys(unsupported).join(", ")}.`);
 
   const config = models[model];
+  if (config.family === "seedream") {
+    const dimensions = validateSeedream5ProRequest({ prompt, images, resolution, aspectRatio, maskUrl, background });
+    return { model: `${config.id}/${images.length ? "edit" : "text-to-image"}`, prompt,
+      size: `${dimensions.width}*${dimensions.height}`, output_format: "png", thinking: "enabled", prompt_optimization_mode: "standard",
+      ...(images.length ? { images: [...images] } : {}) };
+  }
   const image25 = config.family === "openai25";
   const openAi = image25 || config.family === "openai";
   validateReferences(images, config.maxReferences, model);

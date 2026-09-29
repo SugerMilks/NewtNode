@@ -49,8 +49,8 @@ export function myNewtBackgroundCommand(text, snapshot, workflows) {
     const workflow = workflows.find((item) => item.id === id);
     if (!workflow || workflow.types.some((type) => !snapshot.catalog.some((entry) => entry.type === type))) throw new Error("This workflow is unavailable in the current node catalog.");
     const choices = localAssetChoices(snapshot, references);
-    const index = ["director", "music-video", "director-storyboard", "coverage", "image-edit", "asset-preview"].includes(id) ? 0 : 1;
-    const bindings = localWorkflowBindings(id === "director-storyboard" ? "director" : id, choices, index);
+    const index = ["director", "music-video", "coverage", "image-edit", "asset-preview"].includes(id) ? 0 : 1;
+    const bindings = localWorkflowBindings(id, choices, index);
     return action(`Set up ${workflow.label} using ${choices.map(({ node }) => node.data?.title || node.type).join(", ")}. Keep the original assets connected. No generation.`, "workflow", { workflowId: id, bindings });
   }
 }

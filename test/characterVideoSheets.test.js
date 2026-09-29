@@ -52,7 +52,7 @@ test("CU generation uses the original portrait while wardrobe edits preserve the
   assert.match(characterVideoWardrobeEditPrompt, /neutral foundation swimwear or existing reference garment/i);
   assert.doesNotMatch([characterVideoSheetPrompt, characterVideoIdentityContinuityPrompt].join(" "), /Base Identity Character Sheet|layout conversion|supporting identity check/i);
   assert.match(characterVideoWardrobeEditPrompt, /Base Identity CU Video Sheet remains the sole authority/i);
-  assert.match(characterVideoWardrobeEditPrompt, /Preserve the portrait's face, hair, head angle, eyeline, and expression exactly/i);
+  assert.match(characterVideoWardrobeEditPrompt, /Preserve the underlying facial identity, anatomy, hairstyle, head angle, eyeline, and expression/i);
   assert.doesNotMatch(characterVideoWardrobeEditPrompt, /Matching Full Character Sheet|Original Character Portrait/i);
 });
 

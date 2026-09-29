@@ -19,6 +19,7 @@ export const nodeTypeDefinitions = [
   { type: "image", label: "Image" },
   { type: "video", label: "Video" },
   { type: "audio", label: "Audio" },
+  { type: "output", label: "Output" },
   { type: "utility", label: "Utility" }
 ];
 

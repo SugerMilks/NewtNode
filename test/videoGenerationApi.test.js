@@ -5,6 +5,9 @@ import { withMyNewtRequestScope } from "../src/myNewt/requestScope.js";
 import { isVideoGenerationRequest, isVideoGenerationRoute } from "../src/videoJobPolicy.js";
 
 const paths = [
+  () => nodeApi.planStoryboard({ nodeId: "board" }),
+  () => nodeApi.reviseStoryboard({ nodeId: "board" }),
+  () => nodeApi.reviewStoryboardSequence({ nodeId: "board" }),
   () => nodeApi.generateImage({ nodeId: "image" }),
   () => myNewtApi.request("job", { route: "/api/node/generate-image", body: {} }),
   () => nodeApi.generateVideo({ nodeId: "video" }),

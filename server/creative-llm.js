@@ -1,6 +1,7 @@
 import Ajv from "ajv";
 import { explorePlanSchema } from "../src/explore.js";
 import { storyboardCastSchema } from "../src/storyboardCast.js";
+import { storyboardPlanSchema, storyboardRevisionSchema, storyboardReviewSchema, storyboardCastRepairSchema } from "../src/storyboardWorkflow.js";
 import { filmDirectorApproachOptions } from "../src/filmDirectorApproaches.js";
 
 export const creativeOpenAiModel = "gpt-6-astra";
@@ -20,6 +21,11 @@ const cameraShot = { number, shotFrame: nonempty, cameraAngle: nonempty, lensBeh
 const captions = object({ descriptions: list(nonempty, 1, 35) });
 
 export const creativeSchemas = {
+  "storyboard-plan-v2": storyboardPlanSchema,
+  "storyboard-revision": storyboardRevisionSchema,
+  "storyboard-cast-repair": storyboardCastRepairSchema,
+  "storyboard-sequence-review": storyboardReviewSchema,
+  "storyboard-reference-analysis": object({ assets: list(object({ tag: nonempty, description: nonempty }), 1, 8) }),
   "explore-plan": explorePlanSchema,
   "film-director-style": object({ styleDirection: nonempty }),
   "film-director-motion": object({ cameraDirection: nonempty }),
@@ -49,6 +55,12 @@ export const creativeSchemas = {
     }), 1, 35)
   }),
   "storyboard-qc": object({ pass: { type: "boolean" }, severity: { type: "string", enum: ["ok", "minor", "major"] }, summary: nonempty, issues: list(nonempty, 0, 6), shouldRetry: { type: "boolean" }, correctionPrompt: text }),
+  "storyboard-qc-adaptive": object({
+    pass: { type: "boolean" }, severity: { type: "string", enum: ["ok", "minor", "major"] }, summary: nonempty,
+    issues: list(nonempty, 0, 6), shouldRetry: { type: "boolean" }, correctionPrompt: text,
+    confidence: { type: "string", enum: ["high", "uncertain"] }, needsDetail: { type: "boolean" },
+    failureType: { type: "string", enum: ["none", "polish", "identity", "missing_cast", "spatial", "action", "prop", "physical", "rendering"] }
+  }),
   "storyboard-export-captions": captions,
   "storyboard-export-visual-captions": captions
 };
@@ -57,7 +69,7 @@ const ajv = new Ajv({ allErrors: true, strict: true });
 const validators = new Map(Object.entries(creativeSchemas).map(([route, schema]) => [route, ajv.compile(schema)]));
 
 export function creativeOutputBudget(route = "") {
-  if (/shotlist|revision|shot-repair|storyboard-plan|explore-plan/.test(route)) return 24000;
+  if (/shotlist|revision|shot-repair|storyboard-plan|storyboard-cast-repair|explore-plan/.test(route)) return 24000;
   if (/video-analysis/.test(route)) return 16000;
   if (/visual-analysis/.test(route)) return 12000;
   return 8000;

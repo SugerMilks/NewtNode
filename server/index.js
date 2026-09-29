@@ -25,7 +25,10 @@ import { findRemoteHistoryAssetUrl } from "./local-asset-recovery.js";
 import { registerComposerPoseRoutes } from "./routes/composerPoses.js";
 import { registerAudioModelRoutes } from "./routes/audioModel.js";
 import { registerExploreRoutes } from "./routes/explore.js";
+import { registerStoryboardRoutes } from "./routes/storyboard.js";
 import { registerEditorRoutes } from "./routes/editor.js";
+import { registerOutputRoutes } from "./routes/output.js";
+import { createOutputAssetResolver } from "./output-export.js";
 import { registerImageEditRoutes } from "./routes/imageEdit.js";
 import { normalizeOpenAiEditMask, finishOpenAiMaskedEdit } from "./openai-edit-mask.js";
 import { normalizeCharacterWardrobeRequest } from "./character-wardrobe.js";
@@ -56,6 +59,7 @@ import { creativeOpenAiModel, creativeFalModel, openAiLlmBody, falLlmInput, crea
 import { llmResponseEndpoints, llmResponseModel, llmUsageCost, requestLlmResponse } from "./llm-responses.js";
 import { currentAtlasLlmRates } from "../src/atlasLlmPricing.js";
 import { createCreativeAnalysisCache, creativeAnalysisKey } from "./creative-analysis-cache.js";
+import { createStoryboardQc } from "./storyboard-qc.js";
 import { storyboardPlanIssues, storyboardQcUnavailable } from "../src/storyboardPlanValidation.js";
 import { assertStoryboardCharacterTags, storyboardCastPlanningRules, storyboardCastPlanIssues, storyboardQcCharacterInputs } from "../src/storyboardCast.js";
 import { storyboardPromptPolicy } from "../src/storyboardPromptPolicy.js";
@@ -68,6 +72,8 @@ import {
 import { estimateOpenAiImage2Cost as estimateOpenAiImage2OutputCost, normalizeOpenAiImage2Quality, openAiImage2Costs, openAiImage2HighCosts, openAiImage2Quality } from "../src/openAiImage2.js";
 import { openAiImage25Models, openAiImage25Variant, isOpenAiImage25Model, normalizeOpenAiImage25Quality, buildOpenAiImage25FalRequest, validateOpenAiImage25KreaRequest, openAiImage25KreaSelection, openAiImage25Cost } from "../src/openAiImage25.js";
 import { nanoBananaProFalThinkingMode, nanoBananaProThinkingConfig } from "../src/nanoBananaPro.js";
+import { seedream5ProModelName, isSeedream5ProModel, seedream5ProFalEndpoint, seedream5ProAspectRatios, validateSeedream5ProRequest, seedream5ProCost } from "../src/seedream5Pro.js";
+import { createSeedream5ProGenerator } from "./seedream5-pro.js";
 import {
   buildNanoBanana2FalInput,
   estimateNanoBanana2Cost,
@@ -291,6 +297,7 @@ const nanoImageAspectRatios = ["21:9", "16:9", "9:16", "1:1", "4:3", "3:4", "3:2
 const openAiImageAspectRatios = [...nanoImageAspectRatios, "2:1", "1:2"];
 const storyboardAspectRatioOptions = ["16:9", "21:9", "9:16", "1:1", "3:2", "2:3", "4:3", "3:4", "2:1", "1:2"];
 const imageModelNames = {
+  seedream5Pro: seedream5ProModelName,
   nanoBanana2: "Nano Banana 2",
   nanoBananaPro: "Nano Banana Pro",
   openAiImage2: "OpenAI Image 2",
@@ -302,7 +309,8 @@ const imageModelOptions = [
   imageModelNames.nanoBananaPro,
   imageModelNames.openAiImage2,
   imageModelNames.openAiImage25Sunburst,
-  imageModelNames.openAiImage25Flare
+  imageModelNames.openAiImage25Flare,
+  imageModelNames.seedream5Pro
 ];
 const videoModelNames = {
   seedance: "Seedance 2.0",
@@ -319,7 +327,7 @@ const videoModelOptions = [
   videoModelNames.minimaxH3
 ];
 const defaultModelPreferences = {
-  image: Object.fromEntries(imageModelOptions.map((model) => [model, model === imageModelNames.openAiImage2 || isOpenAiImage25Model(model)])),
+  image: Object.fromEntries(imageModelOptions.map((model) => [model, model === imageModelNames.openAiImage2 || isOpenAiImage25Model(model) || isSeedream5ProModel(model)])),
   video: Object.fromEntries(videoModelOptions.map((model) => [model, true]))
 };
 const falNanoBananaProEndpoint = process.env.FAL_NANO_BANANA_PRO_ENDPOINT || "fal-ai/nano-banana-pro";
@@ -570,7 +578,16 @@ registerEditorRoutes(app, {
   ffprobePath: ffprobeBinaryPath
 });
 
+registerOutputRoutes(app, {
+  resolveAsset: createOutputAssetResolver({ uploadsDir, outputsDir, findRegisteredWorkflowPackage }),
+  ffmpegPath: ffmpegBinaryPath,
+  ffprobePath: ffprobeBinaryPath,
+  receiptStorePath: path.join(dataDir, "output-receipts.json")
+});
+
 registerExploreRoutes(app, { runTextLlm, runMediaDescriptionLlm, recordHistory: appendHistory, estimateCost: estimateTextProcessingCost });
+registerStoryboardRoutes(app, { runTextLlm, runMediaDescriptionLlm, recordHistory: appendHistory, estimateCost: estimateTextProcessingCost, readLocalAsset,
+  connection: () => { const provider = requireActiveLlmProvider(); return { provider, credential: activeLlmCredential(provider) }; } });
 
 registerAudioModelRoutes(app, {
   getKey: () => process.env.ELEVENLABS_API_KEY,
@@ -743,11 +760,15 @@ function buildHealthPayload() {
       imageEditing: true,
       generateAudio: true,
       editorTimeline: true,
+      outputExport: true,
       elevenLabsVoices: true,
       skillDirector: true,
       creativeReasoningV2: true,
       explore: true,
       storyboardQc: true,
+      storyboardWorkflowV2: true,
+      storyboardBalancedQc: true,
+      storyboardCastAutoRepair: true,
       mediaThumbnail: true,
       settings: true
     },
@@ -2316,20 +2337,24 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
       });
     }
 
-    if (selectedModel.provider === "fal-nano-banana-2") {
+    if (["fal-nano-banana-2", "fal-seedream-5-pro"].includes(selectedModel.provider)) {
       if (!process.env.FAL_KEY) {
         return res.status(400).json({ error: "Missing FAL_KEY in .env." });
       }
 
-      const falImage = await generateFalNanoBanana2({
+      const seedream = isSeedream5ProModel(selectedModel.displayName);
+      const generate = seedream ? createSeedream5ProGenerator({ readLocalAsset, uploadImageInputToFal, promptWithReferenceLabels, subscribeFal, firstFalImageResult }) : generateFalNanoBanana2;
+      const falImage = await generate({
         prompt,
         imagePromptUrls,
         imagePromptLabels,
         aspectRatio,
-        resolution: req.body.resolution
+        resolution: req.body.resolution,
+        editMaskDataUrl: req.body.editMaskDataUrl,
+        background: req.body.background
       });
-      const output = await downloadImage(req, falImage.remoteImage.url, "nano-banana-2", falImage.remoteImage.content_type || falImage.remoteImage.mimeType);
-      const cost = estimateNanoBanana2ImageCost({ resolution: falImage.resolution, endpoint: falImage.endpoint });
+      const output = await downloadImage(req, falImage.remoteImage.url, seedream ? "seedream-5-pro" : "nano-banana-2", falImage.remoteImage.content_type || falImage.remoteImage.mimeType);
+      const cost = seedream ? seedream5ProCost({ resolution: falImage.resolution, aspectRatio, referenceCount: imagePromptUrls.length }) : estimateNanoBanana2ImageCost({ resolution: falImage.resolution, endpoint: falImage.endpoint });
 
       await appendHistory({
         id: falImage.requestId || randomUUID(),
@@ -2348,6 +2373,7 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
           aspectRatio,
           requestedAspectRatio: requestedAspectRatio || aspectRatio,
           resolution: falImage.resolution,
+          ...(seedream ? { imageSize: falImage.size } : {}),
           thinkingLevel: falImage.thinkingLevel,
           imagePromptCount: imagePromptUrls.length,
           imagePromptLabels: cleanReferenceLabels
@@ -2576,6 +2602,8 @@ async function runKreaImageModel(
     validateOpenAiImage25KreaRequest({ model: selectedModel.displayName, resolution: req.body.resolution,
       aspectRatio, referenceCount: imagePromptUrls.length, background: req.body.background, editMaskDataUrl: req.body.editMaskDataUrl });
   }
+  if (isSeedream5ProModel(selectedModel.displayName)) validateSeedream5ProRequest({ prompt, images: imagePromptUrls,
+    resolution: req.body.resolution, aspectRatio, maskUrl: req.body.editMaskDataUrl, background: req.body.background });
   const referenceUrls = await Promise.all(imagePromptUrls.map((url) => uploadLocalOutputToKrea(url, kreaApiKey)));
   const submittedPrompt = promptWithReferenceLabels(
     prompt,
@@ -2619,6 +2647,7 @@ async function runKreaImageModel(
   const cost = isOpenAiImage25Model(selectedModel.displayName) ? openAiImage25Cost({ model: selectedModel.displayName, provider: "Krea", endpoint, resolution, quality: input.quality }) : estimateKreaImageCost({
     modelName: selectedModel.displayName,
     resolution,
+    aspectRatio,
     referenceCount: referenceUrls.length
   });
   const mode = referenceUrls.length
@@ -2709,6 +2738,7 @@ app.post("/api/node/storyboard-plan", async (req, res) => {
   }
 });
 
+const reviewStoryboardQc = createStoryboardQc({ readLocalAsset, review: reviewStoryboardFrameWithOpenAi });
 app.post("/api/node/storyboard-qc", async (req, res) => {
   try {
     const sourceUrl = String(req.body.sourceUrl || req.body.resultUrl || "").trim();
@@ -2719,6 +2749,7 @@ app.post("/api/node/storyboard-qc", async (req, res) => {
     const qcProvider = activeLlmProvider();
     const qcInput = {
         sourceUrl,
+        qcMode: req.body.qcMode === "deep" ? "deep" : "balanced",
         previousFrameUrl: String(req.body.previousFrameUrl || "").trim(),
         spatialAnchorUrl: String(req.body.spatialAnchorUrl || "").trim(),
         sceneDescription: String(req.body.sceneDescription || "").trim(),
@@ -2731,18 +2762,21 @@ app.post("/api/node/storyboard-qc", async (req, res) => {
         characterReferences: req.body.characterReferences || []
       };
     const reviewed = qcProvider
-      ? await reviewStoryboardFrameWithOpenAi(qcInput)
+      ? await reviewStoryboardQc(qcInput, {
+          connection: { provider: qcProvider, key: activeLlmCredential(qcProvider) },
+          model: `${storyboardVisionOpenAiModel}|${storyboardVisionFalModel}`,
+          policy: storyboardQcReviewPrompt({ adaptiveQc: true, qcMode: qcInput.qcMode }),
+          recordUsage: (value, tier) => recordStoryboardLlmUsage(value, req.body, `Storyboard QC (${tier})`)
+        })
       : { qc: storyboardQcUnavailable(llmProviderUnavailableMessage({ kreaKey: process.env.KREA_API_KEY })), cost: { amountUsd: 0, currency: "USD", source: "Local fallback" } };
 
-    await recordStoryboardLlmUsage(reviewed, req.body, "Storyboard QC");
     res.json({ qc: reviewed.qc, cost: reviewed.cost });
   } catch (error) {
     console.error(error);
-    if (error.llmResult) await recordStoryboardLlmUsage({ result: error.llmResult, cost: error.cost }, req.body, "Storyboard QC (invalid response)");
     res.status(500).json({
       error: error.message || "Storyboard frame QC failed.",
       cost: error.cost || null,
-      qc: storyboardQcUnavailable()
+      qc: storyboardQcUnavailable(error.message)
     });
   }
 });
@@ -2758,7 +2792,7 @@ app.post("/api/node/storyboard-export-frame", async (req, res) => {
     const sceneName = safePathSegment(req.body.sceneName || "Scene 1");
     const frameNumber = Math.max(1, Number.parseInt(req.body.frameNumber, 10) || 1);
     const extension = path.extname(source.fileName || "") || ".png";
-    const fileName = `Frame_${String(frameNumber).padStart(3, "0")}${extension}`;
+    const fileName = `Frame_${String(frameNumber).padStart(3, "0")}_${randomUUID()}${extension}`;
     const workflowContext = workflowPackageContextFromBody(req.body);
     let targetPath;
     let publicPath;
@@ -9721,7 +9755,9 @@ async function runMediaDescriptionLlm({
   const rates = provider === "atlas" ? currentAtlasLlmRates() : undefined;
 
   if (provider === "fal") {
-    const mediaUrls = await Promise.all(inputs.map((item) => localAssetToFalUrl(item.url)));
+    const mediaUrls = await Promise.all(inputs.map((item) => item.asset
+      ? createFalClient({ credentials: key }).storage.upload(new File([item.asset.buffer], item.asset.fileName, { type: item.asset.mimeType }))
+      : localAssetToFalUrl(item.url)));
     const endpoint = mediaType === "video" ? "openrouter/router/video" : "openrouter/router/vision";
     const inputKey = mediaType === "video" ? "video_urls" : "image_urls";
     const data = await subscribeFal(endpoint, {
@@ -9747,7 +9783,7 @@ async function runMediaDescriptionLlm({
         content.push({ type: "input_text", text: `${item.label || "Video reference"}: ${item.url}` });
         continue;
       }
-      const asset = await readLocalAsset(item.url);
+      const asset = item.asset || await readLocalAsset(item.url);
       if (item.label) content.push({ type: "input_text", text: item.label });
       content.push({
         type: "input_image",
@@ -11541,6 +11577,7 @@ async function removeLegacyNodeProject(projectId) {
 }
 
 function resolveImageModel(model) {
+  if (isSeedream5ProModel(model)) return { provider: "fal-seedream-5-pro", displayName: seedream5ProModelName, id: seedream5ProFalEndpoint() };
   const normalized = String(model || "").toLowerCase();
   if (normalized.includes("sam") && normalized.includes("image")) {
     if (!sam3SegmentationModelsEnabled) {
@@ -11840,6 +11877,7 @@ function normalizeImageAspectRatioForProvider(value, provider) {
 }
 
 function imageAspectRatiosForProvider(provider) {
+  if (provider === "fal-seedream-5-pro") return seedream5ProAspectRatios;
   return ["fal-openai-image-2", "fal-openai-image-25"].includes(provider) ? openAiImageAspectRatios : nanoImageAspectRatios;
 }
 
@@ -12186,11 +12224,12 @@ function normalizeStoryboardQcResult(result = {}) {
 
   return {
     pass,
-    shouldRetry: !pass && result.shouldRetry !== false,
-    severity: pass ? "ok" : severity,
+    shouldRetry: !pass && severity === "major" && result.shouldRetry === true,
+    severity,
     summary: String(result.summary || (pass ? "Frame passed storyboard QC." : "Frame needs correction.")).replace(/\s+/g, " ").trim().slice(0, 220),
     issues,
-    correctionPrompt: correctionPrompt || (issues.length ? `Correct these storyboard problems: ${issues.join("; ")}.` : "")
+    correctionPrompt: correctionPrompt || (issues.length ? `Correct these storyboard problems: ${issues.join("; ")}.` : ""),
+    ...(result.confidence ? { confidence: result.confidence, needsDetail: result.needsDetail, failureType: result.failureType } : {})
   };
 }
 
@@ -12202,6 +12241,8 @@ function storyboardQcReviewPrompt({
   angle = "",
   notes = "",
   useStoryboardStyle = true,
+  adaptiveQc = false,
+  qcMode = "deep",
   imageLabels = []
 } = {}) {
   return `You are a professional storyboard supervisor reviewing one generated storyboard frame before it becomes a continuity reference.
@@ -12210,8 +12251,9 @@ Return strict JSON only. Do not include markdown fences.
 
 Review goal:
 - Pass the image if it is broadly usable and physically coherent.
-- Fail for obvious storyboard-breaking problems and weak editorial progression.
+- Fail only for clear storyboard-breaking problems or a missing explicitly required story beat.
 - Do not fail for small style differences, minor line-art imperfections, or harmless model variation.
+- ${qcMode === "balanced" ? "BALANCED PERFORMANCE REVIEW: Judge whether the intended story beat reads, not literal execution of every acting adjective. A readable smile, laugh or emotional beat need not have a particular intensity, exact eyebrow angle, gaze nuance, finger pose or micro-expression. Subtle performance, stronger aesthetic preferences or speculative left/right-hand anatomy are polish, not grounds to regenerate. Do not fail a single still for motion/timing that cannot be depicted in it. A clearly missing or opposite story action, or an unmistakably wrong hand/object assignment essential to the story, remains a real action/continuity failure. This tolerance also applies during higher-detail confirmation." : "DEEP PERFORMANCE REVIEW: Check explicit acting direction closely, including readable emotional nuance, gesture, gaze, expression intensity and specified hand/prop choreography. A clearly contradictory or omitted requested performance beat can be an action failure even when the broader story remains understandable. Use visible evidence; never invent requirements or claim certainty about an expression or movement a single still cannot establish."} Never invent requirements from reference images.
 - ${useStoryboardStyle !== false ? "Fail obvious colored output, realistic black-and-white photographs, photorealistic grayscale renders, dense tonal realism or cluttered fully rendered backgrounds. Request a cleaner minimal black ink line drawing with simple gray blocking. Never fail a monochrome board for not matching the colors of its references or source prose, and never request those colors in a correction." : "Evaluate against the user's chosen custom style. Color and photographic rendering are allowed when that style calls for them; do not demand black-and-white line art."}
 
 Current frame:
@@ -12244,6 +12286,7 @@ Check for these problems:
 6. Required story content: the visible action should match the frame prompt and should not omit required named characters or key props.
 7. Rendering: apply the explicit rendering policy above, even if an old prompt or source reference describes a different look.
 8. Cast audit: compare each visible tagged character against that tag's original identity sheet. Multiple views in a sheet are ONE person. Check for a duplicated person replacing another, blended faces or wardrobe, extra people, missing visible cast, and an offscreen person incorrectly shown. Compare the exact tag-to-position, foreground/background depth, action, prop ownership and eyeline assignments in FRAME CAST AND BLOCKING. A clearly wrong identity or swapped assignment is a major failure, not harmless variation. Do not require an offscreen person's face, or a visible face on a back view/foreground shoulder. Judge stylized line-art likeness by available distinctive features, not photographic detail. Original identity sheets outrank earlier frames; the current frame's camera-relative blocking outranks a prior shot's screen coordinates. Never require every character mentioned in the full scene to appear in this frame. A correction must name the affected @tags and their correct positions, without swapping their reference bindings.
+9. Occupancy audit: use PHYSICAL STAGING, the previous image and spatial anchor to check the actual field of view, not only the declared visible cast. A listening partner must not vanish while their established seat/area remains visible. In a two-person table scene, a broad view of the same table cannot have an empty half where the other person still sits. An offscreen label alone does not excuse this. Pass a genuine tighter crop, reverse, insert, motivated opaque occlusion or explicit exit; a partial shoulder/hand/body is visible and need not show a face. A lens label alone is not evidence of reframing. Fail unexplained disappearing occupants as major continuity errors; preserve the intended camera and restore missing in-view people, rather than inventing an exit or forcing all scene characters into a legitimate single.
 
 Return this exact JSON shape:
 {
@@ -12252,10 +12295,14 @@ Return this exact JSON shape:
   "summary": "short reviewer note",
   "issues": [],
   "shouldRetry": false,
-  "correctionPrompt": "short direct prompt addon for regeneration if failed"
+  "correctionPrompt": "short direct prompt addon for regeneration if failed"${adaptiveQc ? `,
+  "confidence": "high",
+  "needsDetail": false,
+  "failureType": "none"` : ""}
 }
 
-If failing, set severity to "major", pass to false, shouldRetry to true, and write correctionPrompt as direct image-generation instructions under 80 words.`;
+Use severity "minor", pass true and shouldRetry false for optional polish; do not pay to regenerate it. A major failure must cite visible evidence that contradicts required staging, identity, story action, physical logic or the requested rendering. Only then set pass false, shouldRetry true and write correctionPrompt as direct image-generation instructions under 80 words.${adaptiveQc ? `
+Choose failureType from none, polish, identity, missing_cast, spatial, action, prop, physical, rendering. Use none for a clean pass, polish for minor optional improvements, or the essential category for a major failure. confidence describes certainty in this verdict, not image quality. Set confidence to uncertain and needsDetail true when size, occlusion or ambiguity prevents verifying identities, anatomy or required action. Never guess a pass or fail from unreadable evidence. Keep summary and issues concise; no extended critique or restatement of the scene.` : ""}`;
 }
 
 async function reviewStoryboardFrameWithOpenAi({
@@ -12269,9 +12316,14 @@ async function reviewStoryboardFrameWithOpenAi({
   angle = "",
   notes = "",
   useStoryboardStyle = true,
-  characterReferences = []
+  characterReferences = [],
+  preparedInputs = null,
+  adaptiveQc = false,
+  qcMode = "deep",
+  connection = null,
+  reasoningEffort = "high"
 } = {}) {
-  const inputs = [
+  const inputs = preparedInputs || [
     sourceUrl ? { url: sourceUrl, label: "Generated frame to review" } : null,
     ...storyboardQcCharacterInputs(characterReferences),
     previousFrameUrl ? { url: previousFrameUrl, label: "Previous approved frame for continuity" } : null,
@@ -12286,6 +12338,8 @@ async function reviewStoryboardFrameWithOpenAi({
     angle,
     notes,
     useStoryboardStyle,
+    adaptiveQc,
+    qcMode,
     imageLabels: inputs.map((item) => item.label)
   });
   const result = await runMediaDescriptionLlm({
@@ -12296,8 +12350,9 @@ async function reviewStoryboardFrameWithOpenAi({
     falModel: storyboardVisionFalModel,
     openAiModel: storyboardVisionOpenAiModel,
     responseMimeType: "application/json",
-    reasoningEffort: "high",
-    route: "storyboard-qc"
+    reasoningEffort,
+    connection,
+    route: adaptiveQc ? "storyboard-qc-adaptive" : "storyboard-qc"
   });
   const cost = estimateTextProcessingCost({ provider: result.provider, helperUsages: result.usages, hasMainRequest: false });
   try { return { qc: normalizeStoryboardQcResult(parseStoryboardPlanJson(result.text)), cost, result }; }

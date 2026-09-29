@@ -38,7 +38,7 @@ export function createAtlasMedia({ client, readLocalAsset, imageSize, labelPromp
     return { ...result, endpoint: input.model, provider: "Atlas Cloud", cost,
       remoteImage: { url: result.url, content_type: "image/png" },
       maskedEdit: editMaskInput ? { source: imageInputs[0].buffer, mask: editMaskInput.buffer } : null,
-      size, quality: input.quality || quality, resolution, submittedPrompt, resultText: "" };
+      size: input.size || size, quality: input.quality || quality, resolution, submittedPrompt, resultText: "" };
   }
 
   async function video({ startImage = "", endImage = "", images = [], videos = [], audios = [], ...options }, key) {

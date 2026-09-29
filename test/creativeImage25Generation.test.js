@@ -1,4 +1,5 @@
 import test from "node:test";
+import { storyboardFrameDirection, storyboardFrameWithVersion, storyboardEditSignature } from "../src/storyboardWorkflow.js";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { nodeApi } from "../src/api/newtApi.js";
@@ -14,7 +15,7 @@ const storyboardHandler = source.slice(source.indexOf("  async function generate
 
 test("Storyboard offers Flare first without changing Coverage's Sunburst default", () => {
   assert.equal(storyboardImageDefaultModel, imageModelNames.openAiImage25Flare);
-  assert.deepEqual(storyboardImageModelOptions, [storyboardImageDefaultModel, creativeImageDefaultModel, imageModelNames.openAiImage2]);
+  assert.deepEqual(storyboardImageModelOptions, [storyboardImageDefaultModel, creativeImageDefaultModel, imageModelNames.openAiImage2, imageModelNames.seedream5Pro]);
   assert.equal(coverageModelOptions[0], creativeImageDefaultModel);
   assert.ok(!coverageModelOptions.includes(storyboardImageDefaultModel));
   assert.equal(normalizeStoryboardImageModel(), storyboardImageDefaultModel);
@@ -65,6 +66,7 @@ for (const provider of ["fal", "krea", "atlas"]) {
       let reviews = 0;
       const deps = {
         nodesRef, edgesRef: { current: [] }, generationProvider: provider, storyboardImageSettings, normalizeStoryboardImageModel, runImageModelGeneration, assertCharacterOutputReferences, assertStoryboardCharacterTags,
+        storyboardTaskBusy: () => false, updateStoryboardStatus: updateNode, pushUndoSnapshot: () => {}, storyboardFrameWithVersion, storyboardFrameDirection, storyboardEditSignature,
         storyboardCharacterSummariesForNode: () => [], storyboardFrameCastForNode: () => ({ references: [] }),
         buildIncomingByNode: () => ({}), expandStoryboardDirectorIncoming: (incoming) => incoming,
         normalizedStoryboardFrames: (frames) => frames, storyboardSceneDescriptionForNode: () => "The character walks to the door", storyboardPlanIsCurrent: () => true,

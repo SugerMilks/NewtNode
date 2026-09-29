@@ -248,7 +248,7 @@ export async function runCharacterWardrobeEdit({
 
   const references = [
     { url: baseUrl, label: isVideoSheet ? "Locked Base Identity CU Video Sheet" : "Locked Base Identity Character Sheet" },
-    { url: wardrobeUrl, label: "Selected wardrobe reference; clothing only" }
+    { url: wardrobeUrl, label: "Wardrobe clothing footwear accessories hats glasses sunglasses not identity" }
   ];
   const { response, data } = await nodeApi.generateImage({
     prompt,

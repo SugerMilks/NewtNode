@@ -3,12 +3,13 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { normalizedResultItems } from "../src/mediaResults.js";
 import { nonOverlappingPosition } from "../src/nodeGeometry.js";
+import { storyboardPanelEditingLocked } from "../src/storyboardWorkflow.js";
 
 const source = readFileSync(new URL("../src/NodeEditor.jsx", import.meta.url), "utf8");
 const body = source.slice(source.indexOf("  async function acceptAiImageEdit("), source.indexOf("  async function applyPreviewLayoutImageEdit("));
 function editor(nodes) {
   const nodesRef = { current: nodes }, applied = [], snapshots = [];
-  const dependencies = { nodesRef, normalizedResultItems, nonOverlappingPosition,
+  const dependencies = { nodesRef, normalizedResultItems, nonOverlappingPosition, storyboardPanelEditingLocked,
     pushUndoSnapshot: () => snapshots.push(structuredClone(nodesRef.current)),
     restorePreviewLayoutImageEdit: async (item) => applied.push(item),
     createNodeId: () => "new-image", createNodeData: () => ({}), defaultNodePosition: () => ({ x: 0, y: 0 }),
@@ -52,4 +53,14 @@ test("the image editing API wrapper does not use the generic retrying transport"
   const api = readFileSync(new URL("../src/api/newtApi.js", import.meta.url), "utf8");
   const section = api.slice(api.indexOf("editImage(form)"), api.indexOf("editImage(form)") + 1800);
   assert.match(section, /fetch\(/); assert.doesNotMatch(section, /postNodeJson|postNodeForm/);
+});
+
+test("an idle Storyboard panel accepts edits while another renders, but active/protected panels cannot", async () => {
+  for (const status of ["complete", "running", "reviewing", "queued"]) {
+    const node = { id: "board", type: "storyboard", data: { status: "running", storyboardFrames: [{ id: "f1", resultUrl: image.url, status }, { id: "f2", status: "running" }] } };
+    const source = { url: image.url, editContext: { type: "storyboardFrame", nodeId: "board", itemId: "f1" } };
+    const state = editor([node]);
+    if (status === "complete") { await state.accept(source, result, "apply"); assert.equal(state.applied.length, 1); }
+    else { await assert.rejects(state.accept(source, result, "apply"), /generating/); assert.equal(state.applied.length, 0); }
+  }
 });

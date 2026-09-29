@@ -1,4 +1,5 @@
 import { cleanReferenceTag, promptHasReferenceTag } from "./referenceTags.js";
+import { storyboardSpatialPlanIssues } from "./storyboardSpatial.js";
 
 const text = (maxLength) => ({ type: "string", maxLength });
 export const storyboardCastSchema = {
@@ -17,7 +18,9 @@ export const storyboardCastSchema = {
 };
 
 export const storyboardCastPlanningRules = `For every frame return a cast array for the relevant Known characters, using exact tags without @. Include each identity once, never one entry per view on its character sheet. Set visibility to visible or offscreen. A foreground shoulder or partially occluded person is visible; a person only spoken to or mentioned can be offscreen. Use [] for frames with no Known characters, not for anonymous descriptions of known people.
-For every visible identity assign an explicit screen-left/center/right position AND foreground/midground/background depth, action/pose, and eyeline target. Keep this assignment attached to the exact tag in the prompt, not to "the other person" or an image's array position. Preserve physical geography and prop ownership; screen positions are camera-relative, so a reverse angle or explicit crossing may change them. Never blindly mirror a shot or swap identities to fill its composition. Distinguish one person's multiple reference-sheet views from multiple people. Do not add offscreen or other scene characters to a close-up. The cast, frame prompt, and beat must agree.`;
+Make routine visible/offscreen staging decisions yourself from the brief, framing, action, eyelines and neighboring panels; do not ask the user to complete cast bookkeeping. Explicit user visibility instructions take priority. A close-up's offscreen listener is not another visible subject; an over-the-shoulder foreground shoulder is visible. Never default every mentioned person to visible or every omitted cast entry to offscreen. Before returning, check all known character mentions in prompt, beat and notes, including offscreen dialogue/eyeline targets: give each exactly one matching cast entry. Reconcile the text with that decision without dropping a required action or character merely to pass validation.
+For every visible identity assign an explicit screen-left/center/right position AND foreground/midground/background depth, action/pose, and eyeline target. Keep this assignment attached to the exact tag in the prompt, not to "the other person" or an image's array position. Preserve physical geography and prop ownership; screen positions are camera-relative, so a reverse angle or explicit crossing may change them. Never blindly mirror a shot or swap identities to fill its composition. Distinguish one person's multiple reference-sheet views from multiple people. Do not add offscreen or other scene characters to a close-up. The cast, frame prompt, and beat must agree.
+Decide physical occupancy before shot focus: people retain their established seats/places while listening. If that space is still visible, keep its occupant visible. A tighter single must actually crop the other seat out, not leave an empty half of the same composition. Justify wholly offscreen characters by the camera's view boundaries or a motivated occlusion, not by who is acting. Preserve legitimate singles, inserts and reverses without requiring everyone in every shot.`;
 
 export function assertStoryboardCharacterTags(characters = []) {
   const seen = new Set();
@@ -71,7 +74,10 @@ export function storyboardCastPlanIssues(frames = [], characters = []) {
 }
 
 export function storyboardCastFingerprint(frame = {}) {
-  return JSON.stringify([frame.prompt, frame.beat, frame.notes, frame.shot, frame.lens, frame.angle].map((value) => String(value || "")));
+  const fields = [frame.prompt, frame.beat, frame.notes, frame.shot, frame.lens, frame.angle].map((value) => String(value || ""));
+  // Preserve legacy signatures; new spatial directions are invalidated by manual edits too.
+  if (frame.spatial) fields.push(JSON.stringify(frame.spatial), String(frame.cameraSide || ""));
+  return JSON.stringify(fields);
 }
 
 export function storyboardPlannedCastPatch(frame) {
@@ -90,7 +96,7 @@ export function resolveStoryboardFrameCast(frame, characters = []) {
   const cast = currentStoryboardCast(frame);
   const content = [frame.prompt, frame.beat, frame.notes].filter(Boolean).join("\n");
   if (cast) {
-    const issues = storyboardCastPlanIssues([frame], characters);
+    const issues = [...storyboardCastPlanIssues([frame], characters), ...storyboardSpatialPlanIssues([frame], characters).map(issue => issue.message)];
     if (issues.length) throw new Error(`${issues[0]} Update the frame's @tags or plan frames again.`);
   }
   const referenced = cast
@@ -111,7 +117,7 @@ export function storyboardCastPrompt(frame, references = []) {
   const cast = currentStoryboardCast(frame);
   const visible = cast?.filter((member) => member.visibility === "visible");
   return [
-    "FRAME CAST AND BLOCKING: This frame's prompt and cast control who is visible and where. The full scene and prior frames are background continuity only, not instructions to add their other characters.",
+    "FRAME CAST AND BLOCKING: This frame's prompt and cast control who is visible and where, based on physical staging and the actual camera view, not just the active speaker. The full scene and prior frames establish occupancy and geography, not instructions to add characters whose positions genuinely lie outside this view. A listener inside the visible area must not disappear; a partial body or foreground shoulder is visible.",
     cast ? `Visible referenced cast: ${visible.length} distinct ${visible.length === 1 ? "identity" : "identities"}${visible.length ? ` (${visible.map((member) => `@${member.tag}`).join(", ")})` : ""}. Depict each once unless the current prompt explicitly requests a reflection or multiple depiction of that same person. Do not invent additional people or crowd members beyond the current frame prompt.` : "Show only the characters required by the current frame. Mentioned offscreen people must stay offscreen; an eyeline target is not automatically another visible person.",
     ...(cast || []).map((member) => member.visibility === "offscreen"
       ? `@${member.tag}: OFFSCREEN, do not depict. ${member.action}. Eyeline/context: ${member.eyeline || "follow frame prompt"}.`

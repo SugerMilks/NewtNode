@@ -1,4 +1,5 @@
 import { getPricingCatalog, pricingQuote } from "./pricingCatalog.js";
+import { seedream5ProModelName, seedream5ProAtlasBase } from "./seedream5Pro.js";
 
 export const ATLAS_PRICING_URL = "https://api.atlascloud.ai/api/v1/pricing/models";
 export const ATLAS_PRICING_CHECKED_AT = "2026-09-10";
@@ -6,6 +7,7 @@ export const ATLAS_RULES_VERSION = 1;
 const round = (value) => Math.round(value * 1e6) / 1e6;
 const imageRatios = ["1:1", "3:2", "2:3", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"];
 const imageModels = {
+  [seedream5ProModelName]: seedream5ProAtlasBase,
   "Nano Banana 2": "google/nano-banana-2", "Nano Banana Pro": "google/nano-banana-pro",
   "OpenAI Image 2": "openai/gpt-image-2",
   "OpenAI Image 2.5 Sunburst": "openai/gpt-image-2.5-sunburst",
@@ -40,6 +42,7 @@ export const atlasPricingSpecs = Object.fromEntries([
 ]);
 
 export const atlasPricingEndpoints = [
+  ...["text-to-image", "edit"].map(route => `${seedream5ProAtlasBase}/${route}`),
   ...Object.keys(atlasPricingSpecs), "google/nano-banana-2/reference-to-image",
   ...["2", "2.5-sunburst", "2.5-flare"].flatMap((version) => ["text-to-image", "edit"].map((route) => `openai/gpt-image-${version}/${route}`)),
   ...["2.0", "2.5"].flatMap((version) => ["text-to-video", "image-to-video", "reference-to-video"].map((route) => `bytedance/seedance-${version}/${route}`))

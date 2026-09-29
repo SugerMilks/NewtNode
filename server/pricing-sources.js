@@ -6,6 +6,7 @@ export const OPENAI_PRICING_URL = "https://developers.openai.com/api/docs/pricin
 export const GOOGLE_PRICING_URL = "https://ai.google.dev/gemini-api/docs/pricing";
 
 export const kreaPricingModels = [
+  ["/generate/image/bytedance/seedream-5-pro", ["resolutionTier", "referenceImageCount"]],
   ["/generate/image/google/nano-banana-2", ["resolution"]],
   ["/generate/image/google/nano-banana-pro", ["resolution"]],
   ["/generate/video/bytedance/seedance-2", ["resolution", "hasVideoReference", "duration"]],
@@ -53,7 +54,7 @@ export function parseKreaPricing(schema) {
       for (const point of entry.points || []) for (const [key, value] of Object.entries(point.dimensions)) {
         if (["duration", "billableSeconds", "referenceImageCount"].includes(key) && (!Number.isInteger(value) || value < 0 || value > 30)) throw new Error("Numeric billing dimensions changed; review required.");
         if (["hasVideoReference", "generateAudio"].includes(key) && typeof value !== "boolean") throw new Error("Audio/reference billing dimensions changed; review required.");
-        if (["resolution", "mode"].includes(key) && (typeof value !== "string" || value.length > 40)) throw new Error("Invalid pricing dimension.");
+        if (["resolution", "resolutionTier", "mode"].includes(key) && (typeof value !== "string" || value.length > 40)) throw new Error("Invalid pricing dimension.");
       }
       return { ...result, entry: validatePricingEntry(entry) };
     } catch (error) { return { ...result, issue: error.message }; }

@@ -200,10 +200,10 @@ test("intelligence defaults preserve Astra high and map each slider level to its
 test("lower reasoning allowance can fit a small budget without bypassing the budget guard", async (t) => {
   let calls = 0;
   const instance = await service(t, { invoke: async () => { calls++; return call("finish", {}); } });
-  const low = await instance.start({ ...owner, brief: "test", settings: { budget: 0.4, intelligence: "low" }, snapshot });
+  const low = await instance.start({ ...owner, brief: "test", settings: { budget: 0.45, intelligence: "low" }, snapshot });
   await settle(instance);
   assert.equal(calls, 1); assert.equal(instance.jobs.get(low.id).status, "complete");
-  const high = await instance.start({ ...owner, brief: "test", settings: { budget: 0.4, intelligence: "high" }, snapshot });
+  const high = await instance.start({ ...owner, brief: "test", settings: { budget: 0.45, intelligence: "high" }, snapshot });
   await settle(instance);
   assert.equal(calls, 1); assert.equal(instance.jobs.get(high.id).status, "paused");
 });

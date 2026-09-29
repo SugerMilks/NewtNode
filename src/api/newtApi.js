@@ -5,7 +5,9 @@ const localApiBaseUrl = `http://127.0.0.1:${localApiPort}`;
 
 function ensureOk(response, data, fallbackMessage) {
   if (!response.ok) {
-    throw new Error(data?.error || fallbackMessage || "Request failed.");
+    const error = new Error(data?.error || fallbackMessage || "Request failed.");
+    error.status = response.status;
+    throw error;
   }
 
   return data;
@@ -15,14 +17,22 @@ export async function fetchJsonApi(path, options = {}, label = "Request") {
   const scoped = scopedMyNewtRequest(path, options);
   if (scoped) return scoped;
   const requestUrl = localApiFetchUrl(path);
+  if (path === "/api/output/export") {
+    try {
+      const response = await fetch(requestUrl, options);
+      return { response, data: await readJsonResponse(response, label) };
+    } catch {
+      throw new Error("Output export response was interrupted. Check the export status or destination before retrying; the files may already have been saved.");
+    }
+  }
   const videoRequest = isVideoGenerationRequest(path, options);
-  if (videoRequest || isImageModelRequest(path, options) || path === "/api/node/explore-plan") {
+  if (videoRequest || isImageModelRequest(path, options) || path === "/api/node/explore-plan" || /^\/api\/node\/storyboard-(?:plan|plan-v2|revise|review|qc)$/.test(path)) {
     // Never replay a paid media POST after an uncertain response, including via Newt.
     try {
       const response = await fetch(requestUrl, options);
       return { response, data: await readJsonResponse(response, label) };
     } catch {
-      throw new Error(`${label}: the connection or response was interrupted. The ${path === "/api/node/explore-plan" ? "plan" : videoRequest ? "video" : "image"} may still be generating. Check History and the provider before running again; NewtNode did not resubmit or cancel the job.`);
+      throw new Error(`${label}: the connection or response was interrupted. The task may still be running. Check History and the provider before running again; NewtNode did not resubmit or cancel the job.`);
     }
   }
   let response;
@@ -111,6 +121,7 @@ function canRetryLocalApi(path) {
 }
 
 function localApiRouteKey(path) {
+  if (path.startsWith("/api/output/")) return "outputExport";
   if (path.startsWith("/api/editor/")) return "editorTimeline";
   if (path.includes("generate-audio")) return "generateAudio";
   if (path.includes("utility-image")) return "utilityImage";
@@ -150,6 +161,18 @@ export const editorApi = {
   render: body => postJson("/api/editor/render", body, "Editor export"),
   job: id => getJson(`/api/editor/jobs/${encodeURIComponent(id)}`, "Editor export status"),
   cancel: id => requestData(`/api/editor/jobs/${encodeURIComponent(id)}`, { method: "DELETE" }, "Cancel Editor export")
+};
+
+export const outputApi = {
+  export: body => postJson("/api/output/export", body, "Output export"),
+  validate: body => postJson("/api/output/validate", body, "Output destination"),
+  job: id => getJson(`/api/output/jobs/${encodeURIComponent(id)}`, "Output export status"),
+  cancel: id => requestData(`/api/output/jobs/${encodeURIComponent(id)}`, { method: "DELETE" }, "Cancel Output export"),
+  reveal: filePath => postJson("/api/output/reveal", { filePath }, "Show exported file"),
+  async selectFolder(body) {
+    const { response, data } = await fetchJsonApi("/api/system/select-folder", jsonBody(body), "Output folder");
+    return data?.canceled ? { canceled: true, path: "" } : ensureOk(response, data, "Folder selection failed.");
+  }
 };
 
 export async function postForm(path, form, fallbackMessage) {
@@ -355,8 +378,11 @@ export const nodeApi = {
   },
 
   planStoryboard(body, label = "Storyboard planning") {
-    return fetchJsonApi("/api/node/storyboard-plan", jsonBody(body), label);
+    return fetchJsonApi("/api/node/storyboard-plan-v2", jsonBody(body), label);
   },
+
+  reviseStoryboard(body) { return fetchJsonApi("/api/node/storyboard-revise", jsonBody(body), "Storyboard revision"); },
+  reviewStoryboardSequence(body) { return fetchJsonApi("/api/node/storyboard-review", jsonBody(body), "Storyboard sequence review"); },
 
   reviewStoryboardFrame(body, label = "Storyboard frame QC") {
     return fetchJsonApi("/api/node/storyboard-qc", jsonBody(body), label);

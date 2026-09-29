@@ -42,6 +42,10 @@ export function resetCopiedNodeRuntime(data = {}) {
   delete copy.myNewtProtection;
   delete copy.myNewtRunRecords;
   if (data.editorExportJob) copy.editorExportJob = null;
+  if (data.outputSettings) {
+    copy.outputSettings = { ...data.outputSettings, autoExport: false };
+    copy.outputJob = null; copy.outputReceipts = []; copy.status = "ready"; copy.error = "";
+  }
   return data.jobId ? { ...copy, jobId: "", myNewtSummary: null } : copy;
 }
 
@@ -93,7 +97,7 @@ export function clearStaleRunningState(node) {
 }
 
 function clearInterruptedMediaJob(data) {
-  if (!["running", "compiling", "uploading"].includes(data?.status)) return data;
+  if (!["running", "compiling", "uploading", "planning", "revising", "reviewing-sequence", "reviewing", "queued", "compiling-characters", "compiling-board"].includes(data?.status)) return data;
   return {
     ...data,
     status: data.status === "compiling" ? "ready" : data.resultUrl ? "complete" : "ready",
@@ -116,7 +120,7 @@ export function remapImportedGraph(graph = {}, offset = {}, stamp = Date.now()) 
     idMap.set(node.id, nextId);
     return {
       ...cloneNode(node),
-      data: node.type === "myNewt" ? { ...node.data, jobId: "", myNewtSummary: null } : node.type === "editor" ? resetCopiedNodeRuntime(cloneNode(node).data) : cloneNode(node).data,
+      data: node.type === "myNewt" ? { ...node.data, jobId: "", myNewtSummary: null } : ["editor", "output"].includes(node.type) ? resetCopiedNodeRuntime(cloneNode(node).data) : cloneNode(node).data,
       id: nextId,
       x: Math.round(node.x + safeOffset.x),
       y: Math.round(node.y + safeOffset.y)

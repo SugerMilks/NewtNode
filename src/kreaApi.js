@@ -1,10 +1,12 @@
 import { applyPricingQuote } from "./pricingCatalog.js";
+import { isSeedream5ProModel, seedream5ProModelName, seedream5ProKreaEndpoint, validateSeedream5ProRequest, seedream5ProCost } from "./seedream5Pro.js";
 import { isOpenAiImage25Model, normalizeOpenAiImage25Quality, normalizeOpenAiImage25Background, openAiImage25Variant, validateOpenAiImage25KreaRequest } from "./openAiImage25.js";
 
 export const kreaApiBaseUrl = "https://api.krea.ai";
 
 export const kreaEndpoints = Object.freeze({
   image: Object.freeze({
+    [seedream5ProModelName]: seedream5ProKreaEndpoint,
     "Nano Banana 2": "/generate/image/google/nano-banana-2",
     "Nano Banana Pro": "/generate/image/google/nano-banana-pro",
     "OpenAI Image 2": "/generate/image/openai/gpt-image-2",
@@ -121,6 +123,11 @@ export function buildKreaImageInput({
   const refs = referenceUrls.filter(Boolean);
   const input = { prompt: String(prompt || "").trim() };
 
+  if (isSeedream5ProModel(modelName)) {
+    const size = validateSeedream5ProRequest({ prompt, images: referenceUrls, resolution, aspectRatio, background });
+    return { ...input, ...size, ...(refs.length ? { style_images: refs.map(url => ({ url, strength: 1 })) } : {}) };
+  }
+
   if (isOpenAiImage25Model(modelName)) {
     validateOpenAiImage25KreaRequest({ model: modelName, resolution, aspectRatio, referenceCount: refs.length, background });
     return compact({ ...input, quality: normalizeOpenAiImage25Quality(quality), image_urls: refs,
@@ -160,7 +167,11 @@ export function normalizeKreaImageAspectRatio(modelName, value) {
   return closestRatio(ratio, options);
 }
 
-export function estimateKreaImageCost({ modelName, resolution } = {}) {
+export function estimateKreaImageCost({ modelName, resolution, aspectRatio, referenceCount = 0 } = {}) {
+  if (isSeedream5ProModel(modelName)) {
+    const cost = seedream5ProCost({ provider: "krea", resolution, aspectRatio, referenceCount });
+    return applyPricingQuote(cost, "krea", seedream5ProKreaEndpoint, { resolutionTier: cost.resolutionTier, referenceImageCount: referenceCount });
+  }
   const normalizedResolution = normalizeKreaImageResolution(modelName, resolution);
   const amountUsd = kreaImagePrices[modelName]?.[normalizedResolution] ?? null;
 

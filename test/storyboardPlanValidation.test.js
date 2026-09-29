@@ -54,6 +54,7 @@ test("the real editor planning failure path preserves frames, image URLs, analys
     storyboardSceneDescriptionForNode: () => "The scene", connectedDirectorPackageSource: () => null,
     storyboardFrameCountForNode: () => 3, assertCharacterOutputReferences: () => {}, assertStoryboardCharacterTags: () => {},
     updateNode: (_id, patch) => Object.assign(node.data, patch), workflowRequestContext: () => ({}),
+    updateStoryboardStatus: (_id, patch) => Object.assign(node.data, patch), storyboardTaskBusy: () => false, normalizeStoryboardFrameCountValue: () => "Auto",
     storyboardCharacterSummariesForNode: () => [], storyboardSceneReferenceSummaries: () => [], storyboardPropReferenceSummaries: () => [],
     nodeApi: { planStoryboard: async () => ({ response: { ok: false }, data: { error: "Provider unavailable", plan: { frames: [frame(1, 1, "Old server fallback")] } } }) },
     requireStoryboardPlanResponse,
@@ -62,7 +63,7 @@ test("the real editor planning failure path preserves frames, image URLs, analys
     updateStoryboardNodeFrames: () => assert.fail("Do not replace user frames")
   };
   const run = new Function(...Object.keys(deps), `${planning}; return planStoryboardNode;`)(...Object.values(deps));
-  assert.equal(await run(node), null);
+  assert.equal(await run(node, { replace: true }), null);
   assert.equal(node.data.status, "error");
   assert.equal(node.data.error, "Provider unavailable");
   for (const [key, value] of Object.entries(before)) assert.deepEqual(node.data[key], value);

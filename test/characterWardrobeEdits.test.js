@@ -12,6 +12,7 @@ import {
 } from "../src/characterSheetWorkflow.js";
 import { characterVideoSheetPrompt } from "../src/characterVideoSheets.js";
 import { runCharacterSheetGeneration, runCharacterWardrobeEdit } from "../src/nodeRunners/mediaModels.js";
+import { normalizeCharacterWardrobeRequest } from "../server/character-wardrobe.js";
 
 function editOptions(model, sheetKind = "video") {
   return {
@@ -60,7 +61,7 @@ for (const model of characterSheetModelOptions) {
     assert.equal(request.prompt, prompt);
     assert.doesNotMatch(request.prompt, /Base Identity Character Sheet|layout conversion|supporting identity check/);
     assert.equal(request.model, model);
-    assert.equal(request.resolution, "4K");
+    assert.equal(request.resolution, model === "Seedream 5.0 Pro" ? "2K" : "4K");
     assert.equal(request.aspectRatio, "16:9");
     assert.equal(request.workflowPackagePath, "/projects/production");
     assert.equal(request.nodeId, "character-1");
@@ -81,10 +82,13 @@ for (const model of characterSheetModelOptions) {
     assert.deepEqual(request.imagePromptUrls, ["/outputs/cu-base.png", "/uploads/outfit.png"]);
     assert.equal(request.imagePromptLabels.length, 2);
     assert.match(request.imagePromptLabels[0], /Locked Base Identity CU Video Sheet/);
-    assert.match(request.imagePromptLabels[1], /clothing only/);
+    assert.match(request.imagePromptLabels[1], /clothing footwear accessories hats glasses sunglasses/);
+    assert.match(request.imagePromptLabels[1], /not identity/);
+    assert.ok(request.imagePromptLabels[1].length <= 80, "Preserve the complete role within the provider label limit");
+    assert.doesNotMatch(request.imagePromptLabels[1], /clothing only/);
     assert.equal(request.prompt, characterVideoWardrobeEditPrompt);
     assert.equal(request.model, model);
-    assert.equal(request.resolution, "4K");
+    assert.equal(request.resolution, model === "Seedream 5.0 Pro" ? "2K" : "4K");
     assert.equal(request.aspectRatio, "16:9");
     assert.equal(request.editMaskDataUrl, undefined, "Obsolete rectangle masks must not be sent, even by older callers");
     assert.equal(request.characterWardrobeEdit, true);
@@ -131,8 +135,11 @@ test("regular wardrobe edits retain their existing two-reference workflow", asyn
   assert.deepEqual(request.imagePromptUrls, ["/outputs/regular-base.png", "/uploads/outfit.png"]);
   assert.equal(request.prompt, characterWardrobeEditPrompt);
   assert.equal(request.imagePromptLabels[0], "Locked Base Identity Character Sheet");
+  assert.match(request.imagePromptLabels[1], /accessories hats glasses sunglasses/);
   assert.equal(request.editMaskDataUrl, undefined);
   assert.equal(request.characterWardrobeEdit, true);
+  assert.deepEqual(normalizeCharacterWardrobeRequest({ ...request, editMaskDataUrl: "obsolete-mask" }), request,
+    "Accessory-inclusive reference labels retain full-sheet editing, without protected face rectangles");
 });
 
 test("multiple CU wardrobe edits reuse the saved CU base without regenerating either base", async (t) => {

@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { storyboardPromptPolicy } from "../src/storyboardPromptPolicy.js";
-import { storyboardCastPrompt, assertStoryboardCharacterTags, storyboardCastPlanningRules, storyboardCastPlanIssues, storyboardQcCharacterInputs } from "../src/storyboardCast.js";
+import { storyboardFrameContext } from "../src/storyboardWorkflow.js";
+import { storyboardCastPrompt, assertStoryboardCharacterTags, storyboardCastPlanningRules, storyboardCastPlanIssues, storyboardQcCharacterInputs, storyboardPlannedCastPatch } from "../src/storyboardCast.js";
 import { storyboardReasoningSkill } from "../server/creative-llm.js";
 import { storyboardPlanIssues, storyboardQcUnavailable } from "../src/storyboardPlanValidation.js";
 import { storyboardDirectorExpansionInstruction } from "../src/storyboardShotExpansion.js";
@@ -27,7 +28,7 @@ const sceneReferenceMap = getFunction(editor, "storyboardSceneReferenceMapPrompt
 const propReferenceMap = getFunction(editor, "storyboardPropReferenceMapPrompt");
 const buildPrompt = getFunction(editor, "buildStoryboardFramePrompt", {
   ...styleConstants, stylePresetPrompts, shotPresetPrompts, lensPresetPrompts, typePresetPrompts,
-  storyboardPromptPolicy, storyboardCastPrompt, connectedDirectorPackageSource: () => null,
+  storyboardPromptPolicy, storyboardCastPrompt, storyboardFrameContext, connectedDirectorPackageSource: () => null,
   storyboardAspectRatioForNode: () => "16:9", storyboardSceneReferenceMapPrompt: sceneReferenceMap,
   storyboardPropReferenceMapPrompt: propReferenceMap, promptPiecesForSource: (source) => [source.data.prompt],
   storyboardPreviousFrameLabel: "PREVIOUS_FRAME.png", storyboardSpatialAnchorLabel: "SPATIAL_ANCHOR.png"
@@ -37,6 +38,29 @@ test("character bindings ignore legacy appearance prose but retain tag, sheet an
   const prompt = storyboardCastPrompt({}, [{ tag: "Red", label: "Red Character Sheet", details: "Blue eyes, silver hair, a red silk coat." }]);
   assert.match(prompt, /reference image 1, "Red Character Sheet", defines @Red ONLY/);
   assert.doesNotMatch(prompt, /Blue eyes|silver hair|red silk coat|Details for/);
+});
+
+test("the image prompt carries physical occupancy through current, previous and anchor references", () => {
+  const frame = {
+    number: 2, shot: "MS", lens: "35mm", prompt: "@Woman sips coffee while @Man listens at his seat.",
+    cast: ["Woman", "Man"].map((tag, i) => ({ tag, visibility: "visible", position: i ? "screen-right" : "screen-left", action: i ? "Listens" : "Sips coffee", eyeline: "Toward scene partner" })),
+    spatial: {
+      spaceId: "cafe", cameraSetupId: "table-master", view: "Both occupied seats remain inside the frame.",
+      visiblePlaces: ["west-seat", "east-seat"], present: [{ tag: "Woman", place: "west-seat" }, { tag: "Man", place: "east-seat" }], hidden: [], blockingChange: ""
+    }
+  };
+  Object.assign(frame, storyboardPlannedCastPatch(frame));
+  const prompt = buildPrompt({ data: {} }, frame, "Two people talk over coffee.", {}, {}, {
+    castReferences: ["Woman", "Man"].map(tag => ({ tag, label: `${tag} sheet` })),
+    activeLocationSources: [], activePropSources: [], hasPreviousFrameReference: true, hasSpatialAnchorReference: true
+  });
+  assert.match(prompt, /PHYSICAL STAGING: Space cafe; camera setup table-master/);
+  assert.match(prompt, /World places inside this frame: west-seat; east-seat/);
+  assert.match(prompt, /@Man at east-seat/);
+  assert.match(prompt, /Keep people who occupy the visible area, even while listening/);
+  assert.match(prompt, /PREVIOUS_FRAME\.png/);
+  assert.match(prompt, /SPATIAL_ANCHOR\.png/);
+  assert.match(prompt, /"Man sheet", defines @Man ONLY/);
 });
 
 for (const useStoryboardStyle of [undefined, true, false]) {
@@ -100,6 +124,9 @@ for (const useStoryboardStyle of [undefined, true, false]) {
     assert.deepEqual(request.inputs.map(({ url }) => url), ["/outputs/board.png", "/outputs/red.png"]);
     assert.match(request.prompt, /not new physical descriptions or wardrobe\/color catalogues/);
     assert.match(request.prompt, /Do not undo an explicit clothing interaction/);
+    assert.match(request.prompt, /Occupancy audit: use PHYSICAL STAGING/);
+    assert.match(request.prompt, /An offscreen label alone does not excuse this/);
+    assert.match(request.prompt, /Fail unexplained disappearing occupants as major continuity errors/);
     if (useStoryboardStyle !== false) assert.match(request.prompt, /Never fail a monochrome board for not matching the colors/);
     else {
       assert.match(request.prompt, /Color and photographic rendering are allowed/);
@@ -114,12 +141,12 @@ for (const useStoryboardStyle of [undefined, true, false]) {
     const plan = editorHandler("planStoryboardNode", "generateStoryboardFrame", {
       nodesRef: { current: [node] }, edgesRef: { current: [] }, buildIncomingByNode: () => ({}), expandStoryboardDirectorIncoming: () => ({}),
       storyboardSceneDescriptionForNode: () => "@Red removes a jacket.", connectedDirectorPackageSource: () => null, storyboardFrameCountForNode: () => 1,
-      updateNode: () => {}, assertCharacterOutputReferences: () => {}, assertStoryboardCharacterTags,
+      updateNode: () => {}, updateStoryboardStatus: () => {}, storyboardTaskBusy: () => false, normalizeStoryboardFrameCountValue: () => "Auto", assertCharacterOutputReferences: () => {}, assertStoryboardCharacterTags,
       storyboardCharacterSummariesForNode: () => [{ name: "Red", tag: "Red" }], storyboardSceneReferenceSummaries: () => [], storyboardPropReferenceSummaries: () => [], workflowRequestContext: () => ({}),
       nodeApi: { planStoryboard: async (body) => { planRequest = body; return { response: { ok: false }, data: {} }; } },
       requireStoryboardPlanResponse: () => { throw new Error("Mock refusal preserves saved content"); }
     });
-    await plan(node);
+    await plan(node, { replace: true });
     const review = editorHandler("reviewStoryboardGeneratedFrame", "exportStoryboardFrameResult", {
       nodeApi: { reviewStoryboardFrame: async (body) => { reviewRequest = body; return { response: { ok: true }, data: { qc: { pass: true } } }; } },
       storyboardPreviousFrameLabel: "PREVIOUS_FRAME.png", storyboardSpatialAnchorLabel: "SPATIAL_ANCHOR.png",
@@ -152,6 +179,9 @@ test("live route handlers pass the explicit rendering choice through, defaulting
     requireActiveLlmProvider: () => {}, activeLlmProvider: () => "mock",
     generateStoryboardPlanWithOpenAi: async (body) => { captured.push(body); return { plan: {} }; },
     reviewStoryboardFrameWithOpenAi: async (body) => { captured.push(body); return { qc: { pass: true } }; },
+    createStoryboardQc: ({ review }) => review, readLocalAsset: async () => {},
+    activeLlmCredential: () => "test", storyboardVisionOpenAiModel: "mock", storyboardVisionFalModel: "mock",
+    storyboardQcReviewPrompt: () => "Policy",
     recordStoryboardLlmUsage: async () => {}, normalizeStoryboardPlan: (plan) => plan
   };
   const source = server.slice(server.indexOf('app.post("/api/node/storyboard-plan"'), server.indexOf('app.post("/api/node/storyboard-export-frame"'));

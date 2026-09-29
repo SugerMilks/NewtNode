@@ -1,4 +1,5 @@
 import test from "node:test";
+import { storyboardFrameContext, storyboardFrameDirection, storyboardFrameWithVersion, storyboardEditSignature } from "../src/storyboardWorkflow.js";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import {
@@ -121,7 +122,7 @@ test("actual plan normalization and editor persistence keep cast bindings withou
   const normalize = getFunction(server, "normalizeStoryboardPlanFrame", { normalizeChoice });
   const fromPlan = getFunction(editor, "storyboardFramesFromPlan", {
     storyboardMaxFrameCount: 35, normalizeChoice, shotPresetNames: ["WS"], lensPresetNames: ["35mm"], typePresetNames: ["None"],
-    createStoryboardFrame: (number, patch) => ({ id: `frame-${number}`, number, ...patch }), storyboardPlannedCastPatch
+    createStoryboardFrame: (number, patch) => ({ id: `frame-${number}`, number, ...patch }), storyboardPlannedCastPatch, storyboardFrameDirection
   });
   const [frame] = fromPlan([normalize(planned())]);
   assert.deepEqual(currentStoryboardCast(frame), planned().cast);
@@ -187,7 +188,7 @@ for (const scenario of ["correct swapped identities", "missing sheet", "duplicat
       connectedImagePromptItems: () => [], uniqueStoryboardImagePromptItems
     });
     const buildStoryboardFramePrompt = getFunction(editor, "buildStoryboardFramePrompt", {
-      storyboardPromptPolicy,
+      storyboardPromptPolicy, storyboardFrameContext,
       connectedDirectorPackageSource: () => null, storyboardAspectRatioForNode: () => "16:9", storyboardCastPrompt,
       storyboardSceneReferenceMapPrompt: () => "", storyboardPropReferenceMapPrompt: () => "",
       shotPresetPrompts: {}, lensPresetPrompts: {}, typePresetPrompts: {}, storyboardContinuityInstruction: "Preserve physical geography.",
@@ -201,6 +202,7 @@ for (const scenario of ["correct swapped identities", "missing sheet", "duplicat
     const reviewStoryboardGeneratedFrame = new Function(...Object.keys(reviewDeps), `${reviewSource}\nreturn reviewStoryboardGeneratedFrame;`)(...Object.values(reviewDeps));
     const deps = {
       nodesRef: { current: [node] }, edgesRef: { current: [] }, generationProvider: "fal",
+      storyboardTaskBusy: () => false, updateStoryboardStatus: updateNode, pushUndoSnapshot: () => {}, storyboardFrameWithVersion, storyboardFrameDirection, storyboardEditSignature,
       storyboardImageSettings, normalizeStoryboardImageModel, runImageModelGeneration, assertStoryboardCharacterTags,
       assertCharacterOutputReferences: () => {}, storyboardCharacterSummariesForNode: () => roster,
       storyboardFrameCastForNode: (_node, frame) => resolveStoryboardFrameCast(frame, roster),

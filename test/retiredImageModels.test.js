@@ -12,6 +12,7 @@ import { kreaPricingModels } from "../server/pricing-sources.js";
 import { estimateImageRunCost } from "../src/generationPricing.js";
 import { PricingRefresh } from "../server/pricing-refresh.js";
 import { isNanoBanana2Model } from "../src/nanoBanana2.js";
+import { isSeedream5ProModel, seedream5ProModelName, seedream5ProFalEndpoint } from "../src/seedream5Pro.js";
 import { isOpenAiImage25Model, openAiImage25Variant, openAiImage25Models } from "../src/openAiImage25.js";
 
 const retired = ["Krea 2 Large", "REVE 2.1"];
@@ -31,7 +32,7 @@ test("backend rejects retired names and endpoints instead of silently generating
   const source = await readFile(new URL("../server/index.js", import.meta.url), "utf8");
   const start = source.indexOf("function resolveImageModel(");
   const end = source.indexOf("function resolveUtilityImageModel(", start);
-  const deps = { isNanoBanana2Model, isOpenAiImage25Model, openAiImage25Variant, openAiImage25Models,
+  const deps = { isSeedream5ProModel, seedream5ProModelName, seedream5ProFalEndpoint, isNanoBanana2Model, isOpenAiImage25Model, openAiImage25Variant, openAiImage25Models,
     imageModelNames, falNanoBanana2TextEndpoint: "fal-ai/nano-banana-2", falNanoBananaProEndpoint: "fal-ai/nano-banana-pro",
     httpError: (status, message) => Object.assign(new Error(message), { status }) };
   const resolve = new Function(...Object.keys(deps), source.slice(start, end) + "\nreturn resolveImageModel;")(...Object.values(deps));

@@ -19,9 +19,9 @@ export const myNewtFields = Object.freeze({
   preview: ["previewTab"],
   character: ["characterName", "characterPhysicalDetails", "characterReferenceNotes", "characterSheetModel", "cinematicCharacterSheet", "cuVideoGeneration"],
   skillDirector: ["sceneName", "sceneOverview", "text", "skillShotCount", "skillDurationSeconds", "skillVideoModel", "skillResolution", "skillAspectRatio", "skillDirectorAudioMode", "skillApproach", "styleDirection", "motionBrief", "motionDirection", "shotListNotes", "skillDirectorRevisionNotes"],
-  storyboard: ["sceneName", "sceneDescription", "storyboardNotes", "frameCount", "model", "resolution", "aspectRatio", "useStoryboardStyle", "useMoodBoard", "storyboardStylePreset"],
+  storyboard: ["sceneName", "sceneDescription", "storyboardNotes", "frameCount", "storyboardApproach", "storyboardPacing", "storyboardTargetDuration", "model", "resolution", "aspectRatio", "useStoryboardStyle", "useMoodBoard", "storyboardStylePreset"],
   utility: ["utilityMode", "utilityImageModel", "model", "coverageMethod", "resolution", "quality"],
-  image: [], video: [], audio: [], transfer: [], editor: []
+  image: [], video: [], audio: [], transfer: [], editor: [], output: []
 });
 
 export function myNewtSettings(data = {}) {
@@ -79,7 +79,9 @@ export function myNewtSnapshot({ nodes = [], edges = [], groups = [], selectedNo
       id: node.id, type: node.type, x: node.x, y: node.y,
       data: Object.fromEntries(Object.entries(node.data || {}).filter(([key]) =>
         ["title", "status", "error", "locked", "activated", "myNewtProtection", "myNewtRunRecords", "skillDirectorLocks", "skillDirectorBuilt", "resultText", "shotList", "storyboardFrames", "characterName", "fileName", "mimeType", "resultUrl", "url", "localUrl", "resultItems", "characterPortrait", "characterSheets", "characterSheetVariants", "characterCustomSheets", "customCharacterSheet", "useCustomCharacterSheet", "compiledCharacterSheetUrl", "characterWardrobes", "characterBaseSheet", "characterBaseVideoSheet", "activeCharacterSheetId", "activeWardrobeId", "transferImages", "storyboardBoardUrl", ...(myNewtFields[node.type] || [])].includes(key)
-      ).map(([key, value]) => [key, sanitize(value)]))
+      ).map(([key, value]) => [key, sanitize(key === "storyboardFrames" && Array.isArray(value)
+        ? value.map(({ versions, generatedDirection, ...frame }) => frame)
+        : value)]))
     })),
     edges: edges.map(({ from, to }) => ({ from, to }))
   };

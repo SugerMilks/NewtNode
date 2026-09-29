@@ -118,8 +118,8 @@ test("Sunburst and Flare retain high/xhigh/max, full size, transparency and the 
 
 test("unsupported masks and background controls never disappear silently", () => {
   for (const model of atlasImageModels.filter((model) => !variants.includes(model))) {
-    rejects(settings(model, { images: references(1), maskUrl }), /does not support masks/);
-    rejects(settings(model, { maskUrl }), /does not support masks/);
+    rejects(settings(model, { images: references(1), maskUrl }), /does not support masks|masks are not supported/);
+    rejects(settings(model, { maskUrl }), /does not support masks|masks are not supported/);
   }
   for (const model of [imageModelNames.openAiImage2, ...nanoModels]) {
     for (const background of ["opaque", "transparent"]) rejects(settings(model, { background }), /background/);

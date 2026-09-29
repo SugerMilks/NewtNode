@@ -1,0 +1,6 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Output QA</title><style>
+body { margin:0; } .output-qa { padding:20px; } .qa-controls { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:24px; } .qa-controls label { display:flex; align-items:center; gap:6px; }
+.qa-layout { display:grid; grid-template-columns:140px minmax(0,440px) minmax(160px,1fr); gap:28px; } .qa-layout aside { font-size:13px; min-width:0; overflow-wrap:anywhere; } .qa-layout aside div { padding:7px 9px; } .qa-active { background:#30302a; color:#ecd330; }
+.qa-layout article.node-card.output { max-width:100%; } .qa-layout .node-header { display:flex; gap:8px; padding:14px 18px; }
+@media(max-width:740px) { .output-qa { padding:12px; } .qa-layout { grid-template-columns:minmax(0,1fr); } .qa-layout aside[aria-label="Node menu"] { display:none; } }
+</style></head><body><div id="root"></div><script type="module" src="/test/browser/output.jsx"></script></body></html>

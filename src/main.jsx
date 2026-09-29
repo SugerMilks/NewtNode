@@ -49,6 +49,7 @@ import {
   videoModelNames
 } from "./modelOptions.js";
 import { isNanoBanana2Model, nanoBanana2ResolutionOptions } from "./nanoBanana2.js";
+import { isSeedream5ProModel, seedream5ProResolutionOptions, seedream5ProAspectRatios } from "./seedream5Pro.js";
 import { isOpenAiImage25Model, openAiImage25Variant, openAiImage25KreaAspectRatios, openAiImage25KreaResolutionOptions, openAiImage25KreaSelection, openAiImage25QualityOptions, openAiImage25BackgroundOptions } from "./openAiImage25.js";
 import { generationProviderFromSettings } from "./generationPricing.js";
 import { isSeedance25Model } from "./seedance25.js";
@@ -1010,10 +1011,12 @@ function isImageWorkspaceHistory(item) {
 }
 
 function imageAspectRatiosForModel(model) {
+  if (isSeedream5ProModel(model)) return seedream5ProAspectRatios;
   return model === imageModelNames.openAiImage2 || isOpenAiImage25Model(model) ? openAiImageAspectRatios : nanoImageAspectRatios;
 }
 
 function imageResolutionOptionsForModel(model, provider = "fal") {
+  if (isSeedream5ProModel(model)) return seedream5ProResolutionOptions;
   if (provider === "krea" && isOpenAiImage25Model(model)) return openAiImage25KreaResolutionOptions;
   if (isNanoBanana2Model(model)) return nanoBanana2ResolutionOptions;
   return imageResolutionOptions;

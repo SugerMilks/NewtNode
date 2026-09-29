@@ -28,7 +28,7 @@ const catalog = [
 test("favorite models are optional, normalized, and retained with other saved settings", () => {
   assert.equal(myNewtDefaults.favoriteImageModel, ""); assert.equal(myNewtDefaults.favoriteVideoModel, "");
   assert.deepEqual(normalizeMyNewtFavoriteModels(), { favoriteImageModel: "", favoriteVideoModel: "" });
-  for (const value of [null, 1, {}, "unknown", "Seedream 5.0 Pro", "Luma Dream Machine"]) {
+  for (const value of [null, 1, {}, "unknown", "Seedream 4.5", "Luma Dream Machine"]) {
     assert.deepEqual(normalizeMyNewtFavoriteModels({ favoriteImageModel: value, favoriteVideoModel: value }), { favoriteImageModel: "", favoriteVideoModel: "" });
   }
   const saved = myNewtSettings(JSON.parse(JSON.stringify({ ...favorites, autoReview: true, budget: 20, allowImages: true })));

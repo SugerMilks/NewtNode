@@ -12,7 +12,6 @@ export const myNewtLocalWorkflows = Object.freeze([
   { id: "storyboard", label: "Storyboard workflow", types: ["plainText", "storyboard", "preview"], inputs: ["sceneDescriptionIn", "sourceIn"] },
   { id: "image-edit", label: "Image edit workflow", types: ["imageModel", "preview"], inputs: ["sourceIn"] },
   { id: "music-video", label: "Music video workflow", types: ["skillDirector", "videoModel", "preview"], inputs: ["directorIn", "sourceIn"] },
-  { id: "director-storyboard", label: "Director storyboard workflow", types: ["skillDirector", "storyboard", "preview"], inputs: ["directorIn", "sourceIn"] },
   { id: "asset-preview", label: "Asset preview workflow", types: ["preview"], inputs: [] }
 ]);
 
@@ -43,6 +42,7 @@ export function myNewtLocalAction(brief, snapshot = {}, settings = {}, createdId
     let match = text.match(/^(?:set up|setup|build|create|add|insert) (?:an? |the )?(image edit|music video|director storyboard|asset preview|image|video|coverage|director|storyboard) workflow$/i);
     if (match) {
       const workflow = myNewtLocalWorkflows.find((item) => item.id === normalized(match[1]).replace(/ /g, "-"));
+      if (!workflow) throw new Error("Storyboard is independent of Director. Ask for a Storyboard workflow instead.");
       if (workflow.id === "music-video") throw new Error("Attach a music track and ask to set up a Music Video workflow using attached assets.");
       if (workflow.types.some((type) => !catalog.some((entry) => entry.type === type))) throw new Error("This workflow is unavailable in the current node catalog.");
       return local(`Set up ${workflow.label}: ${workflow.types.map((type) => catalog.find((entry) => entry.type === type).label).join(" > ")}. No generation.`, "workflow", { workflowId: workflow.id });
