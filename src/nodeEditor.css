@@ -7325,6 +7325,16 @@ video.newtnode-video-fallback {
   padding: 9px;
 }
 
+.image-model-body .model-output-size-value {
+  min-width: 0;
+  min-height: 34px;
+  padding: 8px 9px;
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.34);
+  color: #f6f1e8;
+  overflow-wrap: anywhere;
+}
+
 .node-row > .tagged-prompt-editor {
   width: 100%;
 }

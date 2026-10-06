@@ -1,8 +1,20 @@
+import { isIdeogramImageModel } from "./ideogramImage.js";
+
 export function normalizedResultItems(resultItems, resultUrl, type) {
   const items = Array.isArray(resultItems) ? resultItems.filter((item) => item?.url) : [];
   const fallbackLabel = mediaResultLabel(type);
-  if (items.length) return items.map((item, index) => ({ type, label: `${fallbackLabel} ${index + 1}`, ...item }));
+  if (items.length) return items.map((item, index) => normalizeLegacyIdeogramResult({ type, label: `${fallbackLabel} ${index + 1}`, ...item }));
   return resultUrl ? [{ url: resultUrl, type, label: `${fallbackLabel} 1` }] : [];
+}
+
+function normalizeLegacyIdeogramResult(item) {
+  // Early reference runs put the input URL in Preview's output-lineage field.
+  if (item.type === "image" && isIdeogramImageModel(item.model) && item.imagePromptCount > 0
+    && item.editPrecision === "regular" && item.sourceUrl && item.sourceUrl !== item.url
+    && !Object.hasOwn(item, "referenceSourceUrl")) {
+    return { ...item, sourceUrl: item.url, referenceSourceUrl: item.sourceUrl };
+  }
+  return item;
 }
 
 export function existingResultItemsForNode(node, type) {

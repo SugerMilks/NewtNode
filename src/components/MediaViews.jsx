@@ -924,7 +924,7 @@ export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onResto
             {label}
           </span>
           <div className="output-lightbox-header-actions">
-            {displayItem.type === "image" && onAcceptAiEdit && <button type="button" onClick={() => setAiMode(true)} disabled={editBusy || cropMode || toneMode || curvesMode || textMode} title="Draw and edit with Image 2.5" aria-label="Draw and edit with Image 2.5"><Pencil size={15} /></button>}
+            {displayItem.type === "image" && onAcceptAiEdit && <button type="button" onClick={() => setAiMode(true)} disabled={editBusy || cropMode || toneMode || curvesMode || textMode} title="Draw and edit image" aria-label="Draw and edit image"><Pencil size={15} /></button>}
             {canEditImage && (
               <div className="output-lightbox-tools" aria-label="Layout image editing tools">
                 <button type="button" className={cropMode ? "active" : ""} onClick={() => {

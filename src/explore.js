@@ -1,10 +1,10 @@
-import { imageModelNames, imageModelOptions, stylePresetNames, stylePresetPrompts } from "./modelOptions.js";
+import { imageModelNames, imageWorkspaceModelOptions, stylePresetNames, stylePresetPrompts } from "./modelOptions.js";
 import { normalizedResultItems } from "./mediaResults.js";
 import { gradePresetNames, gradePresetPrompts } from "./colorLook.js";
 
 export const exploreTasks = ["Auto", "Product", "Fashion", "Environment", "Brand / Logo", "Illustration", "Abstract"];
 export const exploreInfluences = ["Follow closely", "Reinterpret", "Explore beyond"];
-export const exploreModels = imageModelOptions;
+export const exploreModels = imageWorkspaceModelOptions;
 export const exploreGrades = gradePresetNames.filter(name => name !== "Custom");
 export const exploreActions = ["explore", "more", "push", "refine", "combine", "retry"];
 export const exploreVersion = 1;

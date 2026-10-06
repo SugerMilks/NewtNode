@@ -259,6 +259,7 @@ import {
 } from "./minimaxH3.js";
 import { isNanoBanana2Model, nanoBanana2ResolutionOptions, normalizeNanoBanana2Resolution } from "./nanoBanana2.js";
 import { isSeedream5ProModel, seedream5ProResolutionOptions, seedream5ProAspectRatios, normalizeSeedream5ProResolution } from "./seedream5Pro.js";
+import { isIdeogramImageModel, ideogramImageQualityOptions, normalizeIdeogramImageQuality, ideogramImageResolutionOptions, ideogramImageAspectRatios, ideogramImageReferenceOrder } from "./ideogramImage.js";
 import {
   analyzeColorLookPalette,
   buildColorGradePrompt,
@@ -1116,7 +1117,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     setNodes((current) =>
       current.map((node) => {
         if (node.type === "imageModel" && !isSam3ImageModel(node.data.model) && !enabledImageModels.includes(node.data.model)) {
-          return { ...node, data: { ...node.data, model: fallbackImageModel } };
+          return { ...node, data: { ...node.data, ...imageModelSelectionPatch(node.data, fallbackImageModel, generationProvider) } };
         }
         if (isCoverageNode(node) && !enabledCoverageModels.includes(node.data.model)) {
           return {
@@ -1134,7 +1135,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         return node;
       })
     );
-  }, [enabledCoverageModels, enabledImageModels, enabledVideoModels, modelPreferences, modelPreferencesReady]);
+  }, [enabledCoverageModels, enabledImageModels, enabledVideoModels, modelPreferences, modelPreferencesReady, generationProvider]);
 
   React.useEffect(() => {
     setEdges((current) => {
@@ -2346,7 +2347,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           cost: data.cost
         };
       } else {
-        const model = node.data.frameItImageModel || enabledImageModels[0] || imageModelNames.openAiImage2;
+        const model = node.data.frameItImageModel || enabledImageModels.find((model) => !isIdeogramImageModel(model)) || imageModelNames.openAiImage2;
         const { response, data } = await nodeApi.generateImage({
           prompt,
           model,
@@ -5572,6 +5573,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     }
 
     try {
+      if (currentNode.type === "imageModel") {
+        const issue = imageModelRunIssue(currentNode.data.model, incoming, generationProvider);
+        if (issue) throw new Error(issue);
+      }
       updateNode(currentNode.id, {
         status: "running",
         error: "",
@@ -6021,7 +6026,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         const isSegmentation = isSam3ImageModel(currentNode.data.model);
         const referenceConnections = isSegmentation ? incoming.imagePromptIn || [] : imageReferenceConnectionsForModel(currentNode.data.model, incoming);
         assertCharacterOutputReferences(referenceConnections);
-        const aspectRatio = isSegmentation ? currentNode.data.aspectRatio : await resolveImageModelAspectRatio(currentNode, incoming);
+        const referenceIssue = imageModelRunIssue(currentNode.data.model, incoming, generationProvider, { data: currentNode.data, prompt: basePrompt, incomingByNode: currentIncomingByNode });
+        if (referenceIssue) throw new Error(referenceIssue);
+        const ideogramEdit = isIdeogramImageModel(currentNode.data.model) && referenceConnections.length > 0;
+        const aspectRatio = ideogramEdit ? "Auto" : isSegmentation ? currentNode.data.aspectRatio : await resolveImageModelAspectRatio(currentNode, incoming);
         const imageInstructionSources = imageInstructionSourcesForModel(currentNode.data.model, incoming);
         const imagePromptItems = connectedImagePromptItems(
           referenceConnections,
@@ -6030,7 +6038,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         );
         const prompt = isSegmentation
           ? basePrompt
-          : buildEffectiveImagePrompt(basePrompt, imageInstructionSources, aspectRatio, currentIncomingByNode);
+          : buildEffectiveImagePrompt(basePrompt, imageInstructionSources, ideogramEdit ? "" : aspectRatio, currentIncomingByNode);
         const runIndexes = nodeRunIndexes(batchCount);
         const settled = await settleSequential(runIndexes, (index) =>
           runImageModelGeneration({
@@ -6054,7 +6062,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           resultItems,
           selectedResultIndex: firstNewIndex,
           resultText: resultTextFromItems(successes),
-          error: batchRunError("image", batchCount, successes, failures)
+          error: [batchRunError("image", batchCount, successes, failures), ...new Set(successes.map((item) => item.warning).filter(Boolean))].filter(Boolean).join(" ")
         });
         loadOutputHistory();
         return { status: "complete" };
@@ -6205,7 +6213,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }), [enabledImageModels, enabledVideoModels, enabledCoverageModels]);
   const myNewtModelControls = (type, model) => {
     if (type === "storyboard") return { resolution: imageModelResolutionOptions(model, generationProvider), aspectRatio: generationProvider === "krea" && isOpenAiImage25Model(model) ? openAiImage25KreaAspectRatios : storyboardAspectRatioOptions };
-    if (["imageModel", "coverage", "utility"].includes(type)) return { resolution: imageModelResolutionOptions(model, generationProvider), aspectRatio: imageModelAspectRatioOptions(model, generationProvider), quality: isSeedream5ProModel(model) ? ["high"] : isOpenAiImage25Model(model) ? openAiImage25QualityOptions : openAiImage2QualityOptions };
+    if (["imageModel", "coverage", "utility"].includes(type)) return { resolution: imageModelResolutionOptions(model, generationProvider), aspectRatio: imageModelAspectRatioOptions(model, generationProvider), quality: isIdeogramImageModel(model) ? ideogramImageQualityOptions : isSeedream5ProModel(model) ? ["high"] : isOpenAiImage25Model(model) ? openAiImage25QualityOptions : openAiImage2QualityOptions };
     if (type !== "videoModel") return {};
     if (isMiniMaxH3Model(model)) return { duration: minimaxH3DurationOptions, resolution: minimaxH3ResolutionOptions, aspectRatio: minimaxH3AspectRatioOptions };
     if (isSeedance25Model(model)) return { duration: seedance25DurationOptions.filter((value) => value !== "Auto"), resolution: seedance25ResolutionOptions, aspectRatio: seedance25AspectRatioOptions };
@@ -6365,7 +6373,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       if (node.type === "imageModel" || isCoverageNode(node)) {
         const prompt = connectedText(incoming.promptIn) || data.prompt || "";
         const references = connectedImagePromptItems(isCoverageNode(node) ? incoming.imageIn || [] : imageReferenceConnectionsForModel(data.model, incoming), byNode, { includeComposerCharacterBindings: true, prompt });
-        const settings = { model: data.model, resolution: data.resolution, aspectRatio: data.aspectRatio, quality: data.quality || "high", ...(isOpenAiImage25Model(data.model) ? { background: normalizeOpenAiImage25Background(data.background) } : {}), batchCount: isCoverageNode(node) ? 9 : count, referenceCount: references.length, provider: generationProvider };
+        const settings = { model: data.model, resolution: data.resolution, aspectRatio: data.aspectRatio, quality: data.quality || "high", ...(isOpenAiImage25Model(data.model) ? { background: normalizeOpenAiImage25Background(data.background) } : {}), ...(isIdeogramImageModel(data.model) ? { enablePromptExpansion: data.enablePromptExpansion !== false } : {}), batchCount: isCoverageNode(node) ? 9 : count, referenceCount: references.length, provider: generationProvider };
         return { ...base, ...settings, count: settings.batchCount, references, prompt: isCoverageNode(node) ? `Nine ${data.coverageMethod || "Standard"} camera-angle generations` : buildEffectiveImagePrompt(prompt, imageInstructionSourcesForModel(data.model, incoming), data.aspectRatio, byNode), estimatedCost: estimateImageRunCost(settings) };
       }
       if (node.type === "videoModel") {
@@ -7525,7 +7533,7 @@ function NodeBody({
           onConnectStart={onConnectStart}
           onDisconnectInput={onDisconnectInput}
           connectedPortKeys={connectedPortKeys}
-          imageModelOptions={imageModelOptions}
+          imageModelOptions={imageModelOptions.filter((model) => !isIdeogramImageModel(model))}
           videoModelOptions={videoModelOptions}
         />
       </>
@@ -10388,14 +10396,17 @@ function NodeBody({
     const promptValue = resolvedPromptText(incoming.promptIn) || node.data.prompt;
     const promptConnected = Boolean(resolvedPromptText(incoming.promptIn));
     const isSam3Image = isSam3ImageModel(node.data.model);
+    const isIdeogram = isIdeogramImageModel(node.data.model);
+    const ideogramEdit = isIdeogram && imageReferenceConnectionsForModel(node.data.model, incoming).length > 0;
+    const ideogramIssue = imageModelRunIssue(node.data.model, incoming, generationProvider, { data: node.data, prompt: promptValue, incomingByNode });
     const isImage25 = isOpenAiImage25Model(node.data.model);
     const isOpenAiImage2 = node.data.model === imageModelNames.openAiImage2 || isImage25;
-    const normalizeQuality = isImage25 ? normalizeOpenAiImage25Quality : normalizeOpenAiImage2Quality;
+    const normalizeQuality = isIdeogram ? normalizeIdeogramImageQuality : isImage25 ? normalizeOpenAiImage25Quality : normalizeOpenAiImage2Quality;
     const imageInstructionSources = imageInstructionSourcesForModel(node.data.model, incoming);
     const imagePromptConnections = imagePromptInputConnectionsForModel(node.data.model, incoming);
     const effectivePromptValue = isSam3Image
       ? promptValue
-      : buildEffectiveImagePrompt(promptValue, imageInstructionSources, node.data.aspectRatio, incomingByNode);
+      : buildEffectiveImagePrompt(promptValue, imageInstructionSources, ideogramEdit ? "" : node.data.aspectRatio, incomingByNode);
     const promptHasGeneratedAdditions = effectivePromptValue !== promptValue;
     const appliedInstructionLabels = activeImageInstructionLabels(imageInstructionSources, incomingByNode);
     const referenceTagMatches = isSam3Image
@@ -10472,11 +10483,12 @@ function NodeBody({
             ))}
           </div>
         )}
-        <button className="run-node-button" onClick={() => onRun(node)} disabled={running}>
+        <button className="run-node-button" onClick={() => onRun(node)} disabled={running || Boolean(ideogramIssue)}>
           {running
             ? `Running ${formatNodeBatchCount(isSam3Image ? 1 : node.data.batchCount)}...`
             : <RunPriceLabel label="Run Image" options={imagePriceSettings} visible={showApiCosts} />}
         </button>
+        {isIdeogram && <small className="upload-status model-status-note" role="status">{ideogramIssue || (ideogramEdit ? `Ideogram 4.5 · Fal · Image edit · ${Math.max(0, pricedImagePromptItems.length - 1)} guide references` : "Ideogram 4.5 · Fal · Text to image")}</small>}
         <details className="model-settings-drawer" open={settingsOpen} onToggle={(event) => onUpdate(node.id, { settingsOpen: event.currentTarget.open })}>
           <summary>Settings</summary>
           <NodeRow label="Prompt" inputPort={settingsOpen ? promptPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
@@ -10503,22 +10515,30 @@ function NodeBody({
             </div>
           )}
           <NodeRow label="Model">
-            <select className={isImage25 ? "image-model-long-name" : undefined} title={node.data.model} value={node.data.model} onChange={(event) => onUpdate(node.id, imageModelSelectionPatch(node.data, event.target.value, generationProvider))}>
+            <select aria-label="Image model" className={isImage25 ? "image-model-long-name" : undefined} title={node.data.model} value={node.data.model} onChange={(event) => onUpdate(node.id, imageModelSelectionPatch(node.data, event.target.value, generationProvider))}>
               {imageModelOptions.map((model) => (
                 <option key={model}>{model}</option>
               ))}
               {sam3SegmentationModelsEnabled && <option>SAM 3 Image</option>}
             </select>
           </NodeRow>
-          {isOpenAiImage2 && (
+          {(isOpenAiImage2 || isIdeogram) && (
             <NodeRow label="Quality">
-              <select value={normalizeQuality(node.data.quality)} onChange={(event) => onUpdate(node.id, { quality: normalizeQuality(event.target.value) })}>
-                {(isImage25 ? openAiImage25QualityOptions : openAiImage2QualityOptions).map((option) => (
-                  <option key={option} value={option}>{formatOpenAiImage2Quality(option)}</option>
+              <select aria-label="Image quality" value={normalizeQuality(node.data.quality)} onChange={(event) => onUpdate(node.id, { quality: normalizeQuality(event.target.value) })}>
+                {(isIdeogram ? ideogramImageQualityOptions : isImage25 ? openAiImage25QualityOptions : openAiImage2QualityOptions).map((option) => (
+                  <option key={option} value={option}>{isIdeogram ? option.charAt(0).toUpperCase() + option.slice(1) : formatOpenAiImage2Quality(option)}</option>
                 ))}
               </select>
             </NodeRow>
           )}
+          {isIdeogram && !ideogramEdit && <NodeRow label="Prompt expansion"><input aria-label="Prompt expansion" type="checkbox" checked={node.data.enablePromptExpansion !== false} onChange={(event) => onUpdate(node.id, { enablePromptExpansion: event.target.checked })} /></NodeRow>}
+          {ideogramEdit && <NodeRow label="Source image">
+            <select aria-label="Ideogram source image" title="The image to edit. All other connected images are guide references." value={node.data.ideogramSourceUrl || ""} disabled={running} onChange={(event) => onUpdate(node.id, { ideogramSourceUrl: event.target.value })}>
+              <option value="">First connected{pricedImagePromptItems[0] ? `: ${pricedImagePromptItems[0].label || "Image 1"}` : " image"}</option>
+              {node.data.ideogramSourceUrl && !pricedImagePromptItems.some(item => item.url === node.data.ideogramSourceUrl) && <option value={node.data.ideogramSourceUrl}>Disconnected source</option>}
+              {pricedImagePromptItems.map((item, index) => <option key={`${item.url}:${index}`} value={item.url}>{index + 1}. {item.label || `Image ${index + 1}`}</option>)}
+            </select>
+          </NodeRow>}
           {isImage25 && !(generationProvider === "krea" && openAiImage25Variant(node.data.model) === "sunburst") && (
             <NodeRow label="Background">
               <select value={normalizeOpenAiImage25Background(node.data.background)} onChange={(event) => onUpdate(node.id, { background: event.target.value })}>
@@ -10552,8 +10572,9 @@ function NodeBody({
                   ))}
                 </select>
               </NodeRow>
+              {ideogramEdit ? <NodeRow label="Output size"><span className="model-output-size-value" aria-label="Ideogram output size" title="Uses the source image proportions. Ideogram may reduce the output dimensions.">Auto (source proportions)</span></NodeRow> : <>
               <NodeRow label="Aspect Ratio">
-                <select value={node.data.aspectRatio} onChange={(event) => onUpdate(node.id, { aspectRatio: event.target.value })}>
+                <select aria-label="Image aspect ratio" value={node.data.aspectRatio} onChange={(event) => onUpdate(node.id, { aspectRatio: event.target.value })}>
                   {imageModelAspectRatioOptions(node.data.model, generationProvider).map((option) => (
                     <option key={option} value={option}>
                       {option}
@@ -10562,12 +10583,13 @@ function NodeBody({
                 </select>
               </NodeRow>
               <NodeRow label="Resolution">
-                <select value={node.data.resolution} onChange={(event) => onUpdate(node.id, { resolution: event.target.value })}>
+                <select aria-label="Image resolution" value={node.data.resolution} onChange={(event) => onUpdate(node.id, { resolution: event.target.value })}>
                   {imageModelResolutionOptions(node.data.model, generationProvider).map((option) => (
                     <option key={option}>{option}</option>
                   ))}
                 </select>
               </NodeRow>
+              </>}
             </>
           )}
         </details>
@@ -11974,13 +11996,29 @@ function createDefaultNodeData(type, label, count) {
   };
 }
 
+function imageModelRunIssue(model, incoming = {}, provider = "fal", context) {
+  if (!isIdeogramImageModel(model)) return "";
+  if (provider !== "fal") return "Enable Fal in Settings to use Ideogram 4.5.";
+  if (context) {
+    const references = imageReferenceConnectionsForModel(model, incoming);
+    const options = { includeComposerCharacterBindings: true, prompt: context.prompt || context.data.prompt };
+    if (references.some(connection => !connectedImagePromptItems([connection], context.incomingByNode, options).length))
+      return "A connected Ideogram reference has no image ready. Generate or select its image first.";
+    const items = connectedImagePromptItems(references, context.incomingByNode, options);
+    try { ideogramImageReferenceOrder(items.map(item => item.url), context.data.ideogramSourceUrl || ""); }
+    catch (error) { return error.message; }
+  }
+  return "";
+}
+
 function imageModelSelectionPatch(data = {}, model, provider = "fal") {
   return {
     model,
     aspectRatio: normalizeImageModelAspectRatio(data.aspectRatio, model),
     resolution: normalizeImageModelResolutionForModel(data.resolution, model),
-    quality: isOpenAiImage25Model(model) ? normalizeOpenAiImage25Quality(data.quality) : normalizeOpenAiImage2Quality(data.quality),
-    background: isSeedream5ProModel(model) ? "auto" : normalizeOpenAiImage25Background(data.background),
+    quality: isIdeogramImageModel(model) ? normalizeIdeogramImageQuality(data.quality) : isOpenAiImage25Model(model) ? normalizeOpenAiImage25Quality(data.quality) : normalizeOpenAiImage2Quality(data.quality),
+    ...(isIdeogramImageModel(model) ? { enablePromptExpansion: data.enablePromptExpansion !== false } : {}),
+    background: isSeedream5ProModel(model) || isIdeogramImageModel(model) ? "auto" : normalizeOpenAiImage25Background(data.background),
     batchCount: data.batchCount || "1",
     ...(isOpenAiImage25Model(model) && provider === "krea" ? openAiImage25KreaSelection({ ...data, model }) : {})
   };
@@ -12005,17 +12043,19 @@ function isModel3DImageInputPort(portId) {
 }
 
 function imageModelAspectRatioOptions(model, provider = "fal") {
+  if (isIdeogramImageModel(model)) return ideogramImageAspectRatios;
   if (isOpenAiImage25Model(model) && provider === "krea") return [imageModelAutoAspectRatio, ...openAiImage25KreaAspectRatios];
   return [imageModelAutoAspectRatio, ...imageModelSupportedAspectRatios(model)];
 }
 
 function imageModelSupportedAspectRatios(model) {
+  if (isIdeogramImageModel(model)) return ideogramImageAspectRatios;
   if (isSeedream5ProModel(model)) return seedream5ProAspectRatios;
   return isOpenAiImageModel(model) ? openAiImageAspectRatios : nanoImageAspectRatios;
 }
 
 function normalizeImageModelAspectRatio(value, model) {
-  if (isAutoImageAspectRatio(value)) return imageModelAutoAspectRatio;
+  if (isAutoImageAspectRatio(value) && !isIdeogramImageModel(model)) return imageModelAutoAspectRatio;
   const ratio = extractAspectRatio(value);
   return imageModelSupportedAspectRatios(model).includes(ratio) ? ratio : "16:9";
 }
@@ -12152,6 +12192,7 @@ function normalizeImageModelResolution(value) {
 }
 
 function imageModelResolutionOptions(model, provider = "fal") {
+  if (isIdeogramImageModel(model)) return ideogramImageResolutionOptions;
   if (isSeedream5ProModel(model)) return seedream5ProResolutionOptions;
   if (isOpenAiImage25Model(model) && provider === "krea") return openAiImage25KreaResolutionOptions;
   if (isNanoBanana2Model(model)) return nanoBanana2ResolutionOptions;
@@ -16001,8 +16042,9 @@ function normalizeImageModelData(data = {}) {
     prompt: data.prompt || "",
     aspectRatio: normalizeImageModelAspectRatio(data.aspectRatio, model),
     resolution: normalizeImageModelResolutionForModel(data.resolution, model),
-    quality: isOpenAiImage25Model(model) ? normalizeOpenAiImage25Quality(data.quality) : normalizeOpenAiImage2Quality(data.quality),
-    background: normalizeOpenAiImage25Background(data.background),
+    quality: isIdeogramImageModel(model) ? normalizeIdeogramImageQuality(data.quality) : isOpenAiImage25Model(model) ? normalizeOpenAiImage25Quality(data.quality) : normalizeOpenAiImage2Quality(data.quality),
+    ...(isIdeogramImageModel(model) ? { enablePromptExpansion: data.enablePromptExpansion !== false } : {}),
+    background: isIdeogramImageModel(model) ? "auto" : normalizeOpenAiImage25Background(data.background),
     batchCount: data.batchCount || "1",
     settingsOpen: data.settingsOpen !== false
   };

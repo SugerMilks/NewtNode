@@ -27,7 +27,6 @@ import {
   defaultModelPreferences,
   enabledImageModelOptions,
   enabledVideoModelOptions,
-  firstEnabledImageModel,
   firstEnabledVideoModel,
   imageModelNames,
   imageResolutionOptions,
@@ -153,7 +152,7 @@ function App() {
   const [nodeStatus, setNodeStatus] = React.useState("");
   const [nodeWorkspaceLoaded, setNodeWorkspaceLoaded] = React.useState(false);
   const nodeStatusInfo = normalizeNodeStatus(nodeStatus);
-  const enabledImageOptions = React.useMemo(() => enabledImageModelOptions(modelPreferences), [modelPreferences]);
+  const enabledImageOptions = React.useMemo(() => enabledImageModelOptions(modelPreferences, { workspaceOnly: true }), [modelPreferences]);
   const enabledVideoWorkspaceOptions = React.useMemo(() => enabledVideoModelOptions(modelPreferences, { workspaceOnly: true }), [modelPreferences]);
 
   React.useEffect(() => {
@@ -208,7 +207,7 @@ function App() {
   React.useEffect(() => {
     if (!modelPreferencesLoaded) return;
     if (!enabledImageOptions.includes(imageModel)) {
-      setImageModel(firstEnabledImageModel(modelPreferences));
+      setImageModel(enabledImageOptions[0] || imageModelNames.openAiImage2);
     }
   }, [enabledImageOptions, imageModel, modelPreferences, modelPreferencesLoaded]);
 
@@ -329,6 +328,7 @@ function App() {
   }
 
   async function generateImage() {
+    if (!enabledImageOptions.length) { setImageMessage("Enable an Image workspace model in Settings."); return; }
     if (!imagePrompt.trim()) {
       setImageMessage("Add a prompt first.");
       return;
@@ -587,12 +587,13 @@ function App() {
 
                 <SelectChip value={imageAspectRatio} options={activeImageAspectRatios} onChange={setImageAspectRatio} />
 
-                <button className="generate-button" onClick={generateImage} disabled={imageStatus === "generating"} title="Generate image">
+                <button className="generate-button" onClick={generateImage} disabled={imageStatus === "generating" || !enabledImageOptions.length} title="Generate image">
                   {imageStatus === "generating" ? <Loader2 className="spin" size={22} /> : <ArrowUp size={22} />}
                 </button>
               </div>
             </div>
 
+            {!enabledImageOptions.length && <p role="status">Enable an Image workspace model in Settings. Ideogram 4.5 is available in Image Model nodes.</p>}
             <div className="route-strip">
               <span>{imageModel}</span>
               <span>{formatBatchCount(Number(imageBatchCount))}</span>

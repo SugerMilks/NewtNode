@@ -1,5 +1,6 @@
 import { openAiImage25Models, isOpenAiImage25Model } from "./openAiImage25.js";
 import { seedream5ProModelName, isSeedream5ProModel } from "./seedream5Pro.js";
+import { ideogramImageModelName, isIdeogramImageModel } from "./ideogramImage.js";
 import {
   seedance25AspectRatioOptions,
   seedance25DurationOptions,
@@ -29,6 +30,7 @@ export const imageBatchOptions = Array.from({ length: 9 }, (_value, index) => St
 export const imageModelAutoAspectRatio = "Auto";
 export const imageModelNames = {
   seedream5Pro: seedream5ProModelName,
+  ideogram45: ideogramImageModelName,
   nanoBanana2: "Nano Banana 2",
   nanoBananaPro: "Nano Banana Pro",
   openAiImage2: "OpenAI Image 2",
@@ -41,8 +43,10 @@ export const imageModelOptions = [
   imageModelNames.openAiImage2,
   imageModelNames.openAiImage25Sunburst,
   imageModelNames.openAiImage25Flare,
-  imageModelNames.seedream5Pro
+  imageModelNames.seedream5Pro,
+  imageModelNames.ideogram45
 ];
+export const imageWorkspaceModelOptions = imageModelOptions.filter((model) => !isIdeogramImageModel(model));
 export const creativeImageDefaultModel = imageModelNames.openAiImage25Sunburst;
 export const storyboardImageDefaultModel = imageModelNames.openAiImage25Flare;
 export const coverageModelOptions = [
@@ -184,7 +188,7 @@ export const videoModelOptions = [
 ];
 export const videoWorkspaceModelOptions = [...videoModelOptions];
 export const defaultModelPreferences = {
-  image: Object.fromEntries(imageModelOptions.map((model) => [model, model === imageModelNames.openAiImage2 || isOpenAiImage25Model(model) || isSeedream5ProModel(model)])),
+  image: Object.fromEntries(imageModelOptions.map((model) => [model, model === imageModelNames.openAiImage2 || isOpenAiImage25Model(model) || isSeedream5ProModel(model) || isIdeogramImageModel(model)])),
   video: Object.fromEntries(videoModelOptions.map((model) => [model, true]))
 };
 export function normalizeModelPreferences(value = {}) {
@@ -198,9 +202,9 @@ export function normalizeModelPreferences(value = {}) {
 
   return { image, video };
 }
-export function enabledImageModelOptions(preferences) {
+export function enabledImageModelOptions(preferences, { workspaceOnly = false } = {}) {
   const normalized = normalizeModelPreferences(preferences);
-  return imageModelOptions.filter((model) => normalized.image[model]);
+  return (workspaceOnly ? imageWorkspaceModelOptions : imageModelOptions).filter((model) => normalized.image[model]);
 }
 export function enabledVideoModelOptions(preferences, { workspaceOnly = false } = {}) {
   const normalized = normalizeModelPreferences(preferences);

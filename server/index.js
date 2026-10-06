@@ -30,6 +30,10 @@ import { registerEditorRoutes } from "./routes/editor.js";
 import { registerOutputRoutes } from "./routes/output.js";
 import { createOutputAssetResolver } from "./output-export.js";
 import { registerImageEditRoutes } from "./routes/imageEdit.js";
+import { generateFalImageEdit, createIdeogramImageEditClient } from "./image-edit.js";
+import { ideogramImageEditModel } from "../src/ideogramImageEdit.js";
+import { ideogramImageModelName, ideogramImageEndpoint } from "../src/ideogramImage.js";
+import { createIdeogramImageHandler } from "./ideogram-image.js";
 import { normalizeOpenAiEditMask, finishOpenAiMaskedEdit } from "./openai-edit-mask.js";
 import { normalizeCharacterWardrobeRequest } from "./character-wardrobe.js";
 import { elevenLabsRates } from "./elevenlabs.js";
@@ -297,6 +301,7 @@ const nanoImageAspectRatios = ["21:9", "16:9", "9:16", "1:1", "4:3", "3:4", "3:2
 const openAiImageAspectRatios = [...nanoImageAspectRatios, "2:1", "1:2"];
 const storyboardAspectRatioOptions = ["16:9", "21:9", "9:16", "1:1", "3:2", "2:3", "4:3", "3:4", "2:1", "1:2"];
 const imageModelNames = {
+  ideogram45: ideogramImageModelName,
   seedream5Pro: seedream5ProModelName,
   nanoBanana2: "Nano Banana 2",
   nanoBananaPro: "Nano Banana Pro",
@@ -310,7 +315,8 @@ const imageModelOptions = [
   imageModelNames.openAiImage2,
   imageModelNames.openAiImage25Sunburst,
   imageModelNames.openAiImage25Flare,
-  imageModelNames.seedream5Pro
+  imageModelNames.seedream5Pro,
+  imageModelNames.ideogram45
 ];
 const videoModelNames = {
   seedance: "Seedance 2.0",
@@ -327,7 +333,7 @@ const videoModelOptions = [
   videoModelNames.minimaxH3
 ];
 const defaultModelPreferences = {
-  image: Object.fromEntries(imageModelOptions.map((model) => [model, model === imageModelNames.openAiImage2 || isOpenAiImage25Model(model) || isSeedream5ProModel(model)])),
+  image: Object.fromEntries(imageModelOptions.map((model) => [model, model === imageModelNames.ideogram45 || model === imageModelNames.openAiImage2 || isOpenAiImage25Model(model) || isSeedream5ProModel(model)])),
   video: Object.fromEntries(videoModelOptions.map((model) => [model, true]))
 };
 const falNanoBananaProEndpoint = process.env.FAL_NANO_BANANA_PRO_ENDPOINT || "fal-ai/nano-banana-pro";
@@ -618,20 +624,20 @@ registerImageEditRoutes(app, {
     if ((await stat(filePath)).size > 32 * 1024 * 1024) throw httpError(400, "Image editing supports source files up to 32 MB.");
     return { buffer: await readFile(filePath) };
   },
-  generate: async ({ provider, model, prompt, quality, size, images, mask }) => {
+  generate: async ({ provider, model, prompt, quality, editPrecision, size, images, mask }) => {
     if (provider === "atlas") {
       const key = String(process.env.ATLAS_API_KEY || "").trim();
       return atlasMedia.image({ model, prompt, quality, size,
         imageInputs: images.map((buffer, index) => ({ buffer, mimeType: "image/png", fileName: `edit-reference-${index + 1}.png` })),
         editMaskInput: mask ? { buffer: mask, mimeType: "image/png", fileName: "edit-mask.png" } : undefined }, key);
     }
-    const imageUrls = await Promise.all(images.map((buffer, index) => uploadImageInputToFal({ buffer, mimeType: "image/png", fileName: `edit-reference-${index + 1}.png` }, index)));
-    const maskUrl = mask ? await uploadImageInputToFal({ buffer: mask, mimeType: "image/png", fileName: "edit-mask.png" }, images.length) : undefined;
-    const { endpoint, input } = buildOpenAiImage25FalRequest({ model, prompt, quality, size, imageUrls, maskUrl });
-    const result = await subscribeFal(endpoint, { input, logs: true }, { route: "edit-image", model });
-    const remoteImage = firstFalImageResult(result?.data);
-    if (!remoteImage?.url) throw httpError(502, "The model returned no edited image. Check Fal history before rerunning.");
-    return { endpoint, remoteImage };
+    const falKey = String(process.env.FAL_KEY || "").trim();
+    if (model === ideogramImageEditModel && !falKey) throw httpError(400, "Enable Fal in Settings for Ideogram 4.5 image editing.");
+    const client = model === ideogramImageEditModel ? createIdeogramImageEditClient(falKey) : fal;
+    return generateFalImageEdit({ model, prompt, quality, editPrecision, size, images, mask }, {
+      uploadImage: (image, index) => uploadImageInputToFal(image, index, client),
+      subscribe: (endpoint, options, context) => subscribeFal(endpoint, options, context, client, model === ideogramImageEditModel ? falKey : undefined), firstImage: firstFalImageResult
+    });
   },
   save: async (req, buffer) => {
     const target = await createManagedAssetTarget(req, "image-edit", ".png");
@@ -2207,15 +2213,21 @@ async function handleTransferCollageUpload(req, res) {
   }
 }
 
+const runIdeogramImageModel = createIdeogramImageHandler({
+  getKey: () => process.env.FAL_KEY, subscribeFal, firstFalImageResult, readLocalAsset, uploadImageInputToFal, downloadImage, appendHistory, projectFromBody, nodeFromBody
+});
+
 app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, res) => {
   try {
-    req.body = normalizeCharacterWardrobeRequest(req.body);
     const prompt = String(req.body.prompt || "").trim();
     if (!prompt) {
       return res.status(400).json({ error: "Prompt is required." });
     }
 
     const selectedModel = resolveImageModel(req.body.model);
+    // Ideogram validates all raw references and routes text or image input before legacy normalization.
+    if (selectedModel.provider === "fal-ideogram-45") return await runIdeogramImageModel(req, res);
+    req.body = normalizeCharacterWardrobeRequest(req.body);
     const imagePromptUrls = Array.isArray(req.body.imagePromptUrls) ? req.body.imagePromptUrls.filter(isLocalAssetUrl) : [];
     const imagePromptLabels = Array.isArray(req.body.imagePromptLabels) ? req.body.imagePromptLabels : [];
     const cleanReferenceLabels = imagePromptUrls.map((_, index) => cleanImagePromptLabel(imagePromptLabels[index])).filter(Boolean);
@@ -8695,8 +8707,7 @@ function pageHistorySummaries(items, req) {
   return paged.slice(0, limit);
 }
 
-async function subscribeFal(endpoint, options = {}, context = {}, client = fal) {
-  const billingKey = process.env.FAL_KEY;
+async function subscribeFal(endpoint, options = {}, context = {}, client = fal, billingKey = process.env.FAL_KEY) {
   const startedAt = Date.now();
   const inputSummary = summarizeFalValue(options.input, "input");
   const originalOnEnqueue = options.onEnqueue;
@@ -11577,6 +11588,7 @@ async function removeLegacyNodeProject(projectId) {
 }
 
 function resolveImageModel(model) {
+  if (String(model || "").trim().toLowerCase() === "ideogram 4.5") return { provider: "fal-ideogram-45", displayName: ideogramImageModelName, id: ideogramImageEndpoint };
   if (isSeedream5ProModel(model)) return { provider: "fal-seedream-5-pro", displayName: seedream5ProModelName, id: seedream5ProFalEndpoint() };
   const normalized = String(model || "").toLowerCase();
   if (normalized.includes("sam") && normalized.includes("image")) {
@@ -13162,7 +13174,7 @@ async function generateFalNanoBanana2({ prompt, imagePromptUrls, imagePromptLabe
     });
   }
 
-  const imageUrls = await Promise.all(imageInputs.slice(0, 14).map(uploadImageInputToFal));
+  const imageUrls = await Promise.all(imageInputs.slice(0, 14).map((image, index) => uploadImageInputToFal(image, index)));
   const endpoint = imageUrls.length ? falNanoBanana2EditEndpoint : falNanoBanana2TextEndpoint;
   const input = buildNanoBanana2FalInput({
     prompt: promptWithReferenceLabels(prompt, imageInputs),
@@ -13213,7 +13225,7 @@ async function generateFalNanoBananaPro({ prompt, imagePromptUrls, imagePromptLa
   };
 
   if (imageInputs.length) {
-    input.image_urls = await Promise.all(imageInputs.slice(0, 14).map(uploadImageInputToFal));
+    input.image_urls = await Promise.all(imageInputs.slice(0, 14).map((image, index) => uploadImageInputToFal(image, index)));
   }
 
   const result = await subscribeFal(endpoint, { input, logs: true });
@@ -13343,7 +13355,7 @@ async function generateFalOpenAiImage2FromInputs({ model = imageModelNames.openA
   };
 
   if (imageInputs.length) {
-    input.image_urls = await Promise.all(imageInputs.slice(0, 16).map(uploadImageInputToFal));
+    input.image_urls = await Promise.all(imageInputs.slice(0, 16).map((image, index) => uploadImageInputToFal(image, index)));
     if (editMaskInput) input.mask_url = await uploadImageInputToFal(editMaskInput, imageInputs.length);
   }
 
@@ -13396,14 +13408,15 @@ function openAiSizeToFalImageSize(size) {
   return { width, height };
 }
 
-function uploadImageInputToFal(image, index) {
+// Pass image/index explicitly in array callbacks; map's third argument is not a client.
+function uploadImageInputToFal(image, index, client = fal) {
   const extension = extensionForMime(image.mimeType);
   const fallbackName = path.basename(image.fileName || "", path.extname(image.fileName || "")) || `reference-${index + 1}`;
   const safeName = String(image.label || fallbackName)
     .replace(/[^a-z0-9_-]+/gi, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 80) || `reference-${index + 1}`;
-  return fal.storage.upload(new File([image.buffer], `${safeName}${extension}`, { type: image.mimeType }));
+  return client.storage.upload(new File([image.buffer], `${safeName}${extension}`, { type: image.mimeType }));
 }
 
 function promptWithReferenceLabels(prompt, imageInputs) {

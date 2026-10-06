@@ -16,7 +16,7 @@ function fixture(portrait) {
   return canvas.toDataURL("image/png");
 }
 function Harness() {
-  const [item, setItem] = React.useState(null), [report, setReport] = React.useState("No request"), [enabled, setEnabled] = React.useState(true), [fail, setFail] = React.useState(false);
+  const [item, setItem] = React.useState(null), [report, setReport] = React.useState("No request"), [provider, setProvider] = React.useState("fal"), [fail, setFail] = React.useState(false);
   nodeApi.editImage = async (form) => {
     if (fail) throw new Error("Simulated provider failure; no credits used.");
     const image = await load(form.get("sourceUrl"));
@@ -31,15 +31,15 @@ function Harness() {
       let pixels = 0; for (let i = 3; i < rgba.length; i += 4) if (rgba[i]) pixels++;
       layers[name] = { width: layer.width, height: layer.height, pixels }; URL.revokeObjectURL(url);
     }
-    setReport(JSON.stringify({ mode: form.get("mode"), blank: form.get("blank"), prompt: form.get("prompt"), quality: form.get("quality"), layers }, null, 2));
+    setReport(JSON.stringify({ model: form.get("model"), provider, editPrecision: form.get("editPrecision"), mode: form.get("mode"), blank: form.get("blank"), prompt: form.get("prompt"), quality: form.get("quality"), layers }, null, 2));
     await new Promise((resolve) => setTimeout(resolve, 500));
     const canvas = document.createElement("canvas"); canvas.width = image.width; canvas.height = image.height;
     const ctx = canvas.getContext("2d"); ctx.filter = "hue-rotate(30deg)"; ctx.drawImage(image, 0, 0);
     const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
-    return { item: { url: URL.createObjectURL(blob), type: "image", fileName: "qa-edit.png", label: "Mock edit", width: image.width, height: image.height } };
+    return { item: { url: URL.createObjectURL(blob), type: "image", fileName: "qa-edit.png", label: "Mock edit", model: form.get("model"), provider: provider === "atlas" ? "Atlas Cloud" : "fal.ai", width: image.width, height: image.height } };
   };
-  return <main style={{ padding: 20 }}><h1>Image editor QA (mock generation only)</h1><button onClick={() => setItem({ url: fixture(true), type: "image", label: "Portrait fixture", editContext: { type: "nodeResult", nodeId: "qa", itemIndex: 0 } })}>Open portrait</button><button onClick={() => setItem({ url: fixture(false), type: "image", label: "Landscape fixture", editContext: { type: "nodeResult", nodeId: "qa", itemIndex: 0 } })}>Open landscape</button><label><input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />Fal enabled</label><label><input type="checkbox" checked={fail} onChange={(e) => setFail(e.target.checked)} />Simulate failure</label><pre aria-label="QA report">{report}</pre>
-    {item && <OutputPreviewLightbox item={item} workflowContext={{ projectId: "qa" }} falAvailable={enabled} onClose={() => setItem(null)} onApplyImageEdit={async () => {}} onAcceptAiEdit={async (_source, result, action) => { setReport((value) => `${value}\nAccepted: ${action} ${result.width}x${result.height}`); setItem(null); }} />}
+  return <main style={{ padding: 20 }}><h1>Image editor QA (mock generation only)</h1><button onClick={() => setItem({ url: fixture(true), type: "image", label: "Portrait fixture", editContext: { type: "nodeResult", nodeId: "qa", itemIndex: 0 } })}>Open portrait</button><button onClick={() => setItem({ url: fixture(false), type: "image", label: "Landscape fixture", editContext: { type: "nodeResult", nodeId: "qa", itemIndex: 0 } })}>Open landscape</button><label>Available edit provider<select aria-label="Available edit provider" value={provider} onChange={(e) => setProvider(e.target.value)}><option value="fal">Fal</option><option value="atlas">Atlas Cloud</option><option value="">Unavailable</option></select></label><label><input type="checkbox" checked={fail} onChange={(e) => setFail(e.target.checked)} />Simulate failure</label><pre aria-label="QA report">{report}</pre>
+    {item && <OutputPreviewLightbox item={item} workflowContext={{ projectId: "qa" }} falAvailable={provider === "fal"} imageEditProvider={provider} onClose={() => setItem(null)} onApplyImageEdit={async () => {}} onAcceptAiEdit={async (_source, result, action) => { setReport((value) => `${value}\nAccepted: ${action} ${result.width}x${result.height}`); setItem(null); }} />}
   </main>;
 }
 createRoot(document.getElementById("root")).render(<Harness />);

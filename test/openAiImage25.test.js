@@ -3,6 +3,7 @@ import test from "node:test";
 import { readFile } from "node:fs/promises";
 import * as image25 from "../src/openAiImage25.js";
 import * as seedream5Pro from "../src/seedream5Pro.js";
+import * as ideogram from "../src/ideogramImage.js";
 import * as modelOptions from "../src/modelOptions.js";
 import { imageModelNames, imageModelOptions, normalizeModelPreferences, openAiImageAspectRatios } from "../src/modelOptions.js";
 import { normalizeOpenAiImage2Quality } from "../src/openAiImage2.js";
@@ -171,7 +172,7 @@ test("Krea selection normalizes sizes and unsupported backgrounds without reduci
 test("Image workspace and node controls share current Krea formats and preserve them on reload", async () => {
   const editor = await readFile(new URL("../src/NodeEditor.jsx", import.meta.url), "utf8");
   const workspace = await readFile(new URL("../src/main.jsx", import.meta.url), "utf8");
-  const deps = { ...modelOptions, ...image25, ...seedream5Pro, isNanoBanana2Model: () => false };
+  const deps = { ...modelOptions, ...image25, ...seedream5Pro, ...ideogram, isNanoBanana2Model: () => false };
   const functions = (source, names, extra = {}) => {
     const scope = { ...deps, ...extra };
     const code = names.map(name => {

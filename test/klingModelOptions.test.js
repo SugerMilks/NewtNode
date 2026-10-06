@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   imageModelOptions,
+  imageModelNames,
   klingO34kAspectRatioOptions,
   klingO34kDurationOptions,
   klingO34kResolutionOptions,
@@ -228,5 +229,13 @@ test("removed video models are no longer selectable", () => {
     videoModelNames.klingO34k,
     videoModelNames.minimaxH3
   ]);
-  assert.equal(imageModelOptions.length, 6);
+  assert.deepEqual(imageModelOptions, [
+    imageModelNames.nanoBanana2,
+    imageModelNames.nanoBananaPro,
+    imageModelNames.openAiImage2,
+    imageModelNames.openAiImage25Sunburst,
+    imageModelNames.openAiImage25Flare,
+    imageModelNames.seedream5Pro,
+    imageModelNames.ideogram45
+  ]);
 });

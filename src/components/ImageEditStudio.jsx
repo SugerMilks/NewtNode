@@ -2,6 +2,8 @@ import React from "react";
 import { ArrowUpRight, Brush, Check, Circle, Download, Eraser, Hand, LoaderCircle, Maximize, Minus, Pencil, Plus, Redo2, Scan, Square, Trash2, Type, Undo2, X } from "lucide-react";
 import { drawImageEditMarks, imageEditColors, imageEditHasPixels, imageEditPoint, imageEditSize } from "../imageEdit.js";
 import { nodeApi } from "../api/newtApi.js";
+import { openAiImage25Models } from "../openAiImage25.js";
+import { ideogramImageEditModel, ideogramImageEditQualityOptions, ideogramImageEditPrecisionOptions } from "../ideogramImageEdit.js";
 import { appendWorkflowContextFormFields } from "../workflowContext.js";
 import { notifyGenerationTaskComplete } from "../generationChime.js";
 import "./imageEditStudio.css";
@@ -9,6 +11,8 @@ import "./imageEditStudio.css";
 const tools = [["pen", Pencil, "Draw"], ["arrow", ArrowUpRight, "Arrow"], ["ellipse", Circle, "Circle"], ["rectangle", Square, "Rectangle"], ["text", Type, "Text note"], ["eraser", Eraser, "Erase marks"], ["hand", Hand, "Pan"]];
 const blobOf = (canvas) => new Promise((resolve, reject) => canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("Could not prepare the drawing.")), "image/png"));
 const emptyHistory = { past: [], marks: [], future: [] };
+const qualityLabels = { very_low: "Very Low", low: "Low", medium: "Medium", high: "High", xhigh: "Extra High", max: "Maximum" };
+const modelLabel = (model) => model === openAiImage25Models.sunburst ? "Image 2.5 Sunburst" : model;
 
 function IconButton({ icon: Icon, label, active = false, ...props }) {
   return <button type="button" title={label} aria-label={label} aria-pressed={active} className={`ies-icon ${active ? "active" : ""}`} {...props}><Icon size={18} /></button>;
@@ -28,7 +32,9 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider 
   const [prompt, setPrompt] = React.useState("");
   const [mode, setMode] = React.useState("edit");
   const [blank, setBlank] = React.useState(false);
+  const [model, setModel] = React.useState(openAiImage25Models.sunburst);
   const [quality, setQuality] = React.useState("high");
+  const [editPrecision, setEditPrecision] = React.useState("regular");
   const [zoom, setZoom] = React.useState(1);
   const [pan, setPan] = React.useState({ x: 0, y: 0 });
   const [viewport, setViewport] = React.useState({ width: 700, height: 600 });
@@ -51,8 +57,10 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider 
   const hasDrawing = history.marks.some((mark) => mark.layer === "drawing" && mark.tool !== "eraser");
   const hasSelection = history.marks.some((mark) => mark.layer === "selection" && mark.tool !== "eraser");
   const dirty = history.marks.length || prompt.trim();
-  const providerAvailable = provider === "fal" || provider === "atlas";
-  const providerLabel = provider === "atlas" ? "Atlas Cloud" : provider === "fal" ? "Fal" : provider === "krea" ? "Krea" : "Unavailable";
+  const isIdeogram = model === ideogramImageEditModel;
+  const qualityOptions = isIdeogram ? ideogramImageEditQualityOptions : ["high", "xhigh", "max"];
+  const providerAvailable = provider === "fal" || (!isIdeogram && provider === "atlas");
+  const providerLabel = isIdeogram && !providerAvailable ? "Fal required" : provider === "atlas" ? "Atlas Cloud" : provider === "fal" ? "Fal" : provider === "krea" ? "Krea" : "Unavailable";
   const resultProvider = result?.provider || result?.cost?.provider;
 
   React.useEffect(() => { rootRef.current?.focus(); }, []);
@@ -157,18 +165,19 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider 
     if (busyRef.current || !size || !providerAvailable) return;
     busyRef.current = true; setBusy(true); setError(""); setWarning("");
     try {
-      imageEditSize(size.width, size.height);
+      imageEditSize(size.width, size.height, model);
       const drawing = await renderLayer("drawing"), selection = blank ? null : await renderLayer("selection");
       if (mode === "remove" && !selection) throw new Error("Paint a selection over the area to remove.");
       if (blank && !drawing) throw new Error("Draw a sketch first.");
       const form = new FormData();
       appendWorkflowContextFormFields(form, workflowContext);
-      for (const [key, value] of Object.entries({ sourceUrl: base.url, requestId: crypto.randomUUID(), prompt, mode, quality, blank: String(blank), nodeId: item.editContext?.nodeId || "", nodeTitle: item.label || "Image Edit" })) form.append(key, value);
+      for (const [key, value] of Object.entries({ sourceUrl: base.url, requestId: crypto.randomUUID(), prompt, mode, model, quality, blank: String(blank), nodeId: item.editContext?.nodeId || "", nodeTitle: item.label || "Image Edit" })) form.append(key, value);
+      if (isIdeogram) form.append("editPrecision", editPrecision);
       if (drawing) form.append("drawing", drawing, "drawing.png");
       if (selection) form.append("selection", selection, "selection.png");
       const data = await nodeApi.editImage(form);
       if (!data.item?.url) throw new Error("The edit returned no image. Check History before running again.");
-      setVersions((old) => [...old, { ...data.item, before: base.url }]);
+      setVersions((old) => [...old, { ...data.item, model: data.item.model || model, before: base.url }]);
       setResultIndex(versions.length); setView("split"); setSplit(50); setWarning(data.warning || "");
       notifyGenerationTaskComplete();
     } catch (failure) { setError(failure.message || "Image edit failed."); }
@@ -219,20 +228,22 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider 
       </div>
       <aside className="ies-sidebar">
         {!reviewing && <fieldset disabled={busy || saving}>
+          <label>Model<select aria-label="Edit model" value={model} onChange={(e) => { setModel(e.target.value); setQuality("high"); setError(""); }}><option value={openAiImage25Models.sunburst}>Image 2.5 Sunburst</option><option value={ideogramImageEditModel}>{ideogramImageEditModel}</option></select></label>
           <label>Method<select aria-label="Edit method" value={mode} onChange={(e) => { setMode(e.target.value); if (e.target.value !== "sketch") setBlank(false); if (e.target.value === "remove") { setActiveLayer("selection"); setTool("pen"); } }}><option value="edit">Edit image</option><option value="sketch">Render sketch</option><option value="remove">Remove selected</option></select></label>
           {mode === "sketch" && <label className="ies-checkbox"><input type="checkbox" checked={blank} onChange={(e) => { setBlank(e.target.checked); if (e.target.checked) setActiveLayer("drawing"); }} />Blank canvas</label>}
           <div className="ies-color-row" aria-label="Drawing color">{imageEditColors.map((value) => <button type="button" key={value} aria-label={`Color ${value}`} title={value} aria-pressed={color === value} className={`ies-swatch ${color === value ? "active" : ""}`} style={{ background: value }} onClick={() => setColor(value)} disabled={layer === "selection"} />)}<input aria-label="Custom drawing color" type="color" value={color} onChange={(e) => setColor(e.target.value)} disabled={layer === "selection"} /></div>
           <label className="ies-slider">{tool === "text" ? "Text size" : "Brush size"}<output>{brushSize.toFixed(1)}</output><input aria-label="Brush size" type="range" min="0.2" max="12" step="0.2" value={brushSize} onChange={(e) => setBrushSize(Number(e.target.value))} /></label>
           <label className="ies-slider">Opacity<output>{opacity}%</output><input aria-label="Drawing opacity" type="range" min="10" max="100" value={opacity} onChange={(e) => setOpacity(Number(e.target.value))} disabled={layer === "selection"} /></label>
           {tool === "text" && <label>Text note<textarea aria-label="Text note" rows={2} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} /></label>}
-          <label>Prompt<textarea className="ies-prompt" aria-label="Edit prompt" rows={5} maxLength={16000} placeholder={mode === "remove" ? "Additional direction (optional)" : "Describe the change..."} value={prompt} onChange={(e) => setPrompt(e.target.value)} /></label>
-          <label>Quality<select aria-label="Edit quality" value={quality} onChange={(e) => setQuality(e.target.value)}><option value="high">High</option><option value="xhigh">Extra High</option><option value="max">Maximum</option></select></label>
+          <label>Prompt<textarea className="ies-prompt" aria-label="Edit prompt" rows={5} maxLength={isIdeogram ? 10000 : 16000} placeholder={mode === "remove" ? "Additional direction (optional)" : "Describe the change..."} value={prompt} onChange={(e) => setPrompt(e.target.value)} /></label>
+          <label>Quality<select aria-label="Edit quality" value={quality} onChange={(e) => setQuality(e.target.value)}>{qualityOptions.map((value) => <option key={value} value={value}>{qualityLabels[value]}</option>)}</select></label>
+          {isIdeogram && <label>Precision<select aria-label="Edit precision" value={editPrecision} onChange={(e) => setEditPrecision(e.target.value)}>{ideogramImageEditPrecisionOptions.map((value) => <option key={value} value={value}>{value === "high" ? "High" : "Regular"}</option>)}</select></label>}
         </fieldset>}
         <div className="ies-run-section">
-          <small>Image 2.5 Sunburst <span>{resultProvider === "fal.ai" ? "Fal" : resultProvider || providerLabel}</span></small>
+          <small>{modelLabel(result?.model || result?.cost?.model || model)} <span>{resultProvider === "fal.ai" ? "Fal" : resultProvider || providerLabel}</span></small>
           {!reviewing && <button className="ies-primary" type="button" onClick={generate} disabled={busy || !size || !providerAvailable || (mode === "remove" ? !hasSelection : !prompt.trim() && !(mode === "sketch" && hasDrawing))}><Brush size={17} />{busy ? "Generating..." : "Generate Edit"}</button>}
           {!reviewing && showApiCosts && <small className="ies-cost">Variable API cost</small>}
-          {!providerAvailable && <p role="status" className="ies-warning">Enable Fal, or disable Krea and enable Atlas Cloud in Settings. Krea does not support masked edits.</p>}
+          {!reviewing && !providerAvailable && <p role="status" className="ies-warning">{isIdeogram ? "Enable Fal in Settings to use Ideogram 4.5 image editing. Atlas Cloud and Krea are not supported for this model." : "Enable Fal, or disable Krea and enable Atlas Cloud in Settings. Krea does not support masked edits."}</p>}
         </div>
         {versions.length > 0 && <label>Versions<select aria-label="Edit version" value={resultIndex} disabled={busy || saving} onChange={(e) => { setResultIndex(Number(e.target.value)); setView("split"); }}><option value="-1">Current draft</option>{versions.map((version, i) => <option key={version.url} value={i}>Edit {i + 1}</option>)}</select></label>}
         {reviewing && <div className="ies-result-actions">

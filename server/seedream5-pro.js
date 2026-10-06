@@ -10,7 +10,7 @@ export function createSeedream5ProGenerator({ readLocalAsset, uploadImageInputTo
       imageInputs.push({ ...asset, label: imagePromptLabels[index] });
     }
     const submittedPrompt = promptWithReferenceLabels(prompt, imageInputs);
-    const images = await Promise.all(imageInputs.map(uploadImageInputToFal));
+    const images = await Promise.all(imageInputs.map((image, index) => uploadImageInputToFal(image, index)));
     const input = buildSeedream5ProFalInput({ prompt: submittedPrompt, images, aspectRatio, resolution });
     const endpoint = seedream5ProFalEndpoint(images.length);
     const result = await subscribeFal(endpoint, { input, logs: true });

@@ -222,13 +222,30 @@ WorkflowName/
     manifest.json
 ```
 
+## Ideogram Image Generation
+
+The **Image Model** node also offers **Ideogram 4.5** through the existing enabled Fal credential. With no connected images it generates from text. Connecting Image Prompt, Character or Mood Board images switches to reference editing: one source image and up to four guide images. **Source image** defaults to the first connected image and can be changed in Settings; the remaining images are guides. The other image models and the default model stay unchanged.
+
+Choose Low, Medium or High quality (High by default). Text-to-image offers 1K or 2K and supported aspect ratios, mapped to exact provider-native dimensions; 4K, Auto and 21:9 are unavailable in that mode. Prompt expansion is enabled by default and can be turned off. Reference editing uses Regular precision and automatic source proportions; Ideogram may reduce output dimensions. Text-only size and expansion controls are hidden during edits, with their settings retained for text runs. For masks or High precision use Image Edit. Switching from Extra High or Maximum maps to High; the edit-only Very Low maps to Low. Saved workflows retain these settings, source selection and generated results, and History records the returned seed and actual provider settings.
+
+The [Fal generation schema](https://fal.ai/models/ideogram/v4.5/api) and [reference edit schema](https://fal.ai/models/ideogram/v4.5/edit/api), verified October 4, 2026, accept prompts up to 10,000 characters including generated reference instructions, and one image per node batch request. References must be managed local images, at most 25 MB each, up to 24 megapixels and within 1:6 to 6:1 proportions. Missing or invalid references block the run before submission; they are never silently dropped. Cost is shown as variable until a reliable quote is available. Paid requests are not automatically retried or moved to another provider. This option is limited to the Image Model node; Character, Coverage, Storyboard and other workspaces keep their current model lists. Validation uses mocks; live entitlement and output quality still require an approved paid test.
+
 ## Image Editing
 
 Double-click an image thumbnail, then choose the pencil icon for **Image Edit**. Draw, circle, add arrows or text notes, or paint a separate selection to identify the area to change. Pen size, color, opacity, eraser, undo/redo, zoom and pan are available. **Edit image** interprets the marks and your prompt; **Render sketch** can start on a blank canvas; **Remove selected** fills a selected area from its surroundings.
 
-Edits use **Image 2.5 Sunburst through Fal or Atlas**, with High, Extra High and Maximum quality. Enable the intended provider in Settings; Krea does not currently expose the mask/custom-size features used here. Provider-specific limits still apply, with no automatic paid fallback. API cost is variable. No request is sent until Generate Edit is clicked, and failed requests are not automatically retried.
+Choose the model inside Image Edit:
 
-Review results with the before/after slider, select earlier edits, or continue editing a result. **Add Image to Canvas** creates a separate Image node. **Apply to Source** is available for editable Image, Preview layout and Storyboard images; model/Character outputs stay protected. Generated edits are saved in project storage and History. Originals remain on disk, selection edits preserve untouched pixels locally, and downloaded results retain the original dimensions/aspect. Images up to 24 megapixels and aspect ratios from 1:3 to 3:1 are supported; AI rendering itself is limited to the model's supported size (up to 3840 pixels per edge), then restored to the original canvas dimensions.
+- **Image 2.5 Sunburst** remains the default, through Fal or Atlas, with High, Extra High and Maximum quality. Enable the intended provider in Settings; Krea does not currently expose the mask/custom-size features used here.
+- **Ideogram 4.5** uses the existing enabled Fal credential. Choose Very Low, Low, Medium or High quality (High by default), and Regular or High precision (Regular by default). High precision asks the provider to restore unchanged pixels. These editing controls are separate from the Image Model node’s text-to-image controls.
+
+API cost remains variable because no reliable Ideogram edit quote has been verified. No request is sent until **Generate Edit** is clicked, and failed requests are not automatically retried or moved to another provider. Ideogram accepts up to 10,000 characters for the complete request, including the editor's added instructions; an oversized request is rejected before submission.
+
+Review results with the before/after slider, select earlier edits, or continue editing a result. **Add Image to Canvas** creates a separate Image node. **Apply to Source** is available for editable Image, Preview layout and Storyboard images; model/Character outputs stay protected. Generated edits are saved in project storage and History. Originals remain on disk, selection edits preserve untouched pixels locally, and downloaded results retain the original dimensions/aspect.
+
+Both models accept source images up to 24 megapixels. Sunburst supports aspect ratios from 1:3 to 3:1 and AI rendering up to 3840 pixels per edge. Ideogram supports 1:6 to 6:1 and automatically uses the source geometry, with provider downscaling when needed; it has no custom output-size control here. The editor resizes generated output back to the original canvas dimensions, which does not add native model detail. For Ideogram, painted selections become a same-size binary mask: black edits, white preserves, and both regions must be present. Clear the selection for a whole-image edit.
+
+Provider contracts verified October 4, 2026: [Fal Ideogram 4.5 Edit](https://fal.ai/models/ideogram/v4.5/edit/api) and [Ideogram precise-edit mask and sizing rules](https://developer.ideogram.ai/api-reference/images/precise-edit/ideogram-4-5). These documentation checks do not establish live account access or generation quality.
 
 Drawing drafts are temporary and require confirmation before discarding; generated edits remain saved. For no-cost UI testing, run the development client and open `/test/browser/image-edit.html` for the isolated mock editor.
 

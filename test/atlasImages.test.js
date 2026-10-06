@@ -29,10 +29,10 @@ function rejects(options, pattern) {
 }
 
 test("only exact canonical image models are supported, with no substitutions or LLMs", () => {
-  assert.deepEqual(new Set(atlasImageModels), new Set(imageModelOptions));
+  assert.deepEqual(new Set(atlasImageModels), new Set(imageModelOptions.filter((model) => model !== imageModelNames.ideogram45)));
   assert.ok(Object.isFrozen(atlasImageModels));
   for (const model of atlasImageModels) assert.equal(supportsAtlasImageModel(model), true);
-  for (const model of [undefined, null, {}, 2, "", "toString", "__proto__", "OpenAI Image 2.5", "OpenAI Image 2.5 Sunburst Developer",
+  for (const model of [imageModelNames.ideogram45, undefined, null, {}, 2, "", "toString", "__proto__", "OpenAI Image 2.5", "OpenAI Image 2.5 Sunburst Developer",
     "openai/gpt-image-2-developer/edit", "OpenAI Image 2 Developer", "google/nano-banana-2/text-to-image-developer",
     "Nano Banana 2 Lite", "Nano Banana Pro Ultra", "Gemini 3.1 Pro", "gemini-3.1-flash", "google/gemini-3-pro",
     "REVE", "REVE 2", "Krea 2 Large", "Krea 2 Turbo", "nano banana 2", " OpenAI Image 2 "]) {

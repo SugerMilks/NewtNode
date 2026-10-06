@@ -5,6 +5,7 @@ import { parse } from "@babel/parser";
 import traverseModule from "@babel/traverse";
 import { estimateImageRunCost, estimateVideoRunCost } from "../src/generationPricing.js";
 import { isCoverageNode } from "../src/coveragePresets.js";
+import { isIdeogramImageModel } from "../src/ideogramImage.js";
 
 const traverse = traverseModule.default;
 const editor = readFileSync(new URL("../src/NodeEditor.jsx", import.meta.url), "utf8");
@@ -38,7 +39,7 @@ test("Newt can review connected image and video prompts without a runtime error"
     buildIncomingByNode: () => ({ test: incoming }), connectedText,
     connectedImagePromptItems: () => [], imageReferenceConnectionsForModel: () => [],
     imageInstructionSourcesForModel: () => [], buildEffectiveImagePrompt: (prompt) => prompt,
-    isOpenAiImage25Model: () => false, estimateImageRunCost, estimateVideoRunCost,
+    isOpenAiImage25Model: () => false, isIdeogramImageModel, estimateImageRunCost, estimateVideoRunCost,
     connectedDirectorPackageSource: () => null, connectedDirectorPackageText: () => "",
     expandVideoDirectorPackageIncoming: (value) => value, videoModelSupportsCharacterInput: () => true,
     uniqueAssetItems: (value) => value, connectedAssetItems: () => [], connectedCharacterReferences: () => [],

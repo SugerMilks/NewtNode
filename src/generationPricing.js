@@ -5,6 +5,7 @@ import { estimateNanoBanana2Cost } from "./nanoBanana2.js";
 import { estimateOpenAiImage2Cost } from "./openAiImage2.js";
 import { isOpenAiImage25Model } from "./openAiImage25.js";
 import { isSeedream5ProModel, seedream5ProCost } from "./seedream5Pro.js";
+import { isIdeogramImageModel, ideogramImageCost } from "./ideogramImage.js";
 import { estimateSeedance25FalCost } from "./seedance25.js";
 import { estimateAtlasImageCost, estimateAtlasVideoCost } from "./atlasPricing.js";
 import { getGenerationQuote, getPricingCatalog } from "./pricingCatalog.js";
@@ -64,6 +65,7 @@ export function estimateImageRunCost({
 } = {}) {
   const quote = getGenerationQuote({ kind: "image", model, resolution, aspectRatio, quality, referenceCount, batchCount, provider });
   if (quote) return quote.amountUsd;
+  if (isIdeogramImageModel(model)) return null;
   if (provider === "atlas") return totalEstimate(estimateAtlasImageCost({ model, resolution, aspectRatio, quality, referenceCount }).amountUsd, batchCount);
   const normalizedProvider = provider === "krea" ? "krea" : "fal";
   const references = Math.max(0, Number(referenceCount) || 0);
@@ -159,6 +161,8 @@ export function generationEstimate(raw) {
   const options = generationQuoteSettings(raw);
   const cached = getGenerationQuote(options);
   if (cached) return cached;
+  if (options.kind === "image" && isIdeogramImageModel(options.model))
+    return { ...ideogramImageCost(options), units: options.batchCount, estimated: true, pricingStatus: "unavailable" };
   const amountUsd = (options.kind === "video" ? estimateVideoRunCost : estimateImageRunCost)(options);
   let endpoint = "";
   if (options.provider === "krea") endpoint = kreaEndpointForModel(options.kind, options.model);
