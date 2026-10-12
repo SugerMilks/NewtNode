@@ -42,6 +42,8 @@
 .explore-progress { font-size: 12px; color: #aaa; overflow-wrap: anywhere; }
 .explore-error { font-size: 13px; color: #f3a08b; overflow-wrap: anywhere; }
 .explore-settings-heading { display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #333; padding-top: 8px; }
+.explore-mode { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: #ccc; cursor: pointer; }
+.explore-mode input { width: 15px; height: 15px; margin: 0; accent-color: #e2ca29; }
 .explore-settings-heading button[aria-expanded=false] svg { transform: rotate(-90deg); }
 .explore-settings-heading.explore-reference-heading { justify-content: flex-start; gap: 10px; }
 .collapsed-input-ports { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; flex-shrink: 0; }

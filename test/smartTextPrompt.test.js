@@ -22,10 +22,10 @@ test("image default is exact, does not replace user text, and is absent without 
 });
 
 test("destination detection follows prompt consumers and ignores later media connections", () => {
-  const nodes = [smart, node("image", "imageModel", { model: "Nano Banana 2" }), node("video", "videoModel", { model: "Seedance 2.5" })];
-  assert.deepEqual(smartTextGenerationContext("smart", nodes, [edge("smart", "image"), edge("image", "video", "startFrameIn", "imageOut")]), { target: "image", models: ["Nano Banana 2"] });
+  const nodes = [smart, node("image", "imageModel", { model: "Nano Banana Pro" }), node("video", "videoModel", { model: "Seedance 2.5" })];
+  assert.deepEqual(smartTextGenerationContext("smart", nodes, [edge("smart", "image"), edge("image", "video", "startFrameIn", "imageOut")]), { target: "image", models: ["Nano Banana Pro"] });
   assert.deepEqual(smartTextGenerationContext("smart", nodes, [edge("smart", "video")]), { target: "video", models: ["Seedance 2.5"] });
-  assert.deepEqual(smartTextGenerationContext("smart", nodes, [edge("smart", "video"), edge("smart", "image")]), { target: "mixed", models: ["Nano Banana 2", "Seedance 2.5"] });
+  assert.deepEqual(smartTextGenerationContext("smart", nodes, [edge("smart", "video"), edge("smart", "image")]), { target: "mixed", models: ["Nano Banana Pro", "Seedance 2.5"] });
   assert.equal(smartTextGenerationContext("smart", nodes, [edge("smart", "video", "referenceImageIn")]).target, "auto");
   assert.equal(smartTextGenerationContext("smart", nodes, [edge("smart", "missing")]).target, "auto");
 });
@@ -125,11 +125,11 @@ test("text-only processing uses the original model overrides and ignores obsolet
 });
 
 test("My Newt cannot reuse an image prompt after its destination changes to video", async () => {
-  const snapshot = { nodes: [smart, node("model", "imageModel", { model: "Nano Banana 2" })], edges: [edge("smart", "model")] };
+  const snapshot = { nodes: [smart, node("model", "imageModel", { model: "Nano Banana Pro" })], edges: [edge("smart", "model")] };
   const before = await myNewtRunInputDigest(snapshot, "smart");
   snapshot.nodes[1] = node("model", "videoModel", { model: "Seedance 2.5" });
   assert.notEqual(await myNewtRunInputDigest(snapshot, "smart"), before);
-  snapshot.nodes[1] = node("model", "imageModel", { model: "Nano Banana 2", x: 500 });
+  snapshot.nodes[1] = node("model", "imageModel", { model: "Nano Banana Pro", x: 500 });
   assert.equal(await myNewtRunInputDigest(snapshot, "smart"), before);
 });
 

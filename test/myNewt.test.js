@@ -11,7 +11,7 @@ import { remapImportedGraph } from "../src/workflowState.js";
 import { myNewtIntelligenceLevels } from "../src/myNewt/intelligence.js";
 
 const owner = { projectId: "project-test", nodeId: "my-newt-test" };
-const snapshot = { ...owner, projectName: "Test", nodes: [{ id: owner.nodeId, type: "myNewt", data: {} }, { id: "image-1", type: "imageModel", data: { model: "Nano Banana 2", prompt: "A test" } }], edges: [], catalog: [] };
+const snapshot = { ...owner, projectName: "Test", nodes: [{ id: owner.nodeId, type: "myNewt", data: {} }, { id: "image-1", type: "imageModel", data: { model: "Nano Banana Pro", prompt: "A test" } }], edges: [], catalog: [] };
 const call = (operation, payload) => ({ status: "completed", usage: { input_tokens: 100, output_tokens: 100 }, output: [{ type: "function_call", call_id: `call-${Math.random()}`, name: "project_action", arguments: JSON.stringify({ operation, payload: JSON.stringify(payload), reason: "Test action" }) }] });
 
 async function service(t, options = {}) {
@@ -111,7 +111,7 @@ test("paid requests are persisted once, cached on replay, and blocked while paus
   await settle(instance);
   const actionId = instance.jobs.get(job.id).pending.id;
   await instance.claim(job.id, { ...owner, actionId, clientId: "c" });
-  const body = { nodeId: "image-1", model: "Nano Banana 2", resolution: "1K" };
+  const body = { nodeId: "image-1", model: "Nano Banana Pro", resolution: "1K" };
   const args = { ...owner, actionId, clientId: "c", sequence: 1, route: "/api/node/generate-image", body };
   const first = await instance.request(job.id, args);
   assert.deepEqual(await instance.request(job.id, args), first); assert.equal(submits, 1);
@@ -172,7 +172,7 @@ test("uncertain paid submissions pause instead of retrying", async (t) => {
   const job = await instance.start({ ...owner, brief: "test", settings: { allowImages: true, approveRuns: false }, snapshot }); await settle(instance);
   const actionId = instance.jobs.get(job.id).pending.id;
   await instance.claim(job.id, { ...owner, actionId, clientId: "c" });
-  const args = { ...owner, actionId, clientId: "c", sequence: 1, route: "/api/node/generate-image", body: { nodeId: "image-1", model: "Nano Banana 2" } };
+  const args = { ...owner, actionId, clientId: "c", sequence: 1, route: "/api/node/generate-image", body: { nodeId: "image-1", model: "Nano Banana Pro" } };
   await assert.rejects(instance.request(job.id, args), /Connection lost/);
   assert.equal(instance.jobs.get(job.id).status, "paused");
   assert.deepEqual(instance.jobs.get(job.id).uncertainNodes, ["image-1"]);
@@ -193,7 +193,7 @@ test("intelligence defaults preserve Astra high and map each slider level to its
     assert.equal(request.reasoning.effort, level.value);
     assert.equal(request.max_output_tokens, level.maxOutputTokens);
     assert.deepEqual(recorded.intelligence, level);
-    assert.equal(instance.jobs.get(job.id).snapshot.nodes[1].data.model, "Nano Banana 2");
+    assert.equal(instance.jobs.get(job.id).snapshot.nodes[1].data.model, "Nano Banana Pro");
   }
 });
 

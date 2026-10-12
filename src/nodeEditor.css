@@ -8065,3 +8065,32 @@ video.newtnode-video-fallback {
   .storyboard-topbar .character-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
   .storyboard-topbar .character-tabs button { min-width: 0; padding: 4px 6px; white-space: normal; }
 }
+.seedance-draft-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 0;
+}
+.seedance-draft-actions small { color: var(--muted, #aaa); }
+.seedance-draft-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  max-width: 100%;
+  border: 1px solid #454545;
+  border-radius: 6px;
+  padding: 6px 10px;
+  background: #303030;
+  color: #eee;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.seedance-draft-actions button:hover:not(:disabled) { background: #3c3c3c; }
+.seedance-draft-actions button:disabled { opacity: 0.55; cursor: wait; }
+.seedance-draft-actions svg { flex: 0 0 14px; }

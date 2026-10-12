@@ -1,6 +1,10 @@
+import { validateSeedance25EditDuration, validateSeedance25Task } from "../src/seedance25.js";
+
 const fail = (message) => { throw Object.assign(new Error(`Atlas Cloud: ${message}`), { status: 400 }); };
 
-export async function validateAtlasVideoAssets({ model, startImage, endImage, images = [], videos = [], audios = [] }, inspect) {
+export async function validateAtlasVideoAssets({ model, startImage, endImage, images = [], videos = [], audios = [], seedanceTask }, inspect) {
+  const editing = validateSeedance25Task({ model, seedanceTask, provider: "atlas", videos,
+    startFrames: startImage ? [startImage] : [], endFrames: endImage ? [endImage] : [] });
   const seedance = model.startsWith("Seedance");
   const seconds = model === "Seedance 2.5" ? 30 : 15;
   const groups = { image: [startImage, endImage, ...images].filter(Boolean), video: videos, audio: audios };
@@ -8,6 +12,7 @@ export async function validateAtlasVideoAssets({ model, startImage, endImage, im
     let totalSeconds = 0;
     for (const [index, source] of sources.entries()) {
       const asset = await inspect(source);
+      if (editing && kind === "video") validateSeedance25EditDuration(asset.duration);
       const label = `${kind} reference ${index + 1}`;
       if (!asset.mimeType?.startsWith(`${kind}/`)) fail(`${label} is not a ${kind} file.`);
       if (seedance) {

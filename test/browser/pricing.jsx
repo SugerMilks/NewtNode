@@ -26,12 +26,12 @@ window.fetch = async (url, init = {}) => {
 
 function PricingQA() {
   const [visible, setVisible] = React.useState(true);
-  const [model, setModel] = React.useState("Nano Banana 2");
+  const [model, setModel] = React.useState("Nano Banana Pro");
   return <main style={{ maxWidth: 850, padding: 20, margin: "30px auto", display: "grid", gap: 24 }}>
     <PricingSettings />
     <section style={{ display: "grid", gap: 16, maxWidth: 380 }}>
       <label><input type="checkbox" checked={visible} onChange={event => setVisible(event.target.checked)} /> API Cost</label>
-      <select aria-label="Image model" value={model} onChange={event => setModel(event.target.value)}><option>Nano Banana 2</option><option>OpenAI Image 2.5 Flare</option></select>
+      <select aria-label="Image model" value={model} onChange={event => setModel(event.target.value)}><option>Nano Banana Pro</option><option>OpenAI Image 2.5 Flare</option></select>
       <button className="run-node-button"><RunPriceLabel label="Run Image" options={{ kind: "image", provider: "atlas", model, resolution: "1K", batchCount: 4 }} visible={visible} /></button>
       <button className="run-node-button"><RunPriceLabel label="Run Video" options={{ kind: "video", provider: "atlas", model: "Seedance 2.5", duration: "8 seconds" }} visible={visible} /></button>
     </section>

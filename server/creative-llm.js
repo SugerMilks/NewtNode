@@ -1,5 +1,5 @@
 import Ajv from "ajv";
-import { explorePlanSchema } from "../src/explore.js";
+import { explorePlanSchema, normalizeExplorePlan } from "../src/explore.js";
 import { storyboardCastSchema } from "../src/storyboardCast.js";
 import { storyboardPlanSchema, storyboardRevisionSchema, storyboardReviewSchema, storyboardCastRepairSchema } from "../src/storyboardWorkflow.js";
 import { filmDirectorApproachOptions } from "../src/filmDirectorApproaches.js";
@@ -89,7 +89,10 @@ export function openAiLlmBody({ model, prompt, systemPrompt, input = prompt, rea
 
 export function falLlmInput({ model, prompt, systemPrompt, route = "" }) {
   // Fal defaults to false even when omitted; Astra requires reasoning enabled.
-  return { model, prompt, system_prompt: systemPrompt,
+  const instructions = route === "explore-plan"
+    ? [systemPrompt, "Required response JSON Schema (return the matching JSON object only):", JSON.stringify(explorePlanSchema)].filter(Boolean).join("\n\n")
+    : systemPrompt;
+  return { model, prompt, system_prompt: instructions,
     ...(creativeSchemas[route] ? { max_tokens: creativeOutputBudget(route) } : {}),
     ...(creativeSchemas[route] || /^openai\/gpt-(?:5|6)/.test(model) ? { reasoning: true } : {}) };
 }
@@ -119,6 +122,7 @@ export function validateCreativeResponse(data, { route, provider, text: outputTe
   let parsed;
   try { parsed = JSON.parse(String(outputText || "").trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "")); }
   catch { throw new Error(`${label}: ${provider} returned invalid JSON. Existing work has been preserved.`); }
+  if (route === "explore-plan") parsed = normalizeExplorePlan(parsed);
   if (!validator(parsed)) {
     const detail = validator.errors.slice(0, 3).map((error) => `${error.instancePath || "response"} ${error.message}`).join("; ");
     throw new Error(`${label}: incomplete planning data (${detail}). Existing work has been preserved.`);

@@ -18,11 +18,11 @@ const edge = (from, to) => ({ from: { nodeId: from, port: "imageOut" }, to: { no
 const graph = () => ({ ...owner, projectName: "Campaign", selectedNodeIds: ["character", "image"], catalog: [], groups: [], nodes: [
   { id: "newt", type: "myNewt", data: {} },
   { id: "character", type: "character", data: { title: "Emma", characterName: "Emma", resultUrl: "/outputs/emma.png" } },
-  { id: "image", type: "imageModel", data: { title: "Hero", prompt: "Portrait of @Emma", model: "Nano Banana 2", resolution: "1K", aspectRatio: "16:9", quality: "high", batchCount: 1, status: "ready" } },
+  { id: "image", type: "imageModel", data: { title: "Hero", prompt: "Portrait of @Emma", model: "Nano Banana Pro", resolution: "1K", aspectRatio: "16:9", quality: "high", batchCount: 1, status: "ready" } },
   { id: "preview", type: "preview", data: { title: "Preview" } },
   { id: "unrelated", type: "imageModel", data: { title: "Other scene", prompt: "Another scene" } }
 ], edges: [edge("character", "image"), edge("image", "preview")] });
-const preview = () => ({ title: "Hero", model: "Nano Banana 2", provider: "fal", count: 1, resolution: "1K", aspectRatio: "16:9", quality: "high", prompt: "Portrait of @Emma. Cinematic standard.", references: [{ url: "/outputs/emma.png", label: "Emma" }], estimatedCost: 0.12 });
+const preview = () => ({ title: "Hero", model: "Nano Banana Pro", provider: "fal", count: 1, resolution: "1K", aspectRatio: "16:9", quality: "high", prompt: "Portrait of @Emma. Cinematic standard.", references: [{ url: "/outputs/emma.png", label: "Emma" }], estimatedCost: 0.12 });
 const protect = (g, id = "image") => { g.nodes.find((node) => node.id === id).data.myNewtProtection = { approved: true, approvedAt: "2026-09-07T14:00:00Z" }; return g; };
 async function completedGraph() {
   const before = graph(), after = graph();

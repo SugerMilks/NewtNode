@@ -232,6 +232,7 @@ export function SkillDirectorNodeBody({
   onUpdate,
   onRun,
   running,
+  generationProvider = "fal",
   sourceLabel,
   onConnectStart,
   onDisconnectInput,
@@ -322,6 +323,7 @@ export function SkillDirectorNodeBody({
   const autoPlannedShotCount = Number.parseInt(node.data.lastRunActualShotCount || node.data.lastRunShotCount || "", 10);
   const durationValue = node.data.skillDurationSeconds || node.data.durationSeconds || "15";
   const videoModelValue = normalizeFilmDirectorVideoModel(node.data.skillVideoModel);
+  const draftMode = node.data.skillSeedanceDraft === true && (!videoModelValue || videoModelValue === "Seedance 2.5");
   const resolutionValue = normalizeFilmDirectorResolution(node.data.skillResolution);
   const aspectRatioValue = normalizeFilmDirectorAspectRatio(node.data.skillAspectRatio);
   const audioModeValue = normalizeFilmDirectorAudioMode(node.data.skillDirectorAudioMode);
@@ -893,7 +895,7 @@ export function SkillDirectorNodeBody({
               </label>
               <label className="node-row">
                 <span>Resolution</span>
-                <select value={resolutionValue} disabled={running || locks.setup} onChange={(event) => onUpdate(node.id, { skillResolution: event.target.value })}>
+                <select value={draftMode ? "480p" : resolutionValue} disabled={running || locks.setup || draftMode} onChange={(event) => onUpdate(node.id, { skillResolution: event.target.value })}>
                   {filmDirectorResolutionOptions.map((resolution) => (
                     <option key={resolution} value={resolution}>
                       {resolution}
@@ -901,6 +903,12 @@ export function SkillDirectorNodeBody({
                   ))}
                 </select>
               </label>
+              {(!videoModelValue || videoModelValue === "Seedance 2.5") && <label className="node-row">
+                <span>Draft (480p)</span>
+                <input type="checkbox" aria-label="Director Draft mode" checked={node.data.skillSeedanceDraft === true} disabled={running || (!draftMode && generationProvider !== "fal")}
+                  title="Seedance 2.5 on Fal only. Overrides preview resolution without rebuilding the plan; 1080p finishing is billed separately."
+                  onChange={event => onUpdate(node.id, { skillSeedanceDraft: event.target.checked })} />
+              </label>}
               <label className="node-row">
                 <span>Aspect Ratio</span>
                 <select value={aspectRatioValue} disabled={running || locks.setup} onChange={(event) => onUpdate(node.id, { skillAspectRatio: event.target.value })}>

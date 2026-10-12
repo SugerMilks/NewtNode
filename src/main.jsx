@@ -47,7 +47,7 @@ import {
   normalizeModelPreferences,
   videoModelNames
 } from "./modelOptions.js";
-import { isNanoBanana2Model, nanoBanana2ResolutionOptions } from "./nanoBanana2.js";
+import { isNanoBanana21Model, nanoBanana21ResolutionOptions, nanoBanana21Ratios } from "./nanoBanana21.js";
 import { isSeedream5ProModel, seedream5ProResolutionOptions, seedream5ProAspectRatios } from "./seedream5Pro.js";
 import { isOpenAiImage25Model, openAiImage25Variant, openAiImage25KreaAspectRatios, openAiImage25KreaResolutionOptions, openAiImage25KreaSelection, openAiImage25QualityOptions, openAiImage25BackgroundOptions } from "./openAiImage25.js";
 import { generationProviderFromSettings } from "./generationPricing.js";
@@ -196,7 +196,7 @@ function App() {
   }, [references.length, startFrame]);
 
   const activeImageAspectRatios = React.useMemo(
-    () => imageProvider === "krea" && isOpenAiImage25Model(imageModel) ? openAiImage25KreaAspectRatios : imageAspectRatiosForModel(imageModel),
+    () => isNanoBanana21Model(imageModel) ? nanoBanana21Ratios(imageProvider) : imageProvider === "krea" && isOpenAiImage25Model(imageModel) ? openAiImage25KreaAspectRatios : imageAspectRatiosForModel(imageModel),
     [imageModel, imageProvider]
   );
   const activeVideoSettings = React.useMemo(() => videoSettingsForModel(videoModel), [videoModel]);
@@ -593,7 +593,7 @@ function App() {
               </div>
             </div>
 
-            {!enabledImageOptions.length && <p role="status">Enable an Image workspace model in Settings. Ideogram 4.5 is available in Image Model nodes.</p>}
+            {!enabledImageOptions.length && <p role="status">Enable an image model in Settings.</p>}
             <div className="route-strip">
               <span>{imageModel}</span>
               <span>{formatBatchCount(Number(imageBatchCount))}</span>
@@ -1017,9 +1017,9 @@ function imageAspectRatiosForModel(model) {
 }
 
 function imageResolutionOptionsForModel(model, provider = "fal") {
+  if (isNanoBanana21Model(model)) return nanoBanana21ResolutionOptions;
   if (isSeedream5ProModel(model)) return seedream5ProResolutionOptions;
   if (provider === "krea" && isOpenAiImage25Model(model)) return openAiImage25KreaResolutionOptions;
-  if (isNanoBanana2Model(model)) return nanoBanana2ResolutionOptions;
   return imageResolutionOptions;
 }
 

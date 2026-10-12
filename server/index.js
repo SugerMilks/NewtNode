@@ -32,8 +32,8 @@ import { createOutputAssetResolver } from "./output-export.js";
 import { registerImageEditRoutes } from "./routes/imageEdit.js";
 import { generateFalImageEdit, createIdeogramImageEditClient } from "./image-edit.js";
 import { ideogramImageEditModel } from "../src/ideogramImageEdit.js";
-import { ideogramImageModelName, ideogramImageEndpoint } from "../src/ideogramImage.js";
-import { createIdeogramImageHandler } from "./ideogram-image.js";
+import { isNanoBanana21Model, nanoBanana21ModelName, nanoBanana21FalTextEndpoint, nanoBanana21Ratios, validateNanoBanana21Request, nanoBanana21Cost } from "../src/nanoBanana21.js";
+import { createNanoBanana21Generator } from "./nano-banana-21.js";
 import { normalizeOpenAiEditMask, finishOpenAiMaskedEdit } from "./openai-edit-mask.js";
 import { normalizeCharacterWardrobeRequest } from "./character-wardrobe.js";
 import { elevenLabsRates } from "./elevenlabs.js";
@@ -78,13 +78,7 @@ import { openAiImage25Models, openAiImage25Variant, isOpenAiImage25Model, normal
 import { nanoBananaProFalThinkingMode, nanoBananaProThinkingConfig } from "../src/nanoBananaPro.js";
 import { seedream5ProModelName, isSeedream5ProModel, seedream5ProFalEndpoint, seedream5ProAspectRatios, validateSeedream5ProRequest, seedream5ProCost } from "../src/seedream5Pro.js";
 import { createSeedream5ProGenerator } from "./seedream5-pro.js";
-import {
-  buildNanoBanana2FalInput,
-  estimateNanoBanana2Cost,
-  isNanoBanana2Model,
-  nanoBanana2FalEditEndpoint as defaultNanoBanana2FalEditEndpoint,
-  nanoBanana2FalTextEndpoint as defaultNanoBanana2FalTextEndpoint
-} from "../src/nanoBanana2.js";
+import { isRetiredNanoBanana2Model } from "../src/retiredImageModels.js";
 import { filmDirectorAdjacentCoverageIssue } from "../src/filmDirectorCoverage.js";
 import { normalizeFilmDirectorAspectRatio } from "../src/filmDirectorAspectRatios.js";
 import { normalizeFilmDirectorDuration } from "../src/filmDirectorDurations.js";
@@ -151,8 +145,13 @@ import {
   normalizeSeedance25Resolution,
   seedance25FalEndpoint,
   seedance25ModelName,
-  seedance25ReferenceLimits
+  seedance25ReferenceLimits,
+  validateSeedance25Task,
+  validateSeedance25EditDuration,
+  validateSeedance25ReferenceTags
 } from "../src/seedance25.js";
+import { validateSeedanceDraft, seedanceDraftCost } from "../src/seedanceDraft.js";
+import { createSeedanceDraftStore, registerSeedanceDraftRoutes } from "./seedance-drafts.js";
 import {
   estimateMiniMaxH3FalCost,
   isMiniMaxH3Model,
@@ -301,22 +300,20 @@ const nanoImageAspectRatios = ["21:9", "16:9", "9:16", "1:1", "4:3", "3:4", "3:2
 const openAiImageAspectRatios = [...nanoImageAspectRatios, "2:1", "1:2"];
 const storyboardAspectRatioOptions = ["16:9", "21:9", "9:16", "1:1", "3:2", "2:3", "4:3", "3:4", "2:1", "1:2"];
 const imageModelNames = {
-  ideogram45: ideogramImageModelName,
+  nanoBanana21: nanoBanana21ModelName,
   seedream5Pro: seedream5ProModelName,
-  nanoBanana2: "Nano Banana 2",
   nanoBananaPro: "Nano Banana Pro",
   openAiImage2: "OpenAI Image 2",
   openAiImage25Sunburst: openAiImage25Models.sunburst,
   openAiImage25Flare: openAiImage25Models.flare
 };
 const imageModelOptions = [
-  imageModelNames.nanoBanana2,
+  imageModelNames.nanoBanana21,
   imageModelNames.nanoBananaPro,
   imageModelNames.openAiImage2,
   imageModelNames.openAiImage25Sunburst,
   imageModelNames.openAiImage25Flare,
-  imageModelNames.seedream5Pro,
-  imageModelNames.ideogram45
+  imageModelNames.seedream5Pro
 ];
 const videoModelNames = {
   seedance: "Seedance 2.0",
@@ -333,12 +330,10 @@ const videoModelOptions = [
   videoModelNames.minimaxH3
 ];
 const defaultModelPreferences = {
-  image: Object.fromEntries(imageModelOptions.map((model) => [model, model === imageModelNames.ideogram45 || model === imageModelNames.openAiImage2 || isOpenAiImage25Model(model) || isSeedream5ProModel(model)])),
+  image: Object.fromEntries(imageModelOptions.map((model) => [model, isNanoBanana21Model(model) || model === imageModelNames.openAiImage2 || isOpenAiImage25Model(model) || isSeedream5ProModel(model)])),
   video: Object.fromEntries(videoModelOptions.map((model) => [model, true]))
 };
 const falNanoBananaProEndpoint = process.env.FAL_NANO_BANANA_PRO_ENDPOINT || "fal-ai/nano-banana-pro";
-const falNanoBanana2TextEndpoint = process.env.FAL_NANO_BANANA_2_ENDPOINT || defaultNanoBanana2FalTextEndpoint;
-const falNanoBanana2EditEndpoint = process.env.FAL_NANO_BANANA_2_EDIT_ENDPOINT || defaultNanoBanana2FalEditEndpoint;
 const falKlingO3ProTextEndpoint = process.env.FAL_KLING_O3_PRO_TEXT_ENDPOINT || "fal-ai/kling-video/o3/pro/text-to-video";
 const falKlingO3ProReferenceEndpoint = process.env.FAL_KLING_O3_PRO_REFERENCE_ENDPOINT || "fal-ai/kling-video/o3/pro/reference-to-video";
 const falKlingO34kTextEndpoint = process.env.FAL_KLING_O3_4K_TEXT_ENDPOINT || "fal-ai/kling-video/o3/4k/text-to-video";
@@ -735,6 +730,9 @@ function buildHealthPayload() {
       myNewtApprovedWork: true,
       myNewtAutoReview: true,
       myNewtUnpricedGenerations: true,
+      seedanceVideoEditing: true,
+      seedanceDrafts: true,
+      nanoBanana21: true,
       myNewtCreativeSkills: true,
       myNewtCanvasOrganization: true,
       myNewtFavoriteModels: true,
@@ -768,6 +766,8 @@ function buildHealthPayload() {
       editorTimeline: true,
       outputExport: true,
       elevenLabsVoices: true,
+      elevenLabsV4: true,
+      exploreLookVariation: true,
       skillDirector: true,
       creativeReasoningV2: true,
       explore: true,
@@ -1514,13 +1514,6 @@ app.get("/api/stats", async (_req, res) => {
         cost4K: nanoBananaCost4K,
         currency: "USD"
       },
-      nanoBanana2: {
-        cost0_5K: estimateNanoBanana2Cost("0.5K"),
-        cost1K: estimateNanoBanana2Cost("1K"),
-        cost2K: estimateNanoBanana2Cost("2K"),
-        cost4K: estimateNanoBanana2Cost("4K"),
-        currency: "USD"
-      },
       openAiImage2: {
         quality: openAiImage2Quality,
         costs: openAiImage2Costs,
@@ -2213,10 +2206,6 @@ async function handleTransferCollageUpload(req, res) {
   }
 }
 
-const runIdeogramImageModel = createIdeogramImageHandler({
-  getKey: () => process.env.FAL_KEY, subscribeFal, firstFalImageResult, readLocalAsset, uploadImageInputToFal, downloadImage, appendHistory, projectFromBody, nodeFromBody
-});
-
 app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, res) => {
   try {
     const prompt = String(req.body.prompt || "").trim();
@@ -2225,8 +2214,14 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
     }
 
     const selectedModel = resolveImageModel(req.body.model);
-    // Ideogram validates all raw references and routes text or image input before legacy normalization.
-    if (selectedModel.provider === "fal-ideogram-45") return await runIdeogramImageModel(req, res);
+    if (isNanoBanana21Model(selectedModel.displayName)) {
+      const provider = process.env.FAL_KEY ? "fal" : process.env.KREA_API_KEY ? "krea" : "atlas";
+      const refs = req.body.imagePromptUrls === undefined ? [] : req.body.imagePromptUrls;
+      validateNanoBanana21Request({ prompt, images: refs, resolution: req.body.resolution,
+        aspectRatio: isAutoImageAspectRatio(req.body.aspectRatio) ? "16:9" : req.body.aspectRatio,
+        provider, maskUrl: req.body.editMaskDataUrl, background: req.body.background });
+      if (refs.some(url => !isLocalAssetUrl(url))) throw httpError(400, "Nano Banana 2.1 references must be connected local images. No references were submitted.");
+    }
     req.body = normalizeCharacterWardrobeRequest(req.body);
     const imagePromptUrls = Array.isArray(req.body.imagePromptUrls) ? req.body.imagePromptUrls.filter(isLocalAssetUrl) : [];
     const imagePromptLabels = Array.isArray(req.body.imagePromptLabels) ? req.body.imagePromptLabels : [];
@@ -2266,7 +2261,7 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
       selectedModel.provider.startsWith("fal-") &&
       supportsKreaModel("image", selectedModel.displayName)
     ) {
-      return runKreaImageModel(req, res, {
+      return await runKreaImageModel(req, res, {
         prompt,
         selectedModel,
         imagePromptUrls,
@@ -2349,13 +2344,15 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
       });
     }
 
-    if (["fal-nano-banana-2", "fal-seedream-5-pro"].includes(selectedModel.provider)) {
+    if (["fal-nano-banana-21", "fal-seedream-5-pro"].includes(selectedModel.provider)) {
       if (!process.env.FAL_KEY) {
         return res.status(400).json({ error: "Missing FAL_KEY in .env." });
       }
 
       const seedream = isSeedream5ProModel(selectedModel.displayName);
-      const generate = seedream ? createSeedream5ProGenerator({ readLocalAsset, uploadImageInputToFal, promptWithReferenceLabels, subscribeFal, firstFalImageResult }) : generateFalNanoBanana2;
+      const nano21 = isNanoBanana21Model(selectedModel.displayName);
+      const createGenerator = seedream ? createSeedream5ProGenerator : createNanoBanana21Generator;
+      const generate = createGenerator({ readLocalAsset, uploadImageInputToFal, promptWithReferenceLabels, subscribeFal, firstFalImageResult });
       const falImage = await generate({
         prompt,
         imagePromptUrls,
@@ -2364,9 +2361,9 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
         resolution: req.body.resolution,
         editMaskDataUrl: req.body.editMaskDataUrl,
         background: req.body.background
-      });
-      const output = await downloadImage(req, falImage.remoteImage.url, seedream ? "seedream-5-pro" : "nano-banana-2", falImage.remoteImage.content_type || falImage.remoteImage.mimeType);
-      const cost = seedream ? seedream5ProCost({ resolution: falImage.resolution, aspectRatio, referenceCount: imagePromptUrls.length }) : estimateNanoBanana2ImageCost({ resolution: falImage.resolution, endpoint: falImage.endpoint });
+      }, process.env.FAL_KEY);
+      const output = await downloadImage(req, falImage.remoteImage.url, seedream ? "seedream-5-pro" : "nano-banana-2.1", falImage.remoteImage.content_type || falImage.remoteImage.mimeType);
+      const cost = nano21 ? nanoBanana21Cost({ resolution: falImage.resolution, referenceCount: imagePromptUrls.length }) : seedream5ProCost({ resolution: falImage.resolution, aspectRatio, referenceCount: imagePromptUrls.length });
 
       await appendHistory({
         id: falImage.requestId || randomUUID(),
@@ -2616,7 +2613,11 @@ async function runKreaImageModel(
   }
   if (isSeedream5ProModel(selectedModel.displayName)) validateSeedream5ProRequest({ prompt, images: imagePromptUrls,
     resolution: req.body.resolution, aspectRatio, maskUrl: req.body.editMaskDataUrl, background: req.body.background });
-  const referenceUrls = await Promise.all(imagePromptUrls.map((url) => uploadLocalOutputToKrea(url, kreaApiKey)));
+  if (isNanoBanana21Model(selectedModel.displayName)) {
+    if (isAutoImageAspectRatio(requestedAspectRatio)) aspectRatio = closestAspectRatio(Number(aspectRatio.split(":")[0]) / Number(aspectRatio.split(":")[1]), nanoBanana21Ratios("krea"));
+    validateNanoBanana21Request({ prompt, images: imagePromptUrls, resolution: req.body.resolution, aspectRatio,
+      provider: "krea", maskUrl: req.body.editMaskDataUrl, background: req.body.background });
+  }
   const submittedPrompt = promptWithReferenceLabels(
     prompt,
     imagePromptUrls.map((url, index) => ({
@@ -2624,6 +2625,14 @@ async function runKreaImageModel(
       label: cleanImagePromptLabel(imagePromptLabels[index])
     }))
   );
+  if (isNanoBanana21Model(selectedModel.displayName)) {
+    validateNanoBanana21Request({ prompt: submittedPrompt, images: imagePromptUrls, resolution: req.body.resolution, aspectRatio, provider: "krea" });
+    for (const url of imagePromptUrls) {
+      const asset = await readLocalAsset(url);
+      if (!asset.mimeType?.startsWith("image/")) throw httpError(400, "Nano Banana 2.1 references must be images.");
+    }
+  }
+  const referenceUrls = await Promise.all(imagePromptUrls.map((url) => uploadLocalOutputToKrea(url, kreaApiKey)));
   const resolution = normalizeKreaImageResolution(selectedModel.displayName, req.body.resolution);
   const input = buildKreaImageInput({
     modelName: selectedModel.displayName,
@@ -2689,7 +2698,8 @@ async function runKreaImageModel(
       ...(isOpenAiImage25Model(selectedModel.displayName) ? { background: input.background || "auto" } : {}),
       imagePromptCount: referenceUrls.length,
       imagePromptLabels: cleanReferenceLabels,
-      runtimeProvider: "krea"
+      runtimeProvider: "krea",
+      ...(isNanoBanana21Model(selectedModel.displayName) ? { thinkingLevel: input.thinking_level } : {})
     },
     cost,
     remoteImage,
@@ -3721,6 +3731,15 @@ async function runCompositeUtilityVideo(req, res, { referenceVideoUrls, maskVide
   );
 }
 
+const seedanceDrafts = createSeedanceDraftStore({
+  directory: path.join(dataDir, "seedance-drafts"),
+  getKey: () => process.env.FAL_KEY,
+  createClient: (credentials, endpoint) => createSingleSubmissionFalClient({ credentials, endpoint, model: "Seedance 2.5 draft completion" }),
+  download: (req, url, options) => downloadVideo(req, url, "draft-complete", options),
+  history: item => appendHistory(item, { deduplicate: true })
+});
+registerSeedanceDraftRoutes(app, { store: seedanceDrafts, sendApiError });
+
 app.post("/api/node/generate-video", async (req, res) => {
   try {
     const prompt = String(req.body.prompt || "").trim();
@@ -3729,6 +3748,23 @@ app.post("/api/node/generate-video", async (req, res) => {
     }
 
     const selectedVideoModel = resolveVideoModel(req.body.model);
+    const draftRequested = req.body.seedanceDraft;
+    const draftKey = String(process.env.FAL_KEY || "").trim();
+    const draftMode = draftRequested === undefined ? false : validateSeedanceDraft({ model: selectedVideoModel.displayName,
+      seedanceDraft: draftRequested, provider: draftKey ? "fal" : "" });
+    const draftStartedAt = Date.now();
+    const editing = validateSeedance25Task({ model: selectedVideoModel.displayName, seedanceTask: req.body.seedanceTask,
+      videos: req.body.referenceVideoUrls, startFrames: req.body.startFrameUrls, endFrames: req.body.endFrameUrls,
+      filmDirector: req.body.filmDirector });
+    if (editing && !isLocalAssetUrl(req.body.referenceVideoUrls[0])) throw httpError(400, "Edit Existing Video requires a managed local source video.");
+    if (editing) {
+      for (const [field, limit] of [["referenceImageUrls", seedance25ReferenceLimits.images], ["referenceAudioUrls", seedance25ReferenceLimits.audio]]) {
+        const values = req.body[field] ?? [];
+        if (!Array.isArray(values) || values.length > limit || values.some((url) => !isLocalAssetUrl(url))) {
+          throw httpError(400, `Edit Existing Video requires valid local ${field} within the ${limit}-file limit. No references have been discarded.`);
+        }
+      }
+    }
 
     if (filmDirectorUsesMusic(req.body.filmDirector?.approach, [req.body.filmDirector?.musicReference])) {
       const audioInputs = (Array.isArray(req.body.referenceAudioUrls) ? req.body.referenceAudioUrls : []).filter(isLocalAssetUrl).map((url) => ({ url }));
@@ -3818,19 +3854,26 @@ app.post("/api/node/generate-video", async (req, res) => {
     const referenceAudioUrls = Array.isArray(req.body.referenceAudioUrls)
       ? req.body.referenceAudioUrls.filter(isLocalAssetUrl).slice(0, atlasMediaEnabled() ? undefined : audioReferenceLimit)
       : [];
+    const referenceAudioNames = normalizeReferenceNames(referenceAudioUrls.map((url) => req.body.referenceAudioLabels?.[req.body.referenceAudioUrls.indexOf(url)]), referenceAudioUrls.length, "Audio");
     const seedanceResolutionOptions = ["480p", "720p", "1080p", "4k"];
-    const resolution = seedance25
+    const resolution = draftMode ? "480p" : seedance25
       ? normalizeSeedance25Resolution(req.body.resolution)
       : normalizeChoice(req.body.resolution, seedanceResolutionOptions, "720p");
-    const duration = seedance25 ? normalizeSeedance25Duration(req.body.duration) : normalizeDuration(req.body.duration);
-    const aspectRatio = seedance25 ? normalizeSeedance25AspectRatio(req.body.aspectRatio) : normalizeAspectRatio(req.body.aspectRatio);
+    const duration = editing ? "auto" : seedance25 ? normalizeSeedance25Duration(req.body.duration) : normalizeDuration(req.body.duration);
+    const aspectRatio = editing ? "auto" : seedance25 ? normalizeSeedance25AspectRatio(req.body.aspectRatio) : normalizeAspectRatio(req.body.aspectRatio);
     const generateAudio = normalizeVideoGenerateAudio(req.body.generateAudio);
-    const runtimeProvider = resolveSeedanceRuntimeProvider({
+    const runtimeProvider = draftMode ? "fal" : resolveSeedanceRuntimeProvider({
       falKey: process.env.FAL_KEY,
       kreaKey: process.env.KREA_API_KEY
     }) || (atlasMediaEnabled() ? "atlas" : "");
     if (!runtimeProvider) {
       return res.status(400).json({ error: "Seedance needs an enabled Fal, Krea, or Atlas Cloud API key in Settings." });
+    }
+    let sourceDurationSeconds = null;
+    if (editing) {
+      validateSeedance25Task({ model: selectedVideoModel.displayName, seedanceTask: "edit", provider: runtimeProvider, videos: referenceVideoUrls });
+      const source = await resolveLocalAssetPath(referenceVideoUrls[0]);
+      sourceDurationSeconds = validateSeedance25EditDuration((await probeVideoFile(source.filePath)).duration);
     }
     const kreaApiKey = runtimeProvider === "krea" ? String(process.env.KREA_API_KEY || "").trim() : "";
     const atlasApiKey = runtimeProvider === "atlas" ? String(process.env.ATLAS_API_KEY || "").trim() : "";
@@ -3846,29 +3889,37 @@ app.post("/api/node/generate-video", async (req, res) => {
       routeKind === "reference-to-video"
         ? rewriteSeedanceReferenceMentions(prompt, {
             imageNames: referenceImageNames,
-            videoNames: referenceVideoNames
-          }, { bracketed: seedance25 })
+            videoNames: referenceVideoNames,
+            audioNames: referenceAudioNames
+          })
         : prompt;
+    if (seedance25) validateSeedance25ReferenceTags(submittedPrompt, { images: referenceImageUrls.length, videos: referenceVideoUrls.length, audio: referenceAudioUrls.length });
     let endpoint;
     let requestId;
     let resultSeed = null;
     let remoteVideo;
     let cost;
     let providerName;
+    let draftMetadata = null;
+    let draftWarning = "";
 
     if (runtimeProvider === "atlas") {
       const result = await atlasMedia.video({ model: selectedVideoModel.displayName, prompt: submittedPrompt,
         startImage: startFrameUrl, endImage: endFrameUrl, images: referenceImageUrls,
         videos: referenceVideoUrls, audios: referenceAudioUrls, generateAudio,
-        resolution: req.body.resolution || resolution, duration: req.body.duration || duration,
-        aspectRatio: req.body.aspectRatio || aspectRatio, seed: optionalInteger(req.body.seed) }, atlasApiKey);
+        resolution: req.body.resolution || resolution, duration: editing ? duration : req.body.duration || duration,
+        aspectRatio: editing ? aspectRatio : req.body.aspectRatio || aspectRatio, seed: optionalInteger(req.body.seed),
+        seedanceTask: editing ? "edit" : "reference" }, atlasApiKey);
       endpoint = result.endpoint;
       requestId = result.requestId;
       remoteVideo = result.remoteVideo;
       submittedPrompt = result.input.prompt;
       providerName = "Atlas Cloud";
-      cost = { ...result.cost, aspectRatio: result.sourceAspect ? "source frame" : aspectRatio, routeKind };
+      cost = { ...result.cost, aspectRatio: editing ? "source video" : result.sourceAspect ? "source frame" : aspectRatio, routeKind };
     } else if (runtimeProvider === "fal") {
+      endpoint = seedance25 ? seedance25FalEndpoint(routeKind) : `bytedance/seedance-2.0/${routeKind}`;
+      const draftClient = draftMode ? createSingleSubmissionFalClient({ credentials: draftKey, endpoint, model: "Seedance 2.5 draft" }) : undefined;
+      const uploadReference = url => uploadLocalOutputToFal(url, draftClient);
       const input = {
         prompt: submittedPrompt,
         resolution,
@@ -3877,20 +3928,21 @@ app.post("/api/node/generate-video", async (req, res) => {
         generate_audio: generateAudio
       };
       if (seedance25) input.end_user_id = seedanceEndUserId;
+      if (draftMode) input.draft = true;
+      if (editing) input.task = "editing";
 
       if (routeKind === "image-to-video") {
-        input.image_url = await uploadLocalOutputToFal(startFrameUrl);
-        if (endFrameUrl) input.end_image_url = await uploadLocalOutputToFal(endFrameUrl);
+        input.image_url = await uploadReference(startFrameUrl);
+        if (endFrameUrl) input.end_image_url = await uploadReference(endFrameUrl);
       }
 
       if (routeKind === "reference-to-video") {
-        if (referenceImageUrls.length) input.image_urls = await Promise.all(referenceImageUrls.map(uploadLocalOutputToFal));
-        if (referenceVideoUrls.length) input.video_urls = await Promise.all(referenceVideoUrls.map(uploadLocalOutputToFal));
-        if (referenceAudioUrls.length) input.audio_urls = await Promise.all(referenceAudioUrls.map(uploadLocalOutputToFal));
+        if (referenceImageUrls.length) input.image_urls = await Promise.all(referenceImageUrls.map(uploadReference));
+        if (referenceVideoUrls.length) input.video_urls = await Promise.all(referenceVideoUrls.map(uploadReference));
+        if (referenceAudioUrls.length) input.audio_urls = await Promise.all(referenceAudioUrls.map(uploadReference));
       }
 
-      endpoint = seedance25 ? seedance25FalEndpoint(routeKind) : `bytedance/seedance-2.0/${routeKind}`;
-      const result = await subscribeFal(endpoint, { input, logs: true });
+      const result = await subscribeFal(endpoint, { input, logs: true }, {}, draftClient, draftMode ? draftKey : undefined);
       requestId = result.requestId;
       resultSeed = result?.data?.seed ?? null;
       remoteVideo = result?.data?.video;
@@ -3907,9 +3959,19 @@ app.post("/api/node/generate-video", async (req, res) => {
           });
       cost.aspectRatio = aspectRatio;
       cost.routeKind = routeKind;
+      if (editing) cost = { ...cost, amountUsd: null, unitRateUsd: null, units: sourceDurationSeconds,
+        durationSeconds: sourceDurationSeconds, pricingStatus: "unavailable", pricingSource: "",
+        pricingBasis: "Video editing charge is not verified; source duration is not a settled output charge." };
 
       if (!remoteVideo?.url) {
         return res.status(502).json({ error: "Fal returned no video URL.", raw: result?.data });
+      }
+      if (draftMode) {
+        cost = seedanceDraftCost();
+        draftMetadata = await seedanceDrafts.recordDraft({ draftId: result.data.draft_id, key: draftKey, startedAt: draftStartedAt,
+          original: { prompt, submittedPrompt, project: projectFromBody(req.body), node: nodeFromBody(req.body),
+            settings: { resolution, duration, aspectRatio, generateAudio, seedanceTask: editing ? "edit" : "reference", runtimeProvider: "fal", seedanceDraft: true } } });
+        if (!draftMetadata) draftWarning = "Fal returned a preview without a draft ID. It has been saved, but cannot be finished at 1080p.";
       }
     } else {
       endpoint = kreaSeedanceEndpoint(selectedVideoModel.displayName);
@@ -3972,8 +4034,12 @@ app.post("/api/node/generate-video", async (req, res) => {
         referenceVideoCount: referenceVideoUrls.length,
         referenceVideoNames,
         referenceAudioCount: referenceAudioUrls.length,
+        referenceAudioNames,
+        ...(seedance25 ? { seedanceTask: editing ? "edit" : "reference", sourceDurationSeconds,
+          providerTask: editing ? runtimeProvider === "fal" ? "editing" : "edit" : "reference" } : {}),
         seed: resultSeed,
-        runtimeProvider
+        runtimeProvider,
+        ...(draftMode ? { seedanceDraft: true, draft: draftMetadata } : {})
       },
       cost,
       remoteVideo,
@@ -3990,6 +4056,7 @@ app.post("/api/node/generate-video", async (req, res) => {
       modelName: selectedVideoModel.displayName,
       submittedPrompt,
       cost,
+      ...(draftMode ? { seedanceDraft: draftMetadata, warning: draftWarning } : {}),
       video: {
         ...remoteVideo,
         localUrl: output.publicPath,
@@ -6048,12 +6115,16 @@ function rewriteReferenceMentions(prompt, referenceNames) {
   const mentionMap = new Map();
   const imageNames = referenceNames?.imageNames || [];
   const videoNames = referenceNames?.videoNames || [];
+  const audioNames = referenceNames?.audioNames || [];
 
   imageNames.forEach((name, index) => {
     mentionMap.set(name.toLowerCase(), `@Image${index + 1}`);
   });
   videoNames.forEach((name, index) => {
     mentionMap.set(name.toLowerCase(), `@Video${index + 1}`);
+  });
+  audioNames.forEach((name, index) => {
+    mentionMap.set(name.toLowerCase(), `@Audio${index + 1}`);
   });
 
   return prompt.replace(/@([A-Za-z0-9_-]+)/g, (fullMatch, name) => mentionMap.get(name.toLowerCase()) || fullMatch);
@@ -8927,7 +8998,7 @@ function truncateString(value, maxLength) {
   return text.length > maxLength ? `${text.slice(0, maxLength - 1)}...` : text;
 }
 
-async function appendHistory(item) {
+async function appendHistory(item, { deduplicate = false } = {}) {
   if (item.provider === "fal.ai" && ["image", "video"].includes(item.mediaType) && item.cost) {
     const billing = generationBillingScope.getStore() || [];
     const matches = billing.filter(row => !row.used && row.endpoint === item.endpoint);
@@ -8939,6 +9010,7 @@ async function appendHistory(item) {
   }
   const write = historyWriteQueue.then(async () => {
     const history = await readHistory();
+    if (deduplicate && history.some(entry => entry.id === item.id && entry.endpoint === item.endpoint)) return;
     history.unshift(item);
     await writeHistory(history.slice(0, maxHistoryItems));
   });
@@ -9384,22 +9456,6 @@ function estimateQwenCameraEditCost({ endpoint, image }) {
   };
 }
 
-function estimateNanoBanana2ImageCost({ resolution, endpoint }) {
-  const amountUsd = estimateNanoBanana2Cost(resolution);
-  return {
-    amountUsd: roundCurrency(amountUsd),
-    currency: "USD",
-    unitRateUsd: amountUsd,
-    units: 1,
-    unit: "image",
-    mediaType: "image",
-    resolution,
-    pricingBasis: "Nano Banana 2 fal.ai per-image estimate with high thinking",
-    pricingSource: "fal-model-page-2026-07-15",
-    endpoint
-  };
-}
-
 function estimateImageCost({ resolution }) {
   const normalized = String(resolution || "2K").toUpperCase();
   const amountUsd = normalized.includes("4K") ? nanoBananaCost4K : nanoBananaCost1K2K;
@@ -9737,7 +9793,8 @@ function checkedCreativeLlmResult(result, data, route) {
     if (payload?.error || (payload?.status && payload.status !== "completed") || payload?.partial) {
       throw new Error(`${result.provider} returned an incomplete or failed response. Existing work has been preserved.`);
     }
-    validateCreativeResponse(data, { ...result, route });
+    const validated = validateCreativeResponse(data, { ...result, route });
+    if (route === "explore-plan") result.text = JSON.stringify(validated);
     if (!result.text) throw new Error(`${result.provider} returned no text.`);
     return result;
   } catch (error) {
@@ -11588,7 +11645,9 @@ async function removeLegacyNodeProject(projectId) {
 }
 
 function resolveImageModel(model) {
-  if (String(model || "").trim().toLowerCase() === "ideogram 4.5") return { provider: "fal-ideogram-45", displayName: ideogramImageModelName, id: ideogramImageEndpoint };
+  if (isRetiredNanoBanana2Model(model)) throw httpError(400, "Nano Banana 2 has been retired. Choose Nano Banana 2.1 with Fal or Krea, or Nano Banana Pro.");
+  if (/ideogram/i.test(String(model || ""))) throw httpError(400, "Ideogram 4.5 is available only in Image Edit. Open an image preview and choose the pencil to edit it, or select another generation model.");
+  if (isNanoBanana21Model(model)) return { provider: "fal-nano-banana-21", displayName: nanoBanana21ModelName, id: nanoBanana21FalTextEndpoint };
   if (isSeedream5ProModel(model)) return { provider: "fal-seedream-5-pro", displayName: seedream5ProModelName, id: seedream5ProFalEndpoint() };
   const normalized = String(model || "").toLowerCase();
   if (normalized.includes("sam") && normalized.includes("image")) {
@@ -11604,14 +11663,6 @@ function resolveImageModel(model) {
       provider: "fal-sam3-image",
       displayName: "SAM 3 Image",
       id: "fal-ai/sam-3/image"
-    };
-  }
-
-  if (isNanoBanana2Model(model)) {
-    return {
-      provider: "fal-nano-banana-2",
-      displayName: imageModelNames.nanoBanana2,
-      id: falNanoBanana2TextEndpoint
     };
   }
 
@@ -11889,6 +11940,7 @@ function normalizeImageAspectRatioForProvider(value, provider) {
 }
 
 function imageAspectRatiosForProvider(provider) {
+  if (provider === "fal-nano-banana-21") return nanoBanana21Ratios();
   if (provider === "fal-seedream-5-pro") return seedream5ProAspectRatios;
   return ["fal-openai-image-2", "fal-openai-image-25"].includes(provider) ? openAiImageAspectRatios : nanoImageAspectRatios;
 }
@@ -13162,44 +13214,6 @@ function extractGeminiImageData(data) {
   };
 }
 
-async function generateFalNanoBanana2({ prompt, imagePromptUrls, imagePromptLabels, aspectRatio, resolution }) {
-  const imageInputs = [];
-
-  for (const [index, imagePromptUrl] of imagePromptUrls.entries()) {
-    const asset = await readLocalAsset(imagePromptUrl);
-    if (!asset.mimeType.startsWith("image/")) continue;
-    imageInputs.push({
-      ...asset,
-      label: cleanImagePromptLabel(imagePromptLabels[index])
-    });
-  }
-
-  const imageUrls = await Promise.all(imageInputs.slice(0, 14).map((image, index) => uploadImageInputToFal(image, index)));
-  const endpoint = imageUrls.length ? falNanoBanana2EditEndpoint : falNanoBanana2TextEndpoint;
-  const input = buildNanoBanana2FalInput({
-    prompt: promptWithReferenceLabels(prompt, imageInputs),
-    aspectRatio: normalizeImageAspectRatioForProvider(aspectRatio, "fal-nano-banana-2"),
-    resolution,
-    imageUrls
-  });
-  const result = await subscribeFal(endpoint, { input, logs: true });
-  const remoteImage = firstFalImageResult(result?.data);
-
-  if (!remoteImage?.url) {
-    throw new Error("Fal returned no Nano Banana 2 image URL.");
-  }
-
-  return {
-    endpoint,
-    requestId: result?.requestId || result?.request_id || "",
-    remoteImage,
-    resolution: input.resolution,
-    thinkingLevel: input.thinking_level,
-    submittedPrompt: input.prompt,
-    description: result?.data?.description || result?.data?.text || ""
-  };
-}
-
 async function generateFalNanoBananaPro({ prompt, imagePromptUrls, imagePromptLabels, aspectRatio, resolution }) {
   const imageInputs = [];
 
@@ -13643,13 +13657,13 @@ function isLocalAssetUrl(value) {
   );
 }
 
-async function uploadLocalOutputToFal(publicPath) {
+async function uploadLocalOutputToFal(publicPath, client = fal) {
   const { fileName, buffer } = await readLocalAsset(publicPath);
   const falFile = new File([buffer], fileName, {
     type: mimeForExtension(path.extname(fileName))
   });
 
-  return fal.storage.upload(falFile);
+  return (client?.storage ? client : fal).storage.upload(falFile);
 }
 
 async function uploadLocalOutputToKrea(publicPath, apiKey = process.env.KREA_API_KEY) {

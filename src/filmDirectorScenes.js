@@ -7,6 +7,7 @@ export const filmDirectorNewSceneSetup = Object.freeze({
   skillDurationSeconds: "30",
   skillVideoModel: "Seedance 2.5",
   skillResolution: "1080p",
+  skillSeedanceDraft: false,
   skillAspectRatio: "21:9",
   skillShotCount: "Auto",
   skillDirectorAudioMode: "production"
@@ -126,6 +127,7 @@ const sceneStateKeys = [
   "durationSeconds",
   "skillVideoModel",
   "skillResolution",
+  "skillSeedanceDraft",
   "skillAspectRatio",
   "skillDirectorAudioMode",
   "skillApproach",
@@ -204,6 +206,7 @@ function sceneDefaults(sceneName = "") {
     durationSeconds: "15",
     skillVideoModel: "",
     skillResolution: "720p",
+    skillSeedanceDraft: false,
     skillAspectRatio: "16:9",
     skillDirectorAudioMode: "production",
     skillApproach: "cinematic",

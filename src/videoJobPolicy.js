@@ -1,5 +1,5 @@
 export function isVideoGenerationRoute(route) {
-  return ["/api/generate", "/api/node/generate-video", "/api/node/utility-video"].includes(route);
+  return ["/api/generate", "/api/node/generate-video", "/api/node/utility-video", "/api/node/seedance-draft/complete"].includes(route);
 }
 
 export function isVideoGenerationRequest(path, options = {}) {

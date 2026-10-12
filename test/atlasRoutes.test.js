@@ -5,6 +5,7 @@ import { supportsAtlasImageModel } from "../src/atlasImages.js";
 import { creativeImageDefaultModel } from "../src/modelOptions.js";
 import { generationProviderFromSettings, estimateImageRunCost, estimateVideoRunCost } from "../src/generationPricing.js";
 import { normalizeCharacterWardrobeRequest } from "../server/character-wardrobe.js";
+import { isNanoBanana21Model } from "../src/nanoBanana21.js";
 
 const source = await readFile(new URL("../server/index.js", import.meta.url), "utf8");
 const code = source.slice(source.indexOf('app.post("/api/node/generate-image",'), source.indexOf("\nasync function runKreaImageModel("));
@@ -22,7 +23,7 @@ function imageApi({ failure } = {}) {
   let handler;
   const calls = [], history = [], reads = [];
   const deps = {
-    normalizeCharacterWardrobeRequest,
+    normalizeCharacterWardrobeRequest, isNanoBanana21Model,
     app: { post: (_path, _limiter, run) => { handler = run; } }, imageGenerationRequestLimiter: null,
     process: { env: { ATLAS_API_KEY: "test-atlas-original" } }, atlasMediaEnabled: () => true, supportsAtlasImageModel,
     resolveImageModel: (displayName) => ({ displayName, provider: "fal-openai-image-25" }),
@@ -78,7 +79,7 @@ test("unsupported Atlas models stop before reading references or paying; adapter
 });
 
 test("Atlas estimates use Atlas standard rates and leave unverified token settings unknown", () => {
-  assert.equal(estimateImageRunCost({ model: "Nano Banana 2", resolution: "2K", aspectRatio: "16:9", provider: "atlas", batchCount: 4 }), 0.48);
+  assert.equal(estimateImageRunCost({ model: "Nano Banana Pro", resolution: "1K", aspectRatio: "16:9", provider: "atlas", batchCount: 4 }), 0.56);
   assert.equal(estimateImageRunCost({ model: creativeImageDefaultModel, provider: "atlas" }), null);
   assert.equal(estimateVideoRunCost({ model: "Seedance 2.5", duration: "8 seconds", resolution: "720p", provider: "atlas" }), 3.00456);
   assert.equal(estimateVideoRunCost({ model: "Seedance 2.5", duration: "8 seconds", resolution: "720p", provider: "atlas", hasVideoReference: true }), null);

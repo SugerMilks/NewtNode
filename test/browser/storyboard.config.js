@@ -12,7 +12,7 @@ export default defineConfig({
     enforce: "pre",
     resolveId(id) { if (id === "virtual:storyboard-qa") return virtual; },
     async load(id) {
-      if (id === virtual) { this.addWatchFile(source); return `${await readFile(source, "utf8")}\nexport { NodeBody, createDefaultNodeData };`; }
+      if (id === virtual) { this.addWatchFile(source); return `${await readFile(source, "utf8")}\nexport { NodeBody, createDefaultNodeData, normalizeCurrentNode, directorPackageForVideo };`; }
     },
     handleHotUpdate({ file, server }) {
       if (file === source) {

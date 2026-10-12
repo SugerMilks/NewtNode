@@ -11,11 +11,12 @@ import { atlasPricingEndpoints } from "../src/atlasPricing.js";
 import { kreaPricingModels } from "../server/pricing-sources.js";
 import { estimateImageRunCost } from "../src/generationPricing.js";
 import { PricingRefresh } from "../server/pricing-refresh.js";
-import { isNanoBanana2Model } from "../src/nanoBanana2.js";
+import { isRetiredNanoBanana2Model } from "../src/retiredImageModels.js";
+import * as nanoBanana21 from "../src/nanoBanana21.js";
 import { isSeedream5ProModel, seedream5ProModelName, seedream5ProFalEndpoint } from "../src/seedream5Pro.js";
 import { isOpenAiImage25Model, openAiImage25Variant, openAiImage25Models } from "../src/openAiImage25.js";
 
-const retired = ["Krea 2 Large", "REVE 2.1"];
+const retired = ["Krea 2 Large", "REVE 2.1", "Nano Banana 2", "Ideogram 4.5"];
 
 test("retired choices are absent from catalogs, preferences, favorites and estimates", () => {
   for (const model of retired) {
@@ -32,11 +33,11 @@ test("backend rejects retired names and endpoints instead of silently generating
   const source = await readFile(new URL("../server/index.js", import.meta.url), "utf8");
   const start = source.indexOf("function resolveImageModel(");
   const end = source.indexOf("function resolveUtilityImageModel(", start);
-  const deps = { isSeedream5ProModel, seedream5ProModelName, seedream5ProFalEndpoint, isNanoBanana2Model, isOpenAiImage25Model, openAiImage25Variant, openAiImage25Models,
-    imageModelNames, falNanoBanana2TextEndpoint: "fal-ai/nano-banana-2", falNanoBananaProEndpoint: "fal-ai/nano-banana-pro",
+  const deps = { ...nanoBanana21, isSeedream5ProModel, seedream5ProModelName, seedream5ProFalEndpoint, isRetiredNanoBanana2Model, isOpenAiImage25Model, openAiImage25Variant, openAiImage25Models,
+    imageModelNames, falNanoBananaProEndpoint: "fal-ai/nano-banana-pro",
     httpError: (status, message) => Object.assign(new Error(message), { status }) };
   const resolve = new Function(...Object.keys(deps), source.slice(start, end) + "\nreturn resolveImageModel;")(...Object.values(deps));
-  for (const model of [...retired, "reve/2.1/edit", "reve-ai/reve-2.1/remix", "krea/v2/large/text-to-image", "unknown"]) {
+  for (const model of [...retired, "fal-ai/nano-banana-2", "fal-ai/nano-banana-2/edit", "google/nano-banana-2/edit", "gemini-3.1-flash-image", "ideogram/v4.5", "ideogram/v4.5/edit", "reve/2.1/edit", "reve-ai/reve-2.1/remix", "krea/v2/large/text-to-image", "unknown"]) {
     assert.throws(() => resolve(model), { status: 400 });
   }
   assert.equal(resolve("Nano Banana Pro").displayName, "Nano Banana Pro");
@@ -50,7 +51,7 @@ test("retired cached prices and reviews are pruned without changing history reco
   const initial = new PricingRefresh({ filePath });
   await initial.ready;
   const entry = { currency: "USD", unit: "request", points: [{ amount: 0.2, dimensions: {} }] };
-  const removed = ["fal:reve/2.1/edit", "krea:/generate/image/krea/krea-2/large", "atlas:reve-ai/reve-2.1/edit"];
+  const removed = ["fal:reve/2.1/edit", "krea:/generate/image/krea/krea-2/large", "atlas:reve-ai/reve-2.1/edit", "fal:fal-ai/nano-banana-2", "krea:/generate/image/google/nano-banana-2", "atlas:google/nano-banana-2/edit"];
   const kept = "krea:/generate/image/google/nano-banana-pro";
   const history = [{ model: retired[0], amountUsd: 0.065 }];
   await initial.write(filePath, { ...initial.state, entries: Object.fromEntries([...removed, kept].map(id => [id, entry])),

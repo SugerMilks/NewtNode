@@ -4,12 +4,11 @@ import path from "node:path";
 import { readFile } from "node:fs/promises";
 import * as image25 from "../src/openAiImage25.js";
 import { normalizeOpenAiImage2Quality } from "../src/openAiImage2.js";
-import { buildNanoBanana2FalInput } from "../src/nanoBanana2.js";
 import { createSeedream5ProGenerator } from "../server/seedream5-pro.js";
 
 const source = await readFile(new URL("../server/index.js", import.meta.url), "utf8");
 const names = ["uploadImageInputToFal", "extensionForMime", "promptWithReferenceLabels", "openAiSizeToFalImageSize",
-  "generateFalNanoBanana2", "generateFalNanoBananaPro", "generateFalOpenAiImage2FromInputs"];
+  "generateFalNanoBananaPro", "generateFalOpenAiImage2FromInputs"];
 const code = names.map(name => {
   const start = source.indexOf(`function ${name}(`);
   assert.ok(start >= 0, name);
@@ -23,10 +22,8 @@ const references = [
 function harness({ failUpload = false } = {}) {
   const uploads = [], submissions = [];
   const dependencies = {
-    ...image25, path, buildNanoBanana2FalInput, normalizeOpenAiImage2Quality,
+    ...image25, path, normalizeOpenAiImage2Quality,
     imageModelNames: { openAiImage2: "OpenAI Image 2" },
-    falNanoBanana2EditEndpoint: "fal-ai/nano-banana-2/edit",
-    falNanoBanana2TextEndpoint: "fal-ai/nano-banana-2",
     falNanoBananaProEndpoint: "fal-ai/nano-banana-pro",
     nanoBananaProFalThinkingMode: "high",
     fal: { storage: { upload: async file => {
@@ -52,7 +49,6 @@ function harness({ failUpload = false } = {}) {
 }
 
 const variants = [
-  ["Nano Banana 2", (h, args) => h.generateFalNanoBanana2(args)],
   ["Nano Banana Pro", (h, args) => h.generateFalNanoBananaPro(args)],
   ...["OpenAI Image 2", ...Object.values(image25.openAiImage25Models)].map(model =>
     [model, (h, args) => h.generateFalOpenAiImage2FromInputs({ ...args, model })]),

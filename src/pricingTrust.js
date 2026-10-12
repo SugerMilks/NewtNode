@@ -20,6 +20,8 @@ export function generationQuoteSettings(options = {}) {
     resolution: options.resolution || (kind === "video" ? "720p" : "2K"),
     aspectRatio: options.aspectRatio || "16:9", quality: options.quality || "high",
     duration: kind === "video" ? String(options.duration ?? "5 seconds") : "",
+    ...(kind === "video" && options.seedanceTask === "edit" ? { seedanceTask: "edit" } : {}),
+    ...(kind === "video" && options.seedanceDraft === true ? { seedanceDraft: true } : {}),
     generateAudio: options.generateAudio !== false,
     referenceCount: Number(options.referenceCount || 0), referenceImageCount: Number(options.referenceImageCount || 0),
     hasVideoReference: Boolean(options.hasVideoReference), startFrameCount: Number(options.startFrameCount || 0),

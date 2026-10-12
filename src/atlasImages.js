@@ -8,7 +8,6 @@ const models = {
   [imageModelNames.openAiImage2]: { id: "openai/gpt-image-2", family: "openai", maxReferences: 10 },
   [imageModelNames.openAiImage25Sunburst]: { id: "openai/gpt-image-2.5-sunburst", family: "openai25", maxReferences: 16 },
   [imageModelNames.openAiImage25Flare]: { id: "openai/gpt-image-2.5-flare", family: "openai25", maxReferences: 16 },
-  [imageModelNames.nanoBanana2]: { id: "google/nano-banana-2", family: "nano", maxReferences: 14, thinking: true },
   [imageModelNames.nanoBananaPro]: { id: "google/nano-banana-pro", family: "nano", maxReferences: 10 }
 };
 
@@ -152,7 +151,6 @@ export function buildAtlasImageRequest(options = {}) {
     request.resolution = selectedResolution;
     // These image models have no quality field. High is Newt's neutral default, not a provider tier.
     request.media_resolution = "high";
-    if (config.thinking) request.thinking_level = "high";
   }
 
   if (images.length) request.images = [...images];

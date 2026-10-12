@@ -79,6 +79,22 @@ test("Explore accepts a saved 25-direction selection and enables its run button"
   assert.equal(fixture.find(item => item.props?.className === "primary-button explore-run").props.disabled, false);
 });
 
+test("Explore exposes independent Random selectors and a persistent default-on mode checkbox", () => {
+  const fixture = render(undefined, 0, false, { ...exploreDefaults(), settingsOpen: true });
+  assert.equal(fixture.label("Explore Mode").props.checked, true);
+  fixture.label("Explore Mode").props.onChange({ target: { checked: false } });
+  for (const label of ["Style family", "Grade"]) {
+    const control = fixture.label(label);
+    assert.ok(control.props.children.some(option => option.props.children === "Random"));
+    control.props.onChange({ target: { value: "Random" } });
+  }
+  assert.deepEqual(fixture.updates, [["explore", { exploreMode: false }], ["explore", { styleFamily: "Random" }], ["explore", { gradePreset: "Random" }]]);
+  const closed = render(undefined, 0, false, { settingsOpen: false, exploreMode: false });
+  assert.equal(closed.label("Explore Mode").props.checked, false);
+  assert.equal(closed.label("Style family"), null);
+  assert.equal(render(undefined, 0, true).label("Explore Mode").props.disabled, true);
+});
+
 test("persistent controls page through results, scrub directly and respect endpoints without changing the selected output", () => {
   const fixture = render();
   assert.equal(fixture.label("Scroll thumbnails left").props.disabled, true);

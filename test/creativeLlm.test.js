@@ -15,6 +15,7 @@ import { myNewtRequestEstimate } from "../server/my-newt.js";
 import { processSmartText } from "../server/smart-text.js";
 import { llmResponseEndpoints, llmResponseModel, llmUsageCost, requestLlmResponse } from "../server/llm-responses.js";
 import { currentAtlasLlmRates } from "../src/atlasLlmPricing.js";
+import { explorePlanningInstructions, explorePlanSchema } from "../src/explore.js";
 
 const route = "film-director-style";
 const output = JSON.stringify({ styleDirection: "Muted color, motivated light, restrained performances." });
@@ -142,6 +143,44 @@ test("Fal mood-board analysis explicitly enables mandatory reasoning and still v
   const result = await api.runMediaDescriptionLlm({ ...request, route: "film-director-visual-analysis", inputs: [{ url: "/outputs/mood-board.png" }] });
   assert.equal(result.text, visualOutput);
   assert.equal(result.usages[0].cost, 0.02);
+});
+
+test("Explore text and vision adapters forward the locally normalized plan without another paid request", async () => {
+  const direction = { name: "Soft contrast", concept: "An editorial still life", composition: "Original framing", lighting: "Soft key",
+    palette: ["Ivory", "Charcoal"], treatment: "Fine grain", styleBrief: "Soft warm highlights", prompt: "A softly lit still life", styleFamily: "Echo", gradePreset: "Echo" };
+  for (const provider of ["fal", "atlas", "openai"]) {
+    for (const vision of [false, true]) {
+      let calls = 0;
+      const text = JSON.stringify({ directions: [direction] });
+      const api = adapterFixture({ provider, data: provider === "fal"
+        ? { output: text, usage: { cost: .023 } }
+        : { status: "completed", output_text: text, usage: { input_tokens: 1000, output_tokens: 100 } },
+      onRequest: (_url, body) => {
+        calls++;
+        if (provider === "fal") assert.ok(body.system_prompt.includes(JSON.stringify(explorePlanSchema)));
+        else assert.deepEqual(body.text.format.schema, explorePlanSchema);
+      } });
+      const options = { ...request, route: "explore-plan", systemPrompt: explorePlanningInstructions, inputs: [{ url: "/outputs/reference.png" }] };
+      const result = await (vision ? api.runMediaDescriptionLlm(options) : api.runTextLlm(options));
+      const normalized = JSON.parse(result.text).directions[0];
+      assert.equal(normalized.palette, "Ivory, Charcoal");
+      assert.equal(normalized.styleFamily, undefined); assert.equal(normalized.gradePreset, undefined);
+      assert.equal(normalized.prompt, direction.prompt); assert.equal(calls, 1);
+      assert.ok((result.usage || result.usages[0]).cost > 0);
+    }
+  }
+});
+
+test("Explore rejects genuinely incomplete provider responses with paid usage and no retries", async () => {
+  let calls = 0;
+  const api = adapterFixture({ provider: "fal", data: { output: JSON.stringify({ directions: [{ name: "Missing direction", palette: ["White"] }] }), usage: { cost: .023 } }, onRequest: () => { calls++; } });
+  await assert.rejects(api.runTextLlm({ ...request, route: "explore-plan", systemPrompt: explorePlanningInstructions }), error => {
+    assert.match(error.message, /planning data/);
+    assert.equal(error.cost.amountUsd, .023);
+    assert.equal(error.llmResult.usage.cost, .023);
+    return true;
+  });
+  assert.equal(calls, 1);
 });
 
 test("Fal reasoning is not used as scene output and reasoning-only results retain billed usage", async () => {

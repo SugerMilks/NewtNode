@@ -7,7 +7,7 @@ export const GOOGLE_PRICING_URL = "https://ai.google.dev/gemini-api/docs/pricing
 
 export const kreaPricingModels = [
   ["/generate/image/bytedance/seedream-5-pro", ["resolutionTier", "referenceImageCount"]],
-  ["/generate/image/google/nano-banana-2", ["resolution"]],
+  ["/generate/image/google/nano-banana-2.1", ["resolution"]],
   ["/generate/image/google/nano-banana-pro", ["resolution"]],
   ["/generate/video/bytedance/seedance-2", ["resolution", "hasVideoReference", "duration"]],
   ["/generate/video/bytedance/seedance-2-5", ["resolution", "hasVideoReference", "duration"]],

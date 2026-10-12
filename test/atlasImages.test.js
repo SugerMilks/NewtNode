@@ -8,7 +8,7 @@ const maskUrl = "https://example.com/mask.png";
 const references = (count) => Array.from({ length: count }, (_, index) => `https://example.com/full-${index}.png`);
 const variants = [imageModelNames.openAiImage25Sunburst, imageModelNames.openAiImage25Flare];
 const openAiModels = [imageModelNames.openAiImage2, ...variants];
-const nanoModels = [imageModelNames.nanoBanana2, imageModelNames.nanoBananaPro];
+const nanoModels = [imageModelNames.nanoBananaPro];
 
 // Contract snapshots from the public Atlas schemas, not live generation calls or local cache dependencies.
 // https://static.atlascloud.ai/model/schema/<model-id-with-dashes>.json (2026-09-10)
@@ -16,7 +16,6 @@ const contracts = [
   [imageModelNames.openAiImage2, "openai/gpt-image-2", 10],
   [imageModelNames.openAiImage25Sunburst, "openai/gpt-image-2.5-sunburst", 16],
   [imageModelNames.openAiImage25Flare, "openai/gpt-image-2.5-flare", 16],
-  [imageModelNames.nanoBanana2, "google/nano-banana-2", 14],
   [imageModelNames.nanoBananaPro, "google/nano-banana-pro", 10],
 ];
 const settings = (model, overrides = {}) => ({ model, prompt, ...overrides });
@@ -29,10 +28,10 @@ function rejects(options, pattern) {
 }
 
 test("only exact canonical image models are supported, with no substitutions or LLMs", () => {
-  assert.deepEqual(new Set(atlasImageModels), new Set(imageModelOptions.filter((model) => model !== imageModelNames.ideogram45)));
+  assert.deepEqual(new Set(atlasImageModels), new Set(imageModelOptions.filter((model) => model !== imageModelNames.nanoBanana21)));
   assert.ok(Object.isFrozen(atlasImageModels));
   for (const model of atlasImageModels) assert.equal(supportsAtlasImageModel(model), true);
-  for (const model of [imageModelNames.ideogram45, undefined, null, {}, 2, "", "toString", "__proto__", "OpenAI Image 2.5", "OpenAI Image 2.5 Sunburst Developer",
+  for (const model of ["Ideogram 4.5", imageModelNames.nanoBanana21, undefined, null, {}, 2, "", "toString", "__proto__", "OpenAI Image 2.5", "OpenAI Image 2.5 Sunburst Developer",
     "openai/gpt-image-2-developer/edit", "OpenAI Image 2 Developer", "google/nano-banana-2/text-to-image-developer",
     "Nano Banana 2 Lite", "Nano Banana Pro Ultra", "Gemini 3.1 Pro", "gemini-3.1-flash", "google/gemini-3-pro",
     "REVE", "REVE 2", "Krea 2 Large", "Krea 2 Turbo", "nano banana 2", " OpenAI Image 2 "]) {
@@ -181,11 +180,10 @@ test("automatic sizing is only sent to models that explicitly support it", () =>
 
 test("Nano Banana image models use standard routes and schema-supported high media/reasoning", () => {
   for (const model of nanoModels) {
-    const isNano2 = model === imageModelNames.nanoBanana2;
     assert.deepEqual(buildAtlasImageRequest({ model, prompt }), {
-      model: `google/nano-banana-${isNano2 ? "2" : "pro"}/text-to-image`, prompt,
+      model: "google/nano-banana-pro/text-to-image", prompt,
       aspect_ratio: "16:9", resolution: "2k", media_resolution: "high",
-      ...(isNano2 ? { thinking_level: "high" } : {}), output_format: "png", enable_sync_mode: false
+      output_format: "png", enable_sync_mode: false
     });
     for (const images of [[], references(1)]) for (const resolution of ["1K", "2K", "4K"]) {
       for (const aspectRatio of nanoImageAspectRatios) {
@@ -193,7 +191,7 @@ test("Nano Banana image models use standard routes and schema-supported high med
         assert.equal(result.resolution, resolution.toLowerCase());
         assert.equal(result.aspect_ratio, aspectRatio);
         assert.equal(result.media_resolution, "high");
-        assert.equal(result.thinking_level, isNano2 ? "high" : undefined);
+        assert.equal(result.thinking_level, undefined);
         assert.equal("quality" in result, false);
         assert.equal("size" in result, false);
       }

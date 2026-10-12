@@ -37,7 +37,7 @@ function Harness() {
   async function run(request) {
     update(node.id, { status: "running", error: "", exploreStopRequested: false });
     try {
-      await runExploreGeneration({ node: request, prompt: request.data.prompt, references: [], workflowContext: {}, update: patch => update(node.id, patch),
+      await runExploreGeneration({ node: request, prompt: request.data.prompt, references: connected ? [{ role: "product", label: "Campaign bottle", url: "/outputs/mock-bottle.png" }] : [], workflowContext: {}, update: patch => update(node.id, patch),
         shouldStop: () => ref.current.data.exploreStopRequested,
         plan: async body => { setCalls(value => ({ ...value, plan: value.plan + 1 })); return { directions: Array.from({ length: body.count }, (_, index) => ({ name: `${names[index % names.length]} ${index + 1}`, concept: `${names[index % names.length]}: intentional composition ${index + 1}.`, composition: "Asymmetric framing", lighting: "Soft window light", palette: "Red, cyan and neutral gray", treatment: "Editorial photography", styleBrief: "Motivated light, precise color and restrained materials.", prompt: `A perfume bottle with ${names[index % names.length]}, execution ${index + 1}.` })) }; },
         generate: async args => { await new Promise(resolve => setTimeout(resolve, 700)); setCalls(value => ({ ...value, images: value.images + 1 })); if (fail && args.index === 1) throw new Error("Mock provider failure; previous results remain available."); return [{ url: `/storyboard/MOOD_BOARD.png?qa=${crypto.randomUUID()}`, type: "image", label: "Mock result" }]; }
@@ -68,6 +68,7 @@ function Harness() {
     </article>
     </div>
     <output aria-label="Selected output">{node.data.resultItems[node.data.selectedResultIndex]?.label || "None"}</output>
+    <output aria-label="Saved look choices">{JSON.stringify(node.data.resultItems.map(item => item.exploreSettings))}</output>
     {preview && <dialog open><img src={preview.url} alt={preview.label} style={{ maxWidth: "70vw", maxHeight: "60vh" }} /><button onClick={() => setPreview(null)}>Close preview</button></dialog>}
   </main>;
 }

@@ -22,13 +22,13 @@ function fixture(t) {
 }
 
 test("Atlas account estimates scale batches, cache, coalesce and expire without generating or uploading", async t => {
-  const f = fixture(t), options = { provider: "atlas", model: "Nano Banana 2", resolution: "1K", batchCount: 4 };
+  const f = fixture(t), options = { provider: "atlas", model: "Nano Banana Pro", resolution: "1K", batchCount: 4 };
   const one = f.service.quote(options), two = f.service.quote(options);
   assert.equal(one, two);
   const quote = await one;
   assert.equal(quote.amountUsd, 0.44); assert.equal(quote.estimated, true);
   assert.equal(f.calls.length, 1); assert.equal(f.calls[0].url, ATLAS_CALCULATE_URL);
-  assert.equal(JSON.parse(f.calls[0].init.body).model, "google/nano-banana-2/text-to-image");
+  assert.equal(JSON.parse(f.calls[0].init.body).model, "google/nano-banana-pro/text-to-image");
   assert.ok(!JSON.stringify(quote).includes("test-secret"));
   await f.service.quote(options); assert.equal(f.calls.length, 1);
   f.advance(5 * 60000 + 1); await f.service.quote(options); assert.equal(f.calls.length, 2);
@@ -40,7 +40,7 @@ test("Atlas account estimates scale batches, cache, coalesce and expire without 
 test("display estimates never fabricate reference uploads or fixed token-image prices", async t => {
   const f = fixture(t);
   for (const options of [
-    { kind: "image", model: "Nano Banana 2", referenceCount: 1 },
+    { kind: "image", model: "Nano Banana Pro", referenceCount: 1 },
     { kind: "image", model: "OpenAI Image 2.5 Flare" },
     { kind: "video", model: "Seedance 2.5", hasVideoReference: true },
     { kind: "video", model: "Seedance 2.5", startFrameCount: 1 },
@@ -51,7 +51,7 @@ test("display estimates never fabricate reference uploads or fixed token-image p
 });
 
 test("catalog changes invalidate cached quotes before their TTL", async t => {
-  const f = fixture(t), options = { provider: "atlas", model: "Nano Banana 2" };
+  const f = fixture(t), options = { provider: "atlas", model: "Nano Banana Pro" };
   await f.service.quote(options); assert.equal(f.calls.length, 1);
   f.revise(); await f.service.quote(options); assert.equal(f.calls.length, 2);
 });
@@ -66,10 +66,10 @@ test("Fal display estimates use supported local pricing without unverified unit 
 
 test("quote failures fall back without canceling, replaying or changing providers", async t => {
   const f = fixture(t); f.fail();
-  const quote = await f.service.quote({ provider: "atlas", model: "Nano Banana 2", resolution: "1K" });
-  assert.equal(quote.amountUsd, 0.08); assert.equal(quote.estimated, true);
+  const quote = await f.service.quote({ provider: "atlas", model: "Nano Banana Pro", resolution: "1K" });
+  assert.equal(quote.amountUsd, 0.14); assert.equal(quote.estimated, true);
   assert.equal(f.calls.length, 1);
-  assert.equal(await f.service.atlasInput({ model: "google/nano-banana-2/edit", images: ["https://example.com/image.png"] }, "key"), null);
+  assert.equal(await f.service.atlasInput({ model: "google/nano-banana-pro/edit", images: ["https://example.com/image.png"] }, "key"), null);
 });
 
 test("Atlas payload quote preserves submitted references and token billing is still estimated", async t => {
@@ -108,7 +108,7 @@ test("pricing trust expires old entries, rejects changed contracts, and locks re
 test("display and agent estimators share quotes and discard them on account/catalog changes", t => {
   fixture(t);
   setPricingCatalog({ version: 1, revision: "a", accountRevision: "a", entries: {} });
-  const options = { provider: "atlas", model: "Nano Banana 2", resolution: "1K", batchCount: 4 };
+  const options = { provider: "atlas", model: "Nano Banana Pro", resolution: "1K", batchCount: 4 };
   setGenerationQuote(options, { accountRevision: "a", checkedAt: new Date().toISOString(), amountUsd: 0.44 });
   assert.equal(estimateImageRunCost(options), 0.44);
   assert.notEqual(generationQuoteKey(options), generationQuoteKey({ ...options, batchCount: 2 }));
@@ -127,11 +127,11 @@ test("client quote requests exclude prompts and assets and reject a replaced acc
   setPricingCatalog({ version: 1, revision: "client-quote", accountRevision: "client-account", entries: {} });
   const original = pricingApi.quote;
   t.after(() => { pricingApi.quote = original; });
-  const options = { provider: "atlas", model: "Nano Banana 2", resolution: "1K", prompt: "Private brief", references: [{ url: "/uploads/private.png" }] };
+  const options = { provider: "atlas", model: "Nano Banana Pro", resolution: "1K", prompt: "Private brief", references: [{ url: "/uploads/private.png" }] };
   pricingApi.quote = async settings => {
     assert.ok(!("prompt" in settings)); assert.ok(!("references" in settings));
     return { accountRevision: "replaced-account", checkedAt: new Date().toISOString(), amountUsd: 99 };
   };
-  assert.equal((await refreshGenerationEstimate(options)).amountUsd, 0.08);
+  assert.equal((await refreshGenerationEstimate(options)).amountUsd, 0.14);
   assert.equal(getGenerationQuote(options), null);
 });

@@ -11,7 +11,7 @@ import {
   seedanceVideoDurationOptions,
   seedanceVideoResolutionOptions
 } from "../modelOptions.js";
-import { isSeedance25Model } from "../seedance25.js";
+import { isSeedance25Model, validateSeedance25Task } from "../seedance25.js";
 import { filmDirectorGenerateAudio, normalizeFilmDirectorAudioMode } from "../filmDirectorAudio.js";
 import { filmDirectorMusicVideoError, filmDirectorUsesMusic } from "../filmDirectorApproaches.js";
 import {
@@ -128,6 +128,9 @@ export function buildVideoGenerationRequest({
   const model = activeFilmDirector
     ? normalizeFilmDirectorVideoModel(activeFilmDirector.videoModel, node.data.model)
     : node.data.model;
+  const seedanceTask = isSeedance25Model(node.data.model) ? node.data.seedanceTask || "reference" : "reference";
+  const editing = validateSeedance25Task({ model, seedanceTask, videos: referenceVideoUrls,
+    startFrames: startFrameUrls, endFrames: endFrameUrls, filmDirector: activeFilmDirector });
   const usesMusic = filmDirectorUsesMusic(activeFilmDirector?.approach, [activeFilmDirector?.musicReference]);
   if (usesMusic) {
     const music = filmDirector?.musicReference;
@@ -143,13 +146,14 @@ export function buildVideoGenerationRequest({
   return {
     prompt,
     model,
-    duration: activeFilmDirector
+    ...(isSeedance25Model(model) ? { seedanceTask, seedanceDraft: (activeFilmDirector ? activeFilmDirector.seedanceDraft : node.data.seedanceDraft) === true } : {}),
+    duration: editing ? "Auto" : activeFilmDirector
       ? filmDirectorVideoDuration(model, activeFilmDirector.durationSeconds, node.data.duration)
       : node.data.duration,
-    resolution: activeFilmDirector
+    resolution: isSeedance25Model(model) && (activeFilmDirector ? activeFilmDirector.seedanceDraft : node.data.seedanceDraft) === true ? "480p" : activeFilmDirector
       ? filmDirectorVideoResolution(model, activeFilmDirector.resolution, node.data.resolution)
       : node.data.resolution,
-    aspectRatio: activeFilmDirector
+    aspectRatio: editing ? "Auto" : activeFilmDirector
       ? filmDirectorVideoAspectRatio(model, activeFilmDirector.aspectRatio, node.data.aspectRatio)
       : node.data.aspectRatio,
     generateAudio: usesMusic ? true : activeFilmDirector
@@ -192,9 +196,12 @@ export function normalizeVideoGenerationResult(data, index) {
   return {
     url: data.video.localUrl,
     type: "video",
-    label: `Video ${index + 1}`,
+    label: data.seedanceDraft ? `Draft ${index + 1} (480p)` : data.seedanceDraftSource ? "Finished (1080p)" : `Video ${index + 1}`,
     seed: data.seed,
-    cost: data.cost
+    cost: data.cost,
+    ...(data.seedanceDraft ? { seedanceDraft: data.seedanceDraft } : {}),
+    ...(data.seedanceDraftSource ? { seedanceDraftSource: data.seedanceDraftSource } : {}),
+    ...(data.warning ? { warning: data.warning } : {})
   };
 }
 

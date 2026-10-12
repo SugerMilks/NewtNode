@@ -10,6 +10,7 @@ import sharp from "sharp";
 import { finishOpenAiMaskedEdit } from "../server/openai-edit-mask.js";
 import { isOpenAiImage25Model, openAiImage25Variant } from "../src/openAiImage25.js";
 import { normalizeCharacterWardrobeRequest } from "../server/character-wardrobe.js";
+import { isNanoBanana21Model } from "../src/nanoBanana21.js";
 
 const source = await readFile(new URL("../server/index.js", import.meta.url), "utf8");
 const routeCode = source.slice(source.indexOf('app.post("/api/node/generate-image",'), source.indexOf("\nasync function runKreaImageModel("));
@@ -50,7 +51,7 @@ async function harness(t, provider, model, masked = true, requestOverrides = {})
       maskedEdit: appliedMask, cost, endpoint: "test/edit", size: "32x16", resolution: "4K", quality: "high" };
   };
   const deps = {
-    normalizeCharacterWardrobeRequest,
+    normalizeCharacterWardrobeRequest, isNanoBanana21Model,
     app: { post: (_url, _limiter, callback) => { handler = callback; } }, imageGenerationRequestLimiter: null,
     process: { env: { FAL_KEY: provider === "fal" ? "mock" : "", ATLAS_API_KEY: "mock" } },
     atlasMediaEnabled: () => provider === "atlas", supportsAtlasImageModel: () => true,

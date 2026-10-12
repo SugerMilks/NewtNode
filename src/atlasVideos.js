@@ -4,6 +4,8 @@
 // https://www.atlascloud.ai/docs/more-models/minimax/h3-reference-to-video/generateVideo
 // https://www.atlascloud.ai/docs/more-models/kwaivgi/kling-video-o3-pro-reference-to-video/generateVideo
 // https://www.atlascloud.ai/docs/more-models/kwaivgi/kling-video-o3-4k-image-to-video/generateVideo
+import { validateSeedance25Task } from "./seedance25.js";
+
 const models = new Map([
   ["seedance 2.0", { id: "bytedance/seedance-2.0", family: "seedance", version: "2.0", limits: [9, 3, 3] }],
   ["seedance 2.5", { id: "bytedance/seedance-2.5", family: "seedance", version: "2.5", limits: [30, 10, 10] }],
@@ -27,7 +29,7 @@ export function supportsAtlasVideoModel(name) {
 // those limits. Local URLs are for preflight only; upload before sending the body.
 export function buildAtlasVideoRequest({
   model, prompt, startImage = "", endImage = "", images = [], videos = [], audios = [],
-  aspectRatio, duration, resolution, generateAudio = true, seed, ...unsupported
+  aspectRatio, duration, resolution, generateAudio = true, seed, seedanceTask = "reference", ...unsupported
 } = {}) {
   if (excludedKlingModels.has(modelKey(model))) {
     fail("Atlas Kling O3 is excluded from this integration until direct image/video reference mention syntax is verified. Documented <<<element_N>>> tokens require elements[], not images[]. Kling v3 will not be substituted.");
@@ -45,6 +47,8 @@ export function buildAtlasVideoRequest({
     videos: mediaList(videos, "videos"),
     audios: mediaList(audios, "audios")
   };
+  const editing = validateSeedance25Task({ model, seedanceTask, provider: "atlas", videos: refs.videos,
+    startFrames: first ? [first] : [], endFrames: last ? [last] : [] });
   const hasReferences = Object.values(refs).some((items) => items.length);
   if (last && !first) fail("Atlas endImage requires startImage.");
   if (first && hasReferences) fail("Atlas frame inputs and reference inputs cannot be combined by this adapter. Disconnect one set; no inputs will be dropped.");
@@ -65,9 +69,9 @@ export function buildAtlasVideoRequest({
     if (!is25 && refs.audios.length && !refs.images.length && !refs.videos.length) {
       fail("Atlas Seedance 2.0 audio references require an image or video reference.");
     }
-    request.duration = videoDuration(duration, 4, is25 ? 30 : 15, 5, true);
+    request.duration = editing ? -1 : videoDuration(duration, 4, is25 ? 30 : 15, 5, true);
     request.resolution = choice(resolution, is25 ? seedance25Resolutions : seedance20Resolutions, "720p", "resolution");
-    request.ratio = aspect(aspectRatio, is25 && first ? ["adaptive"] : [...ratios, "adaptive"], first ? "adaptive" : "16:9");
+    request.ratio = editing ? "adaptive" : aspect(aspectRatio, is25 && first ? ["adaptive"] : [...ratios, "adaptive"], first ? "adaptive" : "16:9");
     request.generate_audio = generateAudio;
     if (seed !== undefined) {
       const value = integer(seed, "seed");
@@ -80,8 +84,8 @@ export function buildAtlasVideoRequest({
     if (refs.videos.length) request.reference_videos = refs.videos;
     if (refs.audios.length) request.reference_audios = refs.audios;
     if (hasPrompt) request.prompt = seedanceMentions(prompt, refs, is25);
-    // NewtNode's reference route generates a new clip, not an implicit edit/extend.
-    if (is25 && hasReferences) request.omni_reference_task_type = "reference";
+    // Existing workflows remain reference generation; editing is explicitly opt-in.
+    if (is25 && hasReferences) request.omni_reference_task_type = editing ? "edit" : "reference";
     return request;
   }
 

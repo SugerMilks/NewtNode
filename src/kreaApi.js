@@ -1,4 +1,5 @@
 import { applyPricingQuote } from "./pricingCatalog.js";
+import { isNanoBanana21Model, nanoBanana21ModelName, nanoBanana21KreaEndpoint, buildNanoBanana21Input, nanoBanana21Cost } from "./nanoBanana21.js";
 import { isSeedream5ProModel, seedream5ProModelName, seedream5ProKreaEndpoint, validateSeedream5ProRequest, seedream5ProCost } from "./seedream5Pro.js";
 import { isOpenAiImage25Model, normalizeOpenAiImage25Quality, normalizeOpenAiImage25Background, openAiImage25Variant, validateOpenAiImage25KreaRequest } from "./openAiImage25.js";
 
@@ -7,7 +8,7 @@ export const kreaApiBaseUrl = "https://api.krea.ai";
 export const kreaEndpoints = Object.freeze({
   image: Object.freeze({
     [seedream5ProModelName]: seedream5ProKreaEndpoint,
-    "Nano Banana 2": "/generate/image/google/nano-banana-2",
+    [nanoBanana21ModelName]: nanoBanana21KreaEndpoint,
     "Nano Banana Pro": "/generate/image/google/nano-banana-pro",
     "OpenAI Image 2": "/generate/image/openai/gpt-image-2",
     "OpenAI Image 2.5 Sunburst": "/generate/image/openai/gpt-image-2.5-sunburst",
@@ -29,7 +30,6 @@ export const kreaEndpoints = Object.freeze({
 });
 
 const kreaImagePrices = Object.freeze({
-  "Nano Banana 2": Object.freeze({ "1K": 0.08, "2K": 0.12, "4K": 0.16 }),
   "Nano Banana Pro": Object.freeze({ "1K": 0.15, "2K": 0.15, "4K": 0.3 })
 });
 
@@ -118,6 +118,7 @@ export function buildKreaImageInput({
   background = "auto"
 } = {}) {
   if (!supportsKreaModel("image", modelName)) throw Object.assign(new Error("Unsupported Krea image model. Choose a supported image model."), { status: 400 });
+  if (isNanoBanana21Model(modelName)) return buildNanoBanana21Input({ prompt, images: referenceUrls, aspectRatio, resolution, background, provider: "krea" });
   const normalizedResolution = normalizeKreaImageResolution(modelName, resolution);
   const normalizedAspectRatio = normalizeKreaImageAspectRatio(modelName, aspectRatio);
   const refs = referenceUrls.filter(Boolean);
@@ -168,6 +169,7 @@ export function normalizeKreaImageAspectRatio(modelName, value) {
 }
 
 export function estimateKreaImageCost({ modelName, resolution, aspectRatio, referenceCount = 0 } = {}) {
+  if (isNanoBanana21Model(modelName)) return applyPricingQuote(nanoBanana21Cost({ provider: "krea", resolution, referenceCount }), "krea", nanoBanana21KreaEndpoint, { resolution });
   if (isSeedream5ProModel(modelName)) {
     const cost = seedream5ProCost({ provider: "krea", resolution, aspectRatio, referenceCount });
     return applyPricingQuote(cost, "krea", seedream5ProKreaEndpoint, { resolutionTier: cost.resolutionTier, referenceImageCount: referenceCount });

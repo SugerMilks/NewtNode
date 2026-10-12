@@ -42,8 +42,9 @@ export function createAtlasMedia({ client, readLocalAsset, imageSize, labelPromp
   }
 
   async function video({ startImage = "", endImage = "", images = [], videos = [], audios = [], ...options }, key) {
-    const sourceAspect = Boolean(startImage) && options.model !== "Seedance 2.0";
+    const sourceAspect = (Boolean(startImage) && options.model !== "Seedance 2.0") || options.seedanceTask === "edit";
     if (sourceAspect) options.aspectRatio = "auto";
+    if (options.seedanceTask === "edit") options.duration = "auto";
     // H3 always generates native audio; the caller removes it locally for a silent run.
     if (options.model === "MiniMax H3") options.generateAudio = true;
     const placeholder = "https://reference.invalid/media";

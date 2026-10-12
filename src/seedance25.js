@@ -44,6 +44,39 @@ export function seedance25FalEndpoint(routeKind) {
   return seedance25FalEndpoints[routeKind] || seedance25FalEndpoints["text-to-video"];
 }
 
+// Same model/endpoint, different operation. Never infer editing from a prompt.
+// Fal and Atlas reference-to-video schemas verified 2026-10-06.
+export function validateSeedance25Task({ model, seedanceTask = "reference", provider,
+  videos = [], startFrames = [], endFrames = [], filmDirector } = {}) {
+  const fail = (message) => { throw Object.assign(new Error(message), { status: 400 }); };
+  if (!["reference", "edit"].includes(seedanceTask)) fail("Unknown Seedance task. Choose Generate Video or Edit Existing Video.");
+  if (seedanceTask === "reference") return false;
+  if (!isSeedance25Model(model)) fail("Edit Existing Video requires Seedance 2.5.");
+  if (provider && !["atlas", "fal"].includes(provider)) fail("Seedance video editing is verified for Fal and Atlas only. No provider has been changed.");
+  if (!Array.isArray(videos) || videos.length !== 1) fail("Edit Existing Video requires exactly one connected Reference Video.");
+  if (!Array.isArray(startFrames) || !Array.isArray(endFrames)) fail("Invalid frame inputs for Edit Existing Video.");
+  if (startFrames.length || endFrames.length) fail("Edit Existing Video cannot use Start or End Frames. Connect the look reference to Reference Image instead.");
+  if (filmDirector) fail("Disconnect Director before editing an existing video; its scene timing must not override the source clip.");
+  return true;
+}
+
+export function validateSeedance25EditDuration(duration) {
+  if (!Number.isFinite(duration) || duration < 4 || duration > 30) {
+    throw Object.assign(new Error("Edit Existing Video requires a readable source video between 4 and 30 seconds. No generation was submitted."), { status: 400 });
+  }
+  return duration;
+}
+
+export function validateSeedance25ReferenceTags(prompt, { images = 0, videos = 0, audio = 0 } = {}) {
+  const counts = { image: images, video: videos, audio };
+  const invalid = [...String(prompt || "").matchAll(/(?<![A-Za-z0-9._%+-])@([A-Za-z0-9_-]+)|\[(Image\d+|Video\d+|Audio\d+)\]/gi)]
+    .map((match) => match[1] || match[2]).filter((tag) => {
+      const match = tag.match(/^(Image|Video|Audio)([1-9]\d*)$/i);
+      return !match || Number(match[2]) > counts[match[1].toLowerCase()];
+    });
+  if (invalid.length) throw Object.assign(new Error(`Unmatched reference tags: ${[...new Set(invalid)].map((tag) => `@${tag}`).join(", ")}. Match the connected node names exactly, or use numbered references such as @Image1 and @Video1.`), { status: 400 });
+}
+
 export function normalizeSeedance25Duration(value, fallback = "15") {
   if (String(value || "").trim().toLowerCase() === "auto") return "auto";
   const seconds = Number.parseInt(String(value || "").match(/\d+/)?.[0] || "", 10);

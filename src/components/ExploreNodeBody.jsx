@@ -1,8 +1,7 @@
 import React from "react";
 import { Compass, GitBranch, Sparkles, Pencil, Combine, Pause, Play, Star, Trash2, ChevronDown, ChevronLeft, ChevronRight, Info } from "lucide-react";
 import { NodeRow, OutputPortRow, CollapsedInputPorts } from "./NodePorts.jsx";
-import { exploreTasks, exploreInfluences, exploreModels, exploreGrades, exploreMaxDirections, normalizeExploreData, exploreSelectionPatch, exploreReferenceDescription } from "../explore.js";
-import { stylePresetNames } from "../modelOptions.js";
+import { exploreTasks, exploreInfluences, exploreModels, exploreGrades, exploreStyleFamilies, exploreMaxDirections, normalizeExploreData, exploreSelectionPatch, exploreReferenceDescription } from "../explore.js";
 import { estimateImageRunCost, formatPricedRunLabel } from "../generationPricing.js";
 import "../explore.css";
 
@@ -148,11 +147,15 @@ export function ExploreNodeBody({ node, config, incoming, prompt, onUpdate, onRu
     {!busy && uncertain && <div className="explore-error" role="alert">An interrupted image may still be generating. Check History and the provider before starting another run; it will not be retried automatically.</div>}
     {!settingsValid && <div className="explore-error" role="alert">Choose an enabled model and supported format in Settings.</div>}
 
-    <div className="explore-settings-heading"><button aria-expanded={data.settingsOpen} onClick={() => update({ settingsOpen: !data.settingsOpen })}><ChevronDown size={15} />Settings</button></div>
+    <div className="explore-settings-heading"><button aria-expanded={data.settingsOpen} onClick={() => update({ settingsOpen: !data.settingsOpen })}><ChevronDown size={15} />Settings</button>
+      <label className="explore-mode" title="On: eclectic, distinct looks. Off: restrained variations. Image / Product content stays fixed unless the brief explicitly changes it.">
+        <input aria-label="Explore Mode" type="checkbox" checked={data.exploreMode} disabled={busy} onChange={event => update({ exploreMode: event.target.checked })} />Explore Mode
+      </label>
+    </div>
     {data.settingsOpen &&
       <fieldset className="explore-settings" disabled={busy}>
         {row("Creative Task", select("creativeTask", exploreTasks))}
-        {row("Style Family", select("styleFamily", ["Auto", ...stylePresetNames.filter(name => name !== "None")]))}
+        {row("Style Family", select("styleFamily", exploreStyleFamilies))}
         {row("Creative Range", <div className="explore-range"><input aria-label="Creative range" type="range" min="0" max="100" step="5" value={data.creativeRange} onChange={event => update({ creativeRange: Number(event.target.value) })} /><output>{data.creativeRange}</output></div>)}
         {row("Reference Influence", select("referenceInfluence", exploreInfluences))}
         {row("Directions", <input aria-label="Directions" type="number" min="1" max={exploreMaxDirections} value={data.directionCount} onChange={event => update({ directionCount: Number(event.target.value) })} />)}

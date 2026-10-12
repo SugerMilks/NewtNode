@@ -11,10 +11,10 @@ import { myNewtCompletedRunRecord } from "../src/myNewt/runReuse.js";
 const owner = { projectId: "auto-review-test", nodeId: "newt" };
 const snapshot = () => myNewtSnapshot({ ...owner, nodes: [
   { id: "newt", type: "myNewt", data: {} },
-  { id: "image", type: "imageModel", data: { title: "Image", model: "Nano Banana 2", prompt: "A city", status: "ready" } }
+  { id: "image", type: "imageModel", data: { title: "Image", model: "Nano Banana Pro", prompt: "A city", status: "ready" } }
 ], edges: [], groups: [] });
-const plan = { summary: "Create one image", steps: [{ id: "render", title: "Render the image" }], deliverables: [{ kind: "image", nodeId: "image", label: "Image", count: 1 }], runs: [{ kind: "image", model: "Nano Banana 2", batchCount: 1 }] };
-const preview = { title: "Image", model: "Nano Banana 2", provider: "fal", count: 1, estimatedCost: 0.12 };
+const plan = { summary: "Create one image", steps: [{ id: "render", title: "Render the image" }], deliverables: [{ kind: "image", nodeId: "image", label: "Image", count: 1 }], runs: [{ kind: "image", model: "Nano Banana Pro", batchCount: 1 }] };
+const preview = { title: "Image", model: "Nano Banana Pro", provider: "fal", count: 1, estimatedCost: 0.12 };
 const response = (operation, payload) => ({ usage: { input_tokens: 100, output_tokens: 100 }, output: [{ type: "function_call", name: "project_action", call_id: crypto.randomUUID(), arguments: JSON.stringify({ operation, payload: JSON.stringify(payload), reason: operation }) }] });
 async function wait(service) {
   for (let i = 0; i < 1000; i++) { if (!service.loops.size) return; await new Promise((resolve) => setTimeout(resolve, 3)); }
@@ -41,7 +41,7 @@ async function fixture(t, options = {}) {
   };
   const prepare = (job, details = preview) => service.prepare(job.id, { ...owner, actionId: job.pending.id, preview: details });
   const claim = (job) => service.claim(job.id, { ...owner, actionId: job.pending.id, clientId: "editor" });
-  const request = (job, sequence = 1) => service.request(job.id, { ...owner, actionId: job.pending.id, clientId: "editor", sequence, route: "/api/node/generate-image", body: { nodeId: "image", model: "Nano Banana 2" } });
+  const request = (job, sequence = 1) => service.request(job.id, { ...owner, actionId: job.pending.id, clientId: "editor", sequence, route: "/api/node/generate-image", body: { nodeId: "image", model: "Nano Banana Pro" } });
   return { service, start, prepare, claim, request, calls, submissions };
 }
 

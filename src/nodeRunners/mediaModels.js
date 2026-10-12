@@ -4,26 +4,18 @@ import { storyboardCharacterImageSettings } from "../storyboardImageModels.js";
 import { isOpenAiImage25Model, openAiImage25KreaSelection } from "../openAiImage25.js";
 import { characterVideoBaseReferences } from "../characterVideoSheets.js";
 import { workflowContextPayload } from "../workflowContext.js";
-import { isIdeogramImageModel, validateIdeogramImageRequest } from "../ideogramImage.js";
 
 export async function runImageModelGeneration({ node, prompt, aspectRatio, imagePromptItems, workflowContext, index }) {
-  const ideogram = isIdeogramImageModel(node.data.model);
   const imagePromptUrls = imagePromptItems.map((item) => item.url);
-  const imagePromptLabels = imagePromptItems.map((item) => ideogram ? item.label || "Connected image" : item.label);
-  const ideogramEdit = ideogram && imagePromptUrls.length > 0;
-  if (ideogram) validateIdeogramImageRequest({
-    ...node.data, prompt, aspectRatio: aspectRatio || node.data.aspectRatio, imagePromptUrls, imagePromptLabels
-  });
+  const imagePromptLabels = imagePromptItems.map((item) => item.label);
   const { response, data } = await nodeApi.generateImage({
     prompt,
     model: node.data.model,
     aspectRatio: aspectRatio || node.data.aspectRatio,
-    requestedAspectRatio: ideogramEdit ? "Auto" : node.data.aspectRatio,
+    requestedAspectRatio: node.data.aspectRatio,
     resolution: node.data.resolution,
     quality: node.data.quality,
-    ...(!ideogram ? { background: node.data.background } : {}),
-    ...(ideogram ? { ideogramSourceUrl: node.data.ideogramSourceUrl || "",
-      ...(!ideogramEdit ? { enablePromptExpansion: node.data.enablePromptExpansion !== false } : {}) } : {}),
+    background: node.data.background,
     imagePromptUrls,
     imagePromptLabels,
     ...workflowContextPayload(workflowContext),
@@ -33,8 +25,8 @@ export async function runImageModelGeneration({ node, prompt, aspectRatio, image
   if (!response.ok) throw new Error(`Run ${index + 1}: ${data.error || "Image generation failed."}`);
 
   const images = Array.isArray(data.images) && data.images.length ? data.images : [data.image].filter(Boolean);
-  if (ideogram && (!images.length || images.some((image) => !image?.localUrl)))
-    throw new Error(`Run ${index + 1}: Ideogram 4.5 returned no saved image. Check History before running again.`);
+  if (!images.length || images.some((image) => !image?.localUrl))
+    throw new Error(`Run ${index + 1}: Image generation returned no saved image. Check History before running again.`);
   return images.map((image, imageIndex) => ({
     url: image.localUrl,
     thumbnailUrl: image.thumbnailUrl || "",
@@ -43,10 +35,7 @@ export async function runImageModelGeneration({ node, prompt, aspectRatio, image
     text: data.text || "",
     cost: imageIndex === 0 ? data.cost : null,
     layerIndex: image.layerIndex || null,
-    ...(ideogram ? { warning: data.warning || "", model: data.model || node.data.model, provider: data.provider || "fal.ai",
-      seed: image.seed ?? data.seed, quality: image.quality || node.data.quality,
-      ...(ideogramEdit ? { sourceUrl: image.localUrl, referenceSourceUrl: image.sourceUrl, imagePromptCount: image.imagePromptCount, editPrecision: image.editPrecision }
-        : { enablePromptExpansion: image.enablePromptExpansion ?? (node.data.enablePromptExpansion !== false) }) } : {})
+    ...(data.warning ? { warning: data.warning } : {})
   }));
 }
 

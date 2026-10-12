@@ -8,7 +8,7 @@ import { parseAtlasPricing } from "../server/atlas-pricing.js";
 import { PricingRefresh } from "../server/pricing-refresh.js";
 import { setPricingCatalog, getPricingCatalog, recordedCostAmount } from "../src/pricingCatalog.js";
 
-const banana = "google/nano-banana-2/text-to-image";
+const banana = "google/nano-banana-pro/text-to-image";
 const h3 = "minimax/h3/reference-to-video";
 const version = `sha256:${"a".repeat(64)}`;
 
@@ -35,11 +35,11 @@ const catalogFixture = () => ({ code: 200, data: Object.keys(atlasPricingSpecs).
 const parsed = (model) => parseAtlasPricing({ code: 200, data: [model] }).find((row) => row.id === `atlas:${model.id}`);
 
 test("Nano Banana standard image tiers and request add-ons are exact on text and edit routes", () => {
-  for (const [resolution, price] of [["1K", 0.08], ["2K", 0.12], ["4K", 0.16]]) for (const referenceCount of [0, 1, 14]) {
-    const options = { modelName: "Nano Banana 2", resolution, referenceCount, aspectRatio: "16:9" };
+  for (const [resolution, price] of [["1K", 0.14], ["4K", 0.24]]) for (const referenceCount of [0, 1, 10]) {
+    const options = { modelName: "Nano Banana Pro", resolution, referenceCount, aspectRatio: "16:9" };
     assert.equal(estimateAtlasImageCost(options).amountUsd, price);
-    assert.equal(estimateAtlasImageCost({ ...options, enableWebSearch: true, enableImageSearch: true }).amountUsd, Math.round((price + 0.028) * 1e6) / 1e6);
-    assert.equal(estimateAtlasImageCost(options).endpoint, `google/nano-banana-2/${referenceCount ? "edit" : "text-to-image"}`);
+    assert.equal(estimateAtlasImageCost({ ...options, enableWebSearch: true }).amountUsd, Math.round((price + 0.014) * 1e6) / 1e6);
+    assert.equal(estimateAtlasImageCost(options).endpoint, `google/nano-banana-pro/${referenceCount ? "edit" : "text-to-image"}`);
   }
   for (const referenceCount of [0, 10]) {
     assert.equal(estimateAtlasImageCost({ model: "Nano Banana Pro", resolution: "1K", referenceCount }).amountUsd, 0.14);
@@ -49,11 +49,11 @@ test("Nano Banana standard image tiers and request add-ons are exact on text and
 });
 
 test("unsupported, ambiguous, promotional and token-billed image requests stay unknown", () => {
-  const base = { model: "Nano Banana 2", resolution: "1K" };
+  const base = { model: "Nano Banana Pro", resolution: "1K" };
   for (const change of [{ resolution: "8K" }, { resolution: undefined }, { referenceCount: -1 }, { referenceCount: 15 },
     { referenceCount: "1" }, { aspectRatio: "auto" }, { size: "2048x1024" }, { n: 2 }, { n: 2, numImages: 1 },
     { videoClipCount: 1 }, { hasVideoReference: true }, { enableWebSearch: "false" }, { enableWebSearch: false, enable_web_search: true },
-    { images: ["reference"], referenceCount: 0 }, { modelName: "Nano Banana Pro" }, { routeKind: "reference-to-image" },
+    { images: ["reference"], referenceCount: 0 }, { modelName: "OpenAI Image 2" }, { routeKind: "reference-to-image" },
     { model: "google/nano-banana-2/text-to-image-developer" }, { model: "google/nano-banana-pro/edit-ultra" },
     { model: "REVE 2.1" }, { model: "OpenAI Image 2" }, { model: "OpenAI Image 2.5 Sunburst" }, { model: "OpenAI Image 2.5 Flare" }]) {
     const cost = estimateAtlasImageCost({ ...base, ...change });
@@ -96,7 +96,7 @@ test("video price summaries, token estimates and missing reference durations nev
 
 test("public adapter applies standard rows only, ignoring discounts, account quotes and generic summaries", () => {
   const results = parseAtlasPricing(catalogFixture());
-  assert.equal(results.filter((row) => row.entry).length, 7);
+  assert.equal(results.filter((row) => row.entry).length, 5);
   for (const row of results.filter((row) => row.entry)) {
     assert.deepEqual(row.entry.points, atlasPricingEntry(row.id.slice(6)).points);
     assert.equal(row.entry.priceKind, "standard");
@@ -138,13 +138,13 @@ test("shared catalog overrides bundled rates without revaluing recorded costs or
   const entry = parsed(model).entry;
   assert.ok(entry);
   const snapshot = { version: 1, revision: "atlas-test-refresh", entries: { [`atlas:${banana}`]: { ...entry, checkedAt: "2026-09-14" } } };
-  const costBefore = estimateAtlasImageCost({ model: "Nano Banana 2", resolution: "1K" });
+  const costBefore = estimateAtlasImageCost({ model: "Nano Banana Pro", resolution: "1K" });
   setPricingCatalog(snapshot);
-  const cost = estimateAtlasImageCost({ model: "Nano Banana 2", resolution: "1K" });
-  assert.equal(cost.amountUsd, 0.088);
+  const cost = estimateAtlasImageCost({ model: "Nano Banana Pro", resolution: "1K" });
+  assert.equal(cost.amountUsd, 0.154);
   assert.equal(cost.pricingVersion, "atlas-test-refresh");
   assert.equal(cost.pricingCheckedAt, "2026-09-14");
-  assert.equal(recordedCostAmount(costBefore), 0.08);
+  assert.equal(recordedCostAmount(costBefore), 0.14);
   for (const change of [{ priceKind: "account" }, { rulesVersion: 2 }, { source: "https://other.example" }, { unit: "second" }, { points: [] }]) {
     assert.equal(estimateAtlasImageCost({ model: banana, resolution: "1K", snapshot: { ...snapshot,
       entries: { [`atlas:${banana}`]: { ...entry, ...change } } } }).amountUsd, null);
@@ -165,7 +165,7 @@ test("daily adapter uses existing persistence, no auth or paid requests, and sur
   };
   const service = new PricingRefresh({ filePath, enableAtlasPricing: true, fetchImpl, now: () => Date.parse("2026-09-14T08:00:00Z") });
   await service.ready; await service.refresh();
-  assert.equal(service.status().sources.atlas.applied, 7);
+  assert.equal(service.status().sources.atlas.applied, 5);
   assert.equal(service.catalog().entries[`atlas:${banana}`].priceKind, "standard");
   assert.equal(calls.filter((call) => call.url === ATLAS_PRICING_URL).length, 1);
   assert.ok(calls.every(({ init }) => (init.method || "GET") === "GET" && !init.headers.Authorization));

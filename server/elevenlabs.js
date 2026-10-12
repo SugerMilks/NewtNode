@@ -6,7 +6,7 @@ const fail = (status, message) => Object.assign(new Error(message), { status });
 
 export function elevenLabsRates(env = process.env) {
   const rates = { ...elevenLabsPricing };
-  for (const [field, name] of Object.entries({ ttsPerThousand: "TTS_PER_1000_CHARACTERS", flashPerThousand: "FLASH_PER_1000_CHARACTERS", stsPerMinute: "STS_PER_MINUTE", sfxPerMinute: "SFX_PER_MINUTE", musicPerMinute: "MUSIC_PER_MINUTE" })) {
+  for (const [field, name] of Object.entries({ v4PerThousand: "V4_PER_1000_CHARACTERS", ttsPerThousand: "TTS_PER_1000_CHARACTERS", flashPerThousand: "FLASH_PER_1000_CHARACTERS", stsPerMinute: "STS_PER_MINUTE", sfxPerMinute: "SFX_PER_MINUTE", musicPerMinute: "MUSIC_PER_MINUTE" })) {
     const value = env[`ELEVENLABS_${name}_USD`];
     if (value != null && value !== "" && Number.isFinite(Number(value)) && Number(value) >= 0) rates[field] = Number(value);
   }

@@ -25,17 +25,17 @@ test("image run estimates include quality, edit route, provider, and batch count
     batchCount: 4
   }), 1.652);
   assert.equal(estimateImageRunCost({
-    model: "Nano Banana 2",
+    model: "Nano Banana 2.1",
     resolution: "2K",
     provider: "fal",
     batchCount: 4
-  }), 0.488);
+  }), null);
   assert.equal(estimateImageRunCost({
-    model: "Nano Banana 2",
+    model: "Nano Banana 2.1",
     resolution: "2K",
     provider: "krea",
     batchCount: 4
-  }), 0.48);
+  }), 0.202);
 });
 
 test("video run estimates include duration, audio, references, provider, and batch count", () => {

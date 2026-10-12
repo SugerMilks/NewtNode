@@ -45,7 +45,7 @@ function setup(t, quoteInput) {
 test("Atlas quotes the complete prepared request; a pricing failure never blocks or replays generation", async t => {
   const quote = { amountUsd: 0.123, currency: "USD", estimated: true };
   const quoteInput = t.mock.fn(async () => quote), h = setup(t, quoteInput);
-  const result = await h.media.image({ model: "Nano Banana 2", prompt, imageInputs: refs(1), aspectRatio: "16:9", resolution: "1K" }, key);
+  const result = await h.media.image({ model: "Nano Banana Pro", prompt, imageInputs: refs(1), aspectRatio: "16:9", resolution: "1K" }, key);
   assert.equal(result.cost.amountUsd, quote.amountUsd);
   assert.deepEqual(quoteInput.mock.calls[0].arguments[0], submitted(h));
   assert.equal(quoteInput.mock.calls[0].arguments[1], key);
@@ -76,7 +76,7 @@ test("all supported image models preserve exact routes, ordered native reference
     ["OpenAI Image 2", "openai/gpt-image-2"],
     ["OpenAI Image 2.5 Sunburst", "openai/gpt-image-2.5-sunburst"],
     ["OpenAI Image 2.5 Flare", "openai/gpt-image-2.5-flare"],
-    ["Nano Banana 2", "google/nano-banana-2"],
+    ["Nano Banana Pro", "google/nano-banana-pro"],
     ["Nano Banana Pro", "google/nano-banana-pro"],
   ];
   for (const [model, id] of contracts) for (const count of [0, 1, 2]) {
@@ -167,7 +167,7 @@ test("explicit OpenAI size is preserved and invalid explicit size is never defau
 });
 
 test("Nano Banana remove shared OpenAI fields before requests and pricing", async (t) => {
-  for (const model of ["Nano Banana 2", "Nano Banana Pro"]) {
+  for (const model of ["Nano Banana Pro"]) {
     const h = setup(t);
     const options = Object.freeze({ model, prompt, size: "2048x1152", resolution: "2K", quality: "max", background: "transparent", aspectRatio: "9:16" });
     const result = await h.media.image(options, key);
@@ -182,7 +182,7 @@ test("Nano Banana remove shared OpenAI fields before requests and pricing", asyn
     assert.equal(result.size, undefined);
     {
       assert.equal(body.media_resolution, "high");
-      assert.equal(body.thinking_level, model === "Nano Banana 2" ? "high" : undefined);
+      assert.equal(body.thinking_level, undefined);
       // Verify adapter settings reach pricing cleanly; an unverified price may correctly remain null.
       assert.deepEqual(result.cost, estimateAtlasImageCost({ model, resolution: "2K", aspectRatio: "9:16", referenceCount: 0 }));
     }
@@ -194,14 +194,14 @@ test("Nano Banana remove shared OpenAI fields before requests and pricing", asyn
 
 test("image reference caps and unsupported native settings reject before transfers", async (t) => {
   for (const [model, cap] of [["OpenAI Image 2", 10], ["OpenAI Image 2.5 Sunburst", 16],
-    ["OpenAI Image 2.5 Flare", 16], ["Nano Banana 2", 14], ["Nano Banana Pro", 10]]) {
+    ["OpenAI Image 2.5 Flare", 16], ["Nano Banana Pro", 10]]) {
     const h = setup(t);
     await assert.rejects(h.media.image({ model, prompt, imageInputs: refs(cap + 1) }, key), new RegExp(`${cap} reference images`));
     noTransfers(h);
   }
   for (const options of [
     { model: "REVE 2.1", resolution: "8K" }, { model: "REVE 2.1", resolution: "1K" },
-    { model: "Nano Banana 2", resolution: "0.5K" }, { model: "OpenAI Image 2", quality: "max" },
+    { model: "Nano Banana Pro", resolution: "0.5K" }, { model: "OpenAI Image 2", quality: "max" },
     { model: "Nano Banana Pro", editMaskInput: asset("mask.png") },
     { model: "OpenAI Image 2.5 Sunburst", editMaskInput: asset("mask.png") }, { model: "Krea 2 Large" }
   ]) {
@@ -367,7 +367,7 @@ test("video references at their limits are uploaded without truncation", async (
 
 test("upload and generation failures propagate without retrying or submitting partial references", async (t) => {
   for (const mode of ["image", "video"]) {
-    const options = mode === "image" ? { model: "Nano Banana 2", prompt, imageInputs: refs(2) }
+    const options = mode === "image" ? { model: "Nano Banana Pro", prompt, imageInputs: refs(2) }
       : { model: "Seedance 2.5", prompt, images: refs(2) };
     const failedUpload = setup(t);
     const uploadError = new Error("Mock upload failure");

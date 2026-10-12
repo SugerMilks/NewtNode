@@ -2,8 +2,9 @@ import test from "node:test";
 import { isCoverageNode } from "../src/coveragePresets.js";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { exploreDefaults, exploreRequest, normalizeExploreData, exploreSelectionPatch, validateExplorePlan, exploreImagePrompt, explorePlanningInstructions, exploreGrades, exploreReferenceDescription } from "../src/explore.js";
+import { exploreDefaults, exploreRequest, exploreDirectionRequest, explorePlanningPrompt, normalizeExploreData, normalizeExplorePlan, explorePlanSchema, exploreSelectionPatch, validateExplorePlan, exploreImagePrompt, explorePlanningInstructions, exploreGrades, exploreStyleFamilies, exploreReferenceDescription } from "../src/explore.js";
 import { gradePresetPrompts } from "../src/colorLook.js";
+import { stylePresetPrompts } from "../src/modelOptions.js";
 import { normalizedResultItems } from "../src/mediaResults.js";
 import { runExploreGeneration } from "../src/nodeRunners/explore.js";
 import { clearStaleRunningState } from "../src/workflowState.js";
@@ -67,7 +68,7 @@ test("removed Advanced Outputs state is discarded without altering saved images 
 
 test("medium, reference authority and cinematic craft are explicit rather than a universal film filter", () => {
   assert.match(explorePlanningInstructions, /Graphic\/logo tasks require clean marks/);
-  assert.match(explorePlanningInstructions, /not merely in grade/);
+  assert.match(explorePlanningInstructions, /scene content, viewpoint, framing, subject proportions and positions stay fixed/);
   assert.match(explorePlanningInstructions, /None of these settings weakens subject\/identity fidelity/);
   const request = exploreRequest(input({ references: [{ url: "/outputs/product.png", role: "product", label: "Bottle" }, { url: "/outputs/mood.png", role: "mood", label: "Lighting" }], camera: "35mm", style: "Muted color" }));
   const prompt = exploreImagePrompt(request, direction(), 1);
@@ -89,15 +90,179 @@ test("Astra structured output and Fal local validation reject malformed, duplica
   assert.throws(() => validateCreativeResponse({ status: "incomplete" }, { route: request.route, provider: "mock", text: JSON.stringify(plan) }), /incomplete/);
 });
 
+test("Explore gives Fal the exact output contract, including string palettes and no echoed look fields", () => {
+  const body = falLlmInput({ model: "openai/gpt-6-astra", route: "explore-plan", prompt: "Brief", systemPrompt: explorePlanningInstructions });
+  assert.ok(body.system_prompt.includes(JSON.stringify(explorePlanSchema)));
+  assert.match(body.system_prompt, /Palette is one descriptive string, never an array or object/);
+  assert.match(body.system_prompt, /request metadata are inputs only/);
+  assert.equal(body.prompt, "Brief");
+  assert.equal(body.reasoning, true);
+  assert.equal(body.response_format, undefined, "the Fal adapter must not invent an unsupported schema parameter");
+});
+
+test("Explore canonicalizes harmless metadata and string palettes without changing required content", () => {
+  const raw = { commentary: "Unused", directions: [{ ...direction(), palette: [" Warm ivory ", "Deep charcoal"], styleFamily: "Echoed family", gradePreset: "Echoed grade" }] };
+  const original = structuredClone(raw);
+  const expected = { directions: [{ ...direction(), palette: "Warm ivory, Deep charcoal" }] };
+  assert.deepEqual(normalizeExplorePlan(raw), expected);
+  assert.deepEqual(raw, original);
+  for (const provider of ["fal", "atlas", "OpenAI"]) {
+    assert.deepEqual(validateCreativeResponse({}, { route: "explore-plan", provider, text: JSON.stringify(raw) }), expected);
+  }
+  const invalid = [
+    null, [], {}, { directions: [] }, { directions: [null] }, { directions: [[direction()]] },
+    ...[[], [" "], ["warm", 2], [{ color: "blue" }], { primary: "blue" }, null, " ", "x".repeat(5001)].map(palette => ({ directions: [{ ...direction(), palette }] })),
+    { directions: [{ ...direction(), prompt: undefined }] },
+    { directions: [{ ...direction(), name: "x".repeat(101) }] },
+    { directions: Array.from({ length: 26 }, (_, index) => direction(`Look ${index}`)) }
+  ];
+  for (const value of invalid) {
+    assert.throws(() => validateCreativeResponse({}, { route: "explore-plan", provider: "fal", text: JSON.stringify(value) }), /planning data/);
+  }
+  for (const data of [{ partial: true }, { status: "incomplete" }, { choices: [{ finish_reason: "content_filter" }] }, { output: [{ content: [{ type: "refusal" }] }] }]) {
+    assert.throws(() => validateCreativeResponse(data, { route: "explore-plan", provider: "fal", text: JSON.stringify(raw) }), /incomplete or refused/);
+  }
+  assert.throws(() => validateCreativeResponse({}, { route: "film-director-style", provider: "fal", text: JSON.stringify({ styleDirection: "Good light", extra: true }) }), /planning data/);
+});
+
 function runnerFixture(patch = {}, options = {}) {
-  let data = { ...exploreDefaults(), directionCount: 2, prompt: "Bottle", ...patch }, plans = 0, generations = [];
-  const run = () => runExploreGeneration({ node: { id: "explore-test", data, type: "explore" }, prompt: data.prompt, references: [], workflowContext: { projectId: "test" },
+  let data = { ...exploreDefaults(), directionCount: 2, prompt: "Bottle", ...patch }, plans = 0, generations = [], planningRequests = [];
+  const run = () => runExploreGeneration({ node: { id: "explore-test", data, type: "explore" }, prompt: data.prompt, references: options.references || [], workflowContext: { projectId: "test" },
     update: update => { data = { ...data, ...structuredClone(update) }; options.onUpdate?.(data); }, shouldStop: options.shouldStop,
-    plan: async request => { plans++; return { directions: Array.from({ length: request.count }, (_, index) => direction(`Direction ${index + 1}`)) }; },
+    plan: async request => { plans++; planningRequests.push(request); return options.plan ? options.plan(request) : { directions: Array.from({ length: request.count }, (_, index) => direction(`Direction ${index + 1}`)) }; },
     generate: async args => { generations.push(args); if (options.generate) return options.generate(args, generations.length); return [item(`Image ${generations.length}`)]; }
   });
-  return { run, data: () => data, plans: () => plans, generations, patch: patch => { data = { ...data, ...patch }; } };
+  return { run, data: () => data, plans: () => plans, generations, planningRequests, patch: patch => { data = { ...data, ...patch }; } };
 }
+
+test("Explore Mode defaults on and explicit off plus Random controls survive reopening", () => {
+  assert.equal(exploreDefaults().exploreMode, true);
+  assert.equal(normalizeExploreData({}).exploreMode, true);
+  assert.deepEqual(exploreStyleFamilies.slice(0, 2), ["Auto", "Random"]);
+  assert.deepEqual(exploreGrades.slice(0, 2), ["None", "Random"]);
+  const data = normalizeExploreData({ exploreMode: false, styleFamily: "Random", gradePreset: "Random", resultItems: [item()] });
+  assert.deepEqual(normalizeExploreData(JSON.parse(JSON.stringify(data))), data);
+  assert.equal(data.exploreMode, false); assert.equal(data.styleFamily, "Random"); assert.equal(data.gradePreset, "Random");
+});
+
+test("random choices balance each preset pool and resolved guidance remains consistent", () => {
+  const request = exploreRequest(input({ data: { directionCount: 25, styleFamily: "Random", gradePreset: "Random" }, random: () => 0.3 }));
+  assert.equal(request.directionLooks.length, 25);
+  const styles = request.directionLooks.map(look => look.styleFamily), grades = request.directionLooks.map(look => look.gradePreset);
+  assert.equal(new Set(styles.slice(0, 14)).size, 14);
+  assert.equal(new Set(grades.slice(0, 10)).size, 10);
+  assert.equal(new Set(request.directionLooks.map(look => JSON.stringify(look))).size, 25);
+  assert.ok(styles.every(name => !["None", "Auto", "Random", "UGC Device", "Sexy as Fuk", "Strange as Fuk"].includes(name)));
+  const planning = JSON.parse(explorePlanningPrompt(request));
+  request.directionLooks.forEach((look, index) => {
+    const resolved = exploreDirectionRequest(request, index);
+    assert.equal(resolved.style, stylePresetPrompts[look.styleFamily]);
+    assert.equal(resolved.grade, gradePresetPrompts[look.gradePreset]);
+    assert.equal(planning.lookGuidance.styles[look.styleFamily], resolved.style);
+    assert.equal(planning.lookGuidance.grades[look.gradePreset], resolved.grade);
+    assert.ok(exploreImagePrompt(resolved, direction()).includes(resolved.grade));
+    assert.ok(exploreImagePrompt(resolved, direction()).includes(`Selected style family (${look.styleFamily}) takes precedence`));
+    assert.match(exploreImagePrompt(resolved, direction()), /black-and-white work use tonal contrast only/);
+  });
+  const different = exploreRequest(input({ data: { directionCount: 25, styleFamily: "Random", gradePreset: "Random" }, random: () => 0.8 }));
+  assert.notDeepEqual(different.directionLooks, request.directionLooks);
+});
+
+test("random style and random grade are independent and graphic tasks stay graphic", () => {
+  for (const data of [{ styleFamily: "Random", gradePreset: "Warm" }, { styleFamily: "Cinematic Standard", gradePreset: "Random" }, { styleFamily: "Auto", gradePreset: "None" }]) {
+    const request = exploreRequest(input({ data }));
+    for (const look of request.directionLooks) {
+      if (data.styleFamily !== "Random") assert.equal(look.styleFamily, data.styleFamily);
+      if (data.gradePreset !== "Random") assert.equal(look.gradePreset, data.gradePreset);
+    }
+  }
+  const graphic = exploreRequest(input({ data: { creativeTask: "Brand / Logo", styleFamily: "Random", directionCount: 25 } }));
+  assert.ok(graphic.directionLooks.every(look => !/Cinematic|Photography|Vintage/.test(look.styleFamily)));
+});
+
+test("attached content is locked for both modes while mood-only references are not scene templates", () => {
+  for (const exploreMode of [true, false]) {
+    const request = exploreRequest(input({ data: { exploreMode, creativeRange: 100 }, references: [{ role: "product", url: "/outputs/scene.png", label: "Scene" }] }));
+    assert.equal(request.preserveImageContent, true);
+    const planned = JSON.parse(explorePlanningPrompt(request));
+    assert.match(planned.contentPreservation, /poses, expressions, wardrobe, accessories/);
+    assert.match(planned.contentPreservation, /camera viewpoint, framing and spatial relationships/);
+    const image = exploreImagePrompt(exploreDirectionRequest(request, 0), direction());
+    assert.ok(image.endsWith(planned.contentPreservation));
+    assert.match(image, /Only an explicit change/);
+    if (!exploreMode) assert.match(image, /restrained, faithful/);
+  }
+  const mood = exploreRequest(input({ references: [{ role: "mood", url: "/outputs/look.png" }] }));
+  assert.equal(mood.preserveImageContent, false);
+  assert.equal(JSON.parse(explorePlanningPrompt(mood)).contentPreservation, undefined);
+  assert.match(explorePlanningInstructions, /even when Explore Mode is on/);
+});
+
+test("planning reconstruction validates and preserves assigned looks without rerolling", async () => {
+  let handler, calls = 0, planned;
+  registerExploreRoutes({ post: (_, fn) => { handler = fn; } }, {
+    runTextLlm: async options => { calls++; planned = JSON.parse(options.prompt); return { text: JSON.stringify({ directions: [direction(), direction("Second")] }) }; },
+    recordHistory: async () => {}, estimateCost: () => ({ amountUsd: 0 })
+  });
+  const request = exploreRequest(input({ data: { directionCount: 2, exploreMode: false, styleFamily: "Random", gradePreset: "Random" }, style: "Soft light" }));
+  const response = () => ({ code: 200, status(code) { this.code = code; return this; }, json(value) { this.value = value; } });
+  const res = response(); await handler({ body: request }, res);
+  assert.equal(res.code, 200); assert.equal(planned.exploreMode, false);
+  assert.deepEqual(planned.directionLooks, request.directionLooks);
+  assert.equal(planned.connectedStyle, "Soft light");
+  for (const directionLooks of [[], [{ styleFamily: "Random", gradePreset: "Warm" }, request.directionLooks[1]], [{ styleFamily: "invented", gradePreset: "Warm" }, request.directionLooks[1]]]) {
+    const failed = response(); await handler({ body: { ...request, directionLooks } }, failed);
+    assert.equal(failed.code, 400);
+  }
+  assert.equal(calls, 1);
+});
+
+test("random batches save actual looks per result, resume the same choices and reuse them for More Like This", async () => {
+  let stop = false, pauseAfterFirst = true;
+  const fixture = runnerFixture({ directionCount: 3, styleFamily: "Random", gradePreset: "Random" }, {
+    references: [{ role: "product", label: "Scene", url: "/outputs/scene.png" }], shouldStop: () => stop,
+    onUpdate: data => { if (pauseAfterFirst && data.resultItems.length === 1) { stop = true; pauseAfterFirst = false; } }
+  });
+  await fixture.run();
+  const request = fixture.planningRequests[0];
+  assert.equal(fixture.data().status, "paused");
+  assert.equal(fixture.generations.length, 1);
+  const savedQueue = structuredClone(fixture.data().exploreQueue);
+  stop = false;
+  fixture.patch({ exploreAction: "retry", styleFamily: "Auto", gradePreset: "None", exploreMode: false });
+  await fixture.run();
+  assert.equal(fixture.plans(), 1); assert.equal(fixture.generations.length, 3);
+  for (let index = 0; index < 3; index++) {
+    const result = fixture.data().resultItems[index], look = request.directionLooks[index];
+    assert.equal(result.exploreSettings.styleFamily, look.styleFamily);
+    assert.equal(result.exploreSettings.gradePreset, look.gradePreset);
+    assert.match(result.prompt, /CONTENT LOCK/);
+    assert.ok(result.prompt.includes(gradePresetPrompts[look.gradePreset]));
+    assert.equal(result.prompt, exploreImagePrompt(savedQueue[index].request, savedQueue[index].direction));
+  }
+  const chosen = fixture.data().resultItems[1];
+  fixture.patch({ exploreAction: "more", exploreParentIndexes: [1], styleFamily: "Random", gradePreset: "Random" });
+  await fixture.run();
+  assert.equal(fixture.plans(), 1);
+  assert.equal(fixture.data().resultItems.at(-1).exploreSettings.styleFamily, chosen.exploreSettings.styleFamily);
+  assert.equal(fixture.data().resultItems.at(-1).exploreSettings.gradePreset, chosen.exploreSettings.gradePreset);
+  const refined = exploreRequest(input({ data: { styleFamily: "Random", gradePreset: "Random" }, action: "refine", parents: [chosen], note: "Softer highlights" }));
+  assert.deepEqual(refined.directionLooks[0], { styleFamily: chosen.exploreSettings.styleFamily, gradePreset: chosen.exploreSettings.gradePreset });
+});
+
+test("new look requests require updated backend support before paid planning", async t => {
+  let supported = false, posts = 0;
+  t.mock.method(globalThis, "fetch", async (url, options) => {
+    if (String(url).endsWith("/api/health")) return Response.json({ routes: { exploreLookVariation: supported } });
+    assert.equal(options.method, "POST"); posts++;
+    return Response.json({ directions: [direction()] });
+  });
+  const request = exploreRequest(input({ data: { directionCount: 1 } }));
+  await assert.rejects(nodeApi.planExplore(request), /Restart.*No planning or generation was submitted/);
+  assert.equal(posts, 0);
+  supported = true;
+  await nodeApi.planExplore(request); assert.equal(posts, 1);
+});
 
 test("full exploration preserves old outputs and appends each image with its reusable direction", async () => {
   const fixture = runnerFixture({ resultItems: [item("Existing")] });
@@ -260,6 +425,45 @@ test("planning route records successful and rejected paid usage, sends labeled i
   const invalid = response(); await handler({ body: { ...body, references: [{ role: "product", url: "https://untrusted.example/file" }] } }, invalid);
   assert.equal(invalid.code, 400);
   assert.equal(calls.length, 2);
+});
+
+test("planning cleanup reaches the image runner once, preserves old work and records malformed usage without replay", async () => {
+  let handler, calls = 0, history = [], invalid = false;
+  const output = { directions: [direction(), direction("Reflections")].map(value => ({ ...value, palette: ["Ivory", "Charcoal"], styleFamily: "Extra", gradePreset: "Extra" })) };
+  registerExploreRoutes({ post: (_, fn) => { handler = fn; } }, {
+    runTextLlm: async () => { calls++; return { provider: "fal", model: "openai/gpt-6-astra", usage: { cost: .02 }, text: JSON.stringify(invalid ? { directions: [{ ...direction(), palette: { color: "blue" } }] } : output) }; },
+    recordHistory: async entry => history.push(entry), estimateCost: () => ({ amountUsd: .02 })
+  });
+  const fixture = runnerFixture({ resultItems: [item("Existing")], styleFamily: "Random", gradePreset: "Random" }, {
+    plan: async body => {
+      const res = { code: 200, status(code) { this.code = code; return this; }, json(value) { this.value = value; } };
+      await handler({ body }, res);
+      if (res.code !== 200) throw new Error(res.value.error);
+      return res.value;
+    }
+  });
+  await fixture.run();
+  assert.equal(calls, 1); assert.equal(fixture.generations.length, 2); assert.equal(history.length, 1);
+  assert.equal(fixture.data().resultItems[0].label, "Existing");
+  for (let index = 0; index < 2; index++) {
+    const result = fixture.data().resultItems[index + 1];
+    assert.equal(result.direction.palette, "Ivory, Charcoal");
+    assert.equal(result.direction.gradePreset, undefined);
+    assert.equal(result.exploreSettings.gradePreset, fixture.planningRequests[0].directionLooks[index].gradePreset);
+  }
+  assert.deepEqual(JSON.parse(history[0].text), normalizeExplorePlan(output));
+  const saved = structuredClone(fixture.data());
+  invalid = true;
+  await assert.rejects(fixture.run(), error => {
+    assert.match(error.message, /^Explore: incomplete planning data/);
+    assert.doesNotMatch(error.message, /Explore: Explore:/);
+    return true;
+  });
+  assert.equal(calls, 2); assert.equal(fixture.generations.length, 2);
+  assert.equal(history.length, 2); assert.equal(history[1].cost.amountUsd, .02);
+  assert.match(history[1].error, /planning data/);
+  assert.deepEqual(fixture.data().resultItems, saved.resultItems);
+  assert.deepEqual(fixture.data().exploreQueue, saved.exploreQueue);
 });
 
 test("the planning route and structured schema accept 25 directions and reject oversized batches", async () => {

@@ -1,5 +1,5 @@
 import sharp from "sharp";
-import { createFalClient } from "@fal-ai/client";
+import { createSingleSubmissionFalClient } from "./fal-single-submission.js";
 import { buildOpenAiImage25FalRequest, openAiImage25Models } from "../src/openAiImage25.js";
 import { ideogramImageEditModel, validateIdeogramImageEditRequest, buildIdeogramImageEditFalRequest } from "../src/ideogramImageEdit.js";
 import { buildImageEditPrompt, imageEditMaxPixels, imageEditSize } from "../src/imageEdit.js";
@@ -87,26 +87,5 @@ export async function generateFalImageEdit({ model, prompt, quality, editPrecisi
 }
 
 export function createIdeogramImageEditClient(credentials, fetchImpl = fetch) {
-  return createIdeogramFalClient(credentials, "ideogram/v4.5/edit", fetchImpl);
-}
-
-export function createIdeogramFalClient(credentials, endpoint, fetchImpl = fetch) {
-  let submitted = false;
-  const operation = endpoint.endsWith("/edit") ? "edit" : "generation";
-  // The SDK retries queue submissions even with maxRetries: 0. A request-scoped
-  // fetch guard enforces one outbound paid POST while allowing status/result reads.
-  return createFalClient({ credentials, retry: { maxRetries: 0 }, fetch: async (input, init = {}) => {
-    const url = new URL(typeof input === "string" || input instanceof URL ? input : input.url);
-    const method = String(init.method || input?.method || "GET").toUpperCase();
-    const paidSubmission = method === "POST" && url.hostname === "queue.fal.run" && url.pathname.replace(/\/$/, "") === `/${endpoint}`;
-    if (paidSubmission) {
-      if (submitted) throw Object.assign(new Error(`Ideogram 4.5 submission could not be confirmed. Check Fal history before rerunning; NewtNode did not resubmit the ${operation}.`), { status: 502 });
-      submitted = true;
-    }
-    try { return await fetchImpl(input, init); }
-    catch (error) {
-      if (!paidSubmission) throw error;
-      throw Object.assign(new Error(`Ideogram 4.5 submission could not be confirmed. Check Fal history before rerunning. ${error.message}`), { status: 502, cause: error });
-    }
-  } });
+  return createSingleSubmissionFalClient({ credentials, endpoint: "ideogram/v4.5/edit", model: ideogramImageEditModel }, fetchImpl);
 }

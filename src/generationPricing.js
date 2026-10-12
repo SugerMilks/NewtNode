@@ -1,11 +1,10 @@
 import { estimateKreaImageCost, estimateKreaKlingCost, estimateKreaMiniMaxH3Cost, kreaEndpointForModel } from "./kreaApi.js";
 import { estimateKreaSeedanceCost } from "./kreaSeedance.js";
 import { estimateMiniMaxH3FalCost } from "./minimaxH3.js";
-import { estimateNanoBanana2Cost } from "./nanoBanana2.js";
 import { estimateOpenAiImage2Cost } from "./openAiImage2.js";
 import { isOpenAiImage25Model } from "./openAiImage25.js";
 import { isSeedream5ProModel, seedream5ProCost } from "./seedream5Pro.js";
-import { isIdeogramImageModel, ideogramImageCost } from "./ideogramImage.js";
+import { isNanoBanana21Model, nanoBanana21Cost } from "./nanoBanana21.js";
 import { estimateSeedance25FalCost } from "./seedance25.js";
 import { estimateAtlasImageCost, estimateAtlasVideoCost } from "./atlasPricing.js";
 import { getGenerationQuote, getPricingCatalog } from "./pricingCatalog.js";
@@ -65,7 +64,7 @@ export function estimateImageRunCost({
 } = {}) {
   const quote = getGenerationQuote({ kind: "image", model, resolution, aspectRatio, quality, referenceCount, batchCount, provider });
   if (quote) return quote.amountUsd;
-  if (isIdeogramImageModel(model)) return null;
+  if (isNanoBanana21Model(model)) return totalEstimate(provider === "krea" ? estimateKreaImageCost({ modelName: model, resolution, referenceCount }).amountUsd : nanoBanana21Cost({ resolution, referenceCount }).amountUsd, batchCount);
   if (provider === "atlas") return totalEstimate(estimateAtlasImageCost({ model, resolution, aspectRatio, quality, referenceCount }).amountUsd, batchCount);
   const normalizedProvider = provider === "krea" ? "krea" : "fal";
   const references = Math.max(0, Number(referenceCount) || 0);
@@ -88,10 +87,6 @@ export function estimateImageRunCost({
       quality,
       edit: references > 0
     });
-  } else if (model === "Nano Banana 2") {
-    unitCost = normalizedProvider === "krea"
-      ? estimateKreaImageCost({ modelName: model, resolution, referenceCount: references }).amountUsd
-      : estimateNanoBanana2Cost(resolution);
   } else if (model === "Nano Banana Pro") {
     unitCost = normalizedProvider === "krea"
       ? estimateKreaImageCost({ modelName: model, resolution, referenceCount: references }).amountUsd
@@ -103,6 +98,8 @@ export function estimateImageRunCost({
 
 export function estimateVideoRunCost({
   model,
+  seedanceTask,
+  seedanceDraft,
   duration = "5 seconds",
   resolution = "720p",
   aspectRatio = "16:9",
@@ -115,6 +112,7 @@ export function estimateVideoRunCost({
   batchCount = 1,
   provider = "fal"
 } = {}) {
+  if (seedanceTask === "edit" || seedanceDraft) return null;
   const quote = getGenerationQuote({ kind: "video", model, duration, resolution, aspectRatio, generateAudio, hasVideoReference, referenceImageCount, startFrameCount, endFrameCount, audioReferenceCount, batchCount, provider });
   if (quote) return quote.amountUsd;
   if (provider === "atlas") return totalEstimate(estimateAtlasVideoCost({ model, duration, resolution, aspectRatio, generateAudio, hasVideoReference, referenceImageCount, startFrameCount, ...(audioReferenceCount ? { refers: true } : {}) }).amountUsd, batchCount);
@@ -159,10 +157,12 @@ export function formatPricedRunLabel(label, amountUsd) {
 
 export function generationEstimate(raw) {
   const options = generationQuoteSettings(raw);
+  if (options.seedanceDraft) return { amountUsd: null, currency: "USD", estimated: true,
+    pricingStatus: "unavailable", pricingBasis: "Draft preview and 1080p completion are billed separately. No verified estimate is available." };
+  if (options.seedanceTask === "edit") return { amountUsd: null, currency: "USD", estimated: true,
+    pricingStatus: "unavailable", pricingBasis: "Video editing cost depends on the source clip and provider usage." };
   const cached = getGenerationQuote(options);
   if (cached) return cached;
-  if (options.kind === "image" && isIdeogramImageModel(options.model))
-    return { ...ideogramImageCost(options), units: options.batchCount, estimated: true, pricingStatus: "unavailable" };
   const amountUsd = (options.kind === "video" ? estimateVideoRunCost : estimateImageRunCost)(options);
   let endpoint = "";
   if (options.provider === "krea") endpoint = kreaEndpointForModel(options.kind, options.model);

@@ -1,6 +1,6 @@
 import { openAiImage25Models, isOpenAiImage25Model } from "./openAiImage25.js";
 import { seedream5ProModelName, isSeedream5ProModel } from "./seedream5Pro.js";
-import { ideogramImageModelName, isIdeogramImageModel } from "./ideogramImage.js";
+import { nanoBanana21ModelName, isNanoBanana21Model } from "./nanoBanana21.js";
 import {
   seedance25AspectRatioOptions,
   seedance25DurationOptions,
@@ -30,35 +30,35 @@ export const imageBatchOptions = Array.from({ length: 9 }, (_value, index) => St
 export const imageModelAutoAspectRatio = "Auto";
 export const imageModelNames = {
   seedream5Pro: seedream5ProModelName,
-  ideogram45: ideogramImageModelName,
-  nanoBanana2: "Nano Banana 2",
+  nanoBanana21: nanoBanana21ModelName,
   nanoBananaPro: "Nano Banana Pro",
   openAiImage2: "OpenAI Image 2",
   openAiImage25Sunburst: openAiImage25Models.sunburst,
   openAiImage25Flare: openAiImage25Models.flare
 };
 export const imageModelOptions = [
-  imageModelNames.nanoBanana2,
+  imageModelNames.nanoBanana21,
   imageModelNames.nanoBananaPro,
   imageModelNames.openAiImage2,
   imageModelNames.openAiImage25Sunburst,
   imageModelNames.openAiImage25Flare,
-  imageModelNames.seedream5Pro,
-  imageModelNames.ideogram45
+  imageModelNames.seedream5Pro
 ];
-export const imageWorkspaceModelOptions = imageModelOptions.filter((model) => !isIdeogramImageModel(model));
+export const imageWorkspaceModelOptions = [...imageModelOptions];
 export const creativeImageDefaultModel = imageModelNames.openAiImage25Sunburst;
 export const storyboardImageDefaultModel = imageModelNames.openAiImage25Flare;
 export const coverageModelOptions = [
   creativeImageDefaultModel,
   imageModelNames.openAiImage2,
   imageModelNames.nanoBananaPro,
+  imageModelNames.nanoBanana21,
   imageModelNames.seedream5Pro
 ];
 export const storyboardImageModelOptions = [
   storyboardImageDefaultModel,
   creativeImageDefaultModel,
   imageModelNames.openAiImage2,
+  imageModelNames.nanoBanana21,
   imageModelNames.seedream5Pro
 ];
 export const nanoImageAspectRatios = ["21:9", "16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3", "4:5", "5:4"];
@@ -188,7 +188,7 @@ export const videoModelOptions = [
 ];
 export const videoWorkspaceModelOptions = [...videoModelOptions];
 export const defaultModelPreferences = {
-  image: Object.fromEntries(imageModelOptions.map((model) => [model, model === imageModelNames.openAiImage2 || isOpenAiImage25Model(model) || isSeedream5ProModel(model) || isIdeogramImageModel(model)])),
+  image: Object.fromEntries(imageModelOptions.map((model) => [model, model === imageModelNames.openAiImage2 || isOpenAiImage25Model(model) || isSeedream5ProModel(model) || isNanoBanana21Model(model)])),
   video: Object.fromEntries(videoModelOptions.map((model) => [model, true]))
 };
 export function normalizeModelPreferences(value = {}) {

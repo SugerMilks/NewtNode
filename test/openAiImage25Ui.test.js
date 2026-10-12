@@ -182,7 +182,7 @@ test("saved creative models and full-resolution results survive restoration; leg
       }
     }
     const legacy = normalizeCurrentNode({ id: "old", type, data: {} }).data;
-    assert.equal(legacy[field], type === "character" ? "Nano Banana 2" : "OpenAI Image 2");
+    assert.equal(legacy[field], type === "character" ? "Nano Banana Pro" : "OpenAI Image 2");
   }
   for (const aspectRatio of ["3:2", "2:3"]) {
     const restored = normalizeCurrentNode({ id: "board", type: "storyboard", data: { model: openAiImage25Models.sunburst, aspectRatio } });

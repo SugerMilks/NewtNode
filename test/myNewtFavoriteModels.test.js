@@ -19,7 +19,7 @@ const catalog = [
   { type: "imageModel", options: { model: models.imageModelOptions }, ports: { input: [{ id: "promptIn" }], output: [{ id: "imageOut" }] } },
   { type: "videoModel", options: { model: models.videoModelOptions }, ports: { input: [{ id: "promptIn" }, { id: "directorIn" }], output: [{ id: "videoOut" }] } },
   { type: "coverage", options: { model: ["OpenAI Image 2", "Nano Banana Pro", "OpenAI Image 2.5 Flare"] } },
-  { type: "character", options: { characterSheetModel: ["Nano Banana 2", "Nano Banana Pro", "OpenAI Image 2"] } },
+  { type: "character", options: { characterSheetModel: ["Nano Banana Pro", "Nano Banana Pro", "OpenAI Image 2"] } },
   { type: "skillDirector", options: { skillVideoModel: models.videoModelOptions }, ports: { input: [], output: [{ id: "directorOut" }] } },
   { type: "plainText", ports: { input: [], output: [{ id: "promptOut" }] } },
   { type: "preview", ports: { input: [{ id: "sourceIn" }], output: [] } }

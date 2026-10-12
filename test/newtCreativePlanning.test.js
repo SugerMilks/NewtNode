@@ -141,7 +141,7 @@ test("a preset edited after plan approval needs reinspection and a new plan", as
       case 1: return response("read", { presetId: "look" });
       case 2: return response("plan", savedPlan);
       case 3:
-        f.presets[0].graph.nodes[1].data.model = "Nano Banana 2";
+        f.presets[0].graph.nodes[1].data.model = "Nano Banana 2.1";
         return response("read", { presetId: "look" });
       case 4: return response("preset", { presetId: "look" });
       case 5:

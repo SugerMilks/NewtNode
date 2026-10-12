@@ -12,9 +12,9 @@ function Harness() {
   const [width, setWidth] = React.useState(640);
   const [ran, setRan] = React.useState(false);
   const [node, setNode] = React.useState({ id: "ideogram-qa", type: "imageModel", data: {
-    ...createDefaultNodeData("imageModel", "Ideogram QA", 1), model: "Ideogram 4.5",
+    ...createDefaultNodeData("imageModel", "Image models QA", 1), model: "Nano Banana 2.1",
     prompt: "Rework the lettering using the connected references.", settingsOpen: true,
-    quality: "high", resolution: "2K", aspectRatio: "16:9", enablePromptExpansion: false,
+    quality: "high", resolution: "2K", aspectRatio: "16:9",
     resultUrl: "/storyboard/MOOD_BOARD.png"
   } });
   const incoming = { imagePromptIn: Array.from({ length: count }, (_, index) => ({ source: {
@@ -38,7 +38,7 @@ function Harness() {
         onUpdate={(_id, patch) => setNode(current => ({ ...current, data: { ...current.data, ...patch } }))}
         onRun={() => setRan(true)} onConnectStart={() => {}} onDisconnectInput={() => {}} onPreviewOpen={() => {}} />
     </section>
-    <output aria-label="Test result">{JSON.stringify({ source: node.data.ideogramSourceUrl || "First connected", ran, expansion: node.data.enablePromptExpansion })}</output>
+    <output aria-label="Test result">{JSON.stringify({ model: node.data.model, ran, resolution: node.data.resolution, aspectRatio: node.data.aspectRatio })}</output>
   </main>;
 }
 function PreviewHarness() {

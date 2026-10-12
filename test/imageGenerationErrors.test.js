@@ -5,6 +5,7 @@ import { ValidationError } from "@fal-ai/client";
 import { creativeImageDefaultModel } from "../src/modelOptions.js";
 import { runCharacterSheetGeneration, runCharacterWardrobeEdit } from "../src/nodeRunners/mediaModels.js";
 import { normalizeCharacterWardrobeRequest } from "../server/character-wardrobe.js";
+import { isNanoBanana21Model } from "../src/nanoBanana21.js";
 
 const server = await readFile(new URL("../server/index.js", import.meta.url), "utf8");
 const route = server.slice(server.indexOf('app.post("/api/node/generate-image",'), server.indexOf("\nasync function runKreaImageModel("));
@@ -26,7 +27,7 @@ function imageRoute(error) {
   let handler;
   const requests = [];
   const deps = {
-    normalizeCharacterWardrobeRequest,
+    normalizeCharacterWardrobeRequest, isNanoBanana21Model,
     app: { post: (_path, _limiter, callback) => { handler = callback; } },
     imageGenerationRequestLimiter: null,
     process: { env: { FAL_KEY: "test-only" } },

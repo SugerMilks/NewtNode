@@ -7,6 +7,7 @@ export const audioModes = Object.freeze([
 
 export const audioModels = Object.freeze({
   tts: [
+    { id: "eleven_v4", name: "Eleven v4", maxCharacters: 10000 },
     { id: "eleven_multilingual_v2", name: "Multilingual v2", maxCharacters: 10000 },
     { id: "eleven_v3", name: "Eleven v3", maxCharacters: 5000 },
     { id: "eleven_flash_v2_5", name: "Flash v2.5", maxCharacters: 40000 },
@@ -68,6 +69,8 @@ export function audioInputEnabled(mode, port) {
 
 export function buildAudioRequest(data, { prompt = data.prompt, sourceAudioUrl = data.sourceAudioUrl } = {}) {
   if (!audioModes.some((mode) => mode.value === data.audioMode)) throw new Error("Choose an audio generation mode.");
+  const requestedModel = audioModelId(data);
+  if (requestedModel && !audioModels[data.audioMode].some((model) => model.id === requestedModel)) throw new Error("This model is not supported for the selected audio mode. Choose an available model; no generation was submitted.");
   const d = normalizeAudioModelData(data);
   const modelId = audioModelId(d);
   const text = String(prompt || "").trim();
@@ -90,7 +93,9 @@ export function buildAudioRequest(data, { prompt = data.prompt, sourceAudioUrl =
   };
   const voiceSettings = modelId === "eleven_v3"
     ? { stability: d.stability < 0.25 ? 0 : d.stability > 0.75 ? 1 : 0.5 }
-    : { stability: d.stability, similarity_boost: d.similarityBoost, style: d.style, use_speaker_boost: d.speakerBoost === true, ...(d.audioMode === "tts" ? { speed: d.speed } : {}) };
+    : modelId === "eleven_v4"
+      ? { stability: d.stability, similarity_boost: d.similarityBoost }
+      : { stability: d.stability, similarity_boost: d.similarityBoost, style: d.style, use_speaker_boost: d.speakerBoost === true, ...(d.audioMode === "tts" ? { speed: d.speed } : {}) };
   return {
     mode: d.audioMode, modelId, outputFormat: d.outputFormat,
     endpoint: `/v1/${d.audioMode === "tts" ? "text-to-speech" : "speech-to-speech"}/${encodeURIComponent(d.voiceId)}`,
@@ -102,6 +107,8 @@ export function buildAudioRequest(data, { prompt = data.prompt, sourceAudioUrl =
 
 // Published standard API rates, not a conversion from subscription credits.
 export const elevenLabsPricing = Object.freeze({
+  // Standard v4 price verified 2026-10-06; exclude the temporary launch discount.
+  v4PerThousand: 0.08,
   ttsPerThousand: 0.1, flashPerThousand: 0.05, stsPerMinute: 0.12, sfxPerMinute: 0.12, musicPerMinute: 0.15,
   pricingSource: "https://elevenlabs.io/pricing/api", checkedAt: "2026-09-08"
 });
@@ -111,7 +118,7 @@ export function estimateAudioCost(data, { prompt = data.prompt, durationSeconds,
   let units, rate, basis;
   if (d.audioMode === "tts") {
     units = [...String(prompt || "").trim()].length / 1000;
-    rate = /flash|turbo/.test(d.ttsModel) ? rates.flashPerThousand : rates.ttsPerThousand;
+    rate = d.ttsModel === "eleven_v4" ? rates.v4PerThousand : /flash|turbo/.test(d.ttsModel) ? rates.flashPerThousand : rates.ttsPerThousand;
     basis = "text characters / 1,000";
   } else {
     const seconds = durationSeconds ?? (d.autoDuration || d.audioMode === "sts" ? null : d.audioMode === "music" ? d.musicDurationSeconds : d.durationSeconds);
@@ -122,7 +129,7 @@ export function estimateAudioCost(data, { prompt = data.prompt, durationSeconds,
   const count = Math.min(4, Math.max(1, Math.round(Number(batchCount) || 1)));
   const amountUsd = customVoiceRate || units == null || !Number.isFinite(rate) ? null : Number((units * rate * count).toFixed(6));
   return { amountUsd, currency: "USD", estimated: true, pricingSource: rates.pricingSource,
-    pricingBasis: customVoiceRate ? "Custom voice pricing; check ElevenLabs" : `${basis}; published standard API estimate, account pricing may differ`,
+    pricingBasis: customVoiceRate ? "Custom voice pricing; check ElevenLabs" : `${basis}; published standard API estimate, account pricing${d.audioMode === "tts" && d.ttsModel === "eleven_v4" ? " and promotions" : ""} may differ`,
     source: "ElevenLabs API estimate", ...(durationSeconds != null ? { durationSeconds } : {}) };
 }
 

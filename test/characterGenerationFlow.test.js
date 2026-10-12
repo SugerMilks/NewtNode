@@ -26,7 +26,7 @@ function existingCharacter({ legacyCu = false } = {}) {
   const data = {
     title: "Character", characterName: "Emma", status: "ready",
     characterPortrait: { localUrl: "/uploads/portrait.png", thumbnailUrl: "/thumb.jpg" },
-    characterSheetModel: "Nano Banana 2",
+    characterSheetModel: "Nano Banana Pro",
     characterPhysicalDetails: "Freckles",
     cinematicCharacterSheet: false, cuVideoGeneration: true,
     activeWardrobeId: "blue",

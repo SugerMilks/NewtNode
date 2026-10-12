@@ -11,6 +11,7 @@ const requiredHealthRoutes = [
   "myNewtApprovedWork",
   "myNewtAutoReview",
   "myNewtUnpricedGenerations",
+  "seedanceDrafts",
   "myNewtFavoriteModels",
   "myNewtRemote",
   "myNewtRemoteRemembered",

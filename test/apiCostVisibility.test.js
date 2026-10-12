@@ -37,7 +37,7 @@ function buttonLabel(node, showApiCosts, generationProvider = "fal") {
 
 test("API Cost gates exact and variable button prices without changing models or batches", () => {
   for (const [type, model, provider, label] of [
-    ["imageModel", "Nano Banana 2", "fal", "Run Image"],
+    ["imageModel", "Nano Banana Pro", "fal", "Run Image"],
     ["imageModel", "OpenAI Image 2.5 Sunburst", "fal", "Run Image"],
     ["videoModel", "Seedance 2.0", "fal", "Run Video"],
     ["videoModel", "Seedance 2.5", "atlas", "Run Video"],
@@ -63,7 +63,7 @@ test("API Cost leaves in-progress button labels unchanged", () => {
 });
 
 test("price visibility is display-only and cannot change estimates used for budgets", () => {
-  const image = { model: "Nano Banana 2", resolution: "2K", batchCount: "4", provider: "fal" };
+  const image = { model: "Nano Banana Pro", resolution: "2K", batchCount: "4", provider: "fal" };
   const video = { model: "Seedance 2.0", resolution: "720p", duration: "8 seconds", provider: "fal" };
   assert.equal(estimateImageRunCost({ ...image, showApiCosts: false }), estimateImageRunCost({ ...image, showApiCosts: true }));
   assert.equal(estimateVideoRunCost({ ...video, showApiCosts: false }), estimateVideoRunCost({ ...video, showApiCosts: true }));

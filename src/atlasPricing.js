@@ -8,7 +8,7 @@ const round = (value) => Math.round(value * 1e6) / 1e6;
 const imageRatios = ["1:1", "3:2", "2:3", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"];
 const imageModels = {
   [seedream5ProModelName]: seedream5ProAtlasBase,
-  "Nano Banana 2": "google/nano-banana-2", "Nano Banana Pro": "google/nano-banana-pro",
+  "Nano Banana Pro": "google/nano-banana-pro",
   "OpenAI Image 2": "openai/gpt-image-2",
   "OpenAI Image 2.5 Sunburst": "openai/gpt-image-2.5-sunburst",
   "OpenAI Image 2.5 Flare": "openai/gpt-image-2.5-flare"
@@ -31,11 +31,10 @@ const bundledSeedanceEstimates = { version: 1, revision: "atlas-seedance-estimat
 
 // Only these standard routes have sufficiently explicit, non-token billing rules.
 export const atlasPricingSpecs = Object.fromEntries([
-  ...["2", "pro"].flatMap((version) => ["text-to-image", "edit"].map((route) => [
-    `google/nano-banana-${version}/${route}`,
-    { kind: "image", resolutions: version === "2" ? { "1k": 0.08, "2k": 0.12, "4k": 0.16 } : { "1k": 0.14, "4k": 0.24 },
-      imageSearch: version === "2", maxReferences: version === "2" ? 14 : 10 }
-  ])),
+  ...["text-to-image", "edit"].map((route) => [
+    `google/nano-banana-pro/${route}`,
+    { kind: "image", resolutions: { "1k": 0.14, "4k": 0.24 }, imageSearch: false, maxReferences: 10 }
+  ]),
   ...["text-to-video", "image-to-video", "reference-to-video"].map((route) => [
     `minimax/h3/${route}`, { kind: "video", resolutions: { "768p": 0.08, "2k": 0.13 }, reference: route === "reference-to-video" }
   ])
@@ -43,7 +42,7 @@ export const atlasPricingSpecs = Object.fromEntries([
 
 export const atlasPricingEndpoints = [
   ...["text-to-image", "edit"].map(route => `${seedream5ProAtlasBase}/${route}`),
-  ...Object.keys(atlasPricingSpecs), "google/nano-banana-2/reference-to-image",
+  ...Object.keys(atlasPricingSpecs),
   ...["2", "2.5-sunburst", "2.5-flare"].flatMap((version) => ["text-to-image", "edit"].map((route) => `openai/gpt-image-${version}/${route}`)),
   ...["2.0", "2.5"].flatMap((version) => ["text-to-video", "image-to-video", "reference-to-video"].map((route) => `bytedance/seedance-${version}/${route}`))
 ];

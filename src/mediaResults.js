@@ -1,4 +1,4 @@
-import { isIdeogramImageModel } from "./ideogramImage.js";
+import { ideogramImageEditModel } from "./ideogramImageEdit.js";
 
 export function normalizedResultItems(resultItems, resultUrl, type) {
   const items = Array.isArray(resultItems) ? resultItems.filter((item) => item?.url) : [];
@@ -9,7 +9,7 @@ export function normalizedResultItems(resultItems, resultUrl, type) {
 
 function normalizeLegacyIdeogramResult(item) {
   // Early reference runs put the input URL in Preview's output-lineage field.
-  if (item.type === "image" && isIdeogramImageModel(item.model) && item.imagePromptCount > 0
+  if (item.type === "image" && item.model === ideogramImageEditModel && item.imagePromptCount > 0
     && item.editPrecision === "regular" && item.sourceUrl && item.sourceUrl !== item.url
     && !Object.hasOwn(item, "referenceSourceUrl")) {
     return { ...item, sourceUrl: item.url, referenceSourceUrl: item.sourceUrl };

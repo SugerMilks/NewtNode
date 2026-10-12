@@ -11,7 +11,7 @@ import { videoModelOptions } from "../src/modelOptions.js";
 
 const source = readFileSync(new URL("../src/NodeEditor.jsx", import.meta.url), "utf8");
 const compiled = buildSync({
-  stdin: { contents: `${source}\nexport { NodeBody };`, resolveDir: fileURLToPath(new URL("../src", import.meta.url)), loader: "jsx" },
+  stdin: { contents: `${source}\nexport { NodeBody, connectedAssetItems, runVideoModelGeneration, videoModelSelectionPatch, normalizeCurrentNode };`, resolveDir: fileURLToPath(new URL("../src", import.meta.url)), loader: "jsx" },
   bundle: true, write: false, platform: "node", format: "cjs", packages: "external", jsx: "automatic",
   define: { "import.meta.env": "{}" }, external: ["/newt-mark.png"], loader: { ".css": "empty" }
 });
@@ -37,6 +37,32 @@ const hasAttr = (node, name) => attr(node, name) !== undefined;
 const text = (node) => node.nodeName === "#text" ? node.value : (node.childNodes || []).map(text).join("");
 const option = (view, label) => view.elements.find((node) => node.tagName === "option" && text(node) === label);
 const sourceFrame = { startFrameIn: [{ source: { id: "frame", type: "image", data: { resultUrl: "/uploads/frame.png" } } }] };
+
+test("Draft UI fixes preview resolution, preserves normal resolution and disables unsupported providers", () => {
+  const data = { resolution: "1080p", seedanceDraft: true };
+  for (const provider of ["fal", "atlas", "krea"]) {
+    const view = renderVideo("Seedance 2.5", { provider, data });
+    const toggle = view.elements.find(node => attr(node, "aria-label") === "Seedance Draft mode");
+    assert.equal(attr(toggle, "aria-checked"), "true");
+    assert.equal(hasAttr(toggle, "disabled"), false, "Can always turn an unsupported draft off");
+    const resolution = option(view, "480p");
+    assert.equal(hasAttr(resolution, "selected"), true); assert.equal(hasAttr(resolution.parentNode, "disabled"), true);
+    const run = view.elements.find(node => attr(node, "class") === "run-node-button");
+    assert.equal(hasAttr(run, "disabled"), provider !== "fal");
+  }
+  assert.equal(data.resolution, "1080p");
+  assert.ok(!renderVideo("Seedance 2.0", { provider: "fal" }).html.includes("Seedance Draft mode"));
+});
+
+test("draft results retain Finish after model changes and save/reopen", () => {
+  const draft = { receiptId: "test", draftId: "fal-draft", expiresAt: new Date(Date.now() + 86400000).toISOString() };
+  const node = { id: "v", type: "videoModel", data: { model: "Seedance 2.5", seedanceDraft: true,
+    resultItems: [{ url: "/outputs/preview.mp4", type: "video", seedanceDraft: draft }], selectedResultIndex: 0, resolution: "1080p" } };
+  const normalized = module.exports.normalizeCurrentNode(JSON.parse(JSON.stringify(node)));
+  assert.equal(normalized.data.seedanceDraft, true); assert.deepEqual(normalized.data.resultItems[0].seedanceDraft, draft);
+  const view = renderVideo("MiniMax H3", { provider: "fal", data: { ...normalized.data, model: "MiniMax H3" } });
+  assert.match(view.html, /Finish at 1080p/); assert.match(view.html, /Draft \/ 480p/);
+});
 
 test("Atlas grays unsupported video models and blocks their run without replacing the selected model", () => {
   const atlas = renderVideo("Kling O3 Pro");
@@ -104,4 +130,74 @@ test("Atlas Seedance 2.5 shows 30/10/10 reference limits without clamping visibl
   assert.match(view.html, /Add Videos \( 1\/10 \)/);
   assert.match(view.html, /Add Audio \( 1\/10 \)/);
   assert.doesNotMatch(renderVideo("Seedance 2.5", { provider: "fal", incoming }).html, /Add Images \( 31\/30 \)/);
+});
+
+test("Seedance edit controls match the source without mutating stored generation choices", () => {
+  for (const provider of ["atlas", "fal", "krea"]) {
+    const view = renderVideo("Seedance 2.5", { provider, data: { seedanceTask: "edit", duration: "9 seconds", aspectRatio: "21:9" } });
+    const sources = view.elements.filter(node => node.tagName === "option" && text(node) === "Source video");
+    assert.equal(sources.length, 2);
+    for (const node of sources) assert.equal(hasAttr(node.parentNode, "disabled"), true);
+    assert.equal(hasAttr(option(view, "Edit Existing Video"), "selected"), true);
+    assert.equal(hasAttr(option(view, "Edit Existing Video"), "disabled"), provider === "krea");
+    assert.equal(hasAttr(view.elements.find(node => attr(node, "class") === "run-node-button"), "disabled"), provider === "krea");
+    assert.match(view.html, /Source video \( 0\/1 \)/);
+  }
+  const normal = renderVideo("Seedance 2.5", { data: { duration: "9 seconds", aspectRatio: "21:9" } });
+  assert.equal(hasAttr(option(normal, "Generate Video"), "selected"), true);
+  assert.equal(hasAttr(option(normal, "9 seconds"), "selected"), true);
+  assert.equal(hasAttr(option(normal, "21:9"), "selected"), true);
+  assert.equal(option(renderVideo("Seedance 2.0"), "Edit Existing Video"), undefined);
+});
+
+test("connected video-run assets use the same named tags shown on the node", () => {
+  const connection = (type, title, file) => ({ source: { id: title, type, data: { title,
+    resultUrl: `/uploads/${file}`, resultItems: [{ url: `/uploads/${file}`, type, label: file }], selectedResultIndex: 0 } } });
+  const image = connection("image", "Plate", "timestamp-plate.png");
+  const video = connection("video", "Clip", "timestamp-clip.mov");
+  const audio = connection("audio", "Music", "timestamp-music.wav");
+  const prompt = "Edit @Clip using @Plate and @Music.";
+  for (const item of [image, video, audio]) {
+    assert.equal(module.exports.connectedAssetItems([item], { prompt })[0].label, `@${item.source.data.title}`);
+    assert.notEqual(module.exports.connectedAssetItems([item])[0].label, `@${item.source.data.title}`);
+  }
+});
+
+test("actual video runner submits named references, retains outputs, and checks edit capability before POST", async (t) => {
+  const requests = [];
+  const node = { id: "video", type: "videoModel", data: { model: "Seedance 2.5", seedanceTask: "edit",
+    duration: "5 seconds", aspectRatio: "16:9", resolution: "1080p", resultUrl: "/outputs/old.mp4" } };
+  const incoming = { referenceImageIn: [{ source: { id: "image", type: "image", data: { title: "Plate", resultUrl: "/uploads/timestamp.png" } } }],
+    referenceVideoIn: [{ source: { id: "clip", type: "video", data: { title: "Clip", resultUrl: "/uploads/timestamp.mov" } } }] };
+  t.mock.method(globalThis, "fetch", async (url, options = {}) => {
+    requests.push({ url, body: options.body && JSON.parse(options.body) });
+    return new Response(JSON.stringify(String(url).endsWith("/api/health") ? { routes: { seedanceVideoEditing: true } }
+      : { video: { localUrl: "/outputs/edited.mp4" } }), { status: 200, headers: { "Content-Type": "application/json" } });
+  });
+  const before = JSON.stringify({ node, incoming });
+  const result = await module.exports.runVideoModelGeneration({ node, incoming, incomingByNode: {}, prompt: "Edit @Clip with @Plate.", index: 0 });
+  assert.equal(result.url, "/outputs/edited.mp4");
+  assert.equal(requests.length, 2);
+  assert.match(requests[0].url, /api\/health$/);
+  assert.equal(requests[1].body.seedanceTask, "edit");
+  assert.equal(requests[1].body.duration, "Auto");
+  assert.equal(requests[1].body.aspectRatio, "Auto");
+  assert.deepEqual(requests[1].body.referenceImageLabels, ["@Plate"]);
+  assert.deepEqual(requests[1].body.referenceVideoLabels, ["@Clip"]);
+  assert.equal(JSON.stringify({ node, incoming }), before);
+  requests.length = 0;
+  globalThis.fetch = async (url) => { requests.push({ url }); return new Response(JSON.stringify({ routes: {} })); };
+  await assert.rejects(module.exports.runVideoModelGeneration({ node, incoming, incomingByNode: {}, prompt: "Edit @Clip", index: 0 }), /Restart.*backend/);
+  assert.equal(requests.length, 1);
+  assert.match(requests[0].url, /api\/health$/);
+});
+
+test("edit choice survives workflow serialization and restoration without changing default models", () => {
+  const original = { id: "video", type: "videoModel", position: { x: 10, y: 20 }, data: { model: "Seedance 2.5", seedanceTask: "edit", duration: "9 seconds", aspectRatio: "21:9", resolution: "1080p" } };
+  const restored = module.exports.normalizeCurrentNode(JSON.parse(JSON.stringify(original)));
+  assert.equal(restored.data.seedanceTask, "edit");
+  assert.equal(restored.data.duration, "9 seconds");
+  assert.equal(restored.data.aspectRatio, "21:9");
+  assert.equal(module.exports.videoModelSelectionPatch(original.data, "Seedance 2.5").seedanceTask, "edit");
+  assert.equal(module.exports.videoModelSelectionPatch({ model: "Seedance 2.0" }, "Seedance 2.5").seedanceTask, "reference");
 });

@@ -58,7 +58,7 @@ test("Krea internal job failures retain actionable provider details", () => {
 
 test("current shared NewtNode models resolve to Krea endpoints", () => {
   [
-    "Nano Banana 2",
+    "Nano Banana 2.1",
     "Nano Banana Pro",
     "OpenAI Image 2",
   ].forEach((name) => assert.equal(supportsKreaModel("image", name), true, name));

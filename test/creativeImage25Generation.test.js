@@ -15,7 +15,7 @@ const storyboardHandler = source.slice(source.indexOf("  async function generate
 
 test("Storyboard offers Flare first without changing Coverage's Sunburst default", () => {
   assert.equal(storyboardImageDefaultModel, imageModelNames.openAiImage25Flare);
-  assert.deepEqual(storyboardImageModelOptions, [storyboardImageDefaultModel, creativeImageDefaultModel, imageModelNames.openAiImage2, imageModelNames.seedream5Pro]);
+  assert.deepEqual(storyboardImageModelOptions, [storyboardImageDefaultModel, creativeImageDefaultModel, imageModelNames.openAiImage2, imageModelNames.nanoBanana21, imageModelNames.seedream5Pro]);
   assert.equal(coverageModelOptions[0], creativeImageDefaultModel);
   assert.ok(!coverageModelOptions.includes(storyboardImageDefaultModel));
   assert.equal(normalizeStoryboardImageModel(), storyboardImageDefaultModel);

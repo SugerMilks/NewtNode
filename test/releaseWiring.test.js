@@ -5,7 +5,6 @@ import { parse } from "@babel/parser";
 import traverseModule from "@babel/traverse";
 import { estimateImageRunCost, estimateVideoRunCost } from "../src/generationPricing.js";
 import { isCoverageNode } from "../src/coveragePresets.js";
-import { isIdeogramImageModel } from "../src/ideogramImage.js";
 
 const traverse = traverseModule.default;
 const editor = readFileSync(new URL("../src/NodeEditor.jsx", import.meta.url), "utf8");
@@ -39,7 +38,7 @@ test("Newt can review connected image and video prompts without a runtime error"
     buildIncomingByNode: () => ({ test: incoming }), connectedText,
     connectedImagePromptItems: () => [], imageReferenceConnectionsForModel: () => [],
     imageInstructionSourcesForModel: () => [], buildEffectiveImagePrompt: (prompt) => prompt,
-    isOpenAiImage25Model: () => false, isIdeogramImageModel, estimateImageRunCost, estimateVideoRunCost,
+    isOpenAiImage25Model: () => false, isSeedance25Model: (model) => model === "Seedance 2.5", estimateImageRunCost, estimateVideoRunCost,
     connectedDirectorPackageSource: () => null, connectedDirectorPackageText: () => "",
     expandVideoDirectorPackageIncoming: (value) => value, videoModelSupportsCharacterInput: () => true,
     uniqueAssetItems: (value) => value, connectedAssetItems: () => [], connectedCharacterReferences: () => [],
@@ -47,7 +46,7 @@ test("Newt can review connected image and video prompts without a runtime error"
   });
   for (const type of ["imageModel", "videoModel", "utility"]) {
     const result = describeRun({ id: "test", type, data: {
-      title: "Test", model: type === "videoModel" ? "Seedance 2.0" : "Nano Banana 2",
+      title: "Test", model: type === "videoModel" ? "Seedance 2.0" : "Nano Banana Pro",
       utilityMode: "image", utilityImageModel: "Coverage",
       prompt: "Old node text", batchCount: "2", duration: "8 seconds", resolution: type === "videoModel" ? "720p" : "2K", aspectRatio: "16:9"
     } }, "generate");

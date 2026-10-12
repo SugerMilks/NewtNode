@@ -10,9 +10,13 @@ Grade uses the same named presets as Style, defaulting to None. It guides both p
 
 Auto interprets the brief. Photographic work uses cinematic/editorial craft; logos and other graphic work use graphic design criteria rather than forcing a photographic film treatment.
 
+Style Family and Grade each offer **Random**, independently of Auto/None or a specific preset. A new batch assigns different named looks before planning, reusing each family/grade only after cycling through its available pool. Random style choices avoid presets that deliberately change anatomy, wardrobe or subject matter. The resolved look is saved with each image and appears in Direction Details; it does not change when future settings change. Push Further can explore fresh random looks. More Like This and Refine retain their parent's resolved look when the selector is still Random, and Resume never rerolls an unfinished batch. Explicit fixed selections still apply.
+
+**Explore Mode** sits beside Settings and defaults on. On asks for eclectic, clearly distinct professional treatments within the brief's constraints. Off asks for restrained, faithful variations; it does not cancel a deliberately selected Random style or grade. Neither mode authorizes changes to attached image content. Random selection is local and adds no extra planning calls or image generations.
+
 ## References
 
-- Image / Product: preserve the supplied object, its identity and branding.
+- Image / Product: preserve the depicted subjects, count, identity, wardrobe, objects, environment, framing and spatial layout. Explore lighting, grade, texture and rendering treatment on the same content. Only explicit brief/revision changes override the corresponding constraint; this is generative guidance, not a pixel-perfect lock.
 - Character: use the locked, selected non-base Character sheet.
 - Mood Board: borrow visual treatment, not its depicted subjects or collage layout.
 - Style and Camera: use their existing hidden prompts where appropriate to the medium.

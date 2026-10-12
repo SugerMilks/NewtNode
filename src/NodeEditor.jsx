@@ -250,6 +250,8 @@ import {
   wanVaceSamplerOptions
 } from "./modelOptions.js";
 import { isSeedance25Model } from "./seedance25.js";
+import { selectedSeedanceDraft } from "./seedanceDraft.js";
+import { finishSeedanceDraft } from "./nodeRunners/seedanceDraft.js";
 import { supportsAtlasVideoModel } from "./atlasVideos.js";
 import {
   isMiniMaxH3Model,
@@ -257,9 +259,9 @@ import {
   minimaxH3DurationOptions,
   minimaxH3ResolutionOptions
 } from "./minimaxH3.js";
-import { isNanoBanana2Model, nanoBanana2ResolutionOptions, normalizeNanoBanana2Resolution } from "./nanoBanana2.js";
+import { isRetiredNanoBanana2Model } from "./retiredImageModels.js";
 import { isSeedream5ProModel, seedream5ProResolutionOptions, seedream5ProAspectRatios, normalizeSeedream5ProResolution } from "./seedream5Pro.js";
-import { isIdeogramImageModel, ideogramImageQualityOptions, normalizeIdeogramImageQuality, ideogramImageResolutionOptions, ideogramImageAspectRatios, ideogramImageReferenceOrder } from "./ideogramImage.js";
+import { isNanoBanana21Model, nanoBanana21ResolutionOptions, nanoBanana21Ratios } from "./nanoBanana21.js";
 import {
   analyzeColorLookPalette,
   buildColorGradePrompt,
@@ -573,7 +575,7 @@ const portColors = {
 const maxTransferImages = 6;
 const moodBoardOutputFileName = "MOOD_BOARD.png";
 const autoAspectDefaultRatios = [];
-const autoAspectModelOptions = [imageModelNames.openAiImage2, imageModelNames.nanoBananaPro, imageModelNames.seedream5Pro];
+const autoAspectModelOptions = [imageModelNames.openAiImage2, imageModelNames.nanoBananaPro, imageModelNames.nanoBanana21, imageModelNames.seedream5Pro];
 const composerCharacterPortPrefix = "characterIn:";
 const maxCharacterWardrobes = 8;
 const maxCharacterVoices = 8;
@@ -900,6 +902,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const viewportRef = React.useRef(savedDraft.viewport);
   const nodesRef = React.useRef(savedDraft.nodes);
   const exploreRunsRef = React.useRef(new Set());
+  const draftFinishesRef = React.useRef(new Set());
   const edgesRef = React.useRef(savedDraft.edges);
   const [nodes, setNodes] = React.useState(savedDraft.nodes);
   const [edges, setEdges] = React.useState(savedDraft.edges);
@@ -2347,7 +2350,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           cost: data.cost
         };
       } else {
-        const model = node.data.frameItImageModel || enabledImageModels.find((model) => !isIdeogramImageModel(model)) || imageModelNames.openAiImage2;
+        const model = node.data.frameItImageModel || enabledImageModels[0] || imageModelNames.openAiImage2;
         const { response, data } = await nodeApi.generateImage({
           prompt,
           model,
@@ -5520,7 +5523,18 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     };
   }
 
-  async function runNode(node) {
+  async function runNode(node, action) {
+    if (action === "finish-seedance-draft") {
+      const current = nodesRef.current.find(item => item.id === node.id);
+      if (current?.type !== "videoModel" || draftFinishesRef.current.has(node.id)) return { status: "skipped" };
+      draftFinishesRef.current.add(node.id);
+      try {
+        const result = await finishSeedanceDraft({ node: current, workflowContext: workflowRequestContext(),
+          getCurrent: () => nodesRef.current.find(item => item.id === node.id), update: patch => updateNode(node.id, patch) });
+        loadOutputHistory();
+        return result;
+      } finally { draftFinishesRef.current.delete(node.id); }
+    }
     const storedNode = nodesRef.current.find((item) => item.id === node.id);
     const currentNode =
       storedNode && ["skillDirector", "explore"].includes(node?.type)
@@ -5574,7 +5588,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
     try {
       if (currentNode.type === "imageModel") {
-        const issue = imageModelRunIssue(currentNode.data.model, incoming, generationProvider);
+        const issue = imageModelRunIssue(currentNode.data.model, incoming, generationProvider, currentNode.data);
         if (issue) throw new Error(issue);
       }
       updateNode(currentNode.id, {
@@ -5593,6 +5607,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           ? (currentNode.data.exploreQueue || []).filter(item => ["pending", "failed"].includes(item.status)).map(item => item.settings || {})
           : [currentNode.data];
         for (const settings of settingsToValidate) {
+          const issue = imageModelRunIssue(settings.model, incoming, generationProvider, settings);
+          if (issue) throw new Error(issue);
           if (!enabledImageModels.includes(settings.model) || !exploreModels.includes(settings.model)) throw new Error(`Enable ${settings.model || "the saved Explore image model"} in Settings before ${resuming ? "resuming" : "running"}.`);
           if (!imageModelResolutionOptions(settings.model, generationProvider).includes(settings.resolution)
             || !imageModelAspectRatioOptions(settings.model, generationProvider).includes(settings.aspectRatio)) throw new Error("The Explore model and format are unsupported by the current provider. Restore the original provider to resume, or choose a supported format for a new run.");
@@ -5792,6 +5808,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         if (!sourceImageUrl) throw new Error("Connect an image to Auto Aspect.");
         const autoAspectTargets = autoAspectTargetsForData(currentNode.data);
         if (!autoAspectTargets.length) throw new Error("Select at least one aspect ratio.");
+        for (const target of autoAspectTargets) {
+          const issue = imageModelRunIssue(currentNode.data.model, incoming, generationProvider, target);
+          if (issue) throw new Error(issue);
+        }
 
         const settled = await settleSequential(
           autoAspectTargets,
@@ -5912,6 +5932,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
             if (!sourceImageUrl) throw new Error("Connect an image to Auto Aspect.");
             const autoAspectTargets = autoAspectTargetsForData(currentNode.data);
             if (!autoAspectTargets.length) throw new Error("Select at least one aspect ratio.");
+            for (const target of autoAspectTargets) {
+              const issue = imageModelRunIssue(currentNode.data.autoAspectModel, incoming, generationProvider, target);
+              if (issue) throw new Error(issue);
+            }
 
             const settled = await settleSequential(
               autoAspectTargets,
@@ -6026,10 +6050,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         const isSegmentation = isSam3ImageModel(currentNode.data.model);
         const referenceConnections = isSegmentation ? incoming.imagePromptIn || [] : imageReferenceConnectionsForModel(currentNode.data.model, incoming);
         assertCharacterOutputReferences(referenceConnections);
-        const referenceIssue = imageModelRunIssue(currentNode.data.model, incoming, generationProvider, { data: currentNode.data, prompt: basePrompt, incomingByNode: currentIncomingByNode });
+        const referenceIssue = imageModelRunIssue(currentNode.data.model, incoming, generationProvider, currentNode.data);
         if (referenceIssue) throw new Error(referenceIssue);
-        const ideogramEdit = isIdeogramImageModel(currentNode.data.model) && referenceConnections.length > 0;
-        const aspectRatio = ideogramEdit ? "Auto" : isSegmentation ? currentNode.data.aspectRatio : await resolveImageModelAspectRatio(currentNode, incoming);
+        const aspectRatio = isSegmentation ? currentNode.data.aspectRatio : await resolveImageModelAspectRatio(currentNode, incoming);
         const imageInstructionSources = imageInstructionSourcesForModel(currentNode.data.model, incoming);
         const imagePromptItems = connectedImagePromptItems(
           referenceConnections,
@@ -6038,7 +6061,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         );
         const prompt = isSegmentation
           ? basePrompt
-          : buildEffectiveImagePrompt(basePrompt, imageInstructionSources, ideogramEdit ? "" : aspectRatio, currentIncomingByNode);
+          : buildEffectiveImagePrompt(basePrompt, imageInstructionSources, aspectRatio, currentIncomingByNode);
         const runIndexes = nodeRunIndexes(batchCount);
         const settled = await settleSequential(runIndexes, (index) =>
           runImageModelGeneration({
@@ -6122,7 +6145,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         resultItems,
         selectedResultIndex: firstNewIndex,
         resultText: "",
-        error: batchRunError("video", batchCount, successes, failures)
+        error: [batchRunError("video", batchCount, successes, failures), ...successes.map(item => item.warning)].filter(Boolean).join(" ")
       });
       loadOutputHistory();
       return { status: "complete" };
@@ -6212,8 +6235,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     skillDirector: { skillVideoModel: enabledVideoModels.filter(videoModelSupportsFilmDirector), skillApproach: filmDirectorApproachOptions.map((option) => option.value) }
   }), [enabledImageModels, enabledVideoModels, enabledCoverageModels]);
   const myNewtModelControls = (type, model) => {
-    if (type === "storyboard") return { resolution: imageModelResolutionOptions(model, generationProvider), aspectRatio: generationProvider === "krea" && isOpenAiImage25Model(model) ? openAiImage25KreaAspectRatios : storyboardAspectRatioOptions };
-    if (["imageModel", "coverage", "utility"].includes(type)) return { resolution: imageModelResolutionOptions(model, generationProvider), aspectRatio: imageModelAspectRatioOptions(model, generationProvider), quality: isIdeogramImageModel(model) ? ideogramImageQualityOptions : isSeedream5ProModel(model) ? ["high"] : isOpenAiImage25Model(model) ? openAiImage25QualityOptions : openAiImage2QualityOptions };
+    if (type === "storyboard") return { resolution: imageModelResolutionOptions(model, generationProvider), aspectRatio: isNanoBanana21Model(model) ? storyboardAspectRatioOptions.filter(ratio => nanoBanana21Ratios(generationProvider).includes(ratio)) : generationProvider === "krea" && isOpenAiImage25Model(model) ? openAiImage25KreaAspectRatios : storyboardAspectRatioOptions };
+    if (["imageModel", "coverage", "utility"].includes(type)) return { resolution: imageModelResolutionOptions(model, generationProvider), aspectRatio: imageModelAspectRatioOptions(model, generationProvider), quality: isSeedream5ProModel(model) ? ["high"] : isOpenAiImage25Model(model) ? openAiImage25QualityOptions : openAiImage2QualityOptions };
     if (type !== "videoModel") return {};
     if (isMiniMaxH3Model(model)) return { duration: minimaxH3DurationOptions, resolution: minimaxH3ResolutionOptions, aspectRatio: minimaxH3AspectRatioOptions };
     if (isSeedance25Model(model)) return { duration: seedance25DurationOptions.filter((value) => value !== "Auto"), resolution: seedance25ResolutionOptions, aspectRatio: seedance25AspectRatioOptions };
@@ -6373,7 +6396,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       if (node.type === "imageModel" || isCoverageNode(node)) {
         const prompt = connectedText(incoming.promptIn) || data.prompt || "";
         const references = connectedImagePromptItems(isCoverageNode(node) ? incoming.imageIn || [] : imageReferenceConnectionsForModel(data.model, incoming), byNode, { includeComposerCharacterBindings: true, prompt });
-        const settings = { model: data.model, resolution: data.resolution, aspectRatio: data.aspectRatio, quality: data.quality || "high", ...(isOpenAiImage25Model(data.model) ? { background: normalizeOpenAiImage25Background(data.background) } : {}), ...(isIdeogramImageModel(data.model) ? { enablePromptExpansion: data.enablePromptExpansion !== false } : {}), batchCount: isCoverageNode(node) ? 9 : count, referenceCount: references.length, provider: generationProvider };
+        const settings = { model: data.model, resolution: data.resolution, aspectRatio: data.aspectRatio, quality: data.quality || "high", ...(isOpenAiImage25Model(data.model) ? { background: normalizeOpenAiImage25Background(data.background) } : {}), batchCount: isCoverageNode(node) ? 9 : count, referenceCount: references.length, provider: generationProvider };
         return { ...base, ...settings, count: settings.batchCount, references, prompt: isCoverageNode(node) ? `Nine ${data.coverageMethod || "Standard"} camera-angle generations` : buildEffectiveImagePrompt(prompt, imageInstructionSourcesForModel(data.model, incoming), data.aspectRatio, byNode), estimatedCost: estimateImageRunCost(settings) };
       }
       if (node.type === "videoModel") {
@@ -6386,7 +6409,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           referenceImageCount: uniqueAssetItems([...connectedAssetItems(display.referenceImageIn), ...connectedCharacterReferences(display.characterIn).map(item => ({ url: item.url, label: item.label, type: "image" }))]).length,
           startFrameCount: connectedAssetItems(display.startFrameIn).length, endFrameCount: connectedAssetItems(display.endFrameIn).length,
           audioReferenceCount: connectedAssetItems(display.referenceAudioIn).length, provider: generationProvider };
-        if (/auto/i.test(String(settings.duration))) throw new Error("Choose an explicit video duration before running Newt.");
+        if (isSeedance25Model(model) && data.seedanceTask === "edit") Object.assign(settings, { seedanceTask: "edit", duration: "Auto", aspectRatio: "Auto" });
+        if (isSeedance25Model(model) && (pack ? pack.seedanceDraft : data.seedanceDraft) === true) Object.assign(settings, { seedanceDraft: true, resolution: "480p" });
+        if (settings.seedanceTask !== "edit" && /auto/i.test(String(settings.duration))) throw new Error("Choose an explicit video duration before running Newt.");
         const prompt = [connectedDirectorPackageText(incoming.directorIn, byNode), connectedText(incoming.promptIn) || data.prompt].filter(Boolean).join("\n\n");
         return { ...base, ...settings, references, prompt: buildEffectiveVideoPrompt(prompt, display, byNode), audio: settings.generateAudio ? "Audio on" : "Audio off", estimatedCost: estimateVideoRunCost(settings) };
       }
@@ -7487,6 +7512,7 @@ function NodeBody({
         onUpdate={onUpdate}
         onRun={onRun}
         running={running}
+        generationProvider={generationProvider}
         sourceLabel={sourceLabel}
         onConnectStart={onConnectStart}
         onDisconnectInput={onDisconnectInput}
@@ -7533,7 +7559,7 @@ function NodeBody({
           onConnectStart={onConnectStart}
           onDisconnectInput={onDisconnectInput}
           connectedPortKeys={connectedPortKeys}
-          imageModelOptions={imageModelOptions.filter((model) => !isIdeogramImageModel(model))}
+          imageModelOptions={imageModelOptions}
           videoModelOptions={videoModelOptions}
         />
       </>
@@ -8347,7 +8373,7 @@ function NodeBody({
                 </NodeRow>
                 <NodeRow label="Aspect Ratio">
                   <select value={storyboardAspectRatioForNode(node)} disabled={storyboardLocked} onChange={(event) => onUpdate(node.id, { aspectRatio: event.target.value })}>
-                    {(generationProvider === "krea" && isOpenAiImage25Model(node.data.model) ? openAiImage25KreaAspectRatios : storyboardAspectRatioOptions).map((ratio) => (
+                    {(isNanoBanana21Model(node.data.model) ? storyboardAspectRatioOptions.filter(ratio => nanoBanana21Ratios(generationProvider).includes(ratio)) : generationProvider === "krea" && isOpenAiImage25Model(node.data.model) ? openAiImage25KreaAspectRatios : storyboardAspectRatioOptions).map((ratio) => (
                       <option key={ratio}>{ratio}</option>
                     ))}
                   </select>
@@ -9292,7 +9318,7 @@ function NodeBody({
           <button type="button" className={sourceConnected ? "connected-field" : ""} title={sourceConnected ? sourceSummary : ""}>{sourceSummary}</button>
         </NodeRow>
         <div className="auto-aspect-list" aria-label="Auto Aspect outputs">
-          {openAiImageAspectRatios.map((ratio) => {
+          {openAiImageAspectRatios.filter(ratio => !isNanoBanana21Model(model) || nanoBanana21Ratios(generationProvider).includes(ratio) || selectedAspectRatios.includes(ratio)).map((ratio) => {
             const selected = selectedAspectRatios.includes(ratio);
             const targets = autoAspectTargetsForRatio(ratio);
             const targetResults = targets.map((target) => autoAspectResultForTarget(node, target)).filter(Boolean);
@@ -10050,7 +10076,7 @@ function NodeBody({
                     <button className={incoming.imageIn?.length ? "connected-field" : ""}>{connectedSummary(incoming.imageIn, "Add image")}</button>
                   </NodeRow>
                   <div className="auto-aspect-list" aria-label="Auto Aspect outputs">
-                    {openAiImageAspectRatios.map((ratio) => {
+                    {openAiImageAspectRatios.filter(ratio => !isNanoBanana21Model(autoAspectModel) || nanoBanana21Ratios(generationProvider).includes(ratio) || selectedAspectRatios.includes(ratio)).map((ratio) => {
                       const selected = selectedAspectRatios.includes(ratio);
                       const target = autoAspectTargetsForRatio(ratio)[0];
                       const targetKey = autoAspectTargetKey(target);
@@ -10396,17 +10422,15 @@ function NodeBody({
     const promptValue = resolvedPromptText(incoming.promptIn) || node.data.prompt;
     const promptConnected = Boolean(resolvedPromptText(incoming.promptIn));
     const isSam3Image = isSam3ImageModel(node.data.model);
-    const isIdeogram = isIdeogramImageModel(node.data.model);
-    const ideogramEdit = isIdeogram && imageReferenceConnectionsForModel(node.data.model, incoming).length > 0;
-    const ideogramIssue = imageModelRunIssue(node.data.model, incoming, generationProvider, { data: node.data, prompt: promptValue, incomingByNode });
+    const modelIssue = imageModelRunIssue(node.data.model, incoming, generationProvider, node.data);
     const isImage25 = isOpenAiImage25Model(node.data.model);
     const isOpenAiImage2 = node.data.model === imageModelNames.openAiImage2 || isImage25;
-    const normalizeQuality = isIdeogram ? normalizeIdeogramImageQuality : isImage25 ? normalizeOpenAiImage25Quality : normalizeOpenAiImage2Quality;
+    const normalizeQuality = isImage25 ? normalizeOpenAiImage25Quality : normalizeOpenAiImage2Quality;
     const imageInstructionSources = imageInstructionSourcesForModel(node.data.model, incoming);
     const imagePromptConnections = imagePromptInputConnectionsForModel(node.data.model, incoming);
     const effectivePromptValue = isSam3Image
       ? promptValue
-      : buildEffectiveImagePrompt(promptValue, imageInstructionSources, ideogramEdit ? "" : node.data.aspectRatio, incomingByNode);
+      : buildEffectiveImagePrompt(promptValue, imageInstructionSources, node.data.aspectRatio, incomingByNode);
     const promptHasGeneratedAdditions = effectivePromptValue !== promptValue;
     const appliedInstructionLabels = activeImageInstructionLabels(imageInstructionSources, incomingByNode);
     const referenceTagMatches = isSam3Image
@@ -10483,12 +10507,12 @@ function NodeBody({
             ))}
           </div>
         )}
-        <button className="run-node-button" onClick={() => onRun(node)} disabled={running || Boolean(ideogramIssue)}>
+        <button className="run-node-button" onClick={() => onRun(node)} disabled={running || Boolean(modelIssue)}>
           {running
             ? `Running ${formatNodeBatchCount(isSam3Image ? 1 : node.data.batchCount)}...`
             : <RunPriceLabel label="Run Image" options={imagePriceSettings} visible={showApiCosts} />}
         </button>
-        {isIdeogram && <small className="upload-status model-status-note" role="status">{ideogramIssue || (ideogramEdit ? `Ideogram 4.5 · Fal · Image edit · ${Math.max(0, pricedImagePromptItems.length - 1)} guide references` : "Ideogram 4.5 · Fal · Text to image")}</small>}
+        {modelIssue && <small className="upload-status model-status-note" role="status">{modelIssue}</small>}
         <details className="model-settings-drawer" open={settingsOpen} onToggle={(event) => onUpdate(node.id, { settingsOpen: event.currentTarget.open })}>
           <summary>Settings</summary>
           <NodeRow label="Prompt" inputPort={settingsOpen ? promptPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
@@ -10522,23 +10546,15 @@ function NodeBody({
               {sam3SegmentationModelsEnabled && <option>SAM 3 Image</option>}
             </select>
           </NodeRow>
-          {(isOpenAiImage2 || isIdeogram) && (
+          {isOpenAiImage2 && (
             <NodeRow label="Quality">
               <select aria-label="Image quality" value={normalizeQuality(node.data.quality)} onChange={(event) => onUpdate(node.id, { quality: normalizeQuality(event.target.value) })}>
-                {(isIdeogram ? ideogramImageQualityOptions : isImage25 ? openAiImage25QualityOptions : openAiImage2QualityOptions).map((option) => (
-                  <option key={option} value={option}>{isIdeogram ? option.charAt(0).toUpperCase() + option.slice(1) : formatOpenAiImage2Quality(option)}</option>
+                {(isImage25 ? openAiImage25QualityOptions : openAiImage2QualityOptions).map((option) => (
+                  <option key={option} value={option}>{formatOpenAiImage2Quality(option)}</option>
                 ))}
               </select>
             </NodeRow>
           )}
-          {isIdeogram && !ideogramEdit && <NodeRow label="Prompt expansion"><input aria-label="Prompt expansion" type="checkbox" checked={node.data.enablePromptExpansion !== false} onChange={(event) => onUpdate(node.id, { enablePromptExpansion: event.target.checked })} /></NodeRow>}
-          {ideogramEdit && <NodeRow label="Source image">
-            <select aria-label="Ideogram source image" title="The image to edit. All other connected images are guide references." value={node.data.ideogramSourceUrl || ""} disabled={running} onChange={(event) => onUpdate(node.id, { ideogramSourceUrl: event.target.value })}>
-              <option value="">First connected{pricedImagePromptItems[0] ? `: ${pricedImagePromptItems[0].label || "Image 1"}` : " image"}</option>
-              {node.data.ideogramSourceUrl && !pricedImagePromptItems.some(item => item.url === node.data.ideogramSourceUrl) && <option value={node.data.ideogramSourceUrl}>Disconnected source</option>}
-              {pricedImagePromptItems.map((item, index) => <option key={`${item.url}:${index}`} value={item.url}>{index + 1}. {item.label || `Image ${index + 1}`}</option>)}
-            </select>
-          </NodeRow>}
           {isImage25 && !(generationProvider === "krea" && openAiImage25Variant(node.data.model) === "sunburst") && (
             <NodeRow label="Background">
               <select value={normalizeOpenAiImage25Background(node.data.background)} onChange={(event) => onUpdate(node.id, { background: event.target.value })}>
@@ -10572,9 +10588,9 @@ function NodeBody({
                   ))}
                 </select>
               </NodeRow>
-              {ideogramEdit ? <NodeRow label="Output size"><span className="model-output-size-value" aria-label="Ideogram output size" title="Uses the source image proportions. Ideogram may reduce the output dimensions.">Auto (source proportions)</span></NodeRow> : <>
               <NodeRow label="Aspect Ratio">
                 <select aria-label="Image aspect ratio" value={node.data.aspectRatio} onChange={(event) => onUpdate(node.id, { aspectRatio: event.target.value })}>
+                  {!imageModelAspectRatioOptions(node.data.model, generationProvider).includes(node.data.aspectRatio) && <option value={node.data.aspectRatio} disabled>{node.data.aspectRatio} (unavailable)</option>}
                   {imageModelAspectRatioOptions(node.data.model, generationProvider).map((option) => (
                     <option key={option} value={option}>
                       {option}
@@ -10589,7 +10605,6 @@ function NodeBody({
                   ))}
                 </select>
               </NodeRow>
-              </>}
             </>
           )}
         </details>
@@ -10617,6 +10632,7 @@ function NodeBody({
     videoModel: attachedDirectorSource.data.skillVideoModel,
     durationSeconds: attachedDirectorSource.data.skillDurationSeconds || attachedDirectorSource.data.durationSeconds,
     resolution: attachedDirectorSource.data.skillResolution,
+    seedanceDraft: attachedDirectorSource.data.skillSeedanceDraft === true,
     aspectRatio: attachedDirectorSource.data.skillAspectRatio,
     audioMode: filmDirectorUsesMusic(attachedDirectorSource.data.skillApproach, connectedAssetItems(incomingByNode[attachedDirectorSource.id]?.musicIn).slice(-1)) ? "full" : attachedDirectorSource.data.skillDirectorAudioMode,
     approach: attachedDirectorSource.data.skillApproach
@@ -10630,6 +10646,13 @@ function NodeBody({
   const isKlingO3Pro = isKlingO3ProModel(effectiveVideoModel);
   const isKlingO3 = isKlingO34k || isKlingO3Pro;
   const isSeedance25 = isSeedance25Model(effectiveVideoModel);
+  const seedanceDraft = isSeedance25 && (directorConnected ? directorSettings?.seedanceDraft : node.data.seedanceDraft) === true;
+  const draftUnavailable = seedanceDraft && generationProvider !== "fal";
+  const selectedDraft = selectedSeedanceDraft(node.data);
+  const completedDraft = selectedDraft && node.data.resultItems?.find(item => item.seedanceDraftSource === selectedDraft.seedanceDraft.receiptId);
+  const seedanceEditing = isSeedance25 && node.data.seedanceTask === "edit";
+  const seedanceEditingSupported = ["atlas", "fal"].includes(generationProvider);
+  const seedanceEditingUnavailable = seedanceEditing && !seedanceEditingSupported;
   const isAtlasVideo = generationProvider === "atlas";
   const atlasVideoUnsupported = isAtlasVideo && !supportsAtlasVideoModel(effectiveVideoModel);
   const isSam3Video = isSam3VideoModel(effectiveVideoModel);
@@ -10644,7 +10667,7 @@ function NodeBody({
   const effectiveVideoDuration = directorConnected && directorSettings
     ? filmDirectorVideoDuration(effectiveVideoModel, directorSettings.durationSeconds, node.data.duration)
     : node.data.duration;
-  const effectiveVideoResolution = directorConnected && directorSettings
+  const effectiveVideoResolution = seedanceDraft ? "480p" : directorConnected && directorSettings
     ? filmDirectorVideoResolution(effectiveVideoModel, directorSettings.resolution, node.data.resolution)
     : node.data.resolution;
   const effectiveVideoAspectRatio = directorConnected && directorSettings
@@ -10679,8 +10702,10 @@ function NodeBody({
   } : null;
   const videoPriceSettings = {
     kind: "video",
+    seedanceDraft,
     model: effectiveVideoModel,
-    duration: effectiveVideoDuration,
+    duration: seedanceEditing ? "Auto" : effectiveVideoDuration,
+    ...(seedanceEditing ? { seedanceTask: "edit" } : {}),
     resolution: effectiveVideoResolution,
     aspectRatio: effectiveVideoAspectRatio,
     generateAudio: effectiveVideoGenerateAudio,
@@ -10714,10 +10739,19 @@ function NodeBody({
         error={node.data.error}
         onSelectResult={(index, item) => onUpdate(node.id, { selectedResultIndex: index, resultUrl: item.url })}
       />
-      <button className="run-node-button" onClick={() => onRun(node)} disabled={running || !hasVideoPrompt || atlasVideoUnsupported} title={atlasVideoUnsupported ? "This video model is unavailable through Atlas Cloud" : undefined}>
+      {selectedDraft && <div className="seedance-draft-actions">
+        <small title={`Finish using the original Fal key before ${new Date(selectedDraft.seedanceDraft.expiresAt).toLocaleString()}`}>Draft / 480p</small>
+        <button type="button" disabled={running}
+          title={completedDraft ? "Select the saved 1080p render. No new generation." : "Separately billed render using this draft's original prompt, references and settings. Requires the original Fal key within seven days."}
+          onClick={() => onRun(node, "finish-seedance-draft")}>
+          <Film size={14} aria-hidden="true" />
+          {node.data.seedanceFinishing && running ? "Finishing..." : completedDraft ? "View 1080p" : showApiCosts ? "Finish at 1080p (Variable cost)" : "Finish at 1080p"}
+        </button>
+      </div>}
+      <button className="run-node-button" onClick={() => onRun(node)} disabled={running || !hasVideoPrompt || atlasVideoUnsupported || seedanceEditingUnavailable || draftUnavailable} title={draftUnavailable ? "Draft mode requires Fal. Enable Fal or turn Draft off." : seedanceEditingUnavailable ? "Video editing requires Fal or Atlas Cloud" : atlasVideoUnsupported ? "This video model is unavailable through Atlas Cloud" : undefined}>
         {running
-          ? `Running ${formatNodeBatchCount(isSam3Video ? 1 : node.data.batchCount)}...`
-          : <RunPriceLabel label="Run Video" options={videoPriceSettings} visible={showApiCosts} />}
+          ? node.data.seedanceFinishing ? "Finishing at 1080p..." : `Running ${formatNodeBatchCount(isSam3Video ? 1 : node.data.batchCount)}...`
+          : <RunPriceLabel label={seedanceDraft ? "Run Draft (480p)" : seedanceEditing ? "Edit Video" : "Run Video"} options={videoPriceSettings} visible={showApiCosts} />}
       </button>
       <OutputPortRow node={node} port={outputPort} label="Video output" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
       {!settingsOpen && (
@@ -10738,6 +10772,12 @@ function NodeBody({
       <details className="model-settings-drawer" open={settingsOpen} onToggle={(event) => onUpdate(node.id, { settingsOpen: event.currentTarget.open })}>
         <summary>Settings</summary>
         <fieldset className="video-director-controlled-settings" disabled={directorConnected}>
+        {isSeedance25 && <NodeRow label="Draft (480p)">
+          <button type="button" className={`node-toggle ${seedanceDraft ? "enabled" : ""}`} role="switch" aria-checked={seedanceDraft} aria-label="Seedance Draft mode"
+            disabled={running || (!seedanceDraft && generationProvider !== "fal")}
+            title={directorConnected ? "Controlled by Director" : "Fal preview. Finish selected drafts at 1080p within seven days; each stage is billed separately."}
+            onClick={() => onUpdate(node.id, { seedanceDraft: !seedanceDraft })}><span /></button>
+        </NodeRow>}
         <NodeRow label="Model">
           <select
             value={effectiveVideoModel}
@@ -10751,6 +10791,16 @@ function NodeBody({
             {sam3SegmentationModelsEnabled && <option disabled={isAtlasVideo && !supportsAtlasVideoModel(videoModelNames.sam3Video)}>{videoModelNames.sam3Video}</option>}
           </select>
         </NodeRow>
+        {isSeedance25 && (
+          <NodeRow label="Task">
+            <select aria-label="Seedance task" value={node.data.seedanceTask || "reference"}
+              title="Editing uses one Reference Video and matches its duration and framing. Reference Images guide the look."
+              onChange={(event) => onUpdate(node.id, { seedanceTask: event.target.value })}>
+              <option value="reference">Generate Video</option>
+              <option value="edit" disabled={!seedanceEditingSupported}>Edit Existing Video</option>
+            </select>
+          </NodeRow>
+        )}
         <NodeRow label="Prompt" inputPort={settingsOpen ? promptPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
           <TaggedPromptTextarea
             className={promptConnected ? "connected-field" : ""}
@@ -10974,16 +11024,16 @@ function NodeBody({
         ) : (
           <>
             <NodeRow label="Start Frame" inputPort={settingsOpen ? startFramePort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-              <button className={incoming.startFrameIn?.length ? "connected-field" : ""}>{connectedSummary(incoming.startFrameIn, "Add file")}</button>
+              <button disabled={seedanceEditing} title={seedanceEditing ? "Editing uses the connected Reference Video" : undefined} className={incoming.startFrameIn?.length ? "connected-field" : ""}>{connectedSummary(incoming.startFrameIn, "Add file")}</button>
             </NodeRow>
             <NodeRow label="End Frame" inputPort={settingsOpen ? endFramePort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-              <button className={incoming.endFrameIn?.length ? "connected-field" : ""}>{connectedSummary(incoming.endFrameIn, "Add file")}</button>
+              <button disabled={seedanceEditing} title={seedanceEditing ? "Editing uses the connected Reference Video" : undefined} className={incoming.endFrameIn?.length ? "connected-field" : ""}>{connectedSummary(incoming.endFrameIn, "Add file")}</button>
             </NodeRow>
             <NodeRow label="Reference Image" inputPort={settingsOpen ? referenceImagePort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
               <button className={displayIncoming.referenceImageIn?.length ? "connected-field" : ""}>{atlasSeedance25ReferenceCounts ? `Add Images ( ${atlasSeedance25ReferenceCounts.images}/30 )` : connectedSummary(displayIncoming.referenceImageIn, "Add file")}</button>
             </NodeRow>
             <NodeRow label="Reference Video" inputPort={settingsOpen ? referenceVideoPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
-              <button className={incoming.referenceVideoIn?.length ? "connected-field" : ""}>{atlasSeedance25ReferenceCounts ? `Add Videos ( ${atlasSeedance25ReferenceCounts.videos}/10 )` : connectedSummary(incoming.referenceVideoIn, "Add file")}</button>
+              <button className={incoming.referenceVideoIn?.length ? "connected-field" : ""}>{seedanceEditing ? `Source video ( ${pricedReferenceVideos.length}/1 )` : atlasSeedance25ReferenceCounts ? `Add Videos ( ${atlasSeedance25ReferenceCounts.videos}/10 )` : connectedSummary(incoming.referenceVideoIn, "Add file")}</button>
             </NodeRow>
             <NodeRow label="Reference Audio" inputPort={settingsOpen ? referenceAudioPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
               <button className={displayIncoming.referenceAudioIn?.length ? "connected-field" : ""}>{atlasSeedance25ReferenceCounts ? `Add Audio ( ${atlasSeedance25ReferenceCounts.audios}/10 )` : connectedSummary(displayIncoming.referenceAudioIn, "Add file")}</button>
@@ -10992,22 +11042,22 @@ function NodeBody({
               <button className={displayIncoming.characterIn?.length ? "connected-field" : ""}>{connectedSummary(displayIncoming.characterIn, "Add character")}</button>
             </NodeRow>
             <NodeRow label="Duration">
-              <select value={effectiveVideoDuration} disabled={directorConnected} onChange={(event) => onUpdate(node.id, { duration: event.target.value })}>
-                {(isSeedance25 ? seedance25DurationOptions : seedanceVideoDurationOptions).map((option) => (
+              <select value={seedanceEditing ? "source-video" : effectiveVideoDuration} disabled={directorConnected || seedanceEditing} onChange={(event) => onUpdate(node.id, { duration: event.target.value })}>
+                {seedanceEditing ? <option value="source-video">Source video</option> : (isSeedance25 ? seedance25DurationOptions : seedanceVideoDurationOptions).map((option) => (
                   <option key={option}>{option}</option>
                 ))}
               </select>
             </NodeRow>
             <NodeRow label="Resolution">
-              <select value={effectiveVideoResolution} disabled={directorConnected} onChange={(event) => onUpdate(node.id, { resolution: event.target.value })}>
+              <select value={effectiveVideoResolution} disabled={directorConnected || seedanceDraft} onChange={(event) => onUpdate(node.id, { resolution: event.target.value })}>
                 {displayedVideoResolutionOptions.map((option) => (
                   <option key={option} disabled={isAtlasVideo && isSeedance25 && /^(?:1920p|4k)$/i.test(option)}>{option}</option>
                 ))}
               </select>
             </NodeRow>
             <NodeRow label="Aspect Ratio">
-              <select value={atlasSourceFrameAspect ? "source-frame" : effectiveVideoAspectRatio} disabled={directorConnected || atlasSourceFrameAspect} onChange={(event) => onUpdate(node.id, { aspectRatio: event.target.value })}>
-                {atlasSourceFrameAspect ? <option value="source-frame">Source frame</option> : (isSeedance25 ? seedance25AspectRatioOptions : seedanceVideoAspectRatioOptions).map((option) => (
+              <select value={seedanceEditing ? "source-video" : atlasSourceFrameAspect ? "source-frame" : effectiveVideoAspectRatio} disabled={directorConnected || atlasSourceFrameAspect || seedanceEditing} onChange={(event) => onUpdate(node.id, { aspectRatio: event.target.value })}>
+                {seedanceEditing ? <option value="source-video">Source video</option> : atlasSourceFrameAspect ? <option value="source-frame">Source frame</option> : (isSeedance25 ? seedance25AspectRatioOptions : seedanceVideoAspectRatioOptions).map((option) => (
                   <option key={option}>{option}</option>
                 ))}
               </select>
@@ -11996,18 +12046,9 @@ function createDefaultNodeData(type, label, count) {
   };
 }
 
-function imageModelRunIssue(model, incoming = {}, provider = "fal", context) {
-  if (!isIdeogramImageModel(model)) return "";
-  if (provider !== "fal") return "Enable Fal in Settings to use Ideogram 4.5.";
-  if (context) {
-    const references = imageReferenceConnectionsForModel(model, incoming);
-    const options = { includeComposerCharacterBindings: true, prompt: context.prompt || context.data.prompt };
-    if (references.some(connection => !connectedImagePromptItems([connection], context.incomingByNode, options).length))
-      return "A connected Ideogram reference has no image ready. Generate or select its image first.";
-    const items = connectedImagePromptItems(references, context.incomingByNode, options);
-    try { ideogramImageReferenceOrder(items.map(item => item.url), context.data.ideogramSourceUrl || ""); }
-    catch (error) { return error.message; }
-  }
+function imageModelRunIssue(model, incoming = {}, provider = "fal", data = {}) {
+  if (isNanoBanana21Model(model) && !["fal", "krea"].includes(provider)) return "Enable Fal or Krea in Settings for Nano Banana 2.1. Atlas Cloud support is not yet verified.";
+  if (isNanoBanana21Model(model) && data.aspectRatio && !imageModelAspectRatioOptions(model, provider).includes(data.aspectRatio)) return `Choose a supported Nano Banana 2.1 aspect ratio for ${provider === "krea" ? "Krea" : "Fal"}.`;
   return "";
 }
 
@@ -12016,9 +12057,8 @@ function imageModelSelectionPatch(data = {}, model, provider = "fal") {
     model,
     aspectRatio: normalizeImageModelAspectRatio(data.aspectRatio, model),
     resolution: normalizeImageModelResolutionForModel(data.resolution, model),
-    quality: isIdeogramImageModel(model) ? normalizeIdeogramImageQuality(data.quality) : isOpenAiImage25Model(model) ? normalizeOpenAiImage25Quality(data.quality) : normalizeOpenAiImage2Quality(data.quality),
-    ...(isIdeogramImageModel(model) ? { enablePromptExpansion: data.enablePromptExpansion !== false } : {}),
-    background: isSeedream5ProModel(model) || isIdeogramImageModel(model) ? "auto" : normalizeOpenAiImage25Background(data.background),
+    quality: isOpenAiImage25Model(model) ? normalizeOpenAiImage25Quality(data.quality) : normalizeOpenAiImage2Quality(data.quality),
+    background: isSeedream5ProModel(model) || isNanoBanana21Model(model) ? "auto" : normalizeOpenAiImage25Background(data.background),
     batchCount: data.batchCount || "1",
     ...(isOpenAiImage25Model(model) && provider === "krea" ? openAiImage25KreaSelection({ ...data, model }) : {})
   };
@@ -12043,19 +12083,19 @@ function isModel3DImageInputPort(portId) {
 }
 
 function imageModelAspectRatioOptions(model, provider = "fal") {
-  if (isIdeogramImageModel(model)) return ideogramImageAspectRatios;
+  if (isNanoBanana21Model(model)) return [imageModelAutoAspectRatio, ...nanoBanana21Ratios(provider)];
   if (isOpenAiImage25Model(model) && provider === "krea") return [imageModelAutoAspectRatio, ...openAiImage25KreaAspectRatios];
   return [imageModelAutoAspectRatio, ...imageModelSupportedAspectRatios(model)];
 }
 
 function imageModelSupportedAspectRatios(model) {
-  if (isIdeogramImageModel(model)) return ideogramImageAspectRatios;
+  if (isNanoBanana21Model(model)) return nanoBanana21Ratios();
   if (isSeedream5ProModel(model)) return seedream5ProAspectRatios;
   return isOpenAiImageModel(model) ? openAiImageAspectRatios : nanoImageAspectRatios;
 }
 
 function normalizeImageModelAspectRatio(value, model) {
-  if (isAutoImageAspectRatio(value) && !isIdeogramImageModel(model)) return imageModelAutoAspectRatio;
+  if (isAutoImageAspectRatio(value)) return imageModelAutoAspectRatio;
   const ratio = extractAspectRatio(value);
   return imageModelSupportedAspectRatios(model).includes(ratio) ? ratio : "16:9";
 }
@@ -12147,6 +12187,8 @@ function videoModelSelectionPatch(data = {}, model) {
   if (isSeedance25Model(model)) {
     return {
       model,
+      seedanceTask: isSeedance25Model(data.model) && data.seedanceTask === "edit" ? "edit" : "reference",
+      seedanceDraft: isSeedance25Model(data.model) && data.seedanceDraft === true,
       duration: isSeedance25Model(data.model) && seedance25DurationOptions.includes(data.duration) ? data.duration : "15 seconds",
       resolution: isSeedance25Model(data.model) && seedance25ResolutionOptions.includes(data.resolution) ? data.resolution : "720p",
       aspectRatio: isSeedance25Model(data.model) && seedance25AspectRatioOptions.includes(data.aspectRatio) ? data.aspectRatio : "16:9 (Landscape)",
@@ -12192,16 +12234,14 @@ function normalizeImageModelResolution(value) {
 }
 
 function imageModelResolutionOptions(model, provider = "fal") {
-  if (isIdeogramImageModel(model)) return ideogramImageResolutionOptions;
+  if (isNanoBanana21Model(model)) return nanoBanana21ResolutionOptions;
   if (isSeedream5ProModel(model)) return seedream5ProResolutionOptions;
   if (isOpenAiImage25Model(model) && provider === "krea") return openAiImage25KreaResolutionOptions;
-  if (isNanoBanana2Model(model)) return nanoBanana2ResolutionOptions;
   return imageResolutionOptions;
 }
 
 function normalizeImageModelResolutionForModel(value, model) {
   const options = imageModelResolutionOptions(model);
-  if (isNanoBanana2Model(model)) return normalizeNanoBanana2Resolution(value);
   return normalizeChoice(String(value || options[0]).toUpperCase(), options, options[0]);
 }
 
@@ -12983,6 +13023,7 @@ function directorPackageForVideo(source = null, incomingByNode = {}) {
     durationSeconds: source.data.skillDurationSeconds || "15",
     videoModel: normalizeFilmDirectorVideoModel(source.data.skillVideoModel),
     resolution: normalizeFilmDirectorResolution(source.data.skillResolution),
+    seedanceDraft: source.data.skillSeedanceDraft === true,
     aspectRatio: normalizeFilmDirectorAspectRatio(source.data.skillAspectRatio),
     audioMode: usesMusic ? "full" : normalizeFilmDirectorAudioMode(source.data.skillDirectorAudioMode),
     approach: normalizeFilmDirectorApproach(source.data.skillApproach),
@@ -13107,7 +13148,7 @@ function connectedAssetUrls(items = []) {
   return items.map(({ source, edge }) => connectedOutputUrl(source, edge)).filter(Boolean);
 }
 
-function connectedAssetItems(items = []) {
+function connectedAssetItems(items = [], { prompt } = {}) {
   return items
     .map(({ source, edge }) => {
       const outputItem = connectedOutputItem(source, edge);
@@ -13116,7 +13157,8 @@ function connectedAssetItems(items = []) {
       return {
         url,
         type: outputItem?.type || previewMediaType(source, edge || { from: { port: "" }, to: { port: "" } }),
-        label: outputItem?.label || sourceLabel(source)
+        label: prompt === undefined ? outputItem?.label || sourceLabel(source)
+          : taggedReferenceLabel(prompt, source.data?.title || sourceLabel(source), outputItem?.label || sourceLabel(source))
       };
     })
     .filter(Boolean);
@@ -13137,7 +13179,7 @@ function connectedAssetLabels(items = []) {
     .map(({ source, edge }) => connectedOutputItem(source, edge)?.label || source.data.title || sourceLabel(source));
 }
 
-function connectedCharacterReferences(items = []) {
+function connectedCharacterReferences(items = [], { prompt } = {}) {
   return items
     .filter(({ source }) => source.type === "character" && source.data.locked && source.data.activated)
     .map(({ source }) => {
@@ -13145,7 +13187,8 @@ function connectedCharacterReferences(items = []) {
       if (!reference?.url) return null;
       return {
         url: reference.url,
-        label: reference.usesCuVideoSheet ? `${characterTag(source)} CU Video Character Sheet` : characterTag(source)
+        label: prompt !== undefined && promptHasReferenceTag(prompt, characterTag(source)) ? characterTag(source)
+          : reference.usesCuVideoSheet ? `${characterTag(source)} CU Video Character Sheet` : characterTag(source)
       };
     })
     .filter(Boolean);
@@ -13568,14 +13611,14 @@ function connected3DViewUrls(incoming = {}) {
 
 async function runVideoModelGeneration({ node, prompt, incoming, incomingByNode, projectId, projectName, workflowContext, index }) {
   const characterConnections = videoModelSupportsCharacterInput(node.data.model) ? incoming.characterIn : [];
-  const characterReferences = connectedCharacterReferences(characterConnections);
+  const characterReferences = connectedCharacterReferences(characterConnections, { prompt });
   const characterVoices = connectedCharacterVoiceUrls(characterConnections);
   const referenceImageItems = uniqueAssetItems([
-    ...connectedAssetItems(incoming.referenceImageIn),
+    ...connectedAssetItems(incoming.referenceImageIn, { prompt }),
     ...characterReferences.map((item) => ({ url: item.url, label: item.label, type: "image" }))
   ]);
-  const referenceVideoItems = uniqueAssetItems(connectedAssetItems(incoming.referenceVideoIn));
-  const referenceAudioItems = uniqueAssetItems(connectedAssetItems(incoming.referenceAudioIn));
+  const referenceVideoItems = uniqueAssetItems(connectedAssetItems(incoming.referenceVideoIn, { prompt }));
+  const referenceAudioItems = uniqueAssetItems(connectedAssetItems(incoming.referenceAudioIn, { prompt }));
   const characterVoiceItems = characterVoices.map((url, index) => ({ url, label: `Character voice ${index + 1}`, type: "audio" }));
   const audioItems = uniqueAssetItems([...referenceAudioItems, ...characterVoiceItems]);
   const directorSource = videoModelSupportsFilmDirector(node.data.model) ? connectedDirectorPackageSource(incoming.directorIn) : null;
@@ -14979,6 +15022,7 @@ function normalizeCurrentNode(node) {
         skillDurationSeconds: data.skillDurationSeconds || data.durationSeconds || "15",
         skillVideoModel: normalizeFilmDirectorVideoModel(data.skillVideoModel),
         skillResolution: normalizeFilmDirectorResolution(data.skillResolution),
+        skillSeedanceDraft: data.skillSeedanceDraft === true,
         skillAspectRatio: normalizeFilmDirectorAspectRatio(data.skillAspectRatio),
         skillDirectorAudioMode: normalizeFilmDirectorAudioMode(data.skillDirectorAudioMode),
         skillApproach: normalizeFilmDirectorApproach(data.skillApproach),
@@ -15156,7 +15200,7 @@ function normalizeCurrentNode(node) {
       characterWardrobes: Array.isArray(data.characterWardrobes) ? data.characterWardrobes : [],
       characterVoices: Array.isArray(data.characterVoices) ? data.characterVoices : [],
       characterTraits: Array.isArray(data.characterTraits) ? data.characterTraits : [],
-      characterSheetModel: normalizeCharacterSheetModel(data.characterSheetModel || imageModelNames.nanoBanana2),
+      characterSheetModel: normalizeCharacterSheetModel(data.characterSheetModel),
       characterSheetVariants,
       characterBaseSheet,
       characterBaseSignature: String(data.characterBaseSignature || ""),
@@ -16033,8 +16077,8 @@ function normalizeModel3DData(data = {}) {
 }
 
 function normalizeImageModelData(data = {}) {
-  const model = imageModelOptions.includes(data.model) ? data.model : data.model ? imageModelNames.nanoBananaPro : imageModelNames.openAiImage2;
-  const { kreaCreativity: _retiredControl, ...savedData } = data;
+  const model = isRetiredNanoBanana2Model(data.model) ? imageModelNames.nanoBanana21 : imageModelOptions.includes(data.model) ? data.model : data.model ? imageModelNames.nanoBananaPro : imageModelNames.openAiImage2;
+  const { kreaCreativity: _retiredControl, enablePromptExpansion: _retiredExpansion, ideogramSourceUrl: _retiredSource, ...savedData } = data;
   return {
     ...savedData,
     title: data.title || "Image Model",
@@ -16042,9 +16086,8 @@ function normalizeImageModelData(data = {}) {
     prompt: data.prompt || "",
     aspectRatio: normalizeImageModelAspectRatio(data.aspectRatio, model),
     resolution: normalizeImageModelResolutionForModel(data.resolution, model),
-    quality: isIdeogramImageModel(model) ? normalizeIdeogramImageQuality(data.quality) : isOpenAiImage25Model(model) ? normalizeOpenAiImage25Quality(data.quality) : normalizeOpenAiImage2Quality(data.quality),
-    ...(isIdeogramImageModel(model) ? { enablePromptExpansion: data.enablePromptExpansion !== false } : {}),
-    background: isIdeogramImageModel(model) ? "auto" : normalizeOpenAiImage25Background(data.background),
+    quality: isOpenAiImage25Model(model) ? normalizeOpenAiImage25Quality(data.quality) : normalizeOpenAiImage2Quality(data.quality),
+    background: isNanoBanana21Model(model) ? "auto" : normalizeOpenAiImage25Background(data.background),
     batchCount: data.batchCount || "1",
     settingsOpen: data.settingsOpen !== false
   };

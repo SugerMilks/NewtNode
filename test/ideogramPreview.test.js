@@ -4,8 +4,6 @@ import { readFileSync } from "node:fs";
 import { normalizedResultItems } from "../src/mediaResults.js";
 import { fileNameFromLocalUrl, mimeForOutputItem } from "../src/mediaAssets.js";
 import { isCoverageNode } from "../src/coveragePresets.js";
-import { nodeApi } from "../src/api/newtApi.js";
-import { runImageModelGeneration } from "../src/nodeRunners/mediaModels.js";
 
 // Exercise the same source collection, deduplication and merge used by Preview's Layout effect.
 const editor = readFileSync(new URL("../src/NodeEditor.jsx", import.meta.url), "utf8");
@@ -26,18 +24,13 @@ function incoming(items) {
 }
 const merge = (items, layout = [], hidden = []) => mergePreviewImagesIntoLayout(layout, previewLayoutSourceItems(incoming(items)), hidden);
 
-test("Ideogram generations sharing a reference all reach Preview Layout across batches", async (t) => {
-  let count = 0;
-  t.mock.method(nodeApi, "generateImage", async () => ({ response: { ok: true }, data: { model: "Ideogram 4.5", provider: "fal.ai",
-    image: { localUrl: output(++count), sourceUrl: reference, imagePromptCount: 1, editPrecision: "regular" } } }));
-  const generate = index => runImageModelGeneration({ node: { id: "image-model", type: "imageModel", data: { model: "Ideogram 4.5" } },
-    prompt: "Revise the image", imagePromptItems: [{ url: reference, label: "Source" }], index });
-  const batch = [...await generate(0), ...await generate(1), ...await generate(2)];
+test("previous Ideogram generations sharing a reference still reach Preview Layout", () => {
+  const batch = normalizedResultItems([legacy(1), legacy(2), legacy(3)], "", "image");
   const first = merge(batch);
   assert.deepEqual(first.map(item => item.url), [output(1), output(2), output(3)]);
   assert.deepEqual(batch.map(item => item.referenceSourceUrl), [reference, reference, reference]);
   assert.deepEqual(batch.map(item => item.sourceUrl), batch.map(item => item.url));
-  const next = merge(await generate(0), first);
+  const next = merge([legacy(4)], first);
   assert.deepEqual(next.map(item => item.url), [output(1), output(2), output(3), output(4)]);
   assert.deepEqual(next.slice(0, 3), first);
 });

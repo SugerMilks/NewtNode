@@ -126,8 +126,11 @@ export function AudioModelNodeBody({ node, config, prompt, promptConnected, sour
         <NodeRow label="Format"><select aria-label="Audio output format" disabled={busy} value={d.outputFormat} onChange={(event) => patch({ outputFormat: event.target.value })}>{audioOutputFormats.map((format) => <option key={format.value} value={format.value}>{format.label}</option>)}</select></NodeRow>
         {voiceMode && <>
           {model === "eleven_v3" ? <NodeRow label="Stability"><select aria-label="Voice stability" value={d.stability < 0.25 ? 0 : d.stability > 0.75 ? 1 : 0.5} disabled={busy} onChange={(event) => patch({ stability: Number(event.target.value) })}><option value={0}>Creative</option><option value={0.5}>Natural</option><option value={1}>Robust</option></select></NodeRow> : <>
-            {numeric("Stability", "stability", 0, 1)}{numeric("Similarity", "similarityBoost", 0, 1)}{numeric("Style", "style", 0, 1)}
-            {d.audioMode === "tts" && numeric("Speed", "speed", 0.7, 1.2)}{toggle("Speaker boost", "speakerBoost")}
+            {numeric("Stability", "stability", 0, 1)}{numeric("Similarity", "similarityBoost", 0, 1)}
+            {model !== "eleven_v4" && <>
+              {numeric("Style", "style", 0, 1)}
+              {d.audioMode === "tts" && numeric("Speed", "speed", 0.7, 1.2)}{toggle("Speaker boost", "speakerBoost")}
+            </>}
           </>}
           {d.audioMode === "sts" && toggle("Remove noise", "removeBackgroundNoise")}
           <NodeRow label="Seed"><input aria-label="Audio seed" type="number" min="0" max="4294967295" step="1" value={d.seed} placeholder="Random" disabled={busy} onChange={(event) => patch({ seed: event.target.value })} /></NodeRow>

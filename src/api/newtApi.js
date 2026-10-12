@@ -1,5 +1,6 @@
 import { scopedMyNewtRequest } from "../myNewt/requestScope.js";
 import { isVideoGenerationRequest } from "../videoJobPolicy.js";
+import { isNanoBanana21Model } from "../nanoBanana21.js";
 const localApiPort = import.meta.env?.VITE_API_PORT || "3336";
 const localApiBaseUrl = `http://127.0.0.1:${localApiPort}`;
 
@@ -14,6 +15,13 @@ function ensureOk(response, data, fallbackMessage) {
 }
 
 export async function fetchJsonApi(path, options = {}, label = "Request") {
+  if (path === "/api/node/generate-image") {
+    const body = JSON.parse(options.body || "{}");
+    if (isNanoBanana21Model(body.model)) {
+      const health = await getJson("/api/health", "Could not verify Nano Banana 2.1 support.");
+      if (health.routes?.nanoBanana21 !== true) throw new Error("Restart the NewtNode backend to activate Nano Banana 2.1. No generation was submitted.");
+    }
+  }
   const scoped = scopedMyNewtRequest(path, options);
   if (scoped) return scoped;
   const requestUrl = localApiFetchUrl(path);
@@ -320,13 +328,20 @@ export const generationApi = {
     return postJson("/api/node/generate-image", body, "Image generation failed.");
   },
 
-  generateNodeVideo(body) {
-    return postJson("/api/node/generate-video", body, "Video generation failed.");
+  async generateNodeVideo(body) {
+    const { response, data } = await nodeApi.generateVideo(body);
+    return ensureOk(response, data, "Video generation failed.");
   }
 };
 
 export const nodeApi = {
-  planExplore: body => postJson("/api/node/explore-plan", body, "Explore planning"),
+  async planExplore(body) {
+    if (body.version >= 2) {
+      const health = await getJson("/api/health", "Could not verify Explore look controls.");
+      if (health.routes?.exploreLookVariation !== true) throw new Error("Restart the NewtNode backend to activate Explore's new look controls. No planning or generation was submitted.");
+    }
+    return postJson("/api/node/explore-plan", body, "Explore planning");
+  },
   async editImage(form) {
     // Never replay a potentially billed edit through the localhost fallback.
     let response;
@@ -400,8 +415,25 @@ export const nodeApi = {
     return fetchJsonApi("/api/node/generate-3d", jsonBody(body), label);
   },
 
-  generateVideo(body, label = "Video generation") {
+  async generateVideo(body, label = "Video generation") {
+    if (body.seedanceDraft === true) {
+      const health = await getJson("/api/health", "Could not verify Draft mode support.");
+      if (health.routes?.seedanceDrafts !== true) throw new Error("Restart the NewtNode backend to activate Draft mode. No generation was submitted.");
+    }
+    if (body.seedanceTask === "edit") {
+      const health = await getJson("/api/health", "Could not verify video-editing support.");
+      if (health.routes?.seedanceVideoEditing !== true) throw new Error("Restart the NewtNode backend to activate Edit Existing Video. No generation was submitted.");
+    }
     return fetchJsonApi("/api/node/generate-video", jsonBody(body), label);
+  },
+
+  async completeSeedanceDraft(body) {
+    const health = await getJson("/api/health", "Could not verify draft finishing support.");
+    if (health.routes?.seedanceDrafts !== true) throw new Error("Restart the NewtNode backend to activate draft finishing. No generation was submitted.");
+    let response;
+    try { response = await fetch(localApiFetchUrl("/api/node/seedance-draft/complete"), jsonBody(body)); }
+    catch { throw new Error("The finishing connection was interrupted. The job may still be running. Use Finish again to recover the same request; it will not submit a duplicate."); }
+    return ensureOk(response, await readJsonResponse(response, "Draft completion"), "Could not finish the draft.");
   },
 
   utilityVideo(body, label = "Utility video generation") {
@@ -412,6 +444,10 @@ export const nodeApi = {
 export const audioModelApi = {
   voices: (refresh = false) => getJson(`/api/elevenlabs/voices${refresh ? "?refresh=1" : ""}`, "Could not load ElevenLabs voices."),
   async generate(body) {
+    if (body.audioMode === "tts" && body.ttsModel === "eleven_v4") {
+      const health = await getJson("/api/health", "Could not verify Eleven v4 support.");
+      if (health.routes?.elevenLabsV4 !== true) throw new Error("Restart the NewtNode backend to activate Eleven v4. No generation was submitted.");
+    }
     // A paid audio POST must never be replayed by the generic localhost fallback.
     let response;
     try {

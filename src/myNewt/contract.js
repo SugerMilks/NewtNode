@@ -11,7 +11,7 @@ export const myNewtDefaults = Object.freeze({
 // Only creative inputs are editable. Credentials, runtime flags, locks, and outputs never are.
 export const myNewtFields = Object.freeze({
   plainText: ["text"], text: ["text"],
-  imageModel: ["prompt", "model", "resolution", "aspectRatio", "quality", "enablePromptExpansion", "ideogramSourceUrl", "batchCount"],
+  imageModel: ["prompt", "model", "resolution", "aspectRatio", "quality", "batchCount"],
   videoModel: ["prompt", "model", "resolution", "aspectRatio", "duration", "generateAudio", "batchCount", "negativePrompt"],
   coverage: ["model", "coverageMethod", "resolution", "quality"],
   style: ["stylePreset", "gradePreset"],

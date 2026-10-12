@@ -230,12 +230,11 @@ test("removed video models are no longer selectable", () => {
     videoModelNames.minimaxH3
   ]);
   assert.deepEqual(imageModelOptions, [
-    imageModelNames.nanoBanana2,
+    imageModelNames.nanoBanana21,
     imageModelNames.nanoBananaPro,
     imageModelNames.openAiImage2,
     imageModelNames.openAiImage25Sunburst,
     imageModelNames.openAiImage25Flare,
-    imageModelNames.seedream5Pro,
-    imageModelNames.ideogram45
+    imageModelNames.seedream5Pro
   ]);
 });

@@ -3,7 +3,7 @@ import test from "node:test";
 import { readFile } from "node:fs/promises";
 import * as image25 from "../src/openAiImage25.js";
 import * as seedream5Pro from "../src/seedream5Pro.js";
-import * as ideogram from "../src/ideogramImage.js";
+import * as nanoBanana21 from "../src/nanoBanana21.js";
 import * as modelOptions from "../src/modelOptions.js";
 import { imageModelNames, imageModelOptions, normalizeModelPreferences, openAiImageAspectRatios } from "../src/modelOptions.js";
 import { normalizeOpenAiImage2Quality } from "../src/openAiImage2.js";
@@ -23,7 +23,7 @@ function serverFunction(name) {
   return `${server.slice(start - 6, start) === "async " ? "async " : ""}${server.slice(start, server.indexOf("\n}", start) + 2)}`;
 }
 function serverHelpers(deps, names) {
-  deps = { ...seedream5Pro, ...deps };
+  deps = { ...seedream5Pro, ...nanoBanana21, ...deps };
   return new Function(...Object.keys(deps), `${names.map(serverFunction).join("\n")}\nreturn {${names.join(",")}};`)(...Object.values(deps));
 }
 const sizes = serverHelpers({}, ["normalizeOpenAiImageSize", "openAiImageSizeForAspectRatio", "aspectRatioNumber", "roundOpenAiImageDimension"]);
@@ -45,7 +45,7 @@ test("Image 2.5 variants are registered without replacing Image 2 or saved prefe
 });
 
 test("backend resolves both 2.5 variants before the legacy OpenAI match", () => {
-  const { resolveImageModel } = serverHelpers({ ...image25, imageModelNames, isNanoBanana2Model: () => false,
+  const { resolveImageModel } = serverHelpers({ ...image25, imageModelNames, isRetiredNanoBanana2Model: () => false,
     httpError: (status, message) => Object.assign(new Error(message), { status }) }, ["resolveImageModel"]);
   for (const variant of ["sunburst", "flare"]) {
     for (const name of [image25.openAiImage25Models[variant], `gpt-image-2.5-${variant}`]) {
@@ -172,7 +172,7 @@ test("Krea selection normalizes sizes and unsupported backgrounds without reduci
 test("Image workspace and node controls share current Krea formats and preserve them on reload", async () => {
   const editor = await readFile(new URL("../src/NodeEditor.jsx", import.meta.url), "utf8");
   const workspace = await readFile(new URL("../src/main.jsx", import.meta.url), "utf8");
-  const deps = { ...modelOptions, ...image25, ...seedream5Pro, ...ideogram, isNanoBanana2Model: () => false };
+  const deps = { ...modelOptions, ...image25, ...seedream5Pro, ...nanoBanana21, isRetiredNanoBanana2Model: () => false };
   const functions = (source, names, extra = {}) => {
     const scope = { ...deps, ...extra };
     const code = names.map(name => {

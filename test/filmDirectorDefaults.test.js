@@ -10,6 +10,7 @@ const expected = {
   skillDurationSeconds: "30",
   skillVideoModel: "Seedance 2.5",
   skillResolution: "1080p",
+  skillSeedanceDraft: false,
   skillAspectRatio: "21:9",
   skillShotCount: "Auto",
   skillDirectorAudioMode: "production"

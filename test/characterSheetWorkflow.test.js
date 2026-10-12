@@ -49,7 +49,7 @@ test("wardrobe edits lock identity and composition to the base sheet", () => {
 test("base signatures change only when identity-generation inputs change", () => {
   const data = {
     characterPortrait: { localUrl: "/uploads/person.png" },
-    characterSheetModel: "Nano Banana 2",
+    characterSheetModel: "Nano Banana Pro",
     cinematicCharacterSheet: true,
     characterPhysicalDetails: "Scar above left eyebrow"
   };
@@ -189,7 +189,7 @@ test("a successful Character base survives CU failure and is reused on retry", a
 test("CU signatures depend on portrait-generation inputs, not the regular sheet", () => {
   const data = {
     characterPortrait: { localUrl: "/uploads/portrait.png", thumbnailUrl: "/thumb.jpg" },
-    characterSheetModel: "Nano Banana 2",
+    characterSheetModel: "Nano Banana Pro",
     characterPhysicalDetails: "Freckles",
     cinematicCharacterSheet: false,
     characterBaseSheet: { url: "/outputs/base.png" }
@@ -210,7 +210,7 @@ test("CU signatures depend on portrait-generation inputs, not the regular sheet"
   }
   for (const patch of [
     { characterPortrait: { url: "/different-portrait.png" } },
-    { characterSheetModel: "Nano Banana Pro" },
+    { characterSheetModel: "Nano Banana 2.1" },
     { characterPhysicalDetails: "Scar" }
   ]) {
     assert.notEqual(characterBaseVideoGenerationSignature({ ...data, ...patch }), signature);

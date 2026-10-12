@@ -13,7 +13,7 @@ import { myNewtCheckpoint, restoreMyNewtCheckpoint } from "../src/myNewt/recover
 import { buildNewtPresetGraph, bindNewtPresetInputs, instantiateNewtPreset } from "../src/myNewt/presets.js";
 
 const owner = { projectId: "review-project", nodeId: "newt" };
-const graph = { nodes: [{ id: "newt", type: "myNewt", data: {} }, { id: "image", type: "imageModel", data: { title: "Image", model: "Nano Banana 2", prompt: "Original", status: "ready" } }], edges: [], groups: [] };
+const graph = { nodes: [{ id: "newt", type: "myNewt", data: {} }, { id: "image", type: "imageModel", data: { title: "Image", model: "Nano Banana Pro", prompt: "Original", status: "ready" } }], edges: [], groups: [] };
 const snapshot = () => myNewtSnapshot({ ...structuredClone(graph), ...owner });
 const response = (operation, payload) => ({ usage: { input_tokens: 100, output_tokens: 100 }, output: [{ type: "function_call", name: "project_action", call_id: Math.random().toString(), arguments: JSON.stringify({ operation, payload: JSON.stringify(payload), reason: operation }) }] });
 const plan = { summary: "Review workflow", steps: [{ id: "main", title: "Complete the brief" }], deliverables: [{ kind: "workflow", nodeId: "image", label: "Image workflow", count: 1 }], runs: [] };
@@ -72,7 +72,7 @@ test("a claimed batch stops submitting further paid requests when new direction 
   const { service, start } = await fixture(t, { invoke: async () => response("run", { nodeId: "image" }), relay: async () => { submissions++; return { status: 200, data: { cost: { amountUsd: 0.1 } } }; } });
   const job = await start({ approveRuns: false }), actionId = job.pending.id;
   await service.claim(job.id, { ...owner, actionId, clientId: "test" });
-  const request = { ...owner, actionId, clientId: "test", sequence: 1, route: "/api/node/generate-image", body: { nodeId: "image", model: "Nano Banana 2" } };
+  const request = { ...owner, actionId, clientId: "test", sequence: 1, route: "/api/node/generate-image", body: { nodeId: "image", model: "Nano Banana Pro" } };
   await service.request(job.id, request);
   await service.control(job.id, { ...owner, action: "note", note: "Stop generating" }); await wait(service);
   await assert.rejects(service.request(job.id, { ...request, sequence: 2 }), /New direction/);

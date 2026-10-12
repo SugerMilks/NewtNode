@@ -28,6 +28,8 @@ export async function myNewtRunInputDigest(snapshot, nodeId, stage, preview = {}
   const node = snapshot.nodes.find((item) => item.id === nodeId);
   if (!node || (!reusableTypes.has(node.type) && !isCoverageNode(node))) return null;
   const inputs = Object.fromEntries((myNewtFields[node.type] || []).map((key) => [key, node.data?.[key]]));
+  if (node.type === "videoModel") inputs.seedanceTask = node.data?.seedanceTask || "reference";
+  if (node.type === "videoModel") inputs.seedanceDraft = node.data?.seedanceDraft === true;
   // Media previews contain resolved prompts, settings and the actual selected references.
   // Text has no equivalent preview, so include its complete upstream dependency graph.
   const ancestors = [], edges = [], visited = new Set([nodeId]);
