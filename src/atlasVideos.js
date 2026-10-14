@@ -5,6 +5,7 @@
 // https://www.atlascloud.ai/docs/more-models/kwaivgi/kling-video-o3-pro-reference-to-video/generateVideo
 // https://www.atlascloud.ai/docs/more-models/kwaivgi/kling-video-o3-4k-image-to-video/generateVideo
 import { validateSeedance25Task } from "./seedance25.js";
+import { validateSeedanceDraft } from "./seedanceDraft.js";
 
 const models = new Map([
   ["seedance 2.0", { id: "bytedance/seedance-2.0", family: "seedance", version: "2.0", limits: [9, 3, 3] }],
@@ -29,13 +30,14 @@ export function supportsAtlasVideoModel(name) {
 // those limits. Local URLs are for preflight only; upload before sending the body.
 export function buildAtlasVideoRequest({
   model, prompt, startImage = "", endImage = "", images = [], videos = [], audios = [],
-  aspectRatio, duration, resolution, generateAudio = true, seed, seedanceTask = "reference", ...unsupported
+  aspectRatio, duration, resolution, generateAudio = true, seed, seedanceTask = "reference", seedanceDraft, ...unsupported
 } = {}) {
   if (excludedKlingModels.has(modelKey(model))) {
     fail("Atlas Kling O3 is excluded from this integration until direct image/video reference mention syntax is verified. Documented <<<element_N>>> tokens require elements[], not images[]. Kling v3 will not be substituted.");
   }
   const spec = models.get(modelKey(model));
   if (!spec) fail(`Unsupported Atlas video model: ${String(model)}. Kling v3 is not an alias for O3.`);
+  const draft = validateSeedanceDraft({ model, seedanceDraft, provider: "atlas" });
   const unsupportedFields = Object.keys(unsupported).filter((field) => unsupported[field] !== undefined);
   if (unsupportedFields.length) fail(`Unsupported Atlas video settings: ${unsupportedFields.join(", ")}.`);
   if (typeof generateAudio !== "boolean") fail("Atlas generateAudio must be a boolean.");
@@ -70,7 +72,8 @@ export function buildAtlasVideoRequest({
       fail("Atlas Seedance 2.0 audio references require an image or video reference.");
     }
     request.duration = editing ? -1 : videoDuration(duration, 4, is25 ? 30 : 15, 5, true);
-    request.resolution = choice(resolution, is25 ? seedance25Resolutions : seedance20Resolutions, "720p", "resolution");
+    request.resolution = draft ? "480p" : choice(resolution, is25 ? seedance25Resolutions : seedance20Resolutions, "720p", "resolution");
+    if (draft) request.draft = true;
     request.ratio = editing ? "adaptive" : aspect(aspectRatio, is25 && first ? ["adaptive"] : [...ratios, "adaptive"], first ? "adaptive" : "16:9");
     request.generate_audio = generateAudio;
     if (seed !== undefined) {

@@ -8,7 +8,7 @@ import { buildAtlasVideoRequest, supportsAtlasVideoModel } from "../src/atlasVid
 import { createAtlasMedia } from "../server/atlas-media.js";
 import { validateAtlasVideoAssets } from "../server/atlas-validation.js";
 import { mergeSeedanceDirectorReferences, seedance25ImageReferenceLimit, seedanceImageReferenceLimit } from "../src/seedanceDirectorReferences.js";
-import { resolveSeedanceRuntimeProvider } from "../src/kreaSeedance.js";
+import { resolveSeedanceRuntimeProvider, kreaSeedanceEndpoint, estimateKreaSeedanceCost } from "../src/kreaSeedance.js";
 import { normalizeVideoGenerateAudio, videoAudioEnforcementMode } from "../src/videoAudio.js";
 import { estimateVideoRunCost, generationEstimate } from "../src/generationPricing.js";
 import { generationQuoteKey } from "../src/pricingTrust.js";
@@ -94,7 +94,7 @@ const refs = new Function("uniqueReferenceName", `${referenceCode}; return { nor
 function harness(t, { provider = "atlas", duration = 5, failGeneration = false, draftId = "draft-123" } = {}) {
   let handler;
   const calls = [], histories = [];
-  const submit = async (input) => { calls.push({ kind: "generate", input }); if (failGeneration) throw new Error("Provider failed"); return { requestId: "test", url: "https://example.com/result.mp4" }; };
+  const submit = async (input) => { calls.push({ kind: "generate", input }); if (failGeneration) throw new Error("Provider failed"); return { requestId: "test", url: "https://example.com/result.mp4", job: { ...(input.draft ? { draft_id: draftId } : {}) } }; };
   const inspect = async (url) => url === clip ? { mimeType: "video/quicktime", bytes: 1000, fps: 24, duration }
     : { mimeType: "image/png", bytes: 1000, width: 1920, height: 1080 };
   const media = createAtlasMedia({
@@ -105,7 +105,7 @@ function harness(t, { provider = "atlas", duration = 5, failGeneration = false, 
   const deps = { ...seedance, ...refs, seedance25ImageReferenceLimit, seedanceImageReferenceLimit, mergeSeedanceDirectorReferences,
     validateSeedanceDraft, seedanceDraftCost,
     createSingleSubmissionFalClient: ({ credentials, endpoint }) => { calls.push({ kind: "client", credentials, endpoint }); return {}; },
-    seedanceDrafts: { recordDraft: async (record) => { calls.push({ kind: "receipt", record }); return record.draftId ? { receiptId: "receipt", draftId: record.draftId } : null; } },
+    seedanceDrafts: { recordDraft: async (record) => { calls.push({ kind: "receipt", record }); return record.draftId ? { receiptId: "receipt", draftId: record.draftId, provider: record.provider } : null; } },
     resolveSeedanceRuntimeProvider, normalizeVideoGenerateAudio, videoAudioEnforcementMode, supportsAtlasVideoModel,
     app: { post: (_path, callback) => { handler = callback; } },
     console: { error: () => {} }, process: { env: { FAL_KEY: provider === "fal" ? "test" : "", KREA_API_KEY: provider === "krea" ? "test" : "", ATLAS_API_KEY: "test" } },
@@ -118,6 +118,9 @@ function harness(t, { provider = "atlas", duration = 5, failGeneration = false, 
     optionalInteger: () => undefined, atlasMedia: media,
     uploadLocalOutputToFal: async (url) => { calls.push({ kind: "upload" }); return `https://example.com/${url.split("/").at(-1)}`; },
     seedanceEndUserId: "test-user", subscribeFal: async (_endpoint, { input }) => { const result = await submit(input); return { requestId: result.requestId, data: { video: { url: result.url }, ...(input.draft ? { draft_id: draftId } : {}) } }; },
+    kreaSeedanceEndpoint, estimateKreaSeedanceCost, durationToSeconds: value => Number.parseInt(value, 10),
+    uploadLocalOutputToKrea: async (url, key) => { calls.push({ kind: "upload", key }); return `https://example.com/${url.split("/").at(-1)}`; },
+    runKreaSeedanceGeneration: async ({ input, apiKey }) => { calls.push({ kind: "krea-key", key: apiKey }); const result = await submit(input); return { requestId: result.requestId, remoteVideo: { url: result.url } }; },
     downloadVideo: async () => ({ publicPath: "/outputs/edited.mp4", fileName: "edited.mp4", bytes: 1000 }),
     appendHistory: async (value) => histories.push(value), routeKindLabel: (kind) => kind,
     projectFromBody: () => ({}), nodeFromBody: () => ({}), sendApiError: (res, error) => res.status(error.status || 500).json({ error: error.message }), randomUUID: () => "test"
@@ -173,9 +176,9 @@ test("Krea edit request fails before uploading and never switches providers", as
   assert.equal(result.statusCode, 400); assert.match(result.body.error, /Fal and Atlas only/); assert.deepEqual(h.calls, []);
 });
 
-for (const mode of ["text", "image", "reference", "edit"]) {
-  test(`Fal actual ${mode} route sends draft and retains finishing metadata`, async t => {
-    const h = harness(t, { provider: "fal" });
+for (const provider of ["fal", "atlas"]) for (const mode of ["text", "image", "reference", "edit"]) {
+  test(`${provider} actual ${mode} route sends draft and retains finishing metadata`, async t => {
+    const h = harness(t, { provider });
     const result = await h.run({ seedanceDraft: true, seedanceTask: mode === "edit" ? "edit" : "reference",
       ...(mode === "image" ? { startFrameUrls: [plate] } : {}),
       ...(["text", "image"].includes(mode) ? { prompt: "A cinematic scene", referenceImageUrls: [], referenceVideoUrls: [] } : {}) });
@@ -183,26 +186,42 @@ for (const mode of ["text", "image", "reference", "edit"]) {
     assert.equal(h.calls.filter(x => x.kind === "generate").length, 1);
     const input = h.calls.find(x => x.kind === "generate").input;
     assert.equal(input.draft, true); assert.equal(input.resolution, "480p");
-    assert.equal(h.calls.find(x => x.kind === "client").credentials, "test");
+    if (provider === "fal") assert.equal(h.calls.find(x => x.kind === "client").credentials, "test");
+    assert.equal(result.body.seedanceDraft.provider, provider);
     assert.equal(result.body.seedanceDraft.draftId, "draft-123");
     assert.equal(result.body.cost.amountUsd, null);
     assert.equal(h.histories[0].settings.resolution, "480p");
     assert.equal(h.histories[0].settings.draft.receiptId, "receipt");
-    if (mode === "edit") assert.equal(input.task, "editing");
+    if (mode === "edit") assert.equal(input[provider === "fal" ? "task" : "omni_reference_task_type"], provider === "fal" ? "editing" : "edit");
   });
 }
 
-test("draft rejects non-Fal providers and invalid values before uploads or billing", async t => {
-  for (const provider of ["atlas", "krea"]) {
+test("draft rejects unsupported providers and invalid values before uploads or billing", async t => {
+  for (const provider of ["disabled"]) {
     const h = harness(t, { provider });
     const result = await h.run({ seedanceDraft: true });
-    assert.equal(result.statusCode, 400); assert.match(result.body.error, /requires Fal/); assert.deepEqual(h.calls, []);
+    assert.equal(result.statusCode, 400); assert.match(result.body.error, /Draft mode requires/); assert.deepEqual(h.calls, []);
   }
   const h = harness(t, { provider: "fal" });
   for (const patch of [{ seedanceDraft: "true" }, { seedanceDraft: true, model: "Seedance 2.0" }]) {
     assert.equal((await h.run(patch)).statusCode, 400);
     assert.deepEqual(h.calls, []);
   }
+});
+
+for (const mode of ["text", "image", "reference"]) test(`Krea ${mode} draft is preview-only and never creates a completion receipt`, async t => {
+  const h = harness(t, { provider: "krea" });
+  const result = await h.run({ seedanceDraft: true, seedanceTask: "reference",
+    ...(mode === "image" ? { startFrameUrls: [plate] } : {}),
+    ...(["text", "image"].includes(mode) ? { prompt: "A cinematic scene", referenceImageUrls: [], referenceVideoUrls: [] } : {}) });
+  assert.equal(result.statusCode, 200, JSON.stringify(result.body));
+  const input = h.calls.find(x => x.kind === "generate").input;
+  assert.equal(input.draft, true); assert.equal(input.resolution, "480p");
+  assert.equal(result.body.seedanceDraft.completionSupported, false);
+  assert.equal(result.body.seedanceDraft.provider, "krea");
+  assert.equal(h.calls.filter(x => x.kind === "receipt").length, 0);
+  assert.equal(h.calls.find(x => x.kind === "krea-key").key, "test");
+  assert.match(h.histories[0].cost.pricingBasis, /Krea/);
 });
 
 test("missing draft ID preserves the returned video and warns without a fake finish action", async t => {

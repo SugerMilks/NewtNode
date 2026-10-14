@@ -48,10 +48,23 @@ test("Draft UI fixes preview resolution, preserves normal resolution and disable
     const resolution = option(view, "480p");
     assert.equal(hasAttr(resolution, "selected"), true); assert.equal(hasAttr(resolution.parentNode, "disabled"), true);
     const run = view.elements.find(node => attr(node, "class") === "run-node-button");
-    assert.equal(hasAttr(run, "disabled"), provider !== "fal");
+    assert.equal(hasAttr(run, "disabled"), false);
+    const off = renderVideo("Seedance 2.5", { provider, data: { seedanceDraft: false } });
+    assert.equal(hasAttr(off.elements.find(node => attr(node, "aria-label") === "Seedance Draft mode"), "disabled"), false);
+    if (provider === "krea") assert.match(view.html, /Krea preview only/);
   }
   assert.equal(data.resolution, "1080p");
   assert.ok(!renderVideo("Seedance 2.0", { provider: "fal" }).html.includes("Seedance Draft mode"));
+});
+
+test("Atlas draft finishing uses the saved provider, while Krea previews cannot be finished", () => {
+  const draft = { receiptId: "atlas-test", draftId: "atlas-draft", provider: "atlas", expiresAt: new Date(Date.now() + 86400000).toISOString() };
+  const data = { resultItems: [{ url: "/outputs/draft.mp4", type: "video", seedanceDraft: draft }], selectedResultIndex: 0 };
+  const atlas = renderVideo("Seedance 2.5", { provider: "fal", data });
+  assert.match(atlas.html, /original Atlas Cloud key/); assert.match(atlas.html, /Finish at 1080p/);
+  const krea = renderVideo("Seedance 2.5", { provider: "atlas", data: { ...data,
+    resultItems: [{ ...data.resultItems[0], seedanceDraft: { provider: "krea", completionSupported: false } }] } });
+  assert.match(krea.html, /Krea draft \/ Preview only/); assert.doesNotMatch(krea.html, /Finish at 1080p/);
 });
 
 test("draft results retain Finish after model changes and save/reopen", () => {

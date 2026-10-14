@@ -59,6 +59,16 @@ function submitted(harness) {
   return harness.client.generate.mock.calls[0].arguments[0].input;
 }
 
+test("Atlas draft validates before upload, overrides resolution, and avoids ordinary quotes", async t => {
+  const quote = t.mock.fn(async () => ({ amountUsd: 99 })), h = setup(t, quote);
+  const result = await h.media.video({ model: "Seedance 2.5", prompt, seedanceDraft: true, resolution: "1080p", duration: 5 }, key);
+  assert.equal(submitted(h).draft, true); assert.equal(submitted(h).resolution, "480p");
+  assert.equal(result.cost.amountUsd, null); assert.equal(quote.mock.callCount(), 0);
+  const invalid = setup(t);
+  await assert.rejects(invalid.media.video({ model: "Seedance 2.0", prompt, seedanceDraft: true, images: localRefs(1) }, key), /Draft mode requires/);
+  noTransfers(invalid);
+});
+
 function noTransfers(harness) {
   assert.equal(harness.readLocalAsset.mock.callCount(), 0);
   assert.equal(harness.client.upload.mock.callCount(), 0);

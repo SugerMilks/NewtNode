@@ -5,6 +5,7 @@ import { imageModelNames } from "../src/modelOptions.js";
 import { isOpenAiImage25Model } from "../src/openAiImage25.js";
 import sharp from "sharp";
 import { normalizeOpenAiEditMask } from "./openai-edit-mask.js";
+import { seedanceDraftCost } from "../src/seedanceDraft.js";
 
 export function createAtlasMedia({ client, readLocalAsset, imageSize, labelPrompt, validateVideoAssets = async () => {}, quoteInput = async () => null }) {
   async function quotedCost(cost, input, key) {
@@ -62,7 +63,7 @@ export function createAtlasMedia({ client, readLocalAsset, imageSize, labelPromp
     const input = buildAtlasVideoRequest({ ...options, ...uploaded,
       startImage: startImage ? await upload(startImage) : "",
       endImage: endImage ? await upload(endImage) : "" });
-    cost = await quotedCost(cost, input, key);
+    cost = options.seedanceDraft ? seedanceDraftCost("preview", "atlas") : await quotedCost(cost, input, key);
     const result = await client.generate({ mediaType: "video", input, key });
     return { ...result, endpoint: input.model, cost, input, sourceAspect, provider: "Atlas Cloud",
       remoteVideo: { url: result.url, content_type: "video/mp4" } };

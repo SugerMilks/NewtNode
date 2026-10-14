@@ -418,7 +418,7 @@ export const nodeApi = {
   async generateVideo(body, label = "Video generation") {
     if (body.seedanceDraft === true) {
       const health = await getJson("/api/health", "Could not verify Draft mode support.");
-      if (health.routes?.seedanceDrafts !== true) throw new Error("Restart the NewtNode backend to activate Draft mode. No generation was submitted.");
+      if (health.routes?.seedanceDrafts !== true || health.routes?.seedanceMultiProviderDrafts !== true) throw new Error("Restart the NewtNode backend to activate multi-provider Draft mode. No generation was submitted.");
     }
     if (body.seedanceTask === "edit") {
       const health = await getJson("/api/health", "Could not verify video-editing support.");
@@ -429,7 +429,7 @@ export const nodeApi = {
 
   async completeSeedanceDraft(body) {
     const health = await getJson("/api/health", "Could not verify draft finishing support.");
-    if (health.routes?.seedanceDrafts !== true) throw new Error("Restart the NewtNode backend to activate draft finishing. No generation was submitted.");
+    if (health.routes?.seedanceDrafts !== true || health.routes?.seedanceMultiProviderDrafts !== true) throw new Error("Restart the NewtNode backend to activate multi-provider draft finishing. No generation was submitted.");
     let response;
     try { response = await fetch(localApiFetchUrl("/api/node/seedance-draft/complete"), jsonBody(body)); }
     catch { throw new Error("The finishing connection was interrupted. The job may still be running. Use Finish again to recover the same request; it will not submit a duplicate."); }

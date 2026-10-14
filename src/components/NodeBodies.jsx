@@ -38,6 +38,7 @@ import { MediaPreview, UploadIcon } from "./MediaViews.jsx";
 import { DirectorTaskStatus } from "./DirectorTaskStatus.jsx";
 import { NodeRow, OutputPortRow, PortHandle } from "./NodePorts.jsx";
 import { smartTextImagePrompt } from "../smartTextPrompt.js";
+import { supportsSeedanceDraft, seedanceDraftHint } from "../seedanceDraft.js";
 
 export function PlainTextNodeBody({ node, outputPort, onUpdate, onConnectStart, onDisconnectInput, connectedPortKeys }) {
   return (
@@ -905,8 +906,8 @@ export function SkillDirectorNodeBody({
               </label>
               {(!videoModelValue || videoModelValue === "Seedance 2.5") && <label className="node-row">
                 <span>Draft (480p)</span>
-                <input type="checkbox" aria-label="Director Draft mode" checked={node.data.skillSeedanceDraft === true} disabled={running || (!draftMode && generationProvider !== "fal")}
-                  title="Seedance 2.5 on Fal only. Overrides preview resolution without rebuilding the plan; 1080p finishing is billed separately."
+                <input type="checkbox" aria-label="Director Draft mode" checked={node.data.skillSeedanceDraft === true} disabled={running || (!draftMode && !supportsSeedanceDraft(generationProvider))}
+                  title={`Seedance 2.5: ${seedanceDraftHint(generationProvider)} No plan rebuild required.`}
                   onChange={event => onUpdate(node.id, { skillSeedanceDraft: event.target.checked })} />
               </label>}
               <label className="node-row">

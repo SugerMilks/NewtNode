@@ -37,8 +37,9 @@ function Harness() {
           return { video: { localUrl: `${clip}#finished` }, seedanceDraftSource: receiptId }; } });
     }
     const request = buildVideoGenerationRequest({ node: ref.current, filmDirector: attach ? directorPackageForVideo(director, {}) : null });
-    const result = normalizeVideoGenerationResult({ video: { localUrl: clip }, ...(request.seedanceDraft ? { seedanceDraft: {
-      receiptId: "test-receipt", draftId: "test-draft", expiresAt: new Date(Date.now() + 7 * 86400000).toISOString() } } : {}) }, 0);
+    const result = normalizeVideoGenerationResult({ video: { localUrl: clip }, ...(request.seedanceDraft ? { seedanceDraft: provider === "krea"
+      ? { provider, completionSupported: false, resolution: "480p" }
+      : { provider, receiptId: "test-receipt", draftId: "test-draft", expiresAt: new Date(Date.now() + 7 * 86400000).toISOString() } } : {}) }, 0);
     update(node.id, { resultItems: [result], resultUrl: result.url, selectedResultIndex: 0, status: "complete" });
   }
   const shared = { incomingByNode: {}, connectedPortKeys: new Set(), videoModelOptions, generationProvider: provider, showApiCosts: costs,

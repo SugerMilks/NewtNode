@@ -732,6 +732,7 @@ function buildHealthPayload() {
       myNewtUnpricedGenerations: true,
       seedanceVideoEditing: true,
       seedanceDrafts: true,
+      seedanceMultiProviderDrafts: true,
       nanoBanana21: true,
       myNewtCreativeSkills: true,
       myNewtCanvasOrganization: true,
@@ -3733,8 +3734,9 @@ async function runCompositeUtilityVideo(req, res, { referenceVideoUrls, maskVide
 
 const seedanceDrafts = createSeedanceDraftStore({
   directory: path.join(dataDir, "seedance-drafts"),
-  getKey: () => process.env.FAL_KEY,
+  getKey: provider => provider === "atlas" ? process.env.ATLAS_API_KEY : process.env.FAL_KEY,
   createClient: (credentials, endpoint) => createSingleSubmissionFalClient({ credentials, endpoint, model: "Seedance 2.5 draft completion" }),
+  atlasClient: createAtlasClient({ onProgress: job => console.info("Atlas Cloud draft completion", job) }),
   download: (req, url, options) => downloadVideo(req, url, "draft-complete", options),
   history: item => appendHistory(item, { deduplicate: true })
 });
@@ -3749,9 +3751,10 @@ app.post("/api/node/generate-video", async (req, res) => {
 
     const selectedVideoModel = resolveVideoModel(req.body.model);
     const draftRequested = req.body.seedanceDraft;
-    const draftKey = String(process.env.FAL_KEY || "").trim();
+    const draftProvider = resolveSeedanceRuntimeProvider({ falKey: process.env.FAL_KEY, kreaKey: process.env.KREA_API_KEY }) || (atlasMediaEnabled() ? "atlas" : "");
+    const draftKey = String(({ fal: process.env.FAL_KEY, atlas: process.env.ATLAS_API_KEY, krea: process.env.KREA_API_KEY })[draftProvider] || "").trim();
     const draftMode = draftRequested === undefined ? false : validateSeedanceDraft({ model: selectedVideoModel.displayName,
-      seedanceDraft: draftRequested, provider: draftKey ? "fal" : "" });
+      seedanceDraft: draftRequested, provider: draftProvider });
     const draftStartedAt = Date.now();
     const editing = validateSeedance25Task({ model: selectedVideoModel.displayName, seedanceTask: req.body.seedanceTask,
       videos: req.body.referenceVideoUrls, startFrames: req.body.startFrameUrls, endFrames: req.body.endFrameUrls,
@@ -3862,7 +3865,7 @@ app.post("/api/node/generate-video", async (req, res) => {
     const duration = editing ? "auto" : seedance25 ? normalizeSeedance25Duration(req.body.duration) : normalizeDuration(req.body.duration);
     const aspectRatio = editing ? "auto" : seedance25 ? normalizeSeedance25AspectRatio(req.body.aspectRatio) : normalizeAspectRatio(req.body.aspectRatio);
     const generateAudio = normalizeVideoGenerateAudio(req.body.generateAudio);
-    const runtimeProvider = draftMode ? "fal" : resolveSeedanceRuntimeProvider({
+    const runtimeProvider = draftMode ? draftProvider : resolveSeedanceRuntimeProvider({
       falKey: process.env.FAL_KEY,
       kreaKey: process.env.KREA_API_KEY
     }) || (atlasMediaEnabled() ? "atlas" : "");
@@ -3875,8 +3878,8 @@ app.post("/api/node/generate-video", async (req, res) => {
       const source = await resolveLocalAssetPath(referenceVideoUrls[0]);
       sourceDurationSeconds = validateSeedance25EditDuration((await probeVideoFile(source.filePath)).duration);
     }
-    const kreaApiKey = runtimeProvider === "krea" ? String(process.env.KREA_API_KEY || "").trim() : "";
-    const atlasApiKey = runtimeProvider === "atlas" ? String(process.env.ATLAS_API_KEY || "").trim() : "";
+    const kreaApiKey = runtimeProvider === "krea" ? draftMode ? draftKey : String(process.env.KREA_API_KEY || "").trim() : "";
+    const atlasApiKey = runtimeProvider === "atlas" ? draftMode ? draftKey : String(process.env.ATLAS_API_KEY || "").trim() : "";
 
     let routeKind = "text-to-video";
     if (startFrameUrl) {
@@ -3902,19 +3905,21 @@ app.post("/api/node/generate-video", async (req, res) => {
     let providerName;
     let draftMetadata = null;
     let draftWarning = "";
+    let providerDraftId;
 
     if (runtimeProvider === "atlas") {
       const result = await atlasMedia.video({ model: selectedVideoModel.displayName, prompt: submittedPrompt,
         startImage: startFrameUrl, endImage: endFrameUrl, images: referenceImageUrls,
         videos: referenceVideoUrls, audios: referenceAudioUrls, generateAudio,
-        resolution: req.body.resolution || resolution, duration: editing ? duration : req.body.duration || duration,
+        resolution: draftMode ? resolution : req.body.resolution || resolution, duration: editing ? duration : req.body.duration || duration,
         aspectRatio: editing ? aspectRatio : req.body.aspectRatio || aspectRatio, seed: optionalInteger(req.body.seed),
-        seedanceTask: editing ? "edit" : "reference" }, atlasApiKey);
+        seedanceTask: editing ? "edit" : "reference", ...(draftMode ? { seedanceDraft: true } : {}) }, atlasApiKey);
       endpoint = result.endpoint;
       requestId = result.requestId;
       remoteVideo = result.remoteVideo;
       submittedPrompt = result.input.prompt;
       providerName = "Atlas Cloud";
+      providerDraftId = result.job?.draft_id;
       cost = { ...result.cost, aspectRatio: editing ? "source video" : result.sourceAspect ? "source frame" : aspectRatio, routeKind };
     } else if (runtimeProvider === "fal") {
       endpoint = seedance25 ? seedance25FalEndpoint(routeKind) : `bytedance/seedance-2.0/${routeKind}`;
@@ -3966,13 +3971,7 @@ app.post("/api/node/generate-video", async (req, res) => {
       if (!remoteVideo?.url) {
         return res.status(502).json({ error: "Fal returned no video URL.", raw: result?.data });
       }
-      if (draftMode) {
-        cost = seedanceDraftCost();
-        draftMetadata = await seedanceDrafts.recordDraft({ draftId: result.data.draft_id, key: draftKey, startedAt: draftStartedAt,
-          original: { prompt, submittedPrompt, project: projectFromBody(req.body), node: nodeFromBody(req.body),
-            settings: { resolution, duration, aspectRatio, generateAudio, seedanceTask: editing ? "edit" : "reference", runtimeProvider: "fal", seedanceDraft: true } } });
-        if (!draftMetadata) draftWarning = "Fal returned a preview without a draft ID. It has been saved, but cannot be finished at 1080p.";
-      }
+      providerDraftId = result.data.draft_id;
     } else {
       endpoint = kreaSeedanceEndpoint(selectedVideoModel.displayName);
       const input = {
@@ -3982,6 +3981,7 @@ app.post("/api/node/generate-video", async (req, res) => {
         aspect_ratio: aspectRatio,
         generate_audio: generateAudio
       };
+      if (draftMode) input.draft = true;
 
       if (routeKind === "image-to-video") {
         input.start_image = await uploadLocalOutputToKrea(startFrameUrl, kreaApiKey);
@@ -4006,6 +4006,18 @@ app.post("/api/node/generate-video", async (req, res) => {
       });
       cost.aspectRatio = aspectRatio;
       cost.routeKind = routeKind;
+    }
+
+    if (draftMode) {
+      cost = { ...seedanceDraftCost("preview", runtimeProvider), aspectRatio: cost.aspectRatio, routeKind };
+      if (runtimeProvider === "krea") {
+        draftMetadata = { provider: "krea", resolution: "480p", completionSupported: false };
+      } else {
+        draftMetadata = await seedanceDrafts.recordDraft({ draftId: providerDraftId, key: draftKey, provider: runtimeProvider, startedAt: draftStartedAt,
+          original: { prompt, submittedPrompt, project: projectFromBody(req.body), node: nodeFromBody(req.body),
+            settings: { resolution, duration, aspectRatio, generateAudio, seedanceTask: editing ? "edit" : "reference", runtimeProvider, seedanceDraft: true } } });
+        if (!draftMetadata) draftWarning = `${providerName} returned a preview without a draft ID. It has been saved, but cannot be finished at 1080p.`;
+      }
     }
 
     const output = await downloadVideo(req, remoteVideo.url, routeKind, { removeAudio: !generateAudio });

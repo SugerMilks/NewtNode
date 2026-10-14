@@ -250,7 +250,7 @@ import {
   wanVaceSamplerOptions
 } from "./modelOptions.js";
 import { isSeedance25Model } from "./seedance25.js";
-import { selectedSeedanceDraft } from "./seedanceDraft.js";
+import { selectedSeedanceDraft, supportsSeedanceDraft, seedanceDraftProviderName, seedanceDraftHint } from "./seedanceDraft.js";
 import { finishSeedanceDraft } from "./nodeRunners/seedanceDraft.js";
 import { supportsAtlasVideoModel } from "./atlasVideos.js";
 import {
@@ -10647,8 +10647,10 @@ function NodeBody({
   const isKlingO3 = isKlingO34k || isKlingO3Pro;
   const isSeedance25 = isSeedance25Model(effectiveVideoModel);
   const seedanceDraft = isSeedance25 && (directorConnected ? directorSettings?.seedanceDraft : node.data.seedanceDraft) === true;
-  const draftUnavailable = seedanceDraft && generationProvider !== "fal";
+  const draftUnavailable = seedanceDraft && !supportsSeedanceDraft(generationProvider);
   const selectedDraft = selectedSeedanceDraft(node.data);
+  const previewOnlyDraft = node.data.resultItems?.[node.data.selectedResultIndex || 0]?.seedanceDraft?.completionSupported === false;
+  const draftProviderName = seedanceDraftProviderName(selectedDraft?.seedanceDraft.provider);
   const completedDraft = selectedDraft && node.data.resultItems?.find(item => item.seedanceDraftSource === selectedDraft.seedanceDraft.receiptId);
   const seedanceEditing = isSeedance25 && node.data.seedanceTask === "edit";
   const seedanceEditingSupported = ["atlas", "fal"].includes(generationProvider);
@@ -10740,15 +10742,16 @@ function NodeBody({
         onSelectResult={(index, item) => onUpdate(node.id, { selectedResultIndex: index, resultUrl: item.url })}
       />
       {selectedDraft && <div className="seedance-draft-actions">
-        <small title={`Finish using the original Fal key before ${new Date(selectedDraft.seedanceDraft.expiresAt).toLocaleString()}`}>Draft / 480p</small>
+        <small title={`Finish using the original ${draftProviderName} key before ${new Date(selectedDraft.seedanceDraft.expiresAt).toLocaleString()}`}>Draft / 480p</small>
         <button type="button" disabled={running}
-          title={completedDraft ? "Select the saved 1080p render. No new generation." : "Separately billed render using this draft's original prompt, references and settings. Requires the original Fal key within seven days."}
+          title={completedDraft ? "Select the saved 1080p render. No new generation." : `Separately billed render using this draft's original prompt, references and settings. Requires the original ${draftProviderName} key within seven days.`}
           onClick={() => onRun(node, "finish-seedance-draft")}>
           <Film size={14} aria-hidden="true" />
           {node.data.seedanceFinishing && running ? "Finishing..." : completedDraft ? "View 1080p" : showApiCosts ? "Finish at 1080p (Variable cost)" : "Finish at 1080p"}
         </button>
       </div>}
-      <button className="run-node-button" onClick={() => onRun(node)} disabled={running || !hasVideoPrompt || atlasVideoUnsupported || seedanceEditingUnavailable || draftUnavailable} title={draftUnavailable ? "Draft mode requires Fal. Enable Fal or turn Draft off." : seedanceEditingUnavailable ? "Video editing requires Fal or Atlas Cloud" : atlasVideoUnsupported ? "This video model is unavailable through Atlas Cloud" : undefined}>
+      {previewOnlyDraft && <div className="seedance-draft-actions"><small title={seedanceDraftHint("krea")}>Krea draft / Preview only</small></div>}
+      <button className="run-node-button" onClick={() => onRun(node)} disabled={running || !hasVideoPrompt || atlasVideoUnsupported || seedanceEditingUnavailable || draftUnavailable} title={draftUnavailable ? "Draft mode requires Fal, Atlas Cloud, or Krea. Enable a provider or turn Draft off." : seedanceEditingUnavailable ? "Video editing requires Fal or Atlas Cloud" : atlasVideoUnsupported ? "This video model is unavailable through Atlas Cloud" : undefined}>
         {running
           ? node.data.seedanceFinishing ? "Finishing at 1080p..." : `Running ${formatNodeBatchCount(isSam3Video ? 1 : node.data.batchCount)}...`
           : <RunPriceLabel label={seedanceDraft ? "Run Draft (480p)" : seedanceEditing ? "Edit Video" : "Run Video"} options={videoPriceSettings} visible={showApiCosts} />}
@@ -10774,8 +10777,8 @@ function NodeBody({
         <fieldset className="video-director-controlled-settings" disabled={directorConnected}>
         {isSeedance25 && <NodeRow label="Draft (480p)">
           <button type="button" className={`node-toggle ${seedanceDraft ? "enabled" : ""}`} role="switch" aria-checked={seedanceDraft} aria-label="Seedance Draft mode"
-            disabled={running || (!seedanceDraft && generationProvider !== "fal")}
-            title={directorConnected ? "Controlled by Director" : "Fal preview. Finish selected drafts at 1080p within seven days; each stage is billed separately."}
+            disabled={running || (!seedanceDraft && !supportsSeedanceDraft(generationProvider))}
+            title={directorConnected ? "Controlled by Director" : seedanceDraftHint(generationProvider)}
             onClick={() => onUpdate(node.id, { seedanceDraft: !seedanceDraft })}><span /></button>
         </NodeRow>}
         <NodeRow label="Model">

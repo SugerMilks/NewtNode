@@ -1,10 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createSeedanceDraftStore, registerSeedanceDraftRoutes } from "../server/seedance-drafts.js";
-import { seedanceDraftCompletionEndpoint, seedanceDraftLifetimeMs, selectedSeedanceDraft, finishedSeedanceDraftState } from "../src/seedanceDraft.js";
+import { seedanceDraftCompletionEndpoint, seedanceAtlasDraftCompletionEndpoint, seedanceDraftLifetimeMs, selectedSeedanceDraft, finishedSeedanceDraftState } from "../src/seedanceDraft.js";
+import { createAtlasClient } from "../server/atlas.js";
 import { buildVideoGenerationRequest, normalizeVideoGenerationResult } from "../src/nodeRunners/videoModels.js";
 import { finishSeedanceDraft } from "../src/nodeRunners/seedanceDraft.js";
 import { normalizedResultItems } from "../src/mediaResults.js";
@@ -156,11 +157,96 @@ test("API checks health and never replays paid finishing POSTs", async t => {
   const calls = [];
   t.mock.method(globalThis, "fetch", async (url, options = {}) => {
     calls.push({ url, options });
-    if (url === "/api/health") return new Response(JSON.stringify({ routes: { seedanceDrafts: true } }));
+    if (url === "/api/health") return new Response(JSON.stringify({ routes: { seedanceDrafts: true, seedanceMultiProviderDrafts: true } }));
     throw new Error("Network lost");
   });
   await assert.rejects(nodeApi.completeSeedanceDraft({ receiptId: "receipt" }), /will not submit a duplicate/);
   assert.equal(calls.filter(x => x.options.method === "POST").length, 1);
   t.mock.method(globalThis, "fetch", async () => new Response(JSON.stringify({ routes: {} })));
   await assert.rejects(nodeApi.generateVideo({ seedanceDraft: true }), /Restart.*Draft mode/);
+});
+
+test("a Fal-only backend cannot receive new multi-provider paid requests", async t => {
+  let posts = 0;
+  t.mock.method(globalThis, "fetch", async (_url, options = {}) => { if (options.method === "POST") posts++;
+    return new Response(JSON.stringify({ routes: { seedanceDrafts: true } })); });
+  await assert.rejects(nodeApi.generateVideo({ seedanceDraft: true }), /Restart/);
+  await assert.rejects(nodeApi.completeSeedanceDraft({ receiptId: "receipt" }), /Restart/);
+  assert.equal(posts, 0);
+});
+
+test("legacy Fal receipts still finish on Fal after multi-provider upgrade", async t => {
+  const h = await fixture(t), file = path.join(h.directory, `${h.draft.receiptId}.json`);
+  const record = JSON.parse(await readFile(file, "utf8")); delete record.provider;
+  await writeFile(file, JSON.stringify(record));
+  await h.store.complete(h.draft.receiptId, {});
+  assert.equal(h.calls.find(x => x.kind === "submit").endpoint, seedanceDraftCompletionEndpoint);
+});
+
+async function atlasFixture(t, { uncertain = false, missingId = false, downloadFailure = false } = {}) {
+  const h = await fixture(t);
+  const posts = [], keys = [], gets = [];
+  let disconnected = false, downloads = 0, key = "atlas-key";
+  const options = { ...h.options, getKey: provider => { assert.equal(provider, "atlas"); return key; },
+    createClient: () => assert.fail("Atlas receipt must never use Fal"),
+    atlasClient: createAtlasClient({ sleep: async () => {}, fetchImpl: async (url, request) => {
+      keys.push(request.headers.Authorization);
+      if (request.method === "POST") {
+        posts.push(JSON.parse(request.body));
+        if (uncertain) throw new Error("Lost submission");
+        return new Response(JSON.stringify({ data: { ...(missingId ? {} : { id: "atlas-final" }), status: "processing" } }));
+      }
+      gets.push(url);
+      if (!disconnected) { disconnected = true; return new Response("Denied", { status: 403 }); }
+      return new Response(JSON.stringify({ data: { id: "atlas-final", status: "completed", outputs: [video.url] } }));
+    } }),
+    download: async () => { if (downloadFailure && ++downloads === 1) throw new Error("Disk unavailable"); return { publicPath: "/outputs/atlas-final.mp4", fileName: "atlas-final.mp4" }; } };
+  const store = createSeedanceDraftStore(options);
+  const draft = await store.recordDraft({ provider: "atlas", draftId: "atlas-draft", key, startedAt: Date.now(), original });
+  return { ...h, options, store, draft, posts, keys, gets, setKey: value => { key = value; } };
+}
+
+test("Atlas finishing persists its original prediction and recovers without replay or cross-provider fallback", async t => {
+  const h = await atlasFixture(t);
+  for (const key of ["", "fal-key"]) { h.setKey(key); await assert.rejects(h.store.complete(h.draft.receiptId, {}), /original Atlas Cloud API key/); }
+  assert.equal(h.posts.length, 0);
+  h.setKey("atlas-key");
+  await assert.rejects(h.store.complete(h.draft.receiptId, {}), /did not cancel or resubmit/);
+  assert.deepEqual(h.posts, [{ model: seedanceAtlasDraftCompletionEndpoint, draft_id: "atlas-draft" }]);
+  h.age(seedanceDraftLifetimeMs + 1000);
+  const recovered = createSeedanceDraftStore(h.options);
+  const [result, concurrent] = await Promise.all([recovered.complete(h.draft.receiptId, {}), recovered.complete(h.draft.receiptId, {})]);
+  assert.deepEqual(result, concurrent); assert.equal(h.posts.length, 1);
+  assert.equal(result.provider, "Atlas Cloud"); assert.equal(result.endpoint, seedanceAtlasDraftCompletionEndpoint);
+  assert.equal(result.video.localUrl, "/outputs/atlas-final.mp4");
+  assert.equal(h.histories.length, 1); assert.equal(h.histories[0].settings.resolution, "1080p");
+  assert.equal(h.histories[0].prompt, original.prompt); assert.match(h.histories[0].cost.pricingBasis, /Atlas Cloud/);
+  assert.deepEqual([...new Set(h.keys)], ["Bearer atlas-key"]);
+  assert.ok(h.gets.every(url => url.endsWith("/prediction/atlas-final")));
+  h.setKey(""); assert.deepEqual(await createSeedanceDraftStore(h.options).complete(h.draft.receiptId, {}), result);
+});
+
+for (const type of ["uncertain", "missingId"]) test(`Atlas ${type} finishing submission never replays after restart`, async t => {
+  const h = await atlasFixture(t, { [type]: true });
+  await assert.rejects(h.store.complete(h.draft.receiptId, {}));
+  await assert.rejects(createSeedanceDraftStore(h.options).complete(h.draft.receiptId, {}), /could not be confirmed/);
+  assert.equal(h.posts.length, 1);
+});
+
+test("Atlas rejects expired unsubmitted drafts and recovers downloaded output without new billing", async t => {
+  const expired = await atlasFixture(t); expired.age(seedanceDraftLifetimeMs + 1000);
+  await assert.rejects(expired.store.complete(expired.draft.receiptId, {}), /expired/); assert.equal(expired.posts.length, 0);
+  const h = await atlasFixture(t, { downloadFailure: true });
+  await assert.rejects(h.store.complete(h.draft.receiptId, {}), /did not cancel/);
+  await assert.rejects(h.store.complete(h.draft.receiptId, {}), /Disk unavailable/);
+  const polls = h.gets.length;
+  await createSeedanceDraftStore(h.options).complete(h.draft.receiptId, {});
+  assert.equal(h.posts.length, 1); assert.equal(h.gets.length, polls);
+});
+
+test("Krea preview metadata survives saving but never exposes a finishing action", async () => {
+  const item = normalizeVideoGenerationResult({ video: { localUrl: "/outputs/krea.mp4" }, seedanceDraft: { provider: "krea", resolution: "480p", completionSupported: false } }, 0);
+  const node = { id: "krea", data: JSON.parse(JSON.stringify({ resultItems: [item] })) };
+  assert.match(item.label, /Draft/); assert.equal(selectedSeedanceDraft(node.data), null);
+  assert.equal((await finishSeedanceDraft({ node, complete: () => assert.fail("Preview cannot be finished") })).status, "skipped");
 });

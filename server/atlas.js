@@ -61,7 +61,7 @@ export function createAtlasClient({ fetchImpl = fetch, sleep = (ms) => new Promi
     return url;
   }
 
-  async function generate({ mediaType, input, key }) {
+  async function submit({ mediaType, input, key }) {
     if (!["image", "video"].includes(mediaType) || !input?.model) throw fail(400, "Unsupported Atlas Cloud generation request.");
     let initial;
     try {
@@ -72,20 +72,27 @@ export function createAtlasClient({ fetchImpl = fetch, sleep = (ms) => new Promi
       if (error.retryable) error.message += " The submission may have been accepted. Check Atlas Cloud history before retrying; NewtNode did not resubmit it.";
       throw error;
     }
-    let job = initial?.data || initial;
+    const job = initial?.data || initial;
     const requestId = typeof job?.id === "string" ? job.id : "";
     if (!requestId) throw fail(502, "Atlas Cloud returned no job ID. Check provider history before retrying; NewtNode did not resubmit it.");
+    return { requestId, job };
+  }
+
+  async function waitForResult({ mediaType, model, requestId, key, job: initialJob }) {
+    if (!["image", "video"].includes(mediaType) || typeof requestId !== "string" || !requestId) throw fail(400, "Invalid Atlas Cloud prediction.");
+    let job = initialJob || { id: requestId, status: "pending" };
+    const draftId = initialJob?.draft_id;
     let errors = 0;
     let notFound = 0;
     let previousStatus = "";
     // Poll the same paid prediction with its original key. Video has no job deadline.
     for (let attempt = 0; mediaType === "video" || attempt < 600; attempt += 1) {
       const status = String(job?.status || "").toLowerCase();
-      if (status !== previousStatus) { onProgress({ requestId, model: input.model, status }); previousStatus = status; }
+      if (status !== previousStatus) { onProgress({ requestId, model, status }); previousStatus = status; }
       if (["completed", "succeeded"].includes(status)) {
         const url = Array.isArray(job.outputs) ? job.outputs.map(httpsUrl).find(Boolean) : "";
         if (!url) throw fail(502, `Atlas Cloud job ${requestId} completed without a usable output. Check provider history before rerunning.`);
-        return { requestId, url, job };
+        return { requestId, url, job: { ...job, ...(job.draft_id || draftId ? { draft_id: job.draft_id || draftId } : {}) } };
       }
       if (["failed", "canceled", "cancelled", "timeout"].includes(status)) throw fail(502, `Atlas Cloud job ${requestId} ${status}: ${detail(job.error) || detail(job.message) || detail(job.msg) || "The provider ended this generation."}`);
       if (!["", "created", "pending", "queued", "starting", "processing", "running", "in_queue", "in_progress"].includes(status)) throw fail(502, `Atlas Cloud job ${requestId} has an unrecognized status. Check provider history; no cancellation or resubmission was sent.`);
@@ -106,5 +113,9 @@ export function createAtlasClient({ fetchImpl = fetch, sleep = (ms) => new Promi
     }
     throw fail(504, `Atlas Cloud image job ${requestId} is still pending. Check provider history before rerunning; no cancellation was sent.`);
   }
-  return { upload, generate };
+  async function generate({ mediaType, input, key }) {
+    const submitted = await submit({ mediaType, input, key });
+    return waitForResult({ mediaType, model: input.model, key, ...submitted });
+  }
+  return { upload, generate, submit, waitForResult };
 }

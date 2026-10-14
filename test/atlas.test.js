@@ -38,6 +38,16 @@ test("Atlas never retries uncertain paid submissions", async () => {
   }
 });
 
+test("Atlas retains a draft ID returned at submission when polling omits it", async () => {
+  let posts = 0;
+  const client = createAtlasClient({ sleep: async () => {}, fetchImpl: async (_url, options) => {
+    if (options.method === "POST") { posts++; return json({ data: { id: "job-1", status: "processing", draft_id: "draft-1" } }); }
+    return completed();
+  } });
+  const result = await client.generate({ mediaType: "video", input: { ...input, draft: true }, key: "key" });
+  assert.equal(posts, 1); assert.equal(result.job.draft_id, "draft-1");
+});
+
 test("Atlas provider failures and cancellations are terminal and readable", async () => {
   for (const status of ["failed", "canceled", "cancelled"]) {
     let calls = 0;
