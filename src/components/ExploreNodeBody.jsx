@@ -23,6 +23,7 @@ export function ExploreNodeBody({ node, config, incoming, prompt, onUpdate, onRu
   const [branchMode, setBranchMode] = React.useState("");
   const [note, setNote] = React.useState("");
   const [details, setDetails] = React.useState(false);
+  const [referencesOpen, setReferencesOpen] = React.useState(false);
   const galleryRef = React.useRef(null);
   const galleryBrowserRef = React.useRef(null);
   const [galleryScroll, setGalleryScroll] = React.useState({ left: 0, maximum: 0 });
@@ -148,7 +149,7 @@ export function ExploreNodeBody({ node, config, incoming, prompt, onUpdate, onRu
     {!settingsValid && <div className="explore-error" role="alert">Choose an enabled model and supported format in Settings.</div>}
 
     <div className="explore-settings-heading"><button aria-expanded={data.settingsOpen} onClick={() => update({ settingsOpen: !data.settingsOpen })}><ChevronDown size={15} />Settings</button>
-      <label className="explore-mode" title="On: eclectic, distinct looks. Off: restrained variations. Image / Product content stays fixed unless the brief explicitly changes it.">
+      <label className="explore-mode" title="On: contrasting camera, framing, palette, lighting and art direction within the chosen style. Off: restrained variations. Image / Product content and composition stay fixed unless the brief explicitly changes them.">
         <input aria-label="Explore Mode" type="checkbox" checked={data.exploreMode} disabled={busy} onChange={event => update({ exploreMode: event.target.checked })} />Explore Mode
       </label>
     </div>
@@ -167,10 +168,10 @@ export function ExploreNodeBody({ node, config, incoming, prompt, onUpdate, onRu
       </fieldset>}
     <section className="explore-references" aria-label="References">
       <div className="explore-settings-heading explore-reference-heading">
-        {!data.referencesOpen && <CollapsedInputPorts node={node} ports={referencePorts} connectedPortKeys={connectedPortKeys} onExpand={() => update({ referencesOpen: true })} />}
-        <button aria-expanded={data.referencesOpen} onClick={() => update({ referencesOpen: !data.referencesOpen })}><ChevronDown size={15} />References</button>
+        {!referencesOpen && <CollapsedInputPorts node={node} ports={referencePorts} connectedPortKeys={connectedPortKeys} onExpand={() => setReferencesOpen(true)} />}
+        <button aria-expanded={referencesOpen} onClick={() => setReferencesOpen(!referencesOpen)}><ChevronDown size={15} />References</button>
       </div>
-      {data.referencesOpen && <div className="explore-inputs">{referencePorts.map(port => <NodeRow key={port.id} {...ports} label={port.label} inputPort={port}>
+      {referencesOpen && <div className="explore-inputs">{referencePorts.map(port => <NodeRow key={port.id} {...ports} label={port.label} inputPort={port}>
         <textarea readOnly rows={2} aria-label={`${port.label} reference`} disabled={!incoming[port.id]?.length}
           placeholder="Not connected" value={exploreReferenceDescription(port.id, incoming[port.id])} />
       </NodeRow>)}</div>}

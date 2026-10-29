@@ -23,7 +23,11 @@ server/data/.*.tmp
 server/data/*.log
 server/data/*.log.*
 server/data/my-newt/
+server/data/newt-learning/
 server/data/seedance-drafts/
+server/data/camera-coverage/
+server/data/ideogram-vector/
+server/data/vector-looks/
 server/data/newt-presets/
 server/data/newt-skills/
 public/models/poses/.*.tmp

@@ -1,0 +1,108 @@
+.node-card.cameraCoverage { width: 780px; }
+.camera-coverage-body { display: flex; flex-direction: column; gap: 12px; container-type: inline-size; }
+.camera-coverage-body:focus { outline: none; }
+.camera-coverage-body button, .camera-coverage-body select, .camera-coverage-body input { font: inherit; }
+.camera-coverage-body button:not(.inline-port), .camera-coverage-body select, .camera-coverage-body input:not([type=range]) { border: 1px solid #3b3b3b; border-radius: 6px; background: #181a18; color: #e9e9e5; min-height: 34px; }
+.camera-coverage-body button { cursor: pointer; }
+.camera-coverage-body button:disabled { opacity: .45; cursor: default; }
+.camera-coverage-body button:focus-visible, .camera-coverage-body select:focus-visible, .camera-coverage-body input:focus-visible { outline: 2px solid #e2ce31; outline-offset: 2px; }
+.camera-coverage-body input[type=range] { min-width: 0; accent-color: #e1ca2b; width: 100%; }
+.camera-coverage-body select, .camera-coverage-body input:not([type=range]) { width: 100%; min-width: 0; padding: 6px 8px; }
+.coverage-icon { flex: 0 0 34px; width: 34px; height: 34px; padding: 0; display: inline-flex; align-items: center; justify-content: center; color: #e9e9e5; text-decoration: none; }
+.coverage-source-row, .coverage-monitor-toolbar, .coverage-transport, .coverage-shot-heading, .coverage-gallery-scroll, .coverage-shot-tools, .coverage-enhance, .coverage-job, .coverage-position-footer { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.coverage-source-row .node-row { flex: 1; min-width: 0; margin: 0; }
+.coverage-source-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.coverage-monitor-toolbar > select { max-width: 260px; }
+.coverage-spacer { flex: 1; }
+.coverage-tabs { display: flex; flex-shrink: 0; gap: 2px; }
+.coverage-tabs button { padding: 5px 14px; border-color: transparent; }
+.camera-coverage-body .coverage-tabs button[aria-selected=true], .camera-coverage-body .coverage-position-tabs button[aria-pressed=true] { background: #343a34; color: #fff; border-color: #839582; }
+.coverage-monitor { width: 100%; aspect-ratio: 16 / 9; background: #101210; display: flex; align-items: center; justify-content: center; overflow: hidden; color: #798579; }
+.coverage-monitor video, .coverage-monitor img { width: 100%; height: 100%; object-fit: contain; }
+.coverage-transport output { min-width: 66px; font-variant-numeric: tabular-nums; font-size: 12px; }
+.coverage-shot-heading { justify-content: space-between; border-top: 1px solid #383b38; padding-top: 12px; }
+.coverage-shot-heading .port-row { margin: 0; width: auto; gap: 12px; }
+.coverage-muted { color: #b1b7ad; font-size: 12px; }
+.coverage-gallery { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: thin; scrollbar-color: #9b9f90 #191b19; }
+.coverage-gallery button { flex: 0 0 140px; width: 140px; padding: 3px; overflow: hidden; }
+.coverage-gallery button.selected { border-color: #e2ce31; }
+.coverage-gallery img { display: block; width: 132px; height: 76px; object-fit: contain; background: #111; }
+.coverage-thumbnail { display: block; position: relative; width: 132px; height: 76px; }
+.coverage-shot-progress { position: absolute; top: 4px; right: 4px; width: 24px; height: 24px; display: grid; place-items: center; border: 1px solid #ffffff30; border-radius: 50%; background: #111e; color: #e2ce31; pointer-events: none; }
+.coverage-shot-spinner { animation: coverage-shot-spin 1s linear infinite; }
+@keyframes coverage-shot-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .coverage-shot-spinner { animation: none; } }
+.coverage-gallery button > .coverage-shot-label { height: 26px; display: flex; align-items: center; gap: 5px; overflow: hidden; white-space: nowrap; font-size: 12px; }
+.coverage-gallery-scroll { margin-top: -6px; }
+.coverage-shot-controls { display: flex; flex-direction: column; gap: 8px; }
+.coverage-shot-tools { flex-wrap: wrap; }
+.coverage-shot-tools > input { flex: 2 1 140px; width: auto; }
+.coverage-shot-tools > select { flex: 2 1 170px; width: auto; }
+.coverage-enhance { justify-content: flex-end; flex-wrap: wrap; }
+.coverage-enhance select { width: 68px; }
+.coverage-enhance button { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 6px 12px; }
+.coverage-lens-controls { display: grid; grid-template-columns: minmax(120px, 1fr) minmax(180px, 2fr) minmax(140px, auto); align-items: end; gap: 8px; }
+.coverage-lens-controls label { display: flex; flex-direction: column; gap: 6px; min-width: 0; font-size: 12px; color: #b7beb3; }
+.coverage-lens-controls button { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 6px 12px; min-width: 0; }
+.coverage-lens-controls button svg { flex-shrink: 0; }
+.coverage-settings-toggle { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; }
+.coverage-settings-toggle[aria-expanded=false] svg { transform: rotate(-90deg); }
+.coverage-settings { display: flex; flex-direction: column; gap: 14px; border-top: 1px solid #383b38; padding-top: 14px; }
+.coverage-setting-grid { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 10px; }
+.coverage-pass-settings { grid-template-columns: 1.5fr 1.8fr 1fr 1fr; }
+.coverage-setting-grid label { display: flex; flex-direction: column; gap: 6px; min-width: 0; font-size: 12px; color: #b7beb3; }
+.coverage-camera-layout { display: flex; flex-direction: column; gap: 16px; }
+.coverage-diagram { min-width: 0; overflow: hidden; }
+.coverage-camera-stage { position: relative; height: 340px; background: #171b1d; overflow: hidden; }
+.coverage-camera-webgl { position: absolute; inset: 0; touch-action: none; cursor: grab; outline-offset: -2px; }
+.coverage-camera-webgl:active { cursor: grabbing; }
+.coverage-camera-webgl canvas { display: block; width: 100%; height: 100%; }
+.coverage-camera-caption, .coverage-camera-legend { position: absolute; z-index: 1; left: 14px; right: 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; pointer-events: none; font-size: 12px; color: #c1cbd0; }
+.coverage-camera-caption { top: 12px; }
+.coverage-camera-caption > span:first-child { color: #f1e18c; display: inline-flex; align-items: center; gap: 6px; }
+.coverage-camera-caption > span:last-child { font-variant-numeric: tabular-nums; }
+.coverage-camera-legend { bottom: 12px; justify-content: flex-start; }
+.coverage-camera-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.coverage-camera-legend span:last-child { margin-left: auto; color: #98a5ac; }
+.coverage-camera-legend i { width: 13px; height: 2px; background: #6fb5c4; }
+.coverage-camera-legend span:nth-child(2) i { background: #b4a2db; }
+.coverage-camera-annotations { pointer-events: none; position: absolute; inset: 0; }
+.coverage-camera-annotations > span { position: absolute; transform: translate(-50%, -100%); font-size: 11px; line-height: 18px; color: #e4ecef; padding: 1px 5px; border-radius: 3px; background: #101416db; white-space: nowrap; }
+.coverage-camera-annotations > .coverage-camera-tag { color: #f1e18c; }
+.coverage-camera-fallback { position: absolute; inset: 0; display: grid; place-content: center; pointer-events: none; color: #aebbc2; font-size: 13px; }
+.coverage-auto-refine, .coverage-auto-refine label { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.coverage-framing { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 24px; font-size: 13px; }
+.coverage-framing-switch { display: inline-flex; align-items: center; gap: 8px; }
+.coverage-framing-room { display: grid; grid-template-columns: auto minmax(70px, 1fr) 36px; align-items: center; gap: 8px; flex: 1 1 220px; min-width: 0; }
+.coverage-framing-room output { text-align: right; font-variant-numeric: tabular-nums; }
+.coverage-auto-refine { padding: 3px 0; }
+.coverage-auto-refine label { font-size: 13px; }
+.camera-coverage-body .coverage-auto-refine button, .camera-coverage-body .coverage-framing-switch button { padding: 3px; width: 34px; min-height: 20px; height: 20px; border: 0; border-radius: 10px; background: #4a5052; }
+.coverage-auto-refine button span, .coverage-framing-switch button span { display: block; width: 14px; height: 14px; border-radius: 50%; background: #e8ece9; transition: transform 120ms; }
+.camera-coverage-body .coverage-auto-refine button[aria-checked=true], .camera-coverage-body .coverage-framing-switch button[aria-checked=true] { background: #b3a325; }
+.coverage-auto-refine button[aria-checked=true] span, .coverage-framing-switch button[aria-checked=true] span { transform: translateX(14px); }
+.coverage-gallery button[draggable=true], .coverage-monitor img[draggable=true] { cursor: grab; }
+.coverage-positions { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.coverage-position-tabs { display: flex; flex-wrap: wrap; gap: 4px; }
+.coverage-position-tabs button { min-width: 28px; padding: 4px 7px; font-size: 12px; }
+.coverage-pose-control { display: grid; grid-template-columns: 58px 1fr 64px; align-items: center; gap: 8px; font-size: 12px; }
+.coverage-position-footer { justify-content: flex-end; }
+.coverage-job { font-size: 13px; flex-wrap: wrap; }
+.coverage-job > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.coverage-job-entry { min-width: 0; overflow-wrap: anywhere; }
+.camera-coverage-body button.coverage-generate { display: flex; align-items: center; justify-content: center; gap: 8px; background: #e2cd29; color: #121511; border: 0; font-weight: 700; padding: 10px 14px; min-height: 42px; width: 100%; }
+@container (max-width: 600px) {
+  .coverage-lens-controls { grid-template-columns: 120px minmax(0, 1fr); }
+  .coverage-lens-controls button { grid-column: 1 / -1; }
+}
+@container (max-width: 300px) {
+  .coverage-lens-controls { grid-template-columns: minmax(0, 1fr); }
+}
+@container (max-width: 520px) {
+  .coverage-camera-stage { height: 280px; }
+  .coverage-setting-grid { grid-template-columns: 1fr 1fr; }
+  .coverage-setting-grid label:first-child { grid-column: 1 / -1; }
+  .coverage-pass-settings label:first-child { grid-column: auto; }
+  .coverage-monitor-toolbar { flex-wrap: wrap; }
+  .coverage-monitor-toolbar > select { flex: 1; max-width: none; }
+}

@@ -1,4 +1,10 @@
 import "dotenv/config";
+import { projectGraphForStorage } from "../src/projectCanvases.js";
+import { createVideoOutpaintService } from "./video-outpaint.js";
+import { createVideoOutpaintRunner, registerVideoOutpaintRoutes } from "./routes/videoOutpaint.js";
+import { registerVideoPreviewRoute } from "./routes/videoPreview.js";
+import { finishSeedanceOutpaint } from "./seedance-outpaint.js";
+import { wanOutpaintPrompt, wanOutpaintNegativePrompt } from "../src/wanOutpaintPrompt.js";
 
 import cors from "cors";
 import express from "express";
@@ -25,11 +31,21 @@ import { findRemoteHistoryAssetUrl } from "./local-asset-recovery.js";
 import { registerComposerPoseRoutes } from "./routes/composerPoses.js";
 import { registerAudioModelRoutes } from "./routes/audioModel.js";
 import { registerExploreRoutes } from "./routes/explore.js";
+import { createCameraCoverageService, registerCameraCoverageRoutes } from "./camera-coverage.js";
+import { createSingleSubmissionFalClient } from "./fal-single-submission.js";
 import { registerStoryboardRoutes } from "./routes/storyboard.js";
+import { registerStoryboardScriptRoutes } from "./routes/storyboardScripts.js";
+import { scriptFileByteLimit } from "../src/storyboardScriptImport.js";
 import { registerEditorRoutes } from "./routes/editor.js";
 import { registerOutputRoutes } from "./routes/output.js";
 import { createOutputAssetResolver } from "./output-export.js";
 import { registerImageEditRoutes } from "./routes/imageEdit.js";
+import { createIdeogramVectorService } from "./ideogram-vector.js";
+import { registerIdeogramVectorRoutes, secureVectorAssetResponse } from "./routes/ideogramVector.js";
+import { createVectorLayerService, registerVectorLayerRoutes } from "./vector-layer-service.js";
+import { registerVectorLookRoutes } from "./vector-design-looks.js";
+import { createVectorLayerNamer } from "./vector-layer-names.js";
+import { ideogramVectorCost, ideogramVectorRates } from "../src/ideogramVector.js";
 import { generateFalImageEdit, createIdeogramImageEditClient } from "./image-edit.js";
 import { ideogramImageEditModel } from "../src/ideogramImageEdit.js";
 import { isNanoBanana21Model, nanoBanana21ModelName, nanoBanana21FalTextEndpoint, nanoBanana21Ratios, validateNanoBanana21Request, nanoBanana21Cost } from "../src/nanoBanana21.js";
@@ -55,6 +71,8 @@ import { createMyNewtVoiceTranscriber } from "./my-newt-voice.js";
 import { MY_NEWT_VOICE_MODEL, myNewtVoiceCost } from "../src/myNewt/voiceConfig.js";
 import { registerNewtPresetRoutes } from "./routes/newtPresets.js";
 import { registerNewtSkillRoutes } from "./routes/newtSkills.js";
+import { registerNewtLearningRoutes } from "./routes/newtLearning.js";
+import { createNewtLearningSummarizer } from "./newt-learning-summary.js";
 import { createMyNewtMediaInspector } from "./my-newt-media.js";
 import { relayLocalVideo } from "./local-video-request.js";
 import { isVideoGenerationRoute } from "../src/videoJobPolicy.js";
@@ -515,6 +533,9 @@ const upload = multer({
 
 app.use(cors());
 app.use(express.json({ limit: "16mb" }));
+// SVGs remain downloadable, but direct document navigation cannot execute scripts,
+// styles or external resources. Vector previews use a separately rendered PNG.
+app.use(["/uploads", "/outputs", "/workflow-assets"], secureVectorAssetResponse);
 app.use("/uploads", express.static(uploadsDir));
 app.use("/outputs", express.static(outputsDir));
 app.get("/api/media-thumbnail", runtimeThumbnailRequestLimiter, async (req, res) => {
@@ -586,9 +607,71 @@ registerOutputRoutes(app, {
   receiptStorePath: path.join(dataDir, "output-receipts.json")
 });
 
+const resolveCoverageAsset = createOutputAssetResolver({ uploadsDir, outputsDir, findRegisteredWorkflowPackage });
+const cameraCoverageService = createCameraCoverageService({
+  directory: path.join(dataDir, "camera-coverage"),
+  getKey: () => process.env.FAL_KEY,
+  clientFor: (credentials, endpoint) => createSingleSubmissionFalClient({ credentials, endpoint, model: "ReFrame" }),
+  prepareImage: async (url, client) => {
+    const { filePath } = await resolveCoverageAsset(url);
+    if ((await stat(filePath)).size > 32 * 1024 * 1024) throw httpError(400, "Choose an image no larger than 32 MB.");
+    const buffer = await readFile(filePath);
+    const metadata = await sharp(buffer, { limitInputPixels: 64000000 }).metadata();
+    if (!metadata.width || !metadata.height || (metadata.pages || 1) > 1) throw httpError(400, "Choose a still image for ReFrame.");
+    const png = await sharp(buffer, { limitInputPixels: 64000000 }).rotate().png().toBuffer();
+    return uploadImageInputToFal({ buffer: png, mimeType: "image/png", fileName: "coverage-reference.png" }, 0, client);
+  },
+  saveResult: async job => {
+    const video = job.request.kind === "pass";
+    const saved = video ? await downloadVideo({ body: job.context }, job.remote.url, "camera-coverage")
+      : await downloadImage({ body: job.context }, job.remote.url, "coverage-upscale", "image/png");
+    const metadata = video ? await probeVideoFile(saved.filePath) : await sharp((await resolveCoverageAsset(saved.publicPath)).filePath).metadata();
+    return { url: saved.publicPath, fileName: saved.fileName, thumbnailUrl: saved.thumbnailPublicPath || "", type: video ? "video" : "image",
+      width: metadata.width, height: metadata.height, duration: metadata.duration, fps: metadata.fps, bytes: saved.bytes };
+  },
+  charge: (requestId, endpoint, key) => providerPricing.falCharge(requestId, endpoint, key),
+  recordHistory: job => appendHistory({ id: job.id, createdAt: job.createdAt, provider: "fal", requestId: job.requestId,
+    mediaType: job.result.type, modelName: job.request.kind === "pass" ? "H3 Max Camera Controls" : "Topaz Image Upscale",
+    endpoint: job.endpoint, mode: "ReFrame", project: projectFromBody(job.context), node: nodeFromBody(job.context),
+    settings: job.request, cost: job.cost, outputFileName: job.result.fileName, outputBytes: job.result.bytes,
+    ...(job.result.type === "video" ? { localVideo: job.result.url } : { localImage: job.result.url }) }, { deduplicate: true }),
+  log: writeFalDebugLog
+});
+registerCameraCoverageRoutes(app, { service: cameraCoverageService, sendError: sendApiError,
+  capture: async body => {
+    const { filePath } = await resolveCoverageAsset(body.sourceVideoUrl);
+    const metadata = await probeVideoFile(filePath);
+    if (!metadata.width || !metadata.duration || body.frameTime >= metadata.duration) throw httpError(400, "Choose a frame inside the camera pass.");
+    const result = await createExtractFrameResult({ body: { ...body, format: "png", extractFrame: { format: "png", frameTime: body.frameTime } }, sourceVideoUrl: body.sourceVideoUrl });
+    return { ...result, width: metadata.width, height: metadata.height, frameTime: body.frameTime };
+  }
+});
+
+const outpaintDependencies = {
+  isLocalAssetUrl, resolveAsset: resolveLocalAssetPathFromUrl, probeVideo: probeVideoFile, runFfmpeg, statFile: stat,
+  createTarget: (body, kind, extension, dependency) => createManagedAssetTarget({ body }, kind, extension, dependency ? workflowPackageDependencyDirName : workflowPackageOutputDirName),
+  appendHistory, projectFromBody, nodeFromBody, analyze: runMediaDescriptionLlm, estimateCost: estimateTextProcessingCost
+};
+const videoOutpaintService = createVideoOutpaintService(outpaintDependencies);
+registerVideoOutpaintRoutes(app, { ...outpaintDependencies, service: videoOutpaintService });
+registerVideoPreviewRoute(app, { limiter: runtimeThumbnailRequestLimiter, resolveAsset: resolveLocalAssetPathFromUrl, runFfmpeg, cacheDir: runtimeThumbnailsDir });
+const runVideoOutpaint = createVideoOutpaintRunner({ ...outpaintDependencies, service: videoOutpaintService,
+  seedanceConnection: () => {
+    const provider = resolveSeedanceRuntimeProvider({ falKey: process.env.FAL_KEY, kreaKey: process.env.KREA_API_KEY }) || (atlasMediaEnabled() ? "atlas" : "");
+    return { provider, apiKey: String(({ fal: process.env.FAL_KEY, atlas: process.env.ATLAS_API_KEY })[provider] || "").trim() };
+  }, falKey: () => String(process.env.FAL_KEY || "").trim(), generateSeedance: handleVideoGeneration, generateWan: runWanVaceInpaintingUtility
+});
 registerExploreRoutes(app, { runTextLlm, runMediaDescriptionLlm, recordHistory: appendHistory, estimateCost: estimateTextProcessingCost });
 registerStoryboardRoutes(app, { runTextLlm, runMediaDescriptionLlm, recordHistory: appendHistory, estimateCost: estimateTextProcessingCost, readLocalAsset,
   connection: () => { const provider = requireActiveLlmProvider(); return { provider, credential: activeLlmCredential(provider) }; } });
+
+registerStoryboardScriptRoutes(app, { runTextLlm, runMediaDescriptionLlm, recordHistory: appendHistory, estimateCost: estimateTextProcessingCost,
+  readAsset: async url => {
+    const { filePath, fileName } = await resolveLocalAssetPathFromUrl(url);
+    const info = await stat(filePath);
+    if (!info.isFile() || info.size > scriptFileByteLimit) throw new Error("Choose a PDF no larger than 40 MB.");
+    return { buffer: await readFile(filePath), fileName };
+  } });
 
 registerAudioModelRoutes(app, {
   getKey: () => process.env.ELEVENLABS_API_KEY,
@@ -644,6 +727,58 @@ registerImageEditRoutes(app, {
   sendError: sendApiError
 });
 
+const vectorRates = Object.fromEntries(Object.entries(ideogramVectorRates).map(([name, fallback]) => {
+  const key = `IDEOGRAM_VECTOR_${name.replace(/[A-Z]/g, letter => `_${letter}`).toUpperCase()}_USD`;
+  const override = Number(process.env[key]);
+  return [name, process.env[key]?.trim() && Number.isFinite(override) && override >= 0 ? override : fallback];
+}));
+async function saveVectorArtwork(context, artwork) {
+  const request = { body: context }, created = [];
+  const svg = await createManagedAssetTarget(request, "ideogram-vector", ".svg");
+  const png = await createManagedAssetTarget(request, "ideogram-vector-preview", ".png");
+  const alpha = artwork.alpha ? await createManagedAssetTarget(request, "ideogram-vector-alpha", ".png") : null;
+  try {
+    for (const [target, bytes] of [[svg, artwork.svg], [png, artwork.png], ...(alpha ? [[alpha, artwork.alpha]] : [])]) {
+      await writeFile(target.filePath, bytes, { flag: "wx" }); created.push(target.filePath);
+    }
+  } catch (error) { for (const filePath of created) await rm(filePath, { force: true }).catch(() => {}); throw error; }
+  const thumbnail = await createImagePreview(request, png, "ideogram-vector").catch(() => null);
+  return { url: png.publicPath, fileName: png.fileName, bytes: artwork.png.length,
+    svgUrl: svg.publicPath, svgFileName: svg.fileName, svgBytes: Buffer.byteLength(artwork.svg),
+    thumbnailUrl: thumbnail?.publicPath || "", ...(alpha ? { alphaUrl: alpha.publicPath } : {}) };
+}
+const ideogramVectorService = createIdeogramVectorService({
+  directory: path.join(dataDir, "ideogram-vector"),
+  getKey: () => process.env.FAL_KEY,
+  clientFor: (credentials, endpoint) => createSingleSubmissionFalClient({ credentials, endpoint, model: "Ideogram Vector" }),
+  readSource: async (url, mode) => {
+    const { filePath, fileName } = await resolveCoverageAsset(url);
+    const maximum = (mode === "vectorize" ? 50 : 10) * 1024 * 1024;
+    if ((await stat(filePath)).size > maximum) throw httpError(400, `Ideogram Vector accepts ${mode === "vectorize" ? "source images up to 50" : "references up to 10"} MB.`);
+    return { buffer: await readFile(filePath), fileName };
+  },
+  uploadImage: uploadImageInputToFal,
+  subscribe: subscribeFal,
+  estimateCost: request => ideogramVectorCost(request, vectorRates),
+  charge: (requestId, endpoint, key) => providerPricing.falCharge(requestId, endpoint, key),
+  save: saveVectorArtwork,
+  recordHistory: item => appendHistory(item, { deduplicate: true })
+});
+registerIdeogramVectorRoutes(app, { service: ideogramVectorService, getRates: () => vectorRates, limiter: imageGenerationRequestLimiter, sendError: sendApiError });
+registerVectorLayerRoutes(app, { service: createVectorLayerService({
+  readSource: async url => {
+    const { filePath } = await resolveCoverageAsset(url), info = await stat(filePath);
+    if (!info.isFile() || info.size > 16 * 1024 * 1024) throw httpError(400, "Choose an SVG no larger than 16 MB.");
+    return readFile(filePath);
+  }, saveAssets: saveVectorArtwork, recordHistory: item => appendHistory(item, { deduplicate: true }),
+  describeLayers: createVectorLayerNamer({ analyze: runMediaDescriptionLlm, estimateCost: estimateTextProcessingCost, recordHistory: appendHistory })
+}), limiter: runtimeThumbnailRequestLimiter, sendError: sendApiError });
+
+registerVectorLookRoutes(app, {
+  directory: path.join(dataDir, "vector-looks"), assetDirectory: path.join(uploadsDir, "vector-looks"), assetUrl: "/uploads/vector-looks",
+  readAsset: async url => { const { filePath } = await resolveCoverageAsset(url); if ((await stat(filePath)).size > 10 * 1024 * 1024) throw httpError(400, "Look references must be at most 10 MB."); return readFile(filePath); }
+}, sendApiError);
+
 const newtPresetStore = registerNewtPresetRoutes(app, {
   directory: path.join(rootDir, "server", "data", "newt-presets"),
   systemDirectory: path.join(rootDir, "server", "system-newt-presets"),
@@ -667,16 +802,23 @@ registerMyNewtVoiceRoutes(app, {
 });
 
 const newtSkillStore = registerNewtSkillRoutes(app, { directory: path.join(rootDir, "server", "data", "newt-skills") });
+const invokeNewtLlm = (body, key, connection) => requestLlmResponse(body, { ...connection, key }, {
+  falRequest: (input, credential) => subscribeFal("openrouter/router/openai/v1/responses", { input, logs: true },
+    { route: "my-newt-reasoning", model: input.model }, createFalClient({ credentials: credential }))
+});
+const newtLearningStore = registerNewtLearningRoutes(app, {
+  directory: path.join(rootDir, "server", "data", "newt-learning"),
+  localOrigins: [...new Set([Number(process.env.VITE_CLIENT_PORT || 5176), port])].flatMap(value => [`http://127.0.0.1:${value}`, `http://localhost:${value}`]),
+  summarize: createNewtLearningSummarizer({ getConnection: newtLlmConnection, invoke: invokeNewtLlm, recordHistory: appendHistory })
+});
 const myNewtService = registerMyNewtRoutes(app, {
   skillStore: newtSkillStore,
+  learningStore: newtLearningStore,
   presetStore: newtPresetStore,
   directory: path.join(rootDir, "server", "data", "my-newt"),
   getKey: () => process.env.OPENAI_API_KEY,
   getLlmConnection: newtLlmConnection,
-  invoke: (body, key, connection) => requestLlmResponse(body, { ...connection, key }, {
-    falRequest: (input, credential) => subscribeFal("openrouter/router/openai/v1/responses", { input, logs: true },
-      { route: "my-newt-reasoning", model: input.model }, createFalClient({ credentials: credential }))
-  }),
+  invoke: invokeNewtLlm,
   provider: () => process.env.FAL_KEY ? "fal" : process.env.KREA_API_KEY ? "krea" : process.env.ATLAS_API_KEY ? "atlas" : "fal",
   inspectAsset: createMyNewtMediaInspector({ resolveAsset: resolveLocalAssetPath, probeVideo: probeVideoFile, runFfmpeg }),
   verifyOutputs: async (outputs) => {
@@ -735,6 +877,8 @@ function buildHealthPayload() {
       seedanceMultiProviderDrafts: true,
       nanoBanana21: true,
       myNewtCreativeSkills: true,
+      myNewtLearning: true,
+      myNewtLearningAnalysis: true,
       myNewtCanvasOrganization: true,
       myNewtFavoriteModels: true,
       myNewtRemote: true,
@@ -747,6 +891,7 @@ function buildHealthPayload() {
       systemNewtPresets: true,
       utilityImage: true,
       utilityVideo: true,
+      videoOutpaint: true,
       colorIdMatte: true,
       colorIdVideoMatte: true,
       compositeVideo: true,
@@ -758,22 +903,38 @@ function buildHealthPayload() {
       voidFrameValidation: true,
       sam3VideoMaskOutput: true,
       extractVideoFrame: true,
+      cameraCoverage: true,
+      cameraCoverageTravel: true,
+      cameraCoverageFraming: true,
       generate3d: true,
       gptImage25: true,
       atlasCloud: true,
       apiCostVisibility: true,
       imageEditing: true,
+      ideogramVector: true,
+      vectorLayers: true,
+      vectorLayerEditor: true,
+      vectorLayerTransforms: true,
+      vectorLayerOrganization: true,
+      vectorLayerAutoGroups: true,
+      vectorArtworkEditor: true,
+      vectorSelectionGrouping: true,
       generateAudio: true,
       editorTimeline: true,
       outputExport: true,
       elevenLabsVoices: true,
       elevenLabsV4: true,
       exploreLookVariation: true,
+      exploreArtDirection: true,
+      projectCanvases: true,
       skillDirector: true,
       creativeReasoningV2: true,
       explore: true,
       storyboardQc: true,
       storyboardWorkflowV2: true,
+      storyboardShotList: true,
+      storyboardCinematography: true,
+      storyboardScriptImport: true,
       storyboardBalancedQc: true,
       storyboardCastAutoRepair: true,
       mediaThumbnail: true,
@@ -1484,6 +1645,7 @@ app.get("/api/stats", async (_req, res) => {
       projects: await readNodeProjects(),
       pricing: {
       elevenLabs: elevenLabsRates(),
+      ideogramVector: { rates: vectorRates, ...ideogramVectorCost({}, vectorRates) },
       myNewtVoice: { model: MY_NEWT_VOICE_MODEL, costPerMinute: myNewtVoiceCost(60), currency: "USD" },
       currentCatalog: pricingRefresh.catalog(),
       myNewtReasoning: { models: currentOpenAiRates(myNewtModelRates), perTokens: 1000000, currency: "USD", pricingSource: "https://developers.openai.com/api/docs/pricing" },
@@ -1649,6 +1811,9 @@ app.post("/api/saved-workflows", async (req, res) => {
       const id = String(req.body.id || randomUUID()).trim();
       const name = String(req.body.name || "Untitled node project").trim() || "Untitled node project";
       const existing = workflows.find((item) => item.id === id);
+      if (existing?.version >= 2 && !Array.isArray(req.body.canvases)) {
+        return res.status(409).json({ error: "This project contains canvases. Refresh NewtNode before saving so all canvases are preserved." });
+      }
       const packagePath = workflowPackagePathFromSaveRequest(req.body, existing, name);
       const fileName = existing?.fileName || uniqueWorkflowFileName(name, workflows);
       const workflow = {
@@ -1658,14 +1823,9 @@ app.post("/api/saved-workflows", async (req, res) => {
         createdAt: existing?.createdAt || now,
         updatedAt: now,
         app: "NewtNode",
-        version: 1,
+        version: req.body.canvases ? 2 : 1,
         packagePath: packagePath || "",
-        graph: {
-          nodes: Array.isArray(req.body.nodes) ? req.body.nodes : [],
-          edges: Array.isArray(req.body.edges) ? req.body.edges : [],
-          groups: Array.isArray(req.body.groups) ? req.body.groups : [],
-          viewport: req.body.viewport || { x: 0, y: 0, scale: 1 }
-        }
+        graph: projectGraphForStorage(req.body)
       };
 
       const savedWorkflow = packagePath ? await writeWorkflowPackage(workflow, packagePath) : workflow;
@@ -1721,12 +1881,7 @@ app.post("/api/node-projects", async (req, res) => {
     name,
     createdAt: projects.find((item) => item.id === id)?.createdAt || now,
     updatedAt: now,
-    graph: {
-      nodes: Array.isArray(req.body.nodes) ? req.body.nodes : [],
-      edges: Array.isArray(req.body.edges) ? req.body.edges : [],
-      groups: Array.isArray(req.body.groups) ? req.body.groups : [],
-      viewport: req.body.viewport || { x: 0, y: 0, scale: 1 }
-    }
+    graph: projectGraphForStorage(req.body)
   };
 
   const nextProjects = [project, ...projects.filter((item) => item.id !== id)];
@@ -3484,6 +3639,7 @@ async function runBirefnetUtilityImage(req, res, { imageUrl, selectedModel }) {
 
 app.post("/api/node/utility-video", async (req, res) => {
   try {
+    if (req.body.model === "Video Outpaint") return await runVideoOutpaint(req, res);
     const selectedVideoModel = resolveUtilityVideoModel(req.body.model);
     const prompt = String(req.body.prompt || "").trim();
     const referenceImageUrls = Array.isArray(req.body.referenceImageUrls) ? req.body.referenceImageUrls.filter(isLocalAssetUrl) : [];
@@ -3742,7 +3898,8 @@ const seedanceDrafts = createSeedanceDraftStore({
 });
 registerSeedanceDraftRoutes(app, { store: seedanceDrafts, sendApiError });
 
-app.post("/api/node/generate-video", async (req, res) => {
+app.post("/api/node/generate-video", (req, res) => handleVideoGeneration(req, res));
+async function handleVideoGeneration(req, res, outpaint = null) {
   try {
     const prompt = String(req.body.prompt || "").trim();
     if (!prompt) {
@@ -3865,10 +4022,10 @@ app.post("/api/node/generate-video", async (req, res) => {
     const duration = editing ? "auto" : seedance25 ? normalizeSeedance25Duration(req.body.duration) : normalizeDuration(req.body.duration);
     const aspectRatio = editing ? "auto" : seedance25 ? normalizeSeedance25AspectRatio(req.body.aspectRatio) : normalizeAspectRatio(req.body.aspectRatio);
     const generateAudio = normalizeVideoGenerateAudio(req.body.generateAudio);
-    const runtimeProvider = draftMode ? draftProvider : resolveSeedanceRuntimeProvider({
+    const runtimeProvider = outpaint?.provider || (draftMode ? draftProvider : resolveSeedanceRuntimeProvider({
       falKey: process.env.FAL_KEY,
       kreaKey: process.env.KREA_API_KEY
-    }) || (atlasMediaEnabled() ? "atlas" : "");
+    }) || (atlasMediaEnabled() ? "atlas" : ""));
     if (!runtimeProvider) {
       return res.status(400).json({ error: "Seedance needs an enabled Fal, Krea, or Atlas Cloud API key in Settings." });
     }
@@ -3879,7 +4036,7 @@ app.post("/api/node/generate-video", async (req, res) => {
       sourceDurationSeconds = validateSeedance25EditDuration((await probeVideoFile(source.filePath)).duration);
     }
     const kreaApiKey = runtimeProvider === "krea" ? draftMode ? draftKey : String(process.env.KREA_API_KEY || "").trim() : "";
-    const atlasApiKey = runtimeProvider === "atlas" ? draftMode ? draftKey : String(process.env.ATLAS_API_KEY || "").trim() : "";
+    const atlasApiKey = runtimeProvider === "atlas" ? outpaint?.apiKey || (draftMode ? draftKey : String(process.env.ATLAS_API_KEY || "").trim()) : "";
 
     let routeKind = "text-to-video";
     if (startFrameUrl) {
@@ -3923,7 +4080,7 @@ app.post("/api/node/generate-video", async (req, res) => {
       cost = { ...result.cost, aspectRatio: editing ? "source video" : result.sourceAspect ? "source frame" : aspectRatio, routeKind };
     } else if (runtimeProvider === "fal") {
       endpoint = seedance25 ? seedance25FalEndpoint(routeKind) : `bytedance/seedance-2.0/${routeKind}`;
-      const draftClient = draftMode ? createSingleSubmissionFalClient({ credentials: draftKey, endpoint, model: "Seedance 2.5 draft" }) : undefined;
+      const draftClient = draftMode || outpaint ? createSingleSubmissionFalClient({ credentials: outpaint?.apiKey || draftKey, endpoint, model: outpaint ? "Video Outpaint" : "Seedance 2.5 draft" }) : undefined;
       const uploadReference = url => uploadLocalOutputToFal(url, draftClient);
       const input = {
         prompt: submittedPrompt,
@@ -3947,7 +4104,7 @@ app.post("/api/node/generate-video", async (req, res) => {
         if (referenceAudioUrls.length) input.audio_urls = await Promise.all(referenceAudioUrls.map(uploadReference));
       }
 
-      const result = await subscribeFal(endpoint, { input, logs: true }, {}, draftClient, draftMode ? draftKey : undefined);
+      const result = await subscribeFal(endpoint, { input, logs: true }, {}, draftClient, outpaint?.apiKey || (draftMode ? draftKey : undefined));
       requestId = result.requestId;
       resultSeed = result?.data?.seed ?? null;
       remoteVideo = result?.data?.video;
@@ -4020,16 +4177,23 @@ app.post("/api/node/generate-video", async (req, res) => {
       }
     }
 
-    const output = await downloadVideo(req, remoteVideo.url, routeKind, { removeAudio: !generateAudio });
+    let output = await downloadVideo(req, remoteVideo.url, routeKind, { removeAudio: !generateAudio, dependency: Boolean(outpaint) });
+    let outpaintFinished;
+    if (outpaint) {
+      outpaintFinished = await finishSeedanceOutpaint(req.body, outpaint.prepared, output, enrichVideoMetadata(remoteVideo, await probeVideoFile(output.filePath)), { finish: videoOutpaintService.finish, probeVideo: probeVideoFile });
+      output = outpaintFinished.output;
+      remoteVideo = outpaintFinished.video;
+      if (req.body.outpaintPromptCompacted) outpaintFinished.warning = [outpaintFinished.warning, "The creative prompt was shortened to fit the provider limit; see the submitted prompt in History."].filter(Boolean).join(" ");
+    }
     await appendHistory({
       id: requestId || randomUUID(),
       createdAt: new Date().toISOString(),
       mediaType: "video",
       provider: providerName,
-      modelName: selectedVideoModel.displayName,
+      modelName: outpaint ? "Video Outpaint" : selectedVideoModel.displayName,
       endpoint,
-      mode: routeKindLabel(routeKind),
-      prompt,
+      mode: outpaint ? "Video outpainting" : routeKindLabel(routeKind),
+      prompt: outpaint ? req.body.outpaintUserPrompt : prompt,
       submittedPrompt,
       project: projectFromBody(req.body),
       node: nodeFromBody(req.body),
@@ -4051,8 +4215,10 @@ app.post("/api/node/generate-video", async (req, res) => {
           providerTask: editing ? runtimeProvider === "fal" ? "editing" : "edit" : "reference" } : {}),
         seed: resultSeed,
         runtimeProvider,
-        ...(draftMode ? { seedanceDraft: true, draft: draftMetadata } : {})
+        ...(draftMode ? { seedanceDraft: true, draft: draftMetadata } : {}),
+        ...(outpaintFinished ? { videoOutpaint: outpaintFinished.details } : {})
       },
+      ...(outpaintFinished ? { videoOutpaint: outpaintFinished.details } : {}),
       cost,
       remoteVideo,
       localVideo: output.publicPath,
@@ -4065,10 +4231,11 @@ app.post("/api/node/generate-video", async (req, res) => {
       seed: resultSeed,
       endpoint,
       provider: providerName,
-      modelName: selectedVideoModel.displayName,
+      modelName: outpaint ? "Video Outpaint" : selectedVideoModel.displayName,
       submittedPrompt,
       cost,
       ...(draftMode ? { seedanceDraft: draftMetadata, warning: draftWarning } : {}),
+      ...(outpaintFinished ? { videoOutpaint: outpaintFinished.details, warning: outpaintFinished.warning } : {}),
       video: {
         ...remoteVideo,
         localUrl: output.publicPath,
@@ -4079,7 +4246,7 @@ app.post("/api/node/generate-video", async (req, res) => {
     console.error(error);
     sendApiError(res, error, "Video generation failed.");
   }
-});
+}
 
 async function runKlingO3Video(req, res, { prompt, selectedVideoModel, variant = "pro" }) {
   const is4k = variant === "4k";
@@ -5273,7 +5440,7 @@ async function runWanVaceMaskToVideoUtility(req, res, { prompt, referenceImageUr
   });
 }
 
-async function runWanVaceInpaintingUtility(req, res, { prompt, referenceImageUrls, referenceVideoUrls, maskVideoUrls, selectedVideoModel }) {
+async function runWanVaceInpaintingUtility(req, res, { prompt, referenceImageUrls, referenceVideoUrls, maskVideoUrls, selectedVideoModel, outpaintContext = null, outpaintKey = "" }) {
   const videoUrl = firstLocalOutput(referenceVideoUrls);
   if (!videoUrl) {
     return res.status(400).json({ error: "Wan VACE Inpainting requires a connected source video." });
@@ -5286,14 +5453,16 @@ async function runWanVaceInpaintingUtility(req, res, { prompt, referenceImageUrl
 
   const endpoint = selectedVideoModel.id;
   const options = req.body.wanVaceInpainting || {};
+  const outpaintClient = outpaintContext ? createSingleSubmissionFalClient({ credentials: outpaintKey, endpoint, model: "Video Outpaint" }) : undefined;
+  const upload = url => uploadLocalOutputToFal(url, outpaintClient);
   const matchInputNumFrames = options.matchInputNumFrames !== false;
   const matchInputFps = options.matchInputFps !== false;
   const resolution = normalizeChoice(options.resolution, ["auto", "240p", "360p", "480p", "580p", "720p"], "auto");
   const aspectRatio = normalizeChoice(options.aspectRatio, ["auto", "16:9", "1:1", "9:16"], "auto");
-  const refImageUrls = await Promise.all(referenceImageUrls.slice(0, 4).map((url) => uploadLocalOutputToFal(url)));
+  const refImageUrls = await Promise.all(referenceImageUrls.slice(0, 4).map(upload));
   const input = {
-    prompt,
-    negative_prompt: String(options.negativePrompt || ""),
+    prompt: outpaintContext ? wanOutpaintPrompt(prompt, outpaintContext.plan) : prompt,
+    negative_prompt: outpaintContext ? wanOutpaintNegativePrompt(options.negativePrompt) : String(options.negativePrompt || ""),
     match_input_num_frames: matchInputNumFrames,
     match_input_frames_per_second: matchInputFps,
     resolution,
@@ -5302,8 +5471,8 @@ async function runWanVaceInpaintingUtility(req, res, { prompt, referenceImageUrl
     guidance_scale: clampNumber(options.guidanceScale, 0, 20, 5),
     sampler: normalizeChoice(options.sampler, ["unipc", "dpm++", "euler"], "unipc"),
     shift: clampNumber(options.shift, 0, 20, 5),
-    video_url: await uploadLocalOutputToFal(videoUrl),
-    mask_video_url: await uploadLocalOutputToFal(maskVideoUrl),
+    video_url: await upload(videoUrl),
+    mask_video_url: await upload(maskVideoUrl),
     enable_safety_checker: options.enableSafetyChecker !== false,
     enable_prompt_expansion: Boolean(options.enablePromptExpansion),
     preprocess: Boolean(options.preprocess),
@@ -5320,14 +5489,14 @@ async function runWanVaceInpaintingUtility(req, res, { prompt, referenceImageUrl
   if (!matchInputFps) input.frames_per_second = clampInteger(options.fps, 5, 30, 16);
   if (seed !== undefined) input.seed = seed;
 
-  const result = await subscribeFal(endpoint, { input, logs: true });
+  const result = await subscribeFal(endpoint, { input, logs: true }, {}, outpaintClient, outpaintContext ? outpaintKey : undefined);
   const remoteVideo = normalizeFalFile(result?.data?.video);
   if (!remoteVideo?.url) {
     return res.status(502).json({ error: "Fal returned no Wan VACE video URL.", raw: result?.data });
   }
 
-  const output = await downloadVideo(req, remoteVideo.url, "wan-vace-inpainting");
-  const outputVideo = enrichVideoMetadata(remoteVideo, await probeVideoFile(output.filePath));
+  let output = await downloadVideo(req, remoteVideo.url, "wan-vace-inpainting", { dependency: Boolean(outpaintContext) });
+  let outputVideo = enrichVideoMetadata(remoteVideo, await probeVideoFile(output.filePath));
   const cost = estimateWanVaceInpaintingCost({
     endpoint,
     resolution,
@@ -5338,6 +5507,13 @@ async function runWanVaceInpaintingUtility(req, res, { prompt, referenceImageUrl
     fps: input.frames_per_second
   });
 
+  let outpaintFinished;
+  if (outpaintContext) {
+    outpaintFinished = await finishSeedanceOutpaint(req.body, outpaintContext, output, outputVideo, { finish: videoOutpaintService.finish, probeVideo: probeVideoFile });
+    output = outpaintFinished.output;
+    outputVideo = outpaintFinished.video;
+  }
+
   await appendHistory({
     id: result.requestId || randomUUID(),
     createdAt: new Date().toISOString(),
@@ -5345,9 +5521,9 @@ async function runWanVaceInpaintingUtility(req, res, { prompt, referenceImageUrl
     provider: "fal.ai",
     modelName: selectedVideoModel.displayName,
     endpoint,
-    mode: "Wan VACE inpainting",
+    mode: outpaintContext ? "Video outpainting" : "Wan VACE inpainting",
     prompt,
-    submittedPrompt: prompt,
+    submittedPrompt: input.prompt,
     project: projectFromBody(req.body),
     node: nodeFromBody(req.body),
     settings: {
@@ -5370,8 +5546,10 @@ async function runWanVaceInpaintingUtility(req, res, { prompt, referenceImageUrl
       videoQuality: input.video_quality,
       videoWriteMode: input.video_write_mode,
       numInterpolatedFrames: input.num_interpolated_frames,
-      seed: result?.data?.seed ?? input.seed ?? null
+      seed: result?.data?.seed ?? input.seed ?? null,
+      ...(outpaintFinished ? { videoOutpaint: outpaintFinished.details } : {})
     },
+    ...(outpaintFinished ? { videoOutpaint: outpaintFinished.details } : {}),
     cost,
     remoteVideo: outputVideo,
     localVideo: output.publicPath,
@@ -5387,10 +5565,11 @@ async function runWanVaceInpaintingUtility(req, res, { prompt, referenceImageUrl
     cost,
     video: {
       ...outputVideo,
-      label: "Wan VACE",
+      label: outpaintContext ? "Video Outpaint" : "Wan VACE",
       localUrl: output.publicPath,
       fileName: output.fileName
-    }
+    },
+    ...(outpaintFinished ? { videoOutpaint: outpaintFinished.details, warning: outpaintFinished.warning } : {})
   });
 }
 
@@ -6391,12 +6570,7 @@ function normalizeWorkflowPackageRegistration(value) {
       workflowFileName: fileName,
       assetBaseUrl: `${workflowAssetsPrefix}/${encodeURIComponent(id)}`
     },
-    graph: {
-      nodes: Array.isArray(value?.graph?.nodes) ? value.graph.nodes : [],
-      edges: Array.isArray(value?.graph?.edges) ? value.graph.edges : [],
-      groups: Array.isArray(value?.graph?.groups) ? value.graph.groups : [],
-      viewport: value?.graph?.viewport || { x: 0, y: 0, scale: 1 }
-    }
+    graph: projectGraphForStorage(value?.graph)
   };
 }
 
@@ -7248,12 +7422,7 @@ async function migrateLegacyNodeProjectsToSavedWorkflows() {
       app: "NewtNode",
       version: 1,
       migratedFrom: "server/data/node-projects.json",
-      graph: {
-        nodes: Array.isArray(project.graph?.nodes) ? project.graph.nodes : [],
-        edges: Array.isArray(project.graph?.edges) ? project.graph.edges : [],
-        groups: Array.isArray(project.graph?.groups) ? project.graph.groups : [],
-        viewport: project.graph?.viewport || { x: 0, y: 0, scale: 1 }
-      }
+      graph: projectGraphForStorage(project.graph)
     };
 
     workflows.push(workflow);
@@ -7343,12 +7512,7 @@ async function readSavedWorkflowFiles({ fileNames = null } = {}) {
         fileName: registryWorkflow.fileName || registryFileName,
         filePath: workflowFilePathForDisplay(workflow, registryFileName),
         registryFileName,
-        graph: {
-          nodes: Array.isArray(workflow.graph?.nodes) ? workflow.graph.nodes : [],
-          edges: Array.isArray(workflow.graph?.edges) ? workflow.graph.edges : [],
-          groups: Array.isArray(workflow.graph?.groups) ? workflow.graph.groups : [],
-          viewport: workflow.graph?.viewport || { x: 0, y: 0, scale: 1 }
-        }
+        graph: projectGraphForStorage(workflow.graph)
       });
     } catch {
       // Ignore malformed workflow files instead of blocking the whole loader.
@@ -7569,14 +7733,14 @@ async function uploadToFal(file) {
   return fal.storage.upload(falFile);
 }
 
-async function downloadVideo(req, url, kind, { removeAudio = false } = {}) {
+async function downloadVideo(req, url, kind, { removeAudio = false, dependency = false } = {}) {
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`Could not download generated video: ${response.status} ${response.statusText}`);
   }
 
   const extension = path.extname(new URL(url).pathname) || ".mp4";
-  const output = await createManagedAssetTarget(req, kind, extension, workflowPackageOutputDirName);
+  const output = await createManagedAssetTarget(req, kind, extension, dependency ? workflowPackageDependencyDirName : workflowPackageOutputDirName);
   const bytes = Buffer.from(await response.arrayBuffer());
   await writeFile(output.filePath, bytes);
 
@@ -9796,7 +9960,7 @@ async function runTextLlm({
 }
 
 function checkedCreativeLlmResult(result, data, route) {
-  if (/^(film-director|storyboard|explore)-/.test(route) && result.provider === "fal") {
+  if (/^(film-director|storyboard|explore|vector)-/.test(route) && result.provider === "fal") {
     result = { ...result, text: creativeFinalOutputText(result.text) };
   }
   creativeUsageContext.getStore()?.push(result);
@@ -9806,7 +9970,7 @@ function checkedCreativeLlmResult(result, data, route) {
       throw new Error(`${result.provider} returned an incomplete or failed response. Existing work has been preserved.`);
     }
     const validated = validateCreativeResponse(data, { ...result, route });
-    if (route === "explore-plan") result.text = JSON.stringify(validated);
+    if (route === "explore-plan" || route === "vector-layer-names") result.text = JSON.stringify(validated);
     if (!result.text) throw new Error(`${result.provider} returned no text.`);
     return result;
   } catch (error) {
@@ -12279,7 +12443,7 @@ function normalizeStoryboardPlanFrame(frame = {}, index = 0) {
     number: Math.max(1, Number.parseInt(frame.number, 10) || index + 1),
     shot: normalizeChoice(String(frame.shot || "None"), ["None", "CU", "MS", "WS", "ECU", "EWS"], "None"),
     lens: normalizeChoice(String(frame.lens || "None"), ["None", "8mm", "18mm", "35mm", "50mm", "85mm", "120mm"], "None"),
-    angle: normalizeChoice(String(frame.angle || "None"), ["None", "Macro", "Low Angle", "High Angle", "Extreme High", "Bird's Eye View", "Extreme Low", "Portrait", "Profile", "Selfie"], "None"),
+    angle: normalizeChoice(String(frame.angle || "None"), ["None", "Macro", "Low Angle", "High Angle", "Dutch Angle", "Extreme High", "Bird's Eye View", "Extreme Low", "Portrait", "Profile", "Selfie"], "None"),
     beat: String(frame.beat || "").trim().slice(0, 240),
     prompt: String(frame.prompt || "").trim().slice(0, 1400),
     notes: String(frame.notes || "").trim().slice(0, 240),
@@ -12355,6 +12519,7 @@ Use this uploaded order for review. Generation-reference numbers quoted inside t
 
 Check for these problems:
 1. Physical logic errors: floating objects, impossible contact points, impossible object placement, broken perspective, major anatomy failures.
+Intentional camera expression is not broken perspective: honor requested Dutch roll, wide-angle enlargement, foreshortening, converging lines, long-lens compression, off-center framing, negative space and deliberate cropping. Camera roll tilts the whole scene coherently; it does not mean people are falling or the room has changed. Judge contact, anatomy and identity within that intended projection. Genuine impossible contact, duplicated limbs or displaced occupants remain failures. Never straighten a requested tilted horizon, recenter a deliberate composition, flatten perspective or widen a legitimate crop in a correction. Minimal line art does not require conventional eye-level framing. Missing aesthetic flair alone is optional polish, not a paid retry, in either Balanced or Deep QC.
 2. Character orientation and side-of-room continuity: characters should remain on the correct side of the environment, preserve screen direction and eyelines, and not face the wrong way unless the prompt asks for it.
 3. Spatial consistency: kitchen drawers, counters, doors, props, walls, and other environment details should belong to the room and not float or jump to impossible places.
 4. Shot progression: judge the requested frame, not an invented camera move. Within a continuous CUT, the same scale/composition is valid when the action state changes or the camera remains locked. Between cuts, check a requested scale change is visible; matching close-ups of different speakers are valid. Do not force a tighter frame or new angle that contradicts the current prompt.

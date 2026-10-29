@@ -1,9 +1,20 @@
 import React from "react";
+import { VideoOutpaintControls, VideoOutpaintModelControl } from "./components/VideoOutpaintControls.jsx";
+import { normalizeUtilityOutpaintSettings, videoOutpaintModelName } from "./videoOutpaint.js";
+import { normalizeOutpaintPromptMode } from "./videoOutpaintPrompt.js";
 import { storyboardApproaches, storyboardApproachDetails, storyboardPacing, storyboardPlanningSettings, storyboardRevisionTargets, validateStoryboardRevision, storyboardFrameWithVersion, restoreStoryboardFrameVersion, storyboardFrameContext, storyboardFrameDirection, storyboardBoardSignature, storyboardEditSignature, storyboardPanelEditingLocked } from "./storyboardWorkflow.js";
 import { migrateStoryboardDirectors } from "./storyboardMigration.js";
 import { StoryboardPlanButton, StoryboardRevisionControls, StoryboardExportMenu } from "./components/StoryboardRevisionControls.jsx";
+import { StoryboardShotList } from "./components/StoryboardShotList.jsx";
+import { storyboardCameraPersonalities, storyboardCameraChoices, storyboardCameraRenderingPrompt } from "./storyboardCinematography.js";
+import { storyboardShotListMode, storyboardShotDescription, storyboardShotRows, storyboardShotListError, storyboardShotListContext, storyboardShotNeedsPlan, storyboardShotSource, storyboardShotGalleryPatch, mergeStoryboardShotPlan } from "./storyboardShotList.js";
+import { StoryboardScriptImport, StoryboardScriptSource } from "./components/StoryboardScriptImport.jsx";
 import { useStoryboardBoardOutput, storyboardBoardIsCurrent, storyboardBoardBuildSignature, storyboardBoardCanBuild } from "./useStoryboardBoardOutput.js";
 import { exploreDefaults, normalizeExploreData, exploreModels } from "./explore.js";
+import { cameraCoverageDefaults, normalizeCameraCoverageData, selectCoverageVersion } from "./cameraCoverage.js";
+import { vectorDefaults, normalizeVectorData } from "./ideogramVector.js";
+const VectorNodeBody = React.lazy(() => import("./components/VectorNodeBody.jsx").then(module => ({ default: module.VectorNodeBody })));
+const CameraCoverageNodeBody = React.lazy(() => import("./components/CameraCoverageNodeBody.jsx").then(module => ({ default: module.CameraCoverageNodeBody })));
 import { runExploreGeneration } from "./nodeRunners/explore.js";
 const ExploreNodeBody = React.lazy(() => import("./components/ExploreNodeBody.jsx").then(module => ({ default: module.ExploreNodeBody })));
 import { createEditorTimeline, normalizeEditorTimeline, editorRenderSignature, editorZoomStep } from "./editorTimeline.js";
@@ -19,6 +30,10 @@ import { MyNewtNodeBody } from "./components/MyNewtNodeBody.jsx";
 import { NewtIcon } from "./components/NewtIcon.jsx";
 import { filmDirectorApproachOptions, filmDirectorSupportsMusic, filmDirectorUsesMusic, normalizeFilmDirectorApproach } from "./filmDirectorApproaches.js";
 import { useMyNewt } from "./myNewt/useMyNewt.js";
+import { useNewtLearning } from "./myNewt/useNewtLearning.js";
+import { NewtLearningControls } from "./components/NewtLearningControls.jsx";
+import "./components/newtLearning.css";
+const NewtLearningDialog = React.lazy(() => import("./components/NewtLearningDialog.jsx"));
 import { buildMyNewtLocalWorkflow } from "./myNewt/localActions.js";
 import { myNewtFavoriteCreationPatch } from "./myNewt/favoriteModels.js";
 import { buildMyNewtDuplicateGraph } from "./myNewt/localCopies.js";
@@ -26,6 +41,10 @@ import { useNewtPresets } from "./myNewt/useNewtPresets.js";
 import { bindNewtPresetInputs, buildNewtPresetGraph, instantiateNewtPreset, newtPresetOffset } from "./myNewt/presets.js";
 import { NewtPresetDialog } from "./components/NewtPresetDialog.jsx";
 import { PresetWorkflowPicker } from "./components/PresetWorkflowPicker.jsx";
+import { SidebarMenu } from "./components/SidebarMenu.jsx";
+import { CanvasTabs } from "./components/CanvasTabs.jsx";
+import { normalizeProjectCanvases, canvasGraph, replaceCanvasGraph, snapshotCanvases, copyCanvasGraph, transferCanvasNodes, nodeIsWorking, canvasName, defaultCanvasViewport } from "./projectCanvases.js";
+import { pauseEditorPlayback } from "./editorPlayback.js";
 import { keepSingleMyNewt, myNewtDefaults, myNewtFields, myNewtRunStages, validateMyNewtPatch } from "./myNewt/contract.js";
 import {
   Aperture,
@@ -42,6 +61,7 @@ import {
   FileImage,
   Film,
   FolderOpen,
+  FolderClock,
   FolderOutput,
   Info,
   MonitorPlay,
@@ -52,9 +72,9 @@ import {
   Megaphone,
   PanelLeftClose,
   PanelLeftOpen,
-  PanelRightOpen,
   Palette,
   Pencil,
+  PenTool,
   Pause,
   PersonStanding,
   Pipette,
@@ -134,6 +154,7 @@ import {
   firstAcceptedFile,
   fullResolutionImageProps,
   fullResolutionImageUrl,
+  displayMediaUrl,
   hasOutputItemDragData,
   hasSupportedDroppedFile,
   isOutputItemCompatibleWithNode,
@@ -241,6 +262,7 @@ import {
   utilityImageModelNames,
   utilityModelDescriptions,
   utilityVideoModelNames,
+  videoDefaultModel,
   videoModelOptions,
   videoModelNames,
   voidVideoFrameOptions,
@@ -387,6 +409,7 @@ const nodeIcons = {
   preview: MonitorPlay,
   character: UserRound,
   camera: Camera,
+  cameraCoverage: Camera,
   frameIt: PersonStanding,
   style: Palette,
   transfer: Compass,
@@ -397,6 +420,7 @@ const nodeIcons = {
   coverage: Aperture,
   explore: Compass,
   imageModel: ImagePlus,
+  vector: PenTool,
   videoModel: Film,
   audioModel: Volume2,
   storyboard: Clapperboard,
@@ -410,6 +434,24 @@ const nodeCatalog = nodeTypeDefinitions.map((definition) => ({
 }));
 
 const nodeHelpContent = {
+  vector: {
+    title: "Vector Node",
+    lines: ["Create editable SVG artwork from a design brief, or convert one connected image into vector shapes through your enabled Fal account.",
+      "Text to Vector accepts up to five optional image references. Vectorize Image converts one source without a prompt; Simple favors fewer shapes.",
+      "Every click generates one saved variant. Settings changes preserve previous variants. SVG exports retain editable shapes; PNG exports and the blue image output work with existing image nodes.",
+      "Preview zoom and background are local viewing controls. A design preset adds prompt guidance; it is not a separate model or extra generation.",
+      "Stop waiting does not cancel a submitted provider request or its charge. Check History before starting another run; interrupted requests are never automatically replayed."]
+  },
+  cameraCoverage: {
+    title: "ReFrame",
+    lines: ["Connect or upload a master still, choose a camera path, then generate an H3 Max pass through your enabled Fal account. Each pass is a separately billed video request.",
+      "This is generated multi-view coverage, not a reconstructed Gaussian-splat scene. The diagram shows requested positions only. Unseen areas, identity, exact framing and OTS coverage are not guaranteed; review the pass before selecting shots.",
+      "Scrub the pass and use the camera to save full-resolution PNGs. Space plays or pauses; Left and Right step frames while the monitor is focused. Frame extraction is local; Auto Refine is on by default and starts one billed image refinement after capture.",
+      "Rename, reorder or remove saved shots. Removing a shot affects this node only. The image output sends the selected version; Preview can display every saved version.",
+      "Upscale uses Fal Topaz High Fidelity V2. Refine uses your selected enabled image model with a viewpoint-preserving prompt. Both are separately billed and retain the original; hold Compare to inspect it.",
+      "Change Lens creates a separate paid image version using the selected refinement model. Every lens variation starts from the shot's first original refinement, or its original capture if unrefined, never a previous lens edit. Choose a full-frame-equivalent lens target and either keep camera position or keep subject size with a simulated dolly. These are AI interpretations, not calibrated optics. Normal Refine keeps the current lens unchanged.",
+      "Pass/upscale jobs recover through read-only status checks, never a new generation. Interrupted refinement or lens edits require checking History before running again; no image edit is automatically replayed."]
+  },
   editor: {
     title: "Editor",
     lines: ["Non-destructive video and audio timeline. Connect sources to append clips; embedded sound stays linked on an audio track.",
@@ -885,8 +927,6 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const visibleNodeCatalog = React.useMemo(() => nodeMenuEntries(nodeCatalog, nodePreferences), [nodePreferences]);
   const canvasRef = React.useRef(null);
   const sceneRef = React.useRef(null);
-  const fileMenuRef = React.useRef(null);
-  const projectMenuRef = React.useRef(null);
   const contextMenuRef = React.useRef(null);
   const undoStackRef = React.useRef([]);
   const redoStackRef = React.useRef([]);
@@ -899,14 +939,35 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   const outputHistoryLoadPromiseRef = React.useRef(null);
   const outputHistoryReloadRequestedRef = React.useRef(false);
   const savedDraft = React.useMemo(() => loadNodeEditorDraft({ normalizeEditorGraph }), []);
+  const [canvases, setCanvases] = React.useState(savedDraft.canvases);
+  const [activeCanvasId, setActiveCanvasId] = React.useState(savedDraft.activeCanvasId);
+  const activeCanvasRef = React.useRef(savedDraft.activeCanvasId);
+  activeCanvasRef.current = activeCanvasId;
+  const canvasHistoryRef = React.useRef(new Map());
   const viewportRef = React.useRef(savedDraft.viewport);
   const nodesRef = React.useRef(savedDraft.nodes);
   const exploreRunsRef = React.useRef(new Set());
   const draftFinishesRef = React.useRef(new Set());
   const edgesRef = React.useRef(savedDraft.edges);
-  const [nodes, setNodes] = React.useState(savedDraft.nodes);
+  const [nodes, setProjectNodes] = React.useState(savedDraft.nodes);
+  const setNodes = React.useCallback(value => {
+    const owner = activeCanvasRef.current;
+    setProjectNodes(current => {
+      const supplied = typeof value === "function" ? value(current) : value;
+      const next = supplied.some(node => !node.canvasId) ? supplied.map(node => node.canvasId ? node : { ...node, canvasId: owner }) : supplied;
+      nodesRef.current = next;
+      return next;
+    });
+  }, []);
   const [edges, setEdges] = React.useState(savedDraft.edges);
-  const [groups, setGroups] = React.useState(savedDraft.groups);
+  const [groups, setProjectGroups] = React.useState(savedDraft.groups);
+  const setGroups = React.useCallback(value => {
+    const owner = activeCanvasRef.current;
+    setProjectGroups(current => {
+      const next = typeof value === "function" ? value(current) : value;
+      return next.some(group => !group.canvasId) ? next.map(group => group.canvasId ? group : { ...group, canvasId: owner }) : next;
+    });
+  }, []);
   const [dragState, setDragState] = React.useState(null);
   const [draftEdge, setDraftEdge] = React.useState(null);
   const [portPositions, setPortPositions] = React.useState({});
@@ -931,6 +992,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }, []);
   const [snapToGrid, setSnapToGrid] = React.useState(canvasSnapToGridEnabled);
   const [outputHistory, setOutputHistory] = React.useState([]);
+  const [outputScope, setOutputScope] = React.useState("project");
   const [previewLightboxItem, setPreviewLightboxItem] = React.useState(null);
   const [compilingTransferNodeId, setCompilingTransferNodeId] = React.useState(null);
   const [selectedEdgeId, setSelectedEdgeId] = React.useState(null);
@@ -999,6 +1061,13 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   }, [generationProvider, nodes]);
 
   const incomingByNode = React.useMemo(() => buildIncomingByNode(nodes, edges), [nodes, edges]);
+  const visibleGraph = React.useMemo(() => canvasGraph({ nodes, edges, groups }, activeCanvasId), [nodes, edges, groups, activeCanvasId]);
+  const visibleNodes = visibleGraph.nodes;
+  const canvasesForSave = React.useMemo(() => snapshotCanvases(canvases, activeCanvasId, viewport), [canvases, activeCanvasId, viewport]);
+  const canvasActivity = React.useMemo(() => Object.fromEntries(canvases.map(canvas => [canvas.id, {
+    running: nodes.some(node => node.canvasId === canvas.id && nodeIsWorking(node)),
+    error: nodes.some(node => node.canvasId === canvas.id && node.data?.status === "error")
+  }])), [canvases, nodes]);
   const connectedPortKeys = React.useMemo(() => buildConnectedPortKeys(edges), [edges]);
   const selectedNodeSet = React.useMemo(() => new Set(selectedNodeIds), [selectedNodeIds]);
   const enabledImageModels = React.useMemo(
@@ -1049,6 +1118,11 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     edges,
     groups,
     viewport,
+    canvases: canvasesForSave,
+    activeCanvasId,
+    setCanvases,
+    setActiveCanvasId,
+    importAsCanvases: importProjectCanvases,
     projectId,
     projectName,
     savedProjectName,
@@ -1086,18 +1160,20 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         edges,
         groups,
         viewport,
+        canvases: canvasesForSave,
+        activeCanvasId,
         projectId,
         projectName,
         savedProjectName,
         projectPackagePath,
         workflowFilePath
       }),
-    [nodes, edges, groups, viewport, projectId, projectName, savedProjectName, projectPackagePath, workflowFilePath]
+    [nodes, edges, groups, viewport, canvasesForSave, activeCanvasId, projectId, projectName, savedProjectName, projectPackagePath, workflowFilePath]
   );
   useNodeEditorDraftPersistence(draftSnapshot);
   const projectOutputs = React.useMemo(
-    () => buildProjectOutputItems({ nodes, history: outputHistory, projectId, projectName, getNodeResultMediaType: nodeResultMediaType, titleFallback: configTitleFallback }),
-    [nodes, outputHistory, projectId, projectName]
+    () => buildProjectOutputItems({ nodes: outputScope === "canvas" ? visibleNodes : nodes, history: outputScope === "canvas" ? outputHistory.filter(item => visibleNodes.some(node => node.id === item.node?.id)) : outputHistory, projectId, projectName, getNodeResultMediaType: nodeResultMediaType, titleFallback: configTitleFallback, includeInputs: true, maxItems: 250 }),
+    [nodes, visibleNodes, outputScope, outputHistory, projectId, projectName]
   );
 
   React.useEffect(() => {
@@ -1153,7 +1229,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (!active) return undefined;
     schedulePortPositionRefresh();
     return undefined;
-  }, [active, nodes, groups, selectedNodeIds]);
+  }, [active, nodes, groups, selectedNodeIds, activeCanvasId]);
 
   React.useLayoutEffect(() => {
     if (!active || typeof ResizeObserver === "undefined") return undefined;
@@ -1161,10 +1237,11 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (!canvas) return undefined;
 
     const observer = new ResizeObserver(() => schedulePortPositionRefresh());
+    const geometrySelector = "[data-node-card-id], [data-port-key], .storyboard-scroll-surface, .storyboard-settings-grid";
     const observeGeometryTree = (root) => {
       if (!(root instanceof Element)) return;
-      if (root.matches("[data-node-card-id], [data-port-key]")) observer.observe(root);
-      root.querySelectorAll("[data-node-card-id], [data-port-key]").forEach((element) => observer.observe(element));
+      if (root.matches(geometrySelector)) observer.observe(root);
+      root.querySelectorAll(geometrySelector).forEach((element) => observer.observe(element));
     };
     const mutationObserver = typeof MutationObserver === "undefined"
       ? null
@@ -1187,11 +1264,16 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     observer.observe(canvas);
     observeGeometryTree(canvas);
     mutationObserver?.observe(canvas, { childList: true, subtree: true });
+    const onNodeScroll = event => {
+      if (event.target instanceof Element && event.target.closest("[data-node-card-id]") && event.target.querySelector("[data-port-key]")) schedulePortPositionRefresh();
+    };
+    canvas.addEventListener("scroll", onNodeScroll, { capture: true, passive: true });
     schedulePortPositionRefresh();
 
     return () => {
       observer.disconnect();
       mutationObserver?.disconnect();
+      canvas.removeEventListener("scroll", onNodeScroll, { capture: true });
     };
   }, [active, nodes.map((node) => node.id).join("|"), selectedNodeIds.join("|")]);
 
@@ -1251,6 +1333,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   React.useEffect(() => {
     if (!active) return undefined;
     function handleSaveShortcut(event) {
+      if (event.target instanceof Element && event.target.closest(".newt-learning-dialog")) return;
       if (event.repeat || !(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "s") return;
       event.preventDefault();
       event.stopPropagation();
@@ -1371,12 +1454,6 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   React.useEffect(() => {
     if (!active) return undefined;
     function handlePointerDown(event) {
-      if (!fileMenuRef.current?.contains(event.target)) {
-        setFileMenuOpen(false);
-      }
-      if (!projectMenuRef.current?.contains(event.target)) {
-        setProjectMenuOpen(false);
-      }
       if (!event.target.closest?.(".node-context-menu")) {
         setContextMenu(null);
       }
@@ -1513,13 +1590,15 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const nextPositions = {};
     canvas.querySelectorAll("[data-port-key]").forEach((element) => {
       const card = element.closest("[data-node-card-id]");
-      if (!card) return;
+      if (!card || card.hidden) return;
       const cardRect = card.getBoundingClientRect();
       const renderedScale = card.offsetWidth > 0 ? cardRect.width / card.offsetWidth : viewportRef.current.scale;
+      const scrollSurface = element.closest(".storyboard-scroll-surface");
       nextPositions[element.dataset.portKey] = localPortPointFromRects(
         element.getBoundingClientRect(),
         cardRect,
-        renderedScale
+        renderedScale,
+        scrollSurface?.getBoundingClientRect()
       );
     });
     setPortPositions((current) => (samePointMap(current, nextPositions) ? current : nextPositions));
@@ -1570,6 +1649,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     setGroups((current) => {
       let changed = false;
       const nextGroups = current.map((group) => {
+        if (group.canvasId !== activeCanvasId) return group;
         const nodeIds = getNodeIdsInsideGroup(group);
         const nextNodeIds = nodeIds;
 
@@ -1585,7 +1665,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   function addNode(type, position) {
     if (!nodeCatalog.some((entry) => entry.type === type)) return;
     const existingNewt = type === "myNewt" && nodesRef.current.find((node) => node.type === "myNewt");
-    if (existingNewt) { setSelectedNodeIds([existingNewt.id]); setContextMenu(null); return; }
+    if (existingNewt) { switchCanvas(existingNewt.canvasId); setSelectedNodeIds([existingNewt.id]); setContextMenu(null); return; }
     if (type === "myNewt" && !projectId) setProjectId(createNodeId("project"));
     const count = nodesRef.current.filter((node) => node.type === type).length + 1;
     const spec = nodeCatalog.find((item) => item.type === type);
@@ -1631,7 +1711,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     }
     if (type === "storyboard") return { ...data, ...storyboardImageSettings(data, generationProvider) };
     if (type === "videoModel") {
-      const model = enabledVideoModels[0] || videoModelNames.seedance;
+      const model = enabledVideoModels[0] || videoDefaultModel;
       return {
         ...data,
         ...videoModelSelectionPatch(data, model)
@@ -1874,7 +1954,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     setNodes((current) => current.filter((node) => !ids.has(node.id)));
     setEdges((current) => current.filter((edge) => !ids.has(edge.from.nodeId) && !ids.has(edge.to.nodeId)));
     setGroups((current) =>
-      current.map((group) => ({ ...group, nodeIds: (group.nodeIds || []).filter((id) => !ids.has(id)) })).filter((group) => group.nodeIds.length)
+      current.map((group) => group.canvasId !== activeCanvasRef.current ? group : ({ ...group, nodeIds: (group.nodeIds || []).filter((id) => !ids.has(id)) })).filter((group) => group.canvasId !== activeCanvasRef.current || group.nodeIds.length)
     );
     setSelectedNodeIds((current) => current.filter((id) => !ids.has(id)));
     setSelectedEdgeId((current) => {
@@ -1942,16 +2022,15 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
   function arrangeSelectedNodes() {
     if (selectedNodeIds.length < 2 || dragState) return;
-    const currentNodes = nodesRef.current;
+    const currentNodes = nodesRef.current.filter(node => node.canvasId === activeCanvasId);
     const next = arrangeNodesOnGrid(currentNodes, selectedNodeIds, {
       bounds: new Map(currentNodes.map(node => [node.id, placementRect(node)])),
-      groups: groups.map(group => ({ ...group, nodeIds: getNodeIdsInsideGroup(group) }))
+      groups: visibleGraph.groups.map(group => ({ ...group, nodeIds: getNodeIdsInsideGroup(group) }))
     });
     if (!next.changed) { setSaveStatus("Selected nodes are already aligned"); return; }
     pushUndoSnapshot();
-    nodesRef.current = next.nodes;
-    setNodes(next.nodes);
-    setGroups(next.groups);
+    setNodes(current => [...current.filter(node => node.canvasId !== activeCanvasId), ...next.nodes]);
+    setGroups(current => [...current.filter(group => group.canvasId !== activeCanvasId), ...next.groups]);
     const canvas = canvasRef.current, bounds = next.bounds;
     if (canvas && bounds) {
       const scale = Math.max(viewportScaleFloor, Math.min(viewportRef.current.scale,
@@ -2324,7 +2403,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           ...node,
           data: {
             ...node.data,
-            model: node.data.frameItVideoModel || enabledVideoModels[0] || videoModelNames.seedance,
+            model: node.data.frameItVideoModel || enabledVideoModels[0] || videoDefaultModel,
             duration: node.data.frameItDuration || "5 seconds",
             resolution: node.data.frameItVideoResolution || "720p",
             aspectRatio: node.data.frameItAspectRatio || "16:9",
@@ -3553,8 +3632,11 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   async function planStoryboardNode(node, { replace = false } = {}) {
     const currentNode = nodesRef.current.find((item) => item.id === node.id) || node;
     const existing = currentNode.data.storyboardFrames || [];
+    const shotList = storyboardShotListMode(currentNode.data);
+    const shotListError = shotList ? storyboardShotListError(existing) : "";
+    if (shotListError) { updateNode(currentNode.id, { error: shotListError }); return null; }
     if (storyboardTaskBusy(currentNode)) return null;
-    if (existing.some(frame => frame.protected) || (!replace && existing.some(frame => frame.prompt || frame.resultUrl))) {
+    if (existing.some(frame => frame.protected) || (!shotList && !replace && existing.some(frame => frame.prompt || frame.resultUrl))) {
       updateNode(currentNode.id, { error: "Use Revise Selected to preserve existing panels, or confirm Create New Plan after unprotecting panels." });
       return null;
     }
@@ -3578,6 +3660,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         sceneDescription,
         frameCount: requestedFrameCount,
         storyboardApproach: currentNode.data.storyboardApproach,
+        storyboardCameraPersonality: currentNode.data.storyboardCameraPersonality || "Expressive",
+        ...(shotList ? { shots: storyboardShotRows(existing) } : {}),
         storyboardPacing: currentNode.data.storyboardPacing,
         storyboardTargetDuration: currentNode.data.storyboardTargetDuration,
         useStoryboardStyle: currentNode.data.useStoryboardStyle !== false,
@@ -3587,10 +3671,11 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         props: storyboardPropReferenceSummaries(incoming.propsIn || [], currentIncomingByNode)
       }, "Storyboard planning");
       const plan = requireStoryboardPlanResponse(response, data);
-      const plannedFrames = storyboardFramesFromPlan(plan.frames);
+      const plannedFrames = shotList ? mergeStoryboardShotPlan(existing, storyboardFramesFromPlan(plan.frames)) : storyboardFramesFromPlan(plan.frames);
       const liveNode = nodesRef.current.find(item => item.id === currentNode.id);
       const liveIncoming = buildIncomingByNode(nodesRef.current, edgesRef.current)[currentNode.id] || {};
-      if (!liveNode || storyboardEditSignature(liveNode.data.storyboardFrames) !== storyboardEditSignature(existing) || storyboardSceneDescriptionForNode(liveNode, liveIncoming) !== sceneDescription) throw new Error("The storyboard changed while planning. Its current panels have been preserved.");
+      if (!liveNode || storyboardEditSignature(liveNode.data.storyboardFrames) !== storyboardEditSignature(existing) || storyboardSceneDescriptionForNode(liveNode, liveIncoming) !== sceneDescription
+        || JSON.stringify([storyboardPlanningSettings(liveNode.data), liveNode.data.storyboardNotes, liveNode.data.useStoryboardStyle]) !== JSON.stringify([storyboardPlanningSettings(currentNode.data), currentNode.data.storyboardNotes, currentNode.data.useStoryboardStyle])) throw new Error("The storyboard changed while planning. Its current panels have been preserved.");
 
       pushUndoSnapshot();
       updateStoryboardNodeFrames(currentNode.id, plannedFrames.length ? plannedFrames : defaultStoryboardFrames(requestedFrameCount), {
@@ -3600,7 +3685,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         storyboardSequenceReview: null,
         storyboardSelectedFrameIds: [],
         storyboardRevisionWarning: "",
-        storyboardPlanSceneDescription: sceneDescription,
+        storyboardPlanSceneDescription: storyboardSceneDescriptionForNode({ ...liveNode, data: { ...liveNode.data, storyboardFrames: plannedFrames } }, liveIncoming),
         sceneName: plan.sceneTitle || currentNode.data.sceneName || "Scene 1",
         storyboardTab: "view",
         status: "ready",
@@ -3632,6 +3717,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       sceneDescription: storyboardSceneDescriptionForNode(node, incoming),
       useStoryboardStyle: node.data.useStoryboardStyle !== false,
       storyboardApproach: node.data.storyboardApproach, storyboardPacing: node.data.storyboardPacing, storyboardTargetDuration: node.data.storyboardTargetDuration,
+      storyboardCameraPersonality: node.data.storyboardCameraPersonality || "Expressive",
       notes: node.data.storyboardNotes || "", continuity: node.data.storyboardContinuity || {},
       characters: storyboardCharacterSummariesForNode(node, incoming.characterIn, incomingByNode),
       frames: normalizedStoryboardFrames(node.data.storyboardFrames)
@@ -3695,6 +3781,11 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
     const targetIds = new Set(Array.isArray(frameIds) ? frameIds : frames.filter(frame => !frame.resultUrl && !frame.exportUrl).map((frame) => frame.id));
     const targetFrames = frames.filter((frame) => targetIds.has(frame.id) && !frame.protected).map(frame => ({ ...frame, ...(revisedFrames.find(item => item.id === frame.id) || {}) }));
+    if (storyboardShotListMode(currentNode.data) && !revisedFrames.length && targetFrames.some(storyboardShotNeedsPlan)) {
+      const error = new Error("Plan Shots in Storyboard Setup before generating new or changed shot descriptions.");
+      updateNode(currentNode.id, { error: error.message });
+      return { status: "error", error };
+    }
     if (frameIds && frames.some(frame => targetIds.has(frame.id) && frame.protected)) {
       updateNode(currentNode.id, { error: "Unprotect selected panels before generating replacements." });
       return;
@@ -3822,8 +3913,11 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         });
         const afterExport = nodesRef.current.find(item => item.id === currentNode.id)?.data.storyboardFrames?.find(item => item.id === frame.id);
         if (!afterExport || storyboardEditSignature([afterExport]) !== storyboardEditSignature([original])) throw new Error("This panel changed during export. Its current version was preserved; the new image remains in History.");
+        const shotAuthoring = storyboardShotListMode(currentNode.data) && instruction
+          ? { shotDescription: frame.prompt, shotPlanSource: storyboardShotSource({ ...frame, shotDescription: frame.prompt }) } : {};
         const nextFrame = storyboardFrameWithVersion(original, {
           ...frame,
+          ...shotAuthoring,
           resultUrl: generated.url,
           exportUrl: exported.url,
           resultFallbackUrl: exported.url && exported.url !== generated.url ? exported.url : "",
@@ -3837,7 +3931,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           qcSummary: qcResult?.summary || "",
           qcIssues: qcResult?.issues || [],
           qcRetryCount,
-          generatedDirection: { ...storyboardFrameDirection(frame), castSource: frame.castSource },
+          generatedDirection: { ...storyboardFrameDirection(frame), castSource: frame.castSource, ...(storyboardShotListMode(currentNode.data) ? { shotDescription: frame.shotDescription, shotPlanSource: frame.shotPlanSource, ...shotAuthoring } : {}) },
           revisionInstruction: instruction
         });
         patchStoryboardFrame(currentNode.id, frame.id, nextFrame);
@@ -4145,14 +4239,15 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     }
     const id = createNodeId("image");
     const anchor = nodesRef.current.find((node) => node.id === source.editContext?.nodeId);
-    const position = nonOverlappingPosition({ width: 380, height: 400 }, anchor ? { x: anchor.x + 440, y: anchor.y } : defaultNodePosition(1), occupiedPlacementRects());
-    const next = { id, type: "image", ...position, data: {
+    const owner = anchor?.canvasId || activeCanvasRef.current;
+    const position = nonOverlappingPosition({ width: 380, height: 400 }, anchor ? { x: anchor.x + 440, y: anchor.y } : defaultNodePosition(1), occupiedPlacementRects(new Set(), owner));
+    const next = { id, type: "image", canvasId: owner, ...position, data: {
       ...createNodeData("image", "Image Edit", 1), title: "Image Edit", resultUrl: result.url, thumbnailUrl: result.thumbnailUrl || "",
       resultItems: [savedResult], selectedResultIndex: 0, fileName: result.fileName, mimeType: "image/png", mediaType: "image", resultType: "image", status: "complete"
     } };
-    pushUndoSnapshot();
+    pushUndoSnapshot(owner);
     nodesRef.current = [...nodesRef.current, next];
-    setNodes(nodesRef.current); setSelectedNodeIds([id]);
+    setNodes(nodesRef.current); if (owner === activeCanvasRef.current) setSelectedNodeIds([id]);
     await settleNewNodePlacement(id);
     setPreviewLightboxItem({ ...savedResult, editContext: { type: "nodeResult", nodeId: id, itemIndex: 0 } });
   }
@@ -4571,7 +4666,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
     if (dragState?.type === "marquee") {
       const rect = normalizeRect(dragState.start, pointer);
-      const selected = nodes
+      const selected = visibleNodes
         .filter((node) => rectsIntersect(rect, getNodeBounds(node.id)))
         .map((node) => node.id);
       setDragState((current) => (current?.type === "marquee" ? { ...current, current: pointer } : current));
@@ -4904,7 +4999,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   function getNodeBounds(nodeId) {
     const canvas = canvasRef.current;
     const element = canvas?.querySelector(`[data-node-card-id="${nodeId}"]`);
-    if (!canvas || !element) return { left: 0, top: 0, right: 0, bottom: 0 };
+    if (!canvas || !element || element.hidden) return { left: 0, top: 0, right: 0, bottom: 0 };
 
     const canvasRect = canvas.getBoundingClientRect();
     const rect = element.getBoundingClientRect();
@@ -4925,9 +5020,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     return { left: node.x, top: node.y, right: node.x + width, bottom: node.y + height };
   }
 
-  function occupiedPlacementRects(excluded = new Set()) {
-    return [...nodesRef.current.filter((node) => !excluded.has(node.id)).map(placementRect),
-      ...groups.filter((group) => !group.nodeIds?.some((id) => excluded.has(id))).map(groupToRect)];
+  function occupiedPlacementRects(excluded = new Set(), owner = activeCanvasRef.current) {
+    return [...nodesRef.current.filter((node) => node.canvasId === owner && !excluded.has(node.id)).map(placementRect),
+      ...groups.filter((group) => group.canvasId === owner && !group.nodeIds?.some((id) => excluded.has(id))).map(groupToRect)];
   }
 
   async function settleNewNodePlacement(id, snap = false) {
@@ -4940,7 +5035,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const current = nodesRef.current.find((node) => node.id === id);
     if (!current) throw new Error("The new node was removed before placement finished.");
     const rect = placementRect(current);
-    const occupied = occupiedPlacementRects(new Set([id]));
+    const occupied = occupiedPlacementRects(new Set([id]), current.canvasId);
     const rendered = getNodeBounds(id);
     const preferred = rendered.right > rendered.left ? current : { x: Math.max(current.x, ...occupied.map((item) => item.right + 80)), y: current.y };
     const position = (snap ? nonOverlappingGridPosition : nonOverlappingPosition)({ width: rect.right - rect.left, height: rect.bottom - rect.top }, preferred, occupied);
@@ -4954,6 +5049,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const groupRect = groupToRect(group);
     return nodes
       .filter((node) => {
+        if (node.canvasId !== group.canvasId) return false;
         const bounds = getNodeBounds(node.id);
         if (bounds.right > bounds.left && bounds.bottom > bounds.top) {
           return pointInRect(groupRect, {
@@ -5010,7 +5106,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         setEdges((current) => {
           const replacesSingleComposerCharacterInput = isComposerCharacterInputPort(to.port, targetNodeForConnection);
           const replacesSingleAutoAspectInput = isAutoAspectNode(targetNodeForConnection) && to.port === "imageIn";
-          const replacesSingleCoverageInput = isCoverageNode(targetNodeForConnection) && to.port === "imageIn";
+          const replacesSingleCoverageInput = (isCoverageNode(targetNodeForConnection) || targetNodeForConnection?.type === "cameraCoverage") && to.port === "imageIn";
           const replacesSingleAudioInput = targetNodeForConnection?.type === "audioModel" && to.port === "audioIn";
           const replacesSingleStoryboardSceneInput = targetNodeForConnection?.type === "storyboard" && to.port === "sceneDescriptionIn";
           let nextEdges = current.filter((edge) => {
@@ -5050,6 +5146,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const target = graphNodes.find((node) => node.id === to.nodeId);
 
     if (!source || !target) return "Choose a valid connection";
+    if (source.canvasId && target.canvasId && source.canvasId !== target.canvasId) return "Use project assets to share media between canvases";
     if (!outputPortIdsForNode(source).includes(from.port)) return "Choose a valid output";
     if (!inputPortIdsForNode(target).includes(to.port)) return "Choose a valid input";
     if (source.type === "skillDirector" && (!source.data?.skillDirectorBuilt || !source.data?.resultText)) return "Build Scene before connecting Director output";
@@ -5066,6 +5163,13 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const compatibilityError = getPortCompatibilityError(source, from.port, target, to.port);
     if (compatibilityError) return compatibilityError;
     if (target.type === "output") return "";
+    if (target.type === "cameraCoverage") return "";
+    if (target.type === "vector") {
+      if (to.port === "transferIn" && target.data.vectorMode === "vectorize") return "Mood Board is available in Text to vector mode only";
+      if (source.type === "character" && (!source.data.locked || !source.data.activated)) return "Lock the Character before connecting it to Vector Node";
+      if (source.type === "transfer" && (!source.data.activated || !source.data.resultUrl)) return "Lock the Mood Board before connecting it to Vector Node";
+      return "";
+    }
     if (target.type === "explore") {
       if (source.type === "character" && (!source.data.locked || !source.data.activated)) return "Lock the Character before connecting it to Explore";
       if (source.type === "transfer" && (!source.data.activated || !source.data.resultUrl)) return "Lock the Mood Board before connecting it to Explore";
@@ -5073,7 +5177,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       if (source.type === "camera" && !hasCameraPreset(source)) return "Choose a Camera preset before connecting";
       return "";
     }
-    if (source.type === "explore" && target.type !== "audioModel") return "";
+    if (["explore", "cameraCoverage", "vector"].includes(source.type) && target.type !== "audioModel") return "";
     if (source.type === "editor") {
       if (target.type === "preview") return "";
       if (!connectedOutputItem(source, { from, to })?.url) return "Export the current Editor sequence before connecting it to a video input";
@@ -5346,10 +5450,109 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     };
   }
 
-  function pushUndoSnapshot() {
+  function switchCanvas(idOrCanvas, { focusCanvas = true } = {}) {
+    const next = typeof idOrCanvas === "string" ? canvases.find(item => item.id === idOrCanvas) : idOrCanvas;
+    if (!next || next.id === activeCanvasRef.current) return;
+    if (document.querySelector("dialog[open]")) { setSaveStatus("Close the open editor before switching canvases."); return; }
+    canvasHistoryRef.current.set(activeCanvasRef.current, { undo: undoStackRef.current, redo: redoStackRef.current });
+    const history = canvasHistoryRef.current.get(next.id);
+    undoStackRef.current = history?.undo || []; redoStackRef.current = history?.redo || [];
+    const previousId = activeCanvasRef.current, previousViewport = { ...viewportRef.current };
+    setCanvases(current => snapshotCanvases(current, previousId, previousViewport));
+    if (viewportCommitTimerRef.current) clearTimeout(viewportCommitTimerRef.current);
+    if (viewportRenderFrameRef.current) cancelAnimationFrame(viewportRenderFrameRef.current);
+    viewportRef.current = { ...next.viewport };
+    activeCanvasRef.current = next.id;
+    setActiveCanvasId(next.id); setViewport(next.viewport);
+    setSelectedNodeIds([]); setSelectedEdgeId(null); selectedEdgeIdRef.current = null;
+    setSelectionBounds(null); setDragState(null); setDraftEdge(null); setContextMenu(null); setPreviewLightboxItem(null);
+    pauseEditorPlayback();
+    canvasRef.current?.querySelectorAll("video, audio").forEach(media => media.pause());
+    requestAnimationFrame(() => { schedulePortPositionRefresh(); if (focusCanvas) focusCanvasSelection(canvasRef.current); });
+  }
+
+  function addCanvas() {
+    if (document.querySelector("dialog[open]")) return;
+    const canvas = { id: createNodeId("canvas"), name: `Canvas ${canvases.length + 1}`, viewport: { ...defaultCanvasViewport } };
+    setCanvases(current => [...current, canvas]); switchCanvas(canvas);
+  }
+
+  function duplicateCanvas(id) {
+    if (document.querySelector("dialog[open]")) return;
+    if (nodesRef.current.some(node => node.canvasId === id && nodeIsWorking(node))) return;
+    const original = canvasesForSave.find(canvas => canvas.id === id);
+    const canvas = { ...original, id: createNodeId("canvas"), name: canvasName(`${original.name} Copy`) };
+    const copied = copyCanvasGraph({ nodes, edges, groups }, id, canvas.id);
+    setNodes(current => [...current, ...copied.nodes]); setEdges(current => [...current, ...copied.edges]); setGroups(current => [...current, ...copied.groups]);
+    setCanvases(current => [...current, canvas]); switchCanvas(canvas);
+  }
+
+  function deleteCanvas(id) {
+    if (document.querySelector("dialog[open]")) return;
+    if (canvases.length < 2 || nodesRef.current.some(node => node.canvasId === id && nodeIsWorking(node))) return;
+    const canvas = canvases.find(item => item.id === id);
+    if (!window.confirm(`Delete canvas "${canvas.name}" and its nodes? Generated files will stay on disk. This cannot be undone.`)) return;
+    if (id === activeCanvasId) switchCanvas(canvases.find(item => item.id !== id));
+    const ids = new Set(nodesRef.current.filter(node => node.canvasId === id).map(node => node.id));
+    setNodes(current => current.filter(node => !ids.has(node.id)));
+    setEdges(current => current.filter(edge => !ids.has(edge.from.nodeId) && !ids.has(edge.to.nodeId)));
+    setGroups(current => current.filter(group => group.canvasId !== id));
+    setCanvases(current => current.filter(item => item.id !== id)); canvasHistoryRef.current.delete(id);
+  }
+
+  function reorderCanvas(id, index) {
+    setCanvases(current => { const next = current.filter(item => item.id !== id), item = current.find(item => item.id === id);
+      if (!item) return current; next.splice(Math.max(0, Math.min(next.length, index)), 0, item); return next; });
+  }
+
+  function transferSelection(targetId, copy) {
+    if (document.querySelector("dialog[open]")) return;
+    try {
+      const ids = new Set(selectedNodeIds);
+      const crossing = edges.some(edge => ids.has(edge.from.nodeId) !== ids.has(edge.to.nodeId));
+      if (!copy && crossing && !window.confirm("Move the selected nodes? Connections to nodes left on this canvas will be disconnected.")) return;
+      const next = transferCanvasNodes({ nodes, edges, groups }, selectedNodeIds, targetId, copy);
+      const movedIds = new Set(next.selectedNodeIds), moved = next.nodes.filter(node => movedIds.has(node.id));
+      const rects = moved.map(placementRect);
+      const left = Math.min(...rects.map(rect => rect.left)), top = Math.min(...rects.map(rect => rect.top));
+      const width = Math.max(...rects.map(rect => rect.right)) - left, height = Math.max(...rects.map(rect => rect.bottom)) - top;
+      const position = nonOverlappingGridPosition({ width, height }, { x: 64, y: 64 }, occupiedPlacementRects(new Set(), targetId));
+      next.nodes = next.nodes.map(node => movedIds.has(node.id) ? { ...node, x: node.x + position.x - left, y: node.y + position.y - top } : node);
+      next.groups = next.groups.map(group => group.canvasId === targetId && group.nodeIds.length && group.nodeIds.every(id => movedIds.has(id)) ? { ...group, x: group.x + position.x - left, y: group.y + position.y - top } : group);
+      setNodes(next.nodes); setEdges(next.edges); setGroups(next.groups);
+      clearUndoStack(); switchCanvas(targetId); setSelectedNodeIds(next.selectedNodeIds);
+      const canvas = canvasRef.current?.getBoundingClientRect();
+      if (canvas) {
+        const scale = Math.min(1, Math.max(viewportScaleFloor, Math.min((canvas.width - 120) / width, (canvas.height - 160) / height)));
+        setViewport({ x: 60 - position.x * scale, y: 80 - position.y * scale, scale });
+      }
+      setSaveStatus(`${copy ? "Copied" : "Moved"} ${next.selectedNodeIds.length} nodes`);
+    } catch (error) { setSaveStatus(error.message); }
+  }
+
+  function importProjectCanvases(project) {
+    if (!Array.isArray(project?.graph?.nodes) || !Array.isArray(project?.graph?.edges)) throw new Error("That file is not a NewtNode project. Your canvases are unchanged.");
+    const imported = normalizeProjectCanvases({ ...project.graph, ...normalizeEditorGraph(project.graph?.nodes || [], project.graph?.edges || [], project.graph?.groups || []) });
+    const newCanvases = [], importedNodes = [], importedEdges = [], importedGroups = [];
+    for (const source of imported.canvases) {
+      const canvas = { id: createNodeId("canvas"), name: canvasName(imported.canvases.length === 1 ? project.name || source.name : `${project.name || "Imported"} / ${source.name}`), viewport: source.viewport };
+      const copied = copyCanvasGraph(imported, source.id, canvas.id, { includeNewt: ![...nodesRef.current, ...importedNodes].some(node => node.type === "myNewt") });
+      newCanvases.push(canvas); importedNodes.push(...copied.nodes); importedEdges.push(...copied.edges); importedGroups.push(...copied.groups);
+    }
+    setNodes(current => [...current, ...importedNodes]); setEdges(current => [...current, ...importedEdges]); setGroups(current => [...current, ...importedGroups]);
+    setCanvases(current => [...current, ...newCanvases]); switchCanvas(newCanvases[0]);
+    setSaveStatus(`Imported ${newCanvases.length} canvas${newCanvases.length === 1 ? "" : "es"}`);
+  }
+
+  function pushUndoSnapshot(owner = activeCanvasRef.current) {
+    if (owner !== activeCanvasRef.current) {
+      const history = canvasHistoryRef.current.get(owner) || { undo: [], redo: [] };
+      canvasHistoryRef.current.set(owner, { undo: [...history.undo.slice(-39), cloneGraphState({ ...canvasGraph({ nodes: nodesRef.current, edges: edgesRef.current, groups }, owner), viewport: canvases.find(item => item.id === owner)?.viewport || defaultCanvasViewport, selectedNodeIds: [], selectedEdgeId: null })], redo: [] });
+      return;
+    }
     undoStackRef.current = [
       ...undoStackRef.current.slice(-39),
-      cloneGraphState({ nodes, edges, groups, viewport, selectedNodeIds, selectedEdgeId })
+      cloneGraphState({ ...canvasGraph({ nodes: nodesRef.current, edges: edgesRef.current, groups }, activeCanvasRef.current), viewport, selectedNodeIds, selectedEdgeId })
     ];
     redoStackRef.current = [];
   }
@@ -5357,6 +5560,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   function clearUndoStack() {
     undoStackRef.current = [];
     redoStackRef.current = [];
+    canvasHistoryRef.current.clear();
   }
 
   function undoGraphChange() {
@@ -5368,11 +5572,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
     redoStackRef.current = [
       ...redoStackRef.current.slice(-39),
-      cloneGraphState({ nodes, edges, groups, viewport, selectedNodeIds, selectedEdgeId })
+      cloneGraphState({ ...visibleGraph, viewport, selectedNodeIds, selectedEdgeId })
     ];
-    setNodes(previous.nodes);
-    setEdges(previous.edges);
-    setGroups(previous.groups || []);
+    const restored = replaceCanvasGraph({ nodes: nodesRef.current, edges: edgesRef.current, groups }, activeCanvasId, previous);
+    setNodes(restored.nodes); setEdges(restored.edges); setGroups(restored.groups);
     setViewport(previous.viewport);
     setSelectedNodeIds(previous.selectedNodeIds);
     setSelectedEdgeId(previous.selectedEdgeId || null);
@@ -5388,11 +5591,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
     undoStackRef.current = [
       ...undoStackRef.current.slice(-39),
-      cloneGraphState({ nodes, edges, groups, viewport, selectedNodeIds, selectedEdgeId })
+      cloneGraphState({ ...visibleGraph, viewport, selectedNodeIds, selectedEdgeId })
     ];
-    setNodes(next.nodes);
-    setEdges(next.edges);
-    setGroups(next.groups || []);
+    const restored = replaceCanvasGraph({ nodes: nodesRef.current, edges: edgesRef.current, groups }, activeCanvasId, next);
+    setNodes(restored.nodes); setEdges(restored.edges); setGroups(restored.groups);
     setViewport(next.viewport);
     setSelectedNodeIds(next.selectedNodeIds);
     setSelectedEdgeId(next.selectedEdgeId || null);
@@ -5425,6 +5627,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       return {
         ...nextNode,
         id: nextId,
+        canvasId: activeCanvasId,
         x: node.x + 42,
         y: node.y + 42,
         data: resetCopiedNodeRuntime({
@@ -5516,7 +5719,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       }
     }
 
-    const currentBounds = graphBoundsForNodes(nodesRef.current);
+    const currentBounds = graphBoundsForNodes(nodesRef.current.filter(node => node.canvasId === activeCanvasRef.current));
     return {
       x: currentBounds.right + 160 - importBounds.left,
       y: Math.max(currentBounds.top, sceneCenter.y - importHeight / 2) - importBounds.top
@@ -5547,7 +5750,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           }
         : storedNode || node;
     if (!isRunnableNode(currentNode)) return { status: "skipped" };
-    if (currentNode.data.status === "running") return { status: "skipped" };
+    if (currentNode.data.status === "running" || currentNode.data.outpaintBusy) return { status: "skipped" };
     if (currentNode.type === "explore") {
       if (exploreRunsRef.current.has(currentNode.id)) return { status: "skipped" };
       exploreRunsRef.current.add(currentNode.id);
@@ -5620,7 +5823,6 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           return assets.map(item => ({ ...item, role: { imageIn: "product", characterIn: "character", transferIn: "mood" }[port] }));
         });
         const outcome = await runExploreGeneration({ node: currentNode, prompt: basePrompt, references,
-          style: (incoming.styleIn || []).flatMap(({ source }) => promptPiecesForSource(source)).join("\n"),
           camera: (incoming.cameraIn || []).flatMap(({ source }) => promptPiecesForSource(source)).join("\n"),
           workflowContext: requestContext, update: patch => updateNode(currentNode.id, patch),
           shouldStop: () => { const live = nodesRef.current.find(item => item.id === currentNode.id); return !live || Boolean(live.data.exploreStopRequested); } });
@@ -6256,32 +6458,35 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     return { type, label, ports: { input, output }, editableFields: ["title", ...(myNewtFields[type] || [])],
       defaults: Object.fromEntries((myNewtFields[type] || []).filter((key) => defaults[key] !== undefined).map((key) => [key, defaults[key]])),
       options: myNewtOptions[type] || {}, modelControls: Object.fromEntries((myNewtOptions[type]?.model || []).map((model) => [model, myNewtModelControls(type, model)])),
-      stages: myNewtRunStages[type] || [], manualOnly: ["transfer", "audioModel", "editor", "explore", "output"].includes(type),
+      stages: myNewtRunStages[type] || [], manualOnly: ["transfer", "audioModel", "editor", "explore", "output", "cameraCoverage", "vector"].includes(type),
       ...(type === "utility" ? { description: "Only Image > Coverage supports agent generation. Set utilityMode to image and utilityImageModel to Coverage; generates nine camera angles. Other Utility tools require manual operation." } : {}) };
   }), [myNewtOptions, generationProvider]);
   const newtPresets = useNewtPresets({
-    projectId, onStatus: setSaveStatus,
-    getNodes: () => nodesRef.current,
+    projectId, canvasId: activeCanvasId, onStatus: setSaveStatus,
+    getNodes: () => nodesRef.current.filter(node => node.canvasId === activeCanvasRef.current),
     capture: () => {
       const measured = Object.fromEntries(nodesRef.current.map((node) => {
         const rect = placementRect(node);
         return [node.id, { width: rect.right - rect.left, height: rect.bottom - rect.top }];
       }));
-      return buildNewtPresetGraph({ nodes: nodesRef.current, edges: edgesRef.current, groups }, selectedNodeIds, measured);
+      return buildNewtPresetGraph(canvasGraph({ nodes: nodesRef.current, edges: edgesRef.current, groups }, activeCanvasRef.current), selectedNodeIds, measured);
     },
     insert: (graph, bindings = {}, options = {}) => {
       const status = nodesRef.current.find((node) => node.type === "myNewt")?.data.myNewtSummary?.status;
       if (status === "running" && !options.agent) throw new Error("Pause Newt before inserting a preset.");
+      const owner = options.agent ? newtCanvasId() : activeCanvasRef.current;
       const clean = buildNewtPresetGraph(graph);
-      const offset = newtPresetOffset(clean, occupiedPlacementRects());
+      const offset = newtPresetOffset(clean, occupiedPlacementRects(new Set(), owner));
       const copied = bindNewtPresetInputs(instantiateNewtPreset(clean, offset), bindings, nodesRef.current);
+      copied.nodes = copied.nodes.map(node => ({ ...node, canvasId: owner }));
+      copied.groups = copied.groups.map(group => ({ ...group, canvasId: owner }));
       if (options.agent) {
         const rects = [...copied.nodes.map(node => {
           const rect = estimatedNodeRect(node);
           return { ...rect, right: node.x + (node.presetSize?.width || rect.right - rect.left), bottom: node.y + (node.presetSize?.height || rect.bottom - rect.top) };
         }), ...copied.groups.map(groupToRect)];
         const x = Math.min(...rects.map(rect => rect.left)), y = Math.min(...rects.map(rect => rect.top));
-        const position = nonOverlappingGridPosition({ width: Math.max(...rects.map(rect => rect.right)) - x, height: Math.max(...rects.map(rect => rect.bottom)) - y }, { x, y }, occupiedPlacementRects());
+        const position = nonOverlappingGridPosition({ width: Math.max(...rects.map(rect => rect.right)) - x, height: Math.max(...rects.map(rect => rect.bottom)) - y }, { x, y }, occupiedPlacementRects(new Set(), owner));
         copied.nodes = copied.nodes.map(node => ({ ...node, x: node.x + position.x - x, y: node.y + position.y - y }));
         copied.groups = copied.groups.map(group => ({ ...group, x: group.x + position.x - x, y: group.y + position.y - y }));
       }
@@ -6304,11 +6509,12 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         if (error) throw new Error(error);
       }
       inserted.edges = [...inserted.edges, ...externalEdges];
-      pushUndoSnapshot();
+      pushUndoSnapshot(owner);
       nodesRef.current = [...nodesRef.current, ...inserted.nodes];
       edgesRef.current = [...edgesRef.current, ...inserted.edges];
       setNodes(nodesRef.current); setEdges(edgesRef.current);
       setGroups((current) => [...current, ...inserted.groups]);
+      if (owner !== activeCanvasRef.current) return { createdIds: inserted.nodes.map(node => node.id) };
       setSelectedNodeIds(inserted.nodes.map((node) => node.id)); setSelectedEdgeId(null);
       if (!inserted.nodes.length) return { createdIds: [] };
       const rects = inserted.nodes.map(placementRect);
@@ -6332,13 +6538,24 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         : patch.model && (type === "coverage" || isCoverageNode({ type, data: { ...data, ...patch } })) ? { resolution: normalizeImageModelResolutionForModel(data.resolution, patch.model), aspectRatio: normalizeImageModelAspectRatio(data.aspectRatio, patch.model) } : {};
     return { ...data, ...selection, ...patch };
   };
+  function newtCanvasId() {
+    return nodesRef.current.find(node => node.type === "myNewt")?.canvasId || activeCanvasRef.current;
+  }
+  function newtCanvasGraph() {
+    return canvasGraph({ nodes: nodesRef.current, edges: edgesRef.current, groups }, newtCanvasId());
+  }
+  function applyNewtCanvasGraph(graph) {
+    const next = replaceCanvasGraph({ nodes: nodesRef.current, edges: edgesRef.current, groups }, newtCanvasId(), graph);
+    nodesRef.current = next.nodes; edgesRef.current = next.edges;
+    setNodes(next.nodes); setEdges(next.edges); setGroups(next.groups);
+  }
   const myNewtTaskController = useMyNewt({
     nodes, projectId, projectName,
     catalog: myNewtCatalog,
     presets: newtPresets.items, insertPreset: newtPresets.insertForAgent,
     insertLocalWorkflow: (id, payload = {}) => {
       const graph = buildMyNewtLocalWorkflow(id, {
-        bindings: payload.bindings, copies: payload.copies, sourceNodes: nodesRef.current,
+        bindings: payload.bindings, copies: payload.copies, sourceNodes: newtCanvasGraph().nodes,
         catalog: myNewtCatalog,
         createData: (type, label) => newtCreationData(type, createNodeData(type, label, nodesRef.current.filter((node) => node.type === type).length + 1), {}, { musicRequired: id === "music-video" }),
         nodeWidth: (node) => { const rect = placementRect(node); return rect.right - rect.left; }
@@ -6352,39 +6569,36 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       }
       return newtPresets.insertGraphForAgent(graph);
     },
-    duplicateLocal: (nodeIds, count) => newtPresets.insertGraphForAgent(buildMyNewtDuplicateGraph({ nodes: nodesRef.current, edges: edgesRef.current, groups }, nodeIds, count), { preserveIncoming: true }),
+    duplicateLocal: (nodeIds, count) => newtPresets.insertGraphForAgent(buildMyNewtDuplicateGraph(newtCanvasGraph(), nodeIds, count), { preserveIncoming: true }),
     saveProject: () => saveProjectRef.current({ preserveProjectId: true }),
     renameProject: (name) => setProjectName(name),
     settlePlacement: id => settleNewNodePlacement(id, true),
     arrange: (nodeIds, layoutBlocks) => {
-      const graph = { nodes: nodesRef.current, edges: edgesRef.current, groups };
+      const graph = newtCanvasGraph();
       const next = arrangeMyNewtCanvas(graph, nodeIds, { layoutBlocks, bounds: new Map(graph.nodes.map(node => [node.id, placementRect(node)])) });
       if (next.changed) {
-        pushUndoSnapshot(); nodesRef.current = next.nodes; setNodes(next.nodes); setGroups(next.groups);
+        pushUndoSnapshot(newtCanvasId()); applyNewtCanvasGraph(next);
         schedulePortPositionRefresh();
       }
       return { arrangedIds: nodeIds, changed: next.changed };
     },
     cleanup: nodeIds => {
-      const next = removeMyNewtCanvasNodes({ nodes: nodesRef.current, edges: edgesRef.current, groups }, nodeIds);
-      pushUndoSnapshot();
-      nodesRef.current = next.nodes; edgesRef.current = next.edges;
-      setNodes(next.nodes); setEdges(next.edges); setGroups(next.groups);
+      const next = removeMyNewtCanvasNodes(newtCanvasGraph(), nodeIds);
+      pushUndoSnapshot(newtCanvasId()); applyNewtCanvasGraph(next);
       setSelectedNodeIds(current => current.filter(id => !nodeIds.includes(id))); setSelectedEdgeId(null);
       schedulePortPositionRefresh();
       return { removedIds: nodeIds, filesDeleted: false };
     },
-    getGraph: () => ({ nodes: nodesRef.current, edges: edgesRef.current, groups, selectedNodeIds }),
+    getGraph: () => ({ ...newtCanvasGraph(), selectedNodeIds: newtCanvasId() === activeCanvasRef.current ? selectedNodeIds : [] }),
     restore: (graph) => {
-      pushUndoSnapshot();
+      pushUndoSnapshot(newtCanvasId());
       const restored = normalizeEditorGraph(graph.nodes, graph.edges, graph.groups);
-      nodesRef.current = restored.nodes; edgesRef.current = restored.edges;
-      setNodes(restored.nodes); setEdges(restored.edges); setGroups(restored.groups);
+      applyNewtCanvasGraph(restored);
       setSelectedNodeIds([]); setSelectedEdgeId(null);
     },
     focusNode: (id) => {
       const node = nodesRef.current.find((item) => item.id === id), canvas = canvasRef.current?.getBoundingClientRect();
-      if (!node || !canvas) return;
+      if (!node || !canvas || node.canvasId !== activeCanvasRef.current) return;
       setSelectedNodeIds([id]); setSelectedEdgeId(null);
       const rect = placementRect(node), scale = Math.min(1, Math.max(0.2, (canvas.height - 100) / (rect.bottom - rect.top)));
       setViewport({ x: canvas.width / 2 - (rect.left + rect.right) * scale / 2, y: canvas.height / 2 - (rect.top + rect.bottom) * scale / 2, scale });
@@ -6433,20 +6647,20 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       const node = nodesRef.current.find((item) => item.id === id);
       const selectionPatch = patch.model && node?.type === "imageModel" ? imageModelSelectionPatch(node.data, patch.model) : patch.model && node?.type === "videoModel" ? videoModelSelectionPatch(node.data, patch.model) : {};
       updateNode(id, { ...selectionPatch, ...patch });
-    }, snapshot: pushUndoSnapshot, connectionError: getConnectionError,
+    }, snapshot: () => pushUndoSnapshot(newtCanvasId()), connectionError: getConnectionError,
     validateOptions: validateMyNewtOptions,
     create: (type, request) => {
-      const graph = nodesRef.current;
+      const graph = newtCanvasGraph().nodes;
       const id = createNodeId(type);
       const label = nodeCatalog.find((entry) => entry.type === type)?.label || type;
       const data = createNodeData(type, label, graph.filter((node) => node.type === type).length + 1);
       const patch = { ...(request.patch || {}), ...(request.title ? { title: request.title } : {}) };
       validateMyNewtPatch({ id, type, data }, patch, { allowExisting: true }, [id]);
-      const next = { id, type, x: Number.isFinite(request.x) ? Math.min(50000, Math.max(-50000, request.x)) : graphBoundsForNodes(graph).right + 80, y: Number.isFinite(request.y) ? Math.min(50000, Math.max(-50000, request.y)) : 120, data: newtCreationData(type, data, patch) };
+      const next = { id, type, canvasId: newtCanvasId(), x: Number.isFinite(request.x) ? Math.min(50000, Math.max(-50000, request.x)) : graphBoundsForNodes(graph).right + 80, y: Number.isFinite(request.y) ? Math.min(50000, Math.max(-50000, request.y)) : 120, data: newtCreationData(type, data, patch) };
       const rect = placementRect(next);
-      Object.assign(next, nonOverlappingGridPosition({ width: rect.right - rect.left, height: rect.bottom - rect.top }, next, occupiedPlacementRects()));
-      pushUndoSnapshot();
-      nodesRef.current = [...graph, next]; setNodes(nodesRef.current);
+      Object.assign(next, nonOverlappingGridPosition({ width: rect.right - rect.left, height: rect.bottom - rect.top }, next, occupiedPlacementRects(new Set(), next.canvasId)));
+      pushUndoSnapshot(newtCanvasId());
+      nodesRef.current = [...nodesRef.current, next]; setNodes(nodesRef.current);
       return settleNewNodePlacement(id, true);
     },
     connect: (from, to) => {
@@ -6484,10 +6698,15 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     }
   });
 
-  const myNewtController = { ...myNewtTaskController, modelOptions: { image: enabledImageModels, video: enabledVideoModels } };
+  const newtLearning = useNewtLearning({ projectId, projectName, nodes, edges, canvases, activeCanvasId, selectedNodeIds,
+    available: nodes.some(node => node.type === "myNewt"),
+    localOnly: nodes.find(node => node.type === "myNewt")?.data.localOnly === true,
+    agentBusy: myNewtTaskController.busy || myNewtTaskController.job?.status === "running" || nodes.some(node => node.type === "myNewt" && node.data.myNewtSummary?.status === "running") });
+  const myNewtController = { ...myNewtTaskController, learning: newtLearning, modelOptions: { image: enabledImageModels, video: enabledVideoModels } };
 
   return (
     <section className={`node-workspace ${toolbarCollapsed ? "toolbar-collapsed" : ""} ${outputsCollapsed ? "outputs-collapsed" : "outputs-open"}`} style={{ "--output-drawer-width": `${outputDrawerWidth}px` }}>
+      {newtLearning.dialog && <React.Suspense fallback={null}><NewtLearningDialog key={projectId} learning={newtLearning} /></React.Suspense>}
       {newtPresets.draft && <NewtPresetDialog controller={newtPresets} />}
       {unsavedPrompt && (
         <UnsavedWorkflowPrompt
@@ -6514,73 +6733,36 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           <PanelLeftOpen size={17} />
         </button>
       )}
-      {outputsCollapsed && (
-        <button className="outputs-restore" onClick={() => setOutputsCollapsed(false)} title="Show project outputs">
-          <PanelRightOpen size={17} />
-        </button>
-      )}
-
       <aside className="node-toolbar">
         <div className="toolbar-header">
-          <span>Nodes</span>
-          <button className="sidebar-hide" onClick={() => setToolbarCollapsed(true)} title="Hide node palette">
-            <PanelLeftClose size={16} />
-          </button>
-        </div>
-        <div className="project-tools">
-          <button className="new-project-button" onClick={startNewProject} title="Start a new node project">
-            <Plus size={14} />
-            <span>New Project</span>
-          </button>
-          <input value={projectName} onChange={(event) => setProjectName(event.target.value)} placeholder="Project name" />
-          <div className="file-menu" ref={fileMenuRef}>
-            <button className="file-menu-trigger" onClick={() => setFileMenuOpen((open) => !open)} title="File">
-              <FolderOpen size={16} />
-              <span>File</span>
-              <ChevronDown size={13} />
-            </button>
-            {fileMenuOpen && (
-              <div className="file-menu-list">
-                <button onClick={() => { setFileMenuOpen(false); saveProject(); }} title="Save project">
+          {!toolbarCollapsed && <>
+          <SidebarMenu label="File" icon={FolderOpen} open={fileMenuOpen} onOpenChange={setFileMenuOpen} menuClassName="file-menu-list">
+                <button type="button" role="menuitem" onClick={startNewProject} title="Start a new project"><Plus size={15} /><span>New Project</span></button>
+                <button type="button" role="menuitem" onClick={() => saveProject()} title="Save project">
                   <Save size={15} />
                   <span>Save</span>
                 </button>
-                <button onClick={() => { setFileMenuOpen(false); saveProjectAsLocalFile(); }} title={projectPackagePath ? `Save As portable package. Current package: ${projectPackagePath}` : "Save as portable workflow package"}>
+                <button type="button" role="menuitem" onClick={() => saveProjectAsLocalFile()} title={projectPackagePath ? `Save As portable package. Current package: ${projectPackagePath}` : "Save as portable workflow package"}>
                   <Save size={15} />
                   <span>Save As</span>
                 </button>
-                <button onClick={() => { setFileMenuOpen(false); openWorkflowFromSystemPicker(); }} title="Open workflow package JSON">
+                <button type="button" role="menuitem" onClick={() => openWorkflowFromSystemPicker()} title="Open workflow package JSON">
                   <FolderOpen size={15} />
                   <span>Open</span>
                 </button>
-                <button onClick={() => { setFileMenuOpen(false); importWorkflowFromSystemPicker(); }} title="Import workflow into this canvas">
+                <button type="button" role="menuitem" onClick={() => importWorkflowFromSystemPicker()} title="Import a project as new canvases">
                   <Download size={15} />
-                  <span>Import</span>
+                  <span>Import as Canvases</span>
                 </button>
-              </div>
-            )}
-          </div>
-          <input
-            ref={workflowFileInputRef}
-            className="workflow-file-input"
-            type="file"
-            accept="application/json,.json"
-            onChange={(event) => openWorkflowFile(event.target.files?.[0])}
-          />
-          <div className="project-picker" ref={projectMenuRef}>
-            <button className="project-picker-trigger" onClick={() => setProjectMenuOpen((open) => !open)} title="Load saved workflow">
-              <span>Recent Projects</span>
-              <ChevronDown size={13} />
-            </button>
-            {projectMenuOpen && (
-              <div className="project-menu">
+          </SidebarMenu>
+          <SidebarMenu label="Recent Projects" icon={FolderClock} open={projectMenuOpen} onOpenChange={setProjectMenuOpen}>
                 {projects.length ? (
                   projects.map((project) => (
-                    <div className="project-menu-row" key={project.id}>
-                      <button className="project-load" onClick={() => loadProject(project.id)} title={`Load ${project.fileName || project.name}`}>
+                    <div className="project-menu-row" role="none" key={project.id}>
+                      <button type="button" role="menuitem" className="project-load" onClick={() => loadProject(project.id)} title={`Load ${project.fileName || project.name}`}>
                         {project.name}
                       </button>
-                      <button className="project-delete" onClick={() => deleteProject(project)} title={`Remove ${project.registryFileName || project.fileName || project.name} from dropdown`}>
+                      <button type="button" role="menuitem" className="project-delete" onClick={() => deleteProject(project)} title={`Remove ${project.registryFileName || project.fileName || project.name} from dropdown`} aria-label={`Remove ${project.name} from recent projects`}>
                         <Trash2 size={13} />
                       </button>
                     </div>
@@ -6588,10 +6770,23 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
                 ) : (
                   <small>No saved workflows</small>
                 )}
-              </div>
-            )}
-          </div>
+          </SidebarMenu>
           <PresetWorkflowPicker controller={newtPresets} insertionDisabled={myNewtTaskController.busy || myNewtTaskController.job?.status === "running" || nodes.some(node => node.type === "myNewt" && node.data.myNewtSummary?.status === "running")} />
+          <CanvasSnapToggle enabled={snapToGrid} onToggle={toggleCanvasSnap} />
+          </>}
+          <button className="sidebar-hide" onClick={() => { setFileMenuOpen(false); setProjectMenuOpen(false); setToolbarCollapsed(true); }} title="Hide node palette" aria-label="Hide node palette">
+            <PanelLeftClose size={16} />
+          </button>
+        </div>
+        <div className="project-tools">
+          <input value={projectName} onChange={(event) => setProjectName(event.target.value)} placeholder="Project name" aria-label="Project name" />
+          <input
+            ref={workflowFileInputRef}
+            className="workflow-file-input"
+            type="file"
+            accept="application/json,.json"
+            onChange={(event) => openWorkflowFile(event.target.files?.[0])}
+          />
         </div>
         {visibleNodeCatalog.map((item) => {
           const Icon = item.icon;
@@ -6605,8 +6800,17 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         })}
       </aside>
 
+      <div className="project-canvas-area">
+      <CanvasTabs canvases={canvases} activeId={activeCanvasId} activity={canvasActivity} selectedCount={selectedNodeIds.length}
+        outputsCollapsed={outputsCollapsed} onShowOutputs={() => setOutputsCollapsed(false)}
+        onSelect={id => switchCanvas(id, { focusCanvas: false })} onAdd={addCanvas} onRename={(id, name) => setCanvases(current => current.map(item => item.id === id ? { ...item, name: canvasName(name) } : item))}
+        onReorder={reorderCanvas} onDuplicate={duplicateCanvas} onDelete={deleteCanvas} onTransfer={transferSelection} />
+      {newtLearning.hasSession && <NewtLearningControls key={projectId} learning={newtLearning} compact />}
       <div
         ref={canvasRef}
+        id="project-active-canvas"
+        role="tabpanel"
+        aria-label={canvases.find(item => item.id === activeCanvasId)?.name || "Canvas"}
         className="node-canvas"
         tabIndex={-1}
         style={{
@@ -6629,7 +6833,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
             transform: `translate3d(${viewportRef.current.x}px, ${viewportRef.current.y}px, 0) scale(${viewportRef.current.scale})`
           }}
         >
-          {groups.map((group) => (
+          {visibleGraph.groups.map((group) => (
             <GroupBackdrop
               key={group.id}
               group={group}
@@ -6641,7 +6845,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           ))}
 
           <svg className="edge-layer">
-            {edges.map((edge) => {
+            {visibleGraph.edges.map((edge) => {
               const from = getPortPoint(edge.from.nodeId, edge.from.port);
               const to = getPortPoint(edge.to.nodeId, edge.to.port);
               return (
@@ -6665,6 +6869,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           {nodes.map((node) => (
             <NodeCard
               key={node.id}
+              hidden={node.canvasId !== activeCanvasId}
               myNewtController={myNewtController}
               node={node}
               workflowContext={workflowRequestContext()}
@@ -6703,7 +6908,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
               onStoryboardExport={exportStoryboardBoard}
               onStoryboardPrepare={prepareStoryboardBoard}
               onStoryboardFrameImport={importImageToStoryboardFrame}
-              onUndoSnapshot={pushUndoSnapshot}
+              onUndoSnapshot={() => pushUndoSnapshot(node.canvasId)}
               onPreviewResizeStart={startPreviewResize}
               onPlainTextResizeStart={startPlainTextResize}
               onPreviewOpen={setPreviewLightboxItem}
@@ -6748,11 +6953,13 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
             })}
           </div>
         )}
-        <CanvasSnapToggle enabled={snapToGrid} onToggle={toggleCanvasSnap} />
+      </div>
       </div>
       {!outputsCollapsed && (
         <ProjectOutputDrawer
           items={projectOutputs}
+          scope={outputScope}
+          onScopeChange={setOutputScope}
           width={outputDrawerWidth}
           onResize={resizeOutputDrawer}
           onClose={() => setOutputsCollapsed(true)}
@@ -6915,6 +7122,7 @@ function mergeTextareaHeightsFromCanvas(nodes = [], canvas) {
   const nodeMap = new Map(nodes.map((node) => [node.id, node]));
   const captured = new Map();
   canvas.querySelectorAll("[data-node-card-id]").forEach((card) => {
+    if (card.hidden) return;
     const nodeId = card.getAttribute("data-node-card-id");
     if (!nodeMap.has(nodeId)) return;
     const heights = normalizedTextareaHeights(nodeMap.get(nodeId)?.data?.textareaHeights);
@@ -6950,6 +7158,7 @@ function mergeTextareaHeightsFromCanvas(nodes = [], canvas) {
 
 function NodeCard({
   node,
+  hidden = false,
   workflowContext,
   myNewtController,
   onDragStart,
@@ -7071,6 +7280,8 @@ function NodeCard({
   return (
     <article
       ref={cardRef}
+      hidden={hidden}
+      inert={hidden ? true : undefined}
       className={`node-card ${node.type === "composer" ? "node-type-composer" : `${node.type} node-type-${node.type}`} ${utilityFrameItClass} ${utilityModel3DClass} ${nodeColor ? "has-node-color" : ""} ${selected ? "selected" : ""} ${tagHighlight ? "reference-tag-highlighted" : ""} ${moodBoardScalable ? "mood-board-scalable" : ""} ${storyboardScalable ? "storyboard-scalable" : ""} ${frameItScalable ? "frame-it-scalable" : ""}`}
       style={{
         transform: `translate(${node.x}px, ${node.y}px)`,
@@ -7446,6 +7657,26 @@ function NodeBody({
       ratios={imageModelAspectRatioOptions(node.data.model, generationProvider).filter(ratio => ratio !== "Auto")}
       resolutions={imageModelResolutionOptions(node.data.model, generationProvider)}
       qualities={isOpenAiImage25Model(node.data.model) ? openAiImage25QualityOptions : node.data.model === imageModelNames.openAiImage2 ? openAiImage2QualityOptions : []}
+      modelPatch={model => imageModelSelectionPatch(node.data, model, generationProvider)} /></React.Suspense>;
+  }
+  if (node.type === "vector") {
+    const imageInputs = (incoming.imageIn || []).map(({ source, edge }) => ({ ...(connectedOutputItem(source, edge) || { url: "", label: sourceLabel(source) }), ...(source.type === "transfer" ? { role: "moodBoard" } : {}) }));
+    const moodBoardInputs = (incoming.transferIn || []).map(({ source, edge }) => connectedOutputItem(source, edge) || { url: "", label: sourceLabel(source) });
+    return <React.Suspense fallback={<div className="node-body">Loading Vector Node...</div>}><VectorNodeBody node={node} config={config}
+      prompt={incoming.promptIn?.length ? connectedText(incoming.promptIn) : node.data.prompt} promptConnected={Boolean(incoming.promptIn?.length)}
+      imageInputs={imageInputs} imageConnected={Boolean(incoming.imageIn?.length)} onUpdate={onUpdate} workflowContext={workflowContext}
+      moodBoardInputs={moodBoardInputs} moodBoardConnected={Boolean(incoming.transferIn?.length)}
+      onPreviewOpen={onPreviewOpen} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput}
+      connectedPortKeys={connectedPortKeys} showApiCosts={showApiCosts} /></React.Suspense>;
+  }
+  if (node.type === "cameraCoverage") {
+    const sources = (incoming.imageIn || []).map(({ source, edge }) => connectedOutputItem(source, edge)).filter(item => item?.url);
+    return <React.Suspense fallback={<div className="node-body">Loading ReFrame...</div>}><CameraCoverageNodeBody node={node} config={config}
+      sources={sources} connected={Boolean(incoming.imageIn?.length)} onUpdate={onUpdate} workflowContext={workflowContext} onPreviewOpen={onPreviewOpen}
+      onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}
+      imageModels={imageModelOptions} provider={generationProvider} showApiCosts={showApiCosts}
+      ratios={imageModelAspectRatioOptions(node.data.model, generationProvider)} resolutions={imageModelResolutionOptions(node.data.model, generationProvider)}
+      qualities={isOpenAiImage25Model(node.data.model) ? openAiImage25QualityOptions : []}
       modelPatch={model => imageModelSelectionPatch(node.data, model, generationProvider)} /></React.Suspense>;
   }
   if (node.type === "editor") {
@@ -8035,6 +8266,8 @@ function NodeBody({
 
   if (node.type === "storyboard") {
     const frames = normalizedStoryboardFrames(node.data.storyboardFrames);
+    const shotList = storyboardShotListMode(node.data);
+    const shotListError = shotList ? storyboardShotListError(frames) : "";
     const storedStoryboardTab = ["setup", "view", "advanced"].includes(node.data.storyboardTab) ? node.data.storyboardTab : "setup";
     const selectedFrame = frames.find((frame) => frame.id === node.data.selectedFrameId) || frames[0];
     const preparingCharacters = node.data.status === "compiling-characters";
@@ -8081,6 +8314,10 @@ function NodeBody({
       const original = frames.find(frame => frame.id === frameId);
       if (!original || storyboardPanelEditingLocked(node, original)) return;
       if (original?.protected && !Object.hasOwn(patch, "protected")) return;
+      if (shotList && !Object.hasOwn(patch, "shotDescription") && !Object.hasOwn(patch, "shotPlanSource") && ["prompt", "shot", "lens", "angle"].some(key => Object.hasOwn(patch, key))) {
+        // Gallery edits are explicit final directions; list edits still require planning.
+        patch = storyboardShotGalleryPatch(original, patch);
+      }
       const nextFrames = frames.map((frame) => (frame.id === frameId ? { ...frame, ...patch } : frame));
       onUpdate(node.id, {
         ...(storyboardBoardSignature(nextFrames) !== storyboardBoardSignature(frames) ? { ...clearStoryboardBoardPatch(), storyboardSequenceReview: null } : {}),
@@ -8095,9 +8332,9 @@ function NodeBody({
     function addFrame() {
       if (storyboardLocked) return;
       if (frames.length >= storyboardMaxFrameCount) return;
-      const nextFrames = [...frames, createStoryboardFrame(frames.length + 1)];
+      const nextFrames = [...frames, createStoryboardFrame(frames.length + 1, shotList ? { shotDescription: "" } : {})];
       onUndoSnapshot?.();
-      onUpdate(node.id, { ...clearStoryboardBoardPatch(), storyboardFrames: nextFrames, selectedFrameId: nextFrames.at(-1).id, storyboardTab: "view" });
+      onUpdate(node.id, { ...clearStoryboardBoardPatch(), storyboardFrames: nextFrames, selectedFrameId: nextFrames.at(-1).id, storyboardTab: shotList ? activeTab : "view" });
     }
 
     function removeFrame(frameId) {
@@ -8220,13 +8457,13 @@ function NodeBody({
             </button>
           </div>
           <div className="storyboard-actions">
-            {activeTab === "setup" && <StoryboardPlanButton busy={storyboardLocked} disabled={!sceneDescription.trim()} planning={planningStoryboard} hasPlan={frames.some(frame => frame.prompt || frame.resultUrl)} protectedCount={frames.filter(frame => frame.protected).length} onPlan={options => onStoryboardPlan?.(node, options)} />}
+            {activeTab === "setup" && <StoryboardPlanButton shotList={shotList} busy={storyboardLocked} disabled={!sceneDescription.trim() || Boolean(shotListError)} planning={planningStoryboard} hasPlan={frames.some(frame => frame.prompt || frame.resultUrl)} protectedCount={frames.filter(frame => frame.protected).length} onPlan={options => onStoryboardPlan?.(node, options)} />}
             {(preparingCharacters || exportingStoryboard || compilingStoryboardBoard) && (
               <span className="storyboard-action-busy" title={preparingCharacters ? "Generating character sheets" : compilingStoryboardBoard ? "Preparing storyboard output" : "Exporting storyboard boards"}>
                 <Loader2 size={15} />
               </span>
             )}
-            {(runningStoryboard || frames.some(frame => frame.prompt && !frame.protected && !frame.resultUrl && !frame.exportUrl)) && <button type="button" className="primary" onClick={() => onStoryboardGenerateAll?.(node, frames.filter(frame => !frame.protected && !frame.resultUrl && !frame.exportUrl).map(frame => frame.id))} disabled={storyboardLocked || !sceneDescription.trim()} title="Generate only panels without an image">
+            {(runningStoryboard || frames.some(frame => frame.prompt && !frame.protected && !frame.resultUrl && !frame.exportUrl)) && <button type="button" className="primary" onClick={() => onStoryboardGenerateAll?.(node, frames.filter(frame => !frame.protected && !frame.resultUrl && !frame.exportUrl && (!shotList || !storyboardShotNeedsPlan(frame))).map(frame => frame.id))} disabled={storyboardLocked || !sceneDescription.trim() || (shotList && !frames.some(frame => !frame.protected && !frame.resultUrl && !frame.exportUrl && !storyboardShotNeedsPlan(frame)))} title="Generate only panels without an image">
               {preparingCharacters ? "Preparing..." : runningStoryboard ? "Generating..." : "Generate Missing"}
             </button>}
             {activeTab === "view" && (
@@ -8245,8 +8482,24 @@ function NodeBody({
 
         {activeTab === "setup" ? (
           <section className="storyboard-setup storyboard-scroll-surface">
-            <div className="storyboard-setup-grid">
-              <label className="storyboard-scene-field">
+            <StoryboardScriptImport key={`${workflowContext?.projectId || ""}:${node.id}`} node={node} frames={frames} busy={storyboardLocked} workflowContext={workflowContext}
+              onUpdate={patch => onUpdate(node.id, patch)} onApply={imported => {
+                if (storyboardLocked) return;
+                onUndoSnapshot?.();
+                const nextFrames = normalizedStoryboardFrames(imported);
+                onUpdate(node.id, { ...clearStoryboardBoardPatch(), storyboardApproach: "Shot List", storyboardFrames: nextFrames,
+                  storyboardSelectedFrameIds: [], selectedFrameId: nextFrames[0]?.id || "", storyboardSequenceReview: null,
+                  resultItems: storyboardResultItems(nextFrames), resultUrl: nextFrames.find(frame => frame.resultUrl)?.resultUrl || "" });
+              }} />
+            <div className={`storyboard-setup-grid${shotList ? " shot-list-setup" : ""}`}>
+              {shotList ? <StoryboardShotList frames={frames} busy={storyboardLocked} onAdd={addFrame} onRemove={removeFrame} onMove={moveFrame}
+                onUpdate={(id, patch) => { const frame = frames.find(item => item.id === id); updateFrame(id, { shotDescription: storyboardShotDescription(frame), ...patch, shotPlanSource: "" }); }}
+                onProtect={(id, protectedValue) => { onUndoSnapshot?.(); updateFrame(id, { protected: protectedValue }); }}
+                onRun={id => onStoryboardGenerateFrame?.(node, id)} onPreview={openStoryboardFrame}
+                renderDescription={(frame, disabled) => <TaggedPromptTextarea className="storyboard-tagged-editor" ariaLabel={`Shot ${frame.number} description`} maxLength={1400}
+                  value={storyboardShotDescription(frame)} placeholder="Describe this shot..." tagMatches={storyboardSceneTagMatches(storyboardShotDescription(frame), node, storyboardIncoming, incomingByNode)} readOnly={disabled}
+                  onChange={event => updateFrame(frame.id, { shotDescription: event.target.value, shotPlanSource: "" })} />}
+                context={<details className="storyboard-shot-context"><summary>Scene Context</summary><textarea aria-label="Shot list scene context" value={connectedSceneDescription || node.data.sceneDescription || ""} readOnly={storyboardLocked || sceneDescriptionConnected} placeholder="Optional scene context" onChange={event => onUpdate(node.id, { sceneDescription: event.target.value })} /></details>} /> : <label className="storyboard-scene-field">
                 <span>Scene Description</span>
                 <TaggedPromptTextarea
                   className="storyboard-tagged-editor"
@@ -8260,12 +8513,12 @@ function NodeBody({
                     storyboardAnalysis: ""
                   })}
                 />
-              </label>
+              </label>}
               <div className="storyboard-settings-grid">
                 <NodeRow label="Scene">
                   <input value={displayedSceneName} placeholder="Scene 1" disabled={storyboardLocked} onChange={(event) => onUpdate(node.id, { sceneName: event.target.value })} />
                 </NodeRow>
-                <NodeRow label="Frames">
+                {shotList ? <NodeRow label="Frames"><output className="storyboard-shot-count">{frames.length}</output></NodeRow> : <NodeRow label="Frames">
                   <div className="storyboard-frame-count-control">
                     <select
                       value={frameCountMode}
@@ -8296,12 +8549,17 @@ function NodeBody({
                       }}
                     />
                   </div>
-                </NodeRow>
+                </NodeRow>}
                 <NodeRow label="Approach">
                   <select aria-label="Storyboard approach" aria-describedby={`storyboard-approach-${node.id}`} value={storyboardPlanningSettings(node.data).approach} disabled={storyboardLocked} onChange={event => onUpdate(node.id, { storyboardApproach: event.target.value })}>
-                    {storyboardApproaches.map(value => <option key={value} value={value}>{storyboardApproachDetails[value].label}</option>)}
+                    {(storyboardPlanningSettings(node.data).approach === "Narrative" ? ["Narrative", ...storyboardApproaches] : storyboardApproaches).map(value => <option key={value} value={value}>{storyboardApproachDetails[value].label}</option>)}
                   </select>
                   <small id={`storyboard-approach-${node.id}`} className="storyboard-approach-description" aria-live="polite">{storyboardApproachDetails[storyboardPlanningSettings(node.data).approach].description}</small>
+                </NodeRow>
+                <NodeRow label="Camera Personality">
+                  <select aria-label="Camera personality" value={storyboardPlanningSettings(node.data).cameraPersonality} disabled={storyboardLocked} onChange={event => onUpdate(node.id, { storyboardCameraPersonality: event.target.value, storyboardPlanSceneDescription: "" })}>
+                    {storyboardCameraPersonalities.map(value => <option key={value}>{value}</option>)}
+                  </select>
                 </NodeRow>
                 <NodeRow label="Pacing"><select value={storyboardPlanningSettings(node.data).pacing} disabled={storyboardLocked} onChange={event => onUpdate(node.id, { storyboardPacing: event.target.value })}>{storyboardPacing.map(value => <option key={value}>{value}</option>)}</select></NodeRow>
                 <NodeRow label="Duration (sec)"><input type="number" min="1" max="600" placeholder="Optional" value={node.data.storyboardTargetDuration || ""} disabled={storyboardLocked} onChange={event => onUpdate(node.id, { storyboardTargetDuration: event.target.value })} /></NodeRow>
@@ -8501,7 +8759,7 @@ function NodeBody({
                         {lensPresetNames.map((option) => <option key={option}>{option}</option>)}
                       </select>
                       <select aria-label={`Panel ${frame.number} angle`} value={frame.angle || "None"} disabled={frameEditingLocked || frame.protected} onChange={(event) => updateFrame(frame.id, { angle: event.target.value })}>
-                        {typePresetNames.map((option) => <option key={option}>{option}</option>)}
+                        {storyboardCameraChoices.angle.map((option) => <option key={option}>{option}</option>)}
                       </select>
                     </div>
                     <TaggedPromptTextarea
@@ -8514,7 +8772,7 @@ function NodeBody({
                     />
                     <div className="storyboard-frame-actions">
                       <button type="button" className="icon-only" disabled={frameEditingLocked} aria-pressed={frame.protected === true} title={frame.protected ? "Unprotect panel" : "Protect panel"} onClick={event => { event.stopPropagation(); onUndoSnapshot?.(); updateFrame(frame.id, { protected: !frame.protected }); }}>{frame.protected ? <Lock size={13} /> : <Unlock size={13} />}</button>
-                      <button type="button" onClick={(event) => { event.stopPropagation(); onStoryboardGenerateFrame?.(node, frame.id); }} disabled={storyboardLocked || frame.protected || !sceneDescription.trim() || !frame.prompt.trim()} title="Generate this panel without replanning the scene">
+                      <button type="button" onClick={(event) => { event.stopPropagation(); onStoryboardGenerateFrame?.(node, frame.id); }} disabled={storyboardLocked || frame.protected || !sceneDescription.trim() || !frame.prompt.trim() || (shotList && storyboardShotNeedsPlan(frame))} title="Generate this panel without replanning the scene">
                         {frame.status === "queued" ? "Queued..." : frame.status === "reviewing" ? "Reviewing..." : frame.status === "running" ? "Running..." : "Run"}
                       </button>
                       <button type="button" className="icon-only" title="Delete panel" onClick={(event) => { event.stopPropagation(); removeFrame(frame.id); }} disabled={frames.length <= 1 || storyboardLocked || frame.protected}>
@@ -8522,6 +8780,7 @@ function NodeBody({
                       </button>
                     </div>
                     {frame.purpose && <p className="storyboard-panel-purpose">{frame.shotId} / {frame.phase}: {frame.purpose}</p>}
+                    <StoryboardScriptSource source={frame.sourceScript} />
                     {!!frame.versions?.length && <details className="storyboard-panel-versions" onClick={event => event.stopPropagation()}><summary>Previous versions ({frame.versions.length})</summary>{frame.versions.map((version, index) => <div key={`${version.savedAt}-${index}`}><img src={version.resultUrl || version.exportUrl} alt={`Panel ${frame.number}, previous version ${index + 1}`} loading="lazy" /><button type="button" disabled={frameEditingLocked || frame.protected} onClick={() => { onUndoSnapshot?.(); updateFrame(frame.id, restoreStoryboardFrameVersion(frame, index)); }}>Restore {index + 1}</button></div>)}</details>}
                     {frame.qcWarning && <small className="upload-error">{frame.qcWarning}</small>}
                     {!frame.qcWarning && frame.qcSummary && <small className="storyboard-qc-note">QC: {frame.qcSummary}</small>}
@@ -8959,9 +9218,12 @@ function NodeBody({
       const nextIndex = ((index % previewItems.length) + previewItems.length) % previewItems.length;
       const item = previewItems[nextIndex];
       if (!item?.url) return;
+      const coverageSource = previewSource.sourceNodeType === "cameraCoverage"
+        ? incoming.sourceIn?.find(({ source }) => source.id === previewSource.sourceNodeId)?.source : null;
       onUpdate(previewSource.sourceNodeId, {
         selectedResultIndex: item.sourceResultIndex ?? nextIndex,
-        resultUrl: item.url
+        resultUrl: item.url,
+        ...(coverageSource ? selectCoverageVersion(normalizeCameraCoverageData(coverageSource.data), item.shotId, item.versionId) : {})
       });
       onUpdate(node.id, {
         previewSourceId: previewSource.id,
@@ -8977,7 +9239,8 @@ function NodeBody({
         type: item.type,
         label: item.label || `${previewSource.label} ${index + 1}`,
         fileName: item.fileName || fileNameFromLocalUrl(item.url),
-        mimeType: item.mimeType || mimeForOutputItem(item)
+        mimeType: item.mimeType || mimeForOutputItem(item),
+        ...(item.svgUrl ? { svgUrl: item.svgUrl, svgFileName: item.svgFileName || fileNameFromLocalUrl(item.svgUrl) } : {})
       };
       setOutputItemDragData(event.dataTransfer, dragItem, outputDragMime);
     }
@@ -9134,7 +9397,7 @@ function NodeBody({
             <div className={`preview-stage ${previewItem || previewSource?.editorTimeline ? "has-preview" : ""}`} onDragStart={(event) => event.preventDefault()}>
               {previewSource?.editorTimeline && <React.Suspense fallback={<span>Loading timeline...</span>}><EditorMonitor nodeId={previewSource.sourceNodeId} timeline={previewSource.editorTimeline} /></React.Suspense>}
               {previewItem?.type === "image" && fullResolutionImageUrl(previewItem) && <img {...fullResolutionImageProps(previewItem)} key={previewItem.url} src={fullResolutionImageUrl(previewItem)} alt={previewItem.label || previewSource.label} draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />}
-              {previewItem?.type === "video" && <video key={previewItem.url} src={previewItem.url} controls loop draggable={false} data-preview-video-node-id={node.id} onError={useNewtNodeVideoFallback} />}
+              {previewItem?.type === "video" && <video key={previewItem.url} src={displayMediaUrl(previewItem.url)} controls loop draggable={false} data-preview-video-node-id={node.id} onError={useNewtNodeVideoFallback} />}
               {previewItem?.type === "audio" && <audio key={previewItem.url} src={previewItem.url} controls preload="metadata" />}
               {previewItem?.type === "model3d" && <Model3DViewer key={previewItem.url} url={previewItem.url} label={previewItem.label || previewSource.label} />}
               {!previewItem && !previewSource?.editorTimeline && <span>Preview will appear here</span>}
@@ -9166,7 +9429,7 @@ function NodeBody({
                       aria-label={`Select preview ${index + 1}`}
                     >
                       {item.type === "image" && fullResolutionImageUrl(item) && <img {...fullResolutionImageProps(item)} src={fullResolutionImageUrl(item)} alt={item.label || `Preview ${index + 1}`} draggable={false} loading="lazy" decoding="async" onError={useNewtNodeImageFallback} />}
-                      {item.type === "video" && <video src={item.url} muted playsInline preload="metadata" draggable={false} onError={useNewtNodeVideoFallback} />}
+                      {item.type === "video" && <video src={displayMediaUrl(item.url)} muted playsInline preload="metadata" draggable={false} onError={useNewtNodeVideoFallback} />}
                       {item.type === "audio" && <FileAudio size={22} />}
                       {item.type === "model3d" && (
                         <span className="preview-thumb-model">
@@ -9492,6 +9755,8 @@ function NodeBody({
     const maskVideoPort = config.input.find((port) => port.id === "maskVideoIn");
     const utilityImageModel = normalizedUtilityImageModelName(node.data.utilityImageModel);
     const utilityVideoModel = normalizedUtilityVideoModelName(node.data.utilityVideoModel);
+    const isVideoOutpaint = utilityVideoModel === videoOutpaintModelName;
+    const outpaintCanvasUrl = connectedAssetUrls(incoming.canvasVideoIn).at(-1) || "";
     const isAutoAspect = isUtilityAutoAspectModel(utilityImageModel);
     const selectedAspectRatios = normalizedAutoAspectRatios(node.data);
     const autoAspectResults = normalizedAutoAspectResults(node.data);
@@ -9539,10 +9804,10 @@ function NodeBody({
           .map((portId) => config.input.find((port) => port.id === portId))
           .filter(Boolean);
     const resultType = node.data.resultType || utilityOutputMediaType;
-    const hasRequiredReferenceVideo = isWanVaceMaskToVideo ? true : Boolean(incoming.referenceVideoIn?.length);
+    const hasRequiredReferenceVideo = isWanVaceMaskToVideo ? true : Boolean(incoming.referenceVideoIn?.length) || (isVideoOutpaint && Boolean(outpaintCanvasUrl));
     const canRun = isVideoMode
       ? hasRequiredReferenceVideo &&
-        (isBirefnetVideo ||
+        ((isVideoOutpaint && node.data.videoOutpaintPrepared?.plan.needsOutpaint === false) || isBirefnetVideo ||
           isRifeVideo ||
           isExtractFrameVideo ||
           isColorIdMatteVideo ||
@@ -9561,7 +9826,9 @@ function NodeBody({
           (!isSam3Image || Boolean(promptValue.trim())) &&
           (!isColorIdMatte || colorIdMatteRunColors(node.data).length > 0);
     const utilityRunLabel = isVideoMode
-      ? isSam3Video
+      ? isVideoOutpaint
+        ? "Run Outpaint"
+        : isSam3Video
         ? "Run SAM 3 Video"
         : isVoidVideo
           ? "Run VOID"
@@ -9608,7 +9875,7 @@ function NodeBody({
         ? "Source Video"
         : isSam3Video || isBirefnetVideo || isRifeVideo || isExtractFrameVideo || isColorIdMatteVideo || isWanVaceInpaintingVideo || isVideoUpscaler
           ? "Video"
-          : isVoidVideo
+          : isVoidVideo || isVideoOutpaint
             ? "Source Video"
             : "Control Video";
     const referenceVideoPlaceholder = isCompositeVideo ? "Add 2 videos" : isWanVaceMaskToVideo ? "Optional video" : "Add video";
@@ -9709,7 +9976,7 @@ function NodeBody({
             ))}
           </div>
         )}
-        <button className="run-node-button" onClick={() => onRun(node)} disabled={running || !canRun}>
+        <button className="run-node-button" onClick={() => onRun(node)} disabled={running || node.data.outpaintBusy || !canRun}>
           {running ? (isVideoMode ? "Running Video..." : isAutoAspect ? "Generating aspects..." : isStillFrame ? "Grabbing Still..." : isQwenCameraEdit ? "Running Camera..." : "Running Image...") : utilityRunLabel}
         </button>
         <details className="model-settings-drawer" open={settingsOpen} onToggle={(event) => onUpdate(node.id, { settingsOpen: event.currentTarget.open })}>
@@ -9719,6 +9986,7 @@ function NodeBody({
               <NodeRow label="Model">
                 <select value={utilityVideoModel} onChange={(event) => onUpdate(node.id, { utilityVideoModel: event.target.value, resultUrl: "", resultItems: [], resultType: utilityVideoOutputType(event.target.value), error: "" })}>
                   <option>{utilityVideoModelNames.wanFunControl}</option>
+                  <option>{utilityVideoModelNames.videoOutpaint}</option>
                   <option>{utilityVideoModelNames.extractFrame}</option>
                   <option>{utilityVideoModelNames.colorIdMatte}</option>
                   <option>{utilityVideoModelNames.compositeVideo}</option>
@@ -9730,12 +9998,13 @@ function NodeBody({
                   <option>{utilityVideoModelNames.sam3Video}</option>
                 </select>
               </NodeRow>
+              {isVideoOutpaint && <VideoOutpaintModelControl node={node} running={running || Boolean(node.data.outpaintBusy)} onUpdate={onUpdate} />}
               {!isBirefnetVideo && !isRifeVideo && !isExtractFrameVideo && !isColorIdMatteVideo && !isCompositeVideo && !isVideoUpscaler && (
                 <NodeRow label="Prompt" inputPort={settingsOpen ? promptPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
                   <textarea className={promptConnected ? "connected-field" : ""} value={promptValue} readOnly={promptConnected} onChange={(event) => onUpdate(node.id, { prompt: event.target.value })} />
                 </NodeRow>
               )}
-              {!isSam3Video && !isBirefnetVideo && !isRifeVideo && !isExtractFrameVideo && !isColorIdMatteVideo && !isCompositeVideo && !isWanVaceVideo && !isVideoUpscaler && (
+              {!isVideoOutpaint && !isSam3Video && !isBirefnetVideo && !isRifeVideo && !isExtractFrameVideo && !isColorIdMatteVideo && !isCompositeVideo && !isWanVaceVideo && !isVideoUpscaler && (
                 <NodeRow label="Generations">
                   <select value={node.data.batchCount || "1"} onChange={(event) => onUpdate(node.id, { batchCount: event.target.value })}>
                     {batchOptions.map((option) => (
@@ -9749,7 +10018,15 @@ function NodeBody({
               <NodeRow label={referenceVideoLabel} inputPort={settingsOpen ? referenceVideoPort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
                 <button className={incoming.referenceVideoIn?.length ? "connected-field" : ""}>{connectedSummary(incoming.referenceVideoIn, referenceVideoPlaceholder)}</button>
               </NodeRow>
-              {isSam3Video ? (
+              {isVideoOutpaint ? (
+                <VideoOutpaintControls node={node} sourceVideoUrl={connectedAssetUrls(incoming.referenceVideoIn).at(-1) || ""}
+                  canvasVideoUrl={outpaintCanvasUrl} canvasPort={config.input.find(port => port.id === "canvasVideoIn")}
+                  referenceImageUrls={connectedAssetUrls(incoming.referenceImageIn)} referenceImagePort={referenceImagePort}
+                  promptConnected={promptConnected} running={running} onUpdate={onUpdate} settingsOpen={settingsOpen} incoming={incoming}
+                  portProps={{ onConnectStart, onDisconnectInput, connectedPortKeys }}
+                  onPrepare={(target, values) => nodeApi.prepareVideoOutpaint({ ...workflowContext, nodeId: target.id, nodeTitle: target.data.title, ...values })}
+                  onAnalyze={(target, values) => nodeApi.analyzeVideoOutpaint({ ...workflowContext, nodeId: target.id, nodeTitle: target.data.title, ...values })} />
+              ) : isSam3Video ? (
                 <NodeRow label="Threshold">
                   <input type="number" min="0" max="1" step="0.05" value={node.data.sam3VideoDetectionThreshold ?? 0.5} onChange={(event) => onUpdate(node.id, { sam3VideoDetectionThreshold: event.target.value })} />
                 </NodeRow>
@@ -11125,7 +11402,7 @@ function UtilityImageToolSwitcher({ node, onUpdate, disabled = false }) {
   );
 }
 
-function TaggedPromptTextarea({ value, onChange, readOnly, className = "", tagMatches = [], placeholder = "" }) {
+function TaggedPromptTextarea({ value, onChange, readOnly, className = "", tagMatches = [], placeholder = "", ariaLabel, maxLength }) {
   const highlighterRef = React.useRef(null);
   const parts = React.useMemo(() => promptHighlightParts(value, tagMatches), [value, tagMatches]);
 
@@ -11149,7 +11426,7 @@ function TaggedPromptTextarea({ value, onChange, readOnly, className = "", tagMa
         )}
         {String(value || "").endsWith("\n") ? "\u00a0" : null}
       </div>
-      <textarea value={value} readOnly={readOnly} placeholder={placeholder} onChange={onChange} onScroll={syncScroll} />
+      <textarea value={value} aria-label={ariaLabel} maxLength={maxLength} readOnly={readOnly} placeholder={placeholder} onChange={onChange} onScroll={syncScroll} />
     </div>
   );
 }
@@ -11498,6 +11775,8 @@ function formatFrameTimeDisplay(value) {
 
 function getNodeConfig(type) {
   const configs = {
+    vector: { icon: PenTool, input: [{ id: "promptIn", label: "Design brief", color: portColors.prompt }, { id: "imageIn", label: "Images", color: portColors.image }, { id: "transferIn", label: "Mood Board", color: portColors.transfer }], output: [{ id: "imageOut", label: "Selected design", color: portColors.image }] },
+    cameraCoverage: { icon: Camera, input: [{ id: "imageIn", label: "Master image", color: portColors.image }], output: [{ id: "imageOut", label: "Selected shot", color: portColors.image }] },
     output: { icon: FolderOutput, input: [{ id: "mediaIn", label: "Media", color: portColors.preview }], output: [] },
     editor: {
       icon: PanelsTopLeft,
@@ -11580,6 +11859,7 @@ function getNodeConfig(type) {
         { id: "referenceImageIn", label: "Reference Image", color: portColors.image },
         { id: "referenceVideoIn", label: "Control Video", color: portColors.video },
         { id: "maskVideoIn", label: "Mask Video", color: portColors.video },
+        { id: "canvasVideoIn", label: "Canvas Video", color: portColors.video },
         ...model3DViewInputs.map((input) => ({ id: input.id, label: input.label, color: portColors.image }))
       ],
       output: [{ id: "utilityOut", label: "Output", color: portColors.image }]
@@ -11618,7 +11898,7 @@ function getNodeConfig(type) {
       icon: Compass,
       input: [{ id: "promptIn", label: "Brief", color: portColors.prompt }, { id: "imageIn", label: "Image / Product", color: portColors.image },
         { id: "characterIn", label: "Character", color: portColors.character }, { id: "transferIn", label: "Mood Board", color: portColors.transfer },
-        { id: "styleIn", label: "Style", color: portColors.style }, { id: "cameraIn", label: "Camera", color: portColors.camera }],
+        { id: "cameraIn", label: "Camera", color: portColors.camera }],
       output: [{ id: "imageOut", label: "Images output", color: portColors.image }]
     },
     storyboard: {
@@ -11759,6 +12039,8 @@ function createDefaultNodeData(type, label, count) {
     };
   }
   if (type === "explore") return { title, ...exploreDefaults() };
+  if (type === "cameraCoverage") return { title, ...cameraCoverageDefaults() };
+  if (type === "vector") return { title, ...vectorDefaults() };
   if (type === "coverage") {
     return {
       title,
@@ -11781,7 +12063,8 @@ function createDefaultNodeData(type, label, count) {
       storyboardNotes: "",
       storyboardAutoQc: true,
       storyboardQcMode: "balanced",
-      storyboardApproach: "Narrative",
+      storyboardApproach: "Shot List",
+      storyboardCameraPersonality: "Expressive",
       storyboardPacing: "Balanced",
       storyboardTargetDuration: "",
       storyboardContinuity: null,
@@ -11801,7 +12084,7 @@ function createDefaultNodeData(type, label, count) {
       storyboardCharacters: [],
       storyboardAnalysis: "",
       storyboardPlanSceneDescription: "",
-      storyboardFrames: defaultStoryboardFrames(storyboardDefaultFrameCount),
+      storyboardFrames: defaultStoryboardFrames(1),
       selectedFrameId: "",
       storyboardScale: 1,
       storyboardBoardUrl: "",
@@ -11847,7 +12130,7 @@ function createDefaultNodeData(type, label, count) {
       frameItShowShotLabel: false,
       frameItCreateMode: "image",
       frameItImageModel: imageModelNames.openAiImage2,
-      frameItVideoModel: videoModelNames.seedance,
+      frameItVideoModel: videoDefaultModel,
       frameItPrompt: "",
       frameItSubjectPrompt: "",
       frameItEnvironmentPrompt: "",
@@ -12033,7 +12316,7 @@ function createDefaultNodeData(type, label, count) {
 
   return {
     title,
-    model: videoModelNames.seedance,
+    model: videoDefaultModel,
     prompt: "",
     duration: "15 seconds",
     resolution: "720p",
@@ -12404,6 +12687,7 @@ function utilityInputPortIds(mode, imageModel = utilityImageModelNames.dwpose, v
     return isUtilitySam3ImageModel(imageModel) ? ["promptIn", "imageIn"] : ["imageIn"];
   }
 
+  if (videoModel === videoOutpaintModelName) return ["promptIn", "referenceImageIn", "referenceVideoIn", "canvasVideoIn"];
   if (isUtilityBirefnetVideoModel(videoModel)) return ["referenceVideoIn"];
   if (isUtilityRifeVideoModel(videoModel)) return ["referenceVideoIn"];
   if (isUtilityExtractFrameVideoModel(videoModel)) return ["referenceVideoIn"];
@@ -12434,6 +12718,7 @@ function normalizedUtilityImageModelName(model) {
 
 function normalizedUtilityVideoModelName(model) {
   const normalized = String(model || "").toLowerCase();
+  if (normalized === "video outpaint") return videoOutpaintModelName;
   if (normalized.includes("color") && normalized.includes("matte")) return utilityVideoModelNames.colorIdMatte;
   if (normalized.includes("composite")) return utilityVideoModelNames.compositeVideo;
   if (normalized.includes("vace") || (normalized.includes("wan") && (normalized.includes("mask") || normalized.includes("inpaint")))) return utilityVideoModelNames.wanFunControl;
@@ -12539,7 +12824,7 @@ function portKindForNodePort(node, portId, role) {
 
 function acceptedInputPortKinds(node, portId) {
   if (node?.type === "output" && portId === "mediaIn") return ["image", "video", "audio", "transfer", "character"];
-  if (node?.type === "myNewt" && portId === "imageIn") return ["image", "character", "transfer"];
+  if (["myNewt", "vector"].includes(node?.type) && portId === "imageIn") return ["image", "character", "transfer"];
   const inputKind = portKindForNodePort(node, portId, "input");
   if (inputKind === "preview") return ["image", "video", "audio", "model3d", "transfer", "character"];
   return inputKind ? [inputKind] : [];
@@ -12824,6 +13109,7 @@ function configTitleFallback(type) {
 }
 
 function nodeResultMediaType(node) {
+  if (["cameraCoverage", "vector"].includes(node?.type)) return "image";
   if (!node?.data?.resultUrl && !Array.isArray(node?.data?.resultItems)) return "";
   if (node.type === "utility") return utilityResultType(node);
   if (node.type === "image" || node.type === "video" || node.type === "audio" || node.type === "model3d") return node.type;
@@ -13117,6 +13403,14 @@ function expandVideoDirectorPackageIncoming(incoming = {}, incomingByNode = {}, 
 
 
 function connectedOutputItem(source, edge) {
+  if (source?.type === "vector") {
+    const data = normalizeVectorData(source.data);
+    return edge?.from?.port === "imageOut" ? data.resultItems[data.selectedResultIndex] || null : null;
+  }
+  if (source?.type === "cameraCoverage") {
+    const data = normalizeCameraCoverageData(source.data);
+    return edge?.from?.port === "imageOut" ? data.resultItems[data.selectedResultIndex] || null : null;
+  }
   if (source?.type === "explore" && edge?.from?.port !== "imageOut") return null;
   if (source?.type === "editor" && (!source.data?.editorExportTimeline || editorRenderSignature(normalizeEditorTimeline(source.data.editorExportTimeline)) !== editorRenderSignature(normalizeEditorTimeline(source.data?.editorTimeline)))) return null;
   if (source?.type === "character") {
@@ -13661,6 +13955,7 @@ async function runUtilityVideoGeneration({ node, prompt, incoming, projectId, pr
     referenceImageUrls: connectedAssetUrls(incoming.referenceImageIn),
     referenceVideoUrls: connectedAssetUrls(incoming.referenceVideoIn),
     maskVideoUrls: connectedAssetUrls(incoming.maskVideoIn),
+    canvasVideoUrls: connectedAssetUrls(incoming.canvasVideoIn),
     colorIdMatte: {
       selectedColor: selectedColor ? rgbToHex(selectedColor) : "",
       tolerance: colorIdMatteTolerance(node.data.colorIdMatteTolerance),
@@ -13705,10 +14000,11 @@ function connectedPreviewSources(items = []) {
         (source.type === "utility" && isUtilityAutoAspectModel(source.data?.utilityImageModel))
       ) && resultItems.length === 1 ? resultItems[0]?.label : "";
       const sourceName = outputSpecificLabel || sourceLabel(source);
-      const selectedResultIndex = Math.trunc(Number(source.data.selectedResultIndex));
+      const selectedResultIndex = source.type === "cameraCoverage" ? normalizeCameraCoverageData(source.data).selectedResultIndex : Math.trunc(Number(source.data.selectedResultIndex));
       return {
         id: `${source.id}:${edge.from.port}`,
         sourceNodeId: source.id,
+        sourceNodeType: source.type,
         sourcePort: edge.from.port,
         label: sourceName,
         type: sourceType,
@@ -13716,9 +14012,9 @@ function connectedPreviewSources(items = []) {
           ...item,
           sourceNodeId: source.id,
           sourceResultIndex: index,
-          sourceSelectedResult: index === selectedResultIndex || item.url === source.data.resultUrl,
+          sourceSelectedResult: index === selectedResultIndex || (source.type !== "cameraCoverage" && item.url === source.data.resultUrl),
           type: item.type || sourceType,
-          label: source.type === "explore" && item.label ? item.label : allItems.length > 1 ? `${sourceName} ${index + 1}` : sourceName
+          label: ["explore", "cameraCoverage", "vector"].includes(source.type) && item.label ? item.label : allItems.length > 1 ? `${sourceName} ${index + 1}` : sourceName
         }))
       };
     })
@@ -13727,6 +14023,8 @@ function connectedPreviewSources(items = []) {
 
 function previewSourceResultItems(source, edge, sourceType = "image") {
   if (!source) return [];
+  if (source.type === "cameraCoverage") return edge?.from?.port === "imageOut" ? normalizeCameraCoverageData(source.data).resultItems : [];
+  if (source.type === "vector") return edge?.from?.port === "imageOut" ? normalizeVectorData(source.data).resultItems : [];
   if (source.type === "explore" && edge?.from?.port !== "imageOut") return [];
   if (
     source.type === "storyboard" ||
@@ -14302,6 +14600,8 @@ function isActiveComposerSource(source) {
 }
 
 function promptPiecesForSource(source, { namedCharacterReferences = false } = {}) {
+  if (source.type === "cameraCoverage") return [];
+  if (source.type === "vector") return [];
   if (source.type === "explore") return [];
   if (source.type === "camera") {
     return cameraPromptPieces(source);
@@ -14829,6 +15129,7 @@ function normalizeEditorGraph(nodes = [], edges = [], groups = []) {
   nodes.forEach((node) => {
     if (isLegacyDirectionNode(node)) {
       const split = splitLegacyDirectionNode(node);
+      for (const part of [split.transferNode, split.cameraNode, split.styleNode]) if (part && node.canvasId) part.canvasId = node.canvasId;
       normalizedNodes.push(split.transferNode);
       if (split.cameraNode) normalizedNodes.push(split.cameraNode);
       if (split.styleNode) normalizedNodes.push(split.styleNode);
@@ -14892,6 +15193,7 @@ function normalizeGroups(groups = [], nodeMap = new Map()) {
       const nodeIds = [...new Set(Array.isArray(group?.nodeIds) ? group.nodeIds.filter((id) => nodeMap.has(id)) : [])];
       return {
         id: String(group?.id || `group-${index + 1}`),
+        ...(group.canvasId ? { canvasId: group.canvasId } : {}),
         name: String(group?.name || `Group ${index + 1}`),
         color: groupPalette.includes(group?.color) ? group.color : groupPalette[index % groupPalette.length],
         x: finiteNumber(group?.x, 120 + index * 30),
@@ -15142,6 +15444,8 @@ function normalizeCurrentNode(node) {
 
   if (nextNode.type === "audioModel") return { ...nextNode, data: normalizeAudioModelData(data) };
   if (nextNode.type === "explore") return { ...nextNode, data: normalizeExploreData(data) };
+  if (nextNode.type === "cameraCoverage") return { ...nextNode, data: normalizeCameraCoverageData(data) };
+  if (nextNode.type === "vector") return { ...nextNode, data: normalizeVectorData(data, { restore: true }) };
 
   if (nextNode.type === "coverage") {
     return normalizeCurrentNode(migrateRetiredNode(nextNode));
@@ -15287,6 +15591,8 @@ function normalizeStoryboardData(data = {}) {
   return {
     ...createDefaultNodeData("storyboard", data.title || "Storyboard", 1),
     ...data,
+    storyboardApproach: storyboardPlanningSettings(data).approach,
+    storyboardCameraPersonality: storyboardPlanningSettings(data).cameraPersonality,
     storyboardTab: ["setup", "view", "advanced"].includes(data.storyboardTab) ? data.storyboardTab : "setup",
     sceneName: data.sceneName || "Scene 1",
     frameCount: normalizeStoryboardFrameCountValue(data.frameCount),
@@ -15333,7 +15639,7 @@ function normalizedStoryboardFrames(frames = []) {
       number: index + 1,
       shot: normalizeChoice(frame.shot || "None", shotPresetNames, "None"),
       lens: normalizeChoice(frame.lens || "None", lensPresetNames, "None"),
-      angle: normalizeChoice(frame.angle || "None", typePresetNames, "None"),
+      angle: normalizeChoice(frame.angle || "None", storyboardCameraChoices.angle, "None"),
       prompt: String(frame.prompt || ""),
       beat: String(frame.beat || ""),
       notes: String(frame.notes || ""),
@@ -15414,7 +15720,7 @@ function storyboardCssAspectRatio(value) {
 }
 
 function storyboardSceneDescriptionForNode(node, incoming = {}) {
-  return connectedText(incoming?.sceneDescriptionIn || []) || node?.data?.sceneDescription || "";
+  return storyboardShotListContext(node?.data, connectedText(incoming?.sceneDescriptionIn || []) || node?.data?.sceneDescription || "");
 }
 
 function storyboardPlanIsCurrent(node, sceneDescriptionOverride = null) {
@@ -15625,7 +15931,7 @@ function storyboardFramesFromPlan(frames = []) {
       ...storyboardFrameDirection(frame),
       shot: normalizeChoice(frame.shot || "None", shotPresetNames, "None"),
       lens: normalizeChoice(frame.lens || "None", lensPresetNames, "None"),
-      angle: normalizeChoice(frame.angle || "None", typePresetNames, "None"),
+      angle: normalizeChoice(frame.angle || "None", storyboardCameraChoices.angle, "None"),
       beat: frame.beat || "",
       prompt: frame.prompt || "",
       notes: frame.notes || ""
@@ -16002,6 +16308,7 @@ function buildStoryboardFramePrompt(node, frame, sceneDescription = "", incoming
     node.data.storyboardContinuity ? `Established scene geography (current panel direction wins for explicit changes): ${JSON.stringify(node.data.storyboardContinuity)}` : "",
     `CURRENT CAMERA CONTROLS: Shot ${frame.shot || "None"}; lens ${frame.lens || "None"}; angle ${frame.angle || "None"}. Any non-None camera setting here overrides conflicting camera wording in an older prompt, beat or reference. Apply these controls to this panel only.`,
     ...cameraPieces,
+    storyboardCameraRenderingPrompt(frame),
     storyboardContinuityInstruction,
     sceneReferenceMap,
     propReferenceMap,
@@ -16057,6 +16364,7 @@ function normalizeFrameItData(data = {}) {
     : frameItScene.figures[0]?.id || "";
   return {
     ...createDefaultNodeData("frameIt", data.title || "Frame It", 1),
+    frameItVideoModel: videoModelNames.seedance,
     ...data,
     frameItScene,
     frameItSelectedFigureId: selectedFigureId,
@@ -16229,6 +16537,11 @@ function normalizeUtilityData(data = {}) {
     model: isUtilityModel3DModel(utilityImageModel) || (utilityModeValue === "image" && isUtilityCoverageModel(utilityImageModel)) ? specializedData.model : videoModelNames.wanFunControl,
     utilityImageModel,
     utilityVideoModel,
+    videoOutpaint: normalizeUtilityOutpaintSettings(data.videoOutpaint),
+    videoOutpaintSnap: data.videoOutpaintSnap !== false,
+    outpaintPromptMode: normalizeOutpaintPromptMode(data.outpaintPromptMode),
+    outpaintGuidance: String(data.outpaintGuidance || ""),
+    outpaintBusy: false,
     selectedAspectRatios,
     autoAspectResults,
     autoAspectModel: normalizeAutoAspectModel(data.autoAspectModel || (isUtilityAutoAspectModel(utilityImageModel) ? data.model : "")),
@@ -16501,6 +16814,7 @@ function normalizeEdgeForCurrentGraph(edge, nodeMap) {
   }
 
   if (!inputPortIdsForNode(target).includes(nextEdge.to.port)) return null;
+  if (source.canvasId && target.canvasId && source.canvasId !== target.canvasId) return null;
   if (!outputPortIdsForNode(source).includes(nextEdge.from.port)) return null;
   if (isVideoModelUnsupportedInput(target, nextEdge.to.port)) return null;
   if (!portsAreCompatible(source, nextEdge.from.port, target, nextEdge.to.port)) return null;

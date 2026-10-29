@@ -23,8 +23,8 @@ test("Storyboard approach labels and descriptions match selection without changi
   const find = (node, predicate) => predicate(node) ? node : (node.childNodes || []).map(child => find(child, predicate)).find(Boolean);
   const attr = (node, name) => node.attrs?.find(attribute => attribute.name === name)?.value;
   const text = node => node.nodeName === "#text" ? node.value : (node.childNodes || []).map(text).join("");
-  assert.deepEqual(storyboardApproaches.map(value => storyboardApproachDetails[value].label), ["Standard", "Dialogue", "Action", "Commercial", "Montage"]);
-  for (const approach of [undefined, ...storyboardApproaches]) {
+  assert.deepEqual(storyboardApproaches.map(value => storyboardApproachDetails[value].label), ["Shot List", "Dialogue", "Action", "Commercial", "Montage"]);
+  for (const approach of [undefined, "Narrative", ...storyboardApproaches]) {
     const node = { id: "b", type: "storyboard", data: { ...createDefaultNodeData("storyboard", "Storyboard", 1), storyboardApproach: approach, storyboardTab: "setup", storyboardFrames: [frame] } };
     const original = structuredClone(node);
     const root = parseFragment(renderToStaticMarkup(React.createElement(NodeBody, { node, imageModelOptions, videoModelOptions, generationProvider: "fal", incoming: {}, incomingByNode: {}, connectedPortKeys: new Set(), onUpdate() {} })));
@@ -43,6 +43,79 @@ test("Storyboard approach labels and descriptions match selection without changi
     assert.equal(reopened.data.storyboardFrames[0].resultUrl, frame.resultUrl);
     assert.deepEqual(reopened.data.storyboardFrames[0].versions, frame.versions);
   }
+});
+
+test("Camera Personality defaults to Expressive; saved personality and Dutch cameras survive reopening without rewriting panels", () => {
+  assert.equal(createDefaultNodeData("storyboard", "Storyboard", 1).storyboardCameraPersonality, "Expressive");
+  for (const personality of [undefined, "Restrained", "Expressive", "Bold", "invalid"]) {
+    const node = { id: "b", type: "storyboard", data: { storyboardTab: "setup", storyboardCameraPersonality: personality, storyboardFrames: [{ ...frame, angle: "Dutch Angle" }] } };
+    const before = structuredClone(node);
+    const reopened = normalizeEditorGraph(JSON.parse(JSON.stringify([node])), [], []).nodes[0];
+    assert.equal(reopened.data.storyboardCameraPersonality, ["Restrained", "Bold"].includes(personality) ? personality : "Expressive");
+    assert.equal(reopened.data.storyboardFrames[0].angle, "Dutch Angle");
+    assert.equal(reopened.data.storyboardFrames[0].resultUrl, frame.resultUrl);
+    assert.deepEqual(reopened.data.storyboardFrames[0].versions, frame.versions);
+    assert.equal(reopened.data.storyboardFrames[0].prompt, frame.prompt);
+    const markup = renderToStaticMarkup(React.createElement(NodeBody, { node: reopened, imageModelOptions, videoModelOptions, generationProvider: "fal", incoming: {}, incomingByNode: {}, connectedPortKeys: new Set(), onUpdate() {} }));
+    assert.match(markup, /aria-label="Camera personality"/);
+    assert.match(markup, new RegExp(`<option selected="">${reopened.data.storyboardCameraPersonality}</option>`));
+    assert.deepEqual(node, before);
+  }
+});
+
+test("new Storyboards start with one Shot List row; authored rows and legacy summaries survive reopening", () => {
+  const node = { id: "shots", type: "storyboard", data: createDefaultNodeData("storyboard", "Storyboard", 1) };
+  assert.equal(node.data.storyboardApproach, "Shot List");
+  assert.equal(node.data.storyboardFrames.length, 1);
+  const render = () => renderToStaticMarkup(React.createElement(NodeBody, { node, imageModelOptions, videoModelOptions, generationProvider: "fal", incoming: {}, incomingByNode: {}, connectedPortKeys: new Set(), onUpdate() {} }));
+  const markup = render();
+  assert.match(markup, /Plan Shots/);
+  assert.match(markup, /aria-label="Shot 1 description"/);
+  assert.match(markup, /aria-label="Shot 1 framing"/);
+  assert.doesNotMatch(markup, /storyboard-scene-field/);
+  node.data.storyboardFrames[0] = { ...node.data.storyboardFrames[0], shotDescription: "A door opens", shot: "CU", lens: "85mm", angle: "Low Angle", resultUrl: "/outputs/existing.png" };
+  const saved = JSON.parse(JSON.stringify(node));
+  const reopened = normalizeEditorGraph([saved], [], []).nodes[0];
+  for (const key of ["shotDescription", "shot", "lens", "angle", "resultUrl"]) assert.equal(reopened.data.storyboardFrames[0][key], node.data.storyboardFrames[0][key]);
+  assert.equal(reopened.data.storyboardApproach, "Shot List");
+  for (const approach of ["Dialogue", "Action", "Commercial", "Montage"]) {
+    node.data.storyboardApproach = approach;
+    assert.match(render(), /storyboard-scene-field/);
+    assert.doesNotMatch(render(), /aria-label="Shot 1 description"/);
+  }
+  delete saved.data.storyboardApproach;
+  assert.equal(normalizeEditorGraph([saved], [], []).nodes[0].data.storyboardApproach, "Narrative");
+});
+
+test("Storyboard Shot List scrolls separately from its typed setup inputs", () => {
+  const attr = (element, name) => element.attrs?.find(attribute => attribute.name === name)?.value;
+  const find = (element, predicate) => predicate(element) ? element : (element.childNodes || []).map(child => find(child, predicate)).find(Boolean);
+  const hasClass = (element, name) => (attr(element, "class") || "").split(/\s+/).includes(name);
+  const node = { id: "b", type: "storyboard", data: { ...createDefaultNodeData("storyboard", "Storyboard", 1), storyboardFrames: Array.from({ length: 20 }, (_, index) => ({ id: `f${index}`, number: index + 1, shotDescription: "A door opens", prompt: "" })) } };
+  const root = parseFragment(renderToStaticMarkup(React.createElement(NodeBody, { node, imageModelOptions, videoModelOptions, generationProvider: "fal", incoming: {}, incomingByNode: {}, connectedPortKeys: new Set(), onUpdate() {} })));
+  const setup = find(root, element => hasClass(element, "shot-list-setup"));
+  const list = find(setup, element => hasClass(element, "storyboard-shot-list"));
+  const settings = find(setup, element => hasClass(element, "storyboard-settings-grid"));
+  assert.ok(hasClass(list, "storyboard-scroll-surface"));
+  assert.equal(list.parentNode, settings.parentNode);
+  assert.equal(find(list, element => attr(element, "data-port-key") !== undefined), undefined);
+  for (const port of ["sceneDescriptionIn", "sceneReferenceIn", "propsIn", "characterIn"]) {
+    assert.ok(find(settings, element => attr(element, "data-port-id") === port), port);
+  }
+});
+
+test("PDF import and source metadata survive project normalization without creating images", () => {
+  const sourceScript = { url: "/uploads/script.pdf", fileName: "Script.pdf", title: "Cafe", scene: "Cafe", pages: [3], dialogue: "MAYA: Let's go.", voiceover: "", onScreenText: "", timing: "5s", productionNotes: "" };
+  const node = { id: "b", type: "storyboard", data: { ...createDefaultNodeData("storyboard", "Storyboard", 1), storyboardScriptImport: { document: { url: sourceScript.url, fileName: sourceScript.fileName, pageCount: 70 } }, storyboardFrames: [{ ...frame, shotDescription: "Maya stands", sourceScript }] } };
+  const reopened = normalizeEditorGraph(JSON.parse(JSON.stringify([node])), [], []).nodes[0];
+  assert.deepEqual(reopened.data.storyboardFrames[0].sourceScript, sourceScript);
+  assert.equal(reopened.data.storyboardFrames[0].resultUrl, frame.resultUrl);
+  const markup = renderToStaticMarkup(React.createElement(NodeBody, { node: reopened, imageModelOptions, videoModelOptions, generationProvider: "fal", incoming: {}, incomingByNode: {}, connectedPortKeys: new Set(), onUpdate() {} }));
+  assert.match(markup, /Import Script PDF/);
+  assert.doesNotMatch(markup, /Analyze pages|Preview page|Maximum shots|Choose script pages manually|Find Scripts|Allow AI analysis|Imported shot list review|Apply imported shots/);
+  assert.match(markup, /href="\/uploads\/script.pdf#page=3"/);
+  assert.match(markup, /MAYA: Let/);
+  assert.doesNotMatch(markup, /role="status"[^>]*>Building/);
 });
 
 test("running one panel keeps idle-panel controls editable and QC notes inside collapsed details", () => {
@@ -69,7 +142,7 @@ test("running one panel keeps idle-panel controls editable and QC notes inside c
 });
 
 test("Storyboard gallery starts compact, exports without a lock, and keeps planning in Setup", () => {
-  const node = { id: "b", type: "storyboard", data: { ...createDefaultNodeData("storyboard", "Storyboard", 1), sceneDescription: "Door opens.", storyboardFrames: [frame], storyboardTab: "view" } };
+  const node = { id: "b", type: "storyboard", data: { ...createDefaultNodeData("storyboard", "Storyboard", 1), storyboardApproach: "Narrative", sceneDescription: "Door opens.", storyboardFrames: [frame], storyboardTab: "view" } };
   const render = () => renderToStaticMarkup(React.createElement(NodeBody, { node, imageModelOptions, videoModelOptions, generationProvider: "fal", incoming: {}, incomingByNode: {}, connectedPortKeys: new Set(), onUpdate() {} }));
   const view = render();
   assert.doesNotMatch(view, /storyboard-board-lock|Create New Plan|Selected panel revision|Regenerate Selected/);
@@ -121,7 +194,8 @@ test("Storyboard Setup places Character directly below Props without an upload s
       node, imageModelOptions, videoModelOptions, generationProvider: "fal", incoming: connected ? { characterIn: [{ source: { id: "c", type: "character", data: { title: "Hero" } } }] } : {},
       incomingByNode: {}, connectedPortKeys: new Set(connected ? ["b:characterIn"] : []), onUpdate() {}
     }));
-    assert.doesNotMatch(setup, /Uploaded characters|storyboard-character-zone|type="file"|Upload character image/);
+    assert.doesNotMatch(setup, /Uploaded characters|storyboard-character-zone|Upload character image/);
+    assert.match(setup, /type="file" accept="application\/pdf,.pdf"/);
     const grid = find(parseFragment(setup), element => attr(element, "class") === "storyboard-settings-grid");
     assert.ok(grid);
     const rows = grid.childNodes.filter(element => element.tagName);
@@ -152,7 +226,7 @@ test("removing the upload UI does not discard characters saved in older Storyboa
 test("Setup preserves long local descriptions and notes while connected Scene Text is read-only", () => {
   const localText = "Local scene at @CoffeeShop.\n".repeat(80);
   const connectedText = "Connected scene with its own pacing.\n".repeat(60);
-  const node = { id: "b", type: "storyboard", data: { ...createDefaultNodeData("storyboard", "Storyboard", 1), storyboardTab: "setup", sceneDescription: localText, storyboardNotes: "Keep the eyeline.", storyboardFrames: [frame] } };
+  const node = { id: "b", type: "storyboard", data: { ...createDefaultNodeData("storyboard", "Storyboard", 1), storyboardApproach: "Narrative", storyboardTab: "setup", sceneDescription: localText, storyboardNotes: "Keep the eyeline.", storyboardFrames: [frame] } };
   const find = (element, predicate) => predicate(element) ? element : (element.childNodes || []).map(child => find(child, predicate)).find(Boolean);
   const attr = (element, name) => element.attrs?.find(attribute => attribute.name === name)?.value;
   for (const connected of [false, true, false]) {

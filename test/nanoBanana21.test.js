@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import * as nano from "../src/nanoBanana21.js";
 import { isRetiredNanoBanana2Model } from "../src/retiredImageModels.js";
-import { imageModelNames, imageModelOptions, imageWorkspaceModelOptions, coverageModelOptions, storyboardImageModelOptions, normalizeModelPreferences } from "../src/modelOptions.js";
+import { imageModelNames, imageModelOptions, coverageModelOptions, storyboardImageModelOptions, normalizeModelPreferences } from "../src/modelOptions.js";
 import { characterSheetModelOptions, characterSheetGenerationSettings } from "../src/characterSheetModels.js";
 import { storyboardImageSettings, storyboardCharacterImageSettings } from "../src/storyboardImageModels.js";
 import { exploreModels } from "../src/explore.js";
@@ -35,7 +35,7 @@ test("2.1 is distinct from 2, available throughout image tools, and does not rep
   }
   assert.equal(isRetiredNanoBanana2Model("Nano Banana 2"), true);
   for (const name of ["Nano Banana 2", "Nano Banana Pro", "Nano Banana 2.10", "Nano Banana 2.1 Pro", undefined]) assert.equal(nano.isNanoBanana21Model(name), false);
-  for (const options of [imageModelOptions, imageWorkspaceModelOptions, coverageModelOptions, storyboardImageModelOptions, characterSheetModelOptions, exploreModels]) assert.ok(options.includes(model));
+  for (const options of [imageModelOptions, coverageModelOptions, storyboardImageModelOptions, characterSheetModelOptions, exploreModels]) assert.ok(options.includes(model));
   assert.equal(normalizeModelPreferences().image[model], true);
   assert.equal(normalizeModelPreferences({ image: { [model]: false } }).image[model], false);
   assert.equal(normalizeMyNewtFavoriteModels({ favoriteImageModel: model }).favoriteImageModel, model);

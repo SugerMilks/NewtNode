@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { storyboardFrameWithVersion, storyboardFrameDirection, storyboardEditSignature, storyboardRevisionTargets, validateStoryboardRevision, storyboardPanelEditingLocked } from "../src/storyboardWorkflow.js";
+import { storyboardFrameWithVersion, storyboardFrameDirection, storyboardEditSignature, storyboardRevisionTargets, validateStoryboardRevision, storyboardPanelEditingLocked, storyboardPlanningSettings } from "../src/storyboardWorkflow.js";
+import { storyboardShotListMode, storyboardShotNeedsPlan, storyboardShotSource, storyboardShotRows, storyboardShotListError, storyboardShotListContext, mergeStoryboardShotPlan } from "../src/storyboardShotList.js";
 
 const source = await readFile(new URL("../src/NodeEditor.jsx", import.meta.url), "utf8");
 const extract = (name, next, deps) => {
@@ -10,6 +11,43 @@ const extract = (name, next, deps) => {
   return new Function(...Object.keys(deps), `${source.slice(start, end)}; return ${name};`)(...Object.values(deps));
 };
 const makeFrame = number => ({ id: `f${number}`, number, prompt: `Door opens ${number}`, beat: "Door opens", notes: "", shot: "WS", lens: "35mm", angle: "None", cast: [], resultUrl: `/outputs/old-${number}.png`, status: "complete" });
+
+test("Shot List planning accepts Auto cameras without becoming stale and rejects intervening edits", async () => {
+  for (const change of [null, "shotDescription", "approach"]) {
+    const node = { id: "b", data: { storyboardApproach: "Shot List", storyboardFrames: [{ ...makeFrame(1), shotDescription: "Door opens", shot: "None", lens: "None" }] } };
+    const update = (_id, patch) => { node.data = { ...node.data, ...patch }; };
+    const deps = {
+      nodesRef: { current: [node] }, edgesRef: { current: [] }, storyboardShotListMode, storyboardShotListError, storyboardShotRows,
+      storyboardTaskBusy: () => false, buildIncomingByNode: () => ({}), storyboardSceneDescriptionForNode: item => storyboardShotListContext(item.data),
+      normalizeStoryboardFrameCountValue: () => "Auto", updateStoryboardStatus: update, updateNode: update,
+      assertCharacterOutputReferences() {}, assertStoryboardCharacterTags() {}, storyboardCharacterSummariesForNode: () => [], workflowRequestContext: () => ({}),
+      storyboardSceneReferenceSummaries: () => [], storyboardPropReferenceSummaries: () => [],
+      requireStoryboardPlanResponse: (_response, data) => data.plan, storyboardFramesFromPlan: frames => frames, mergeStoryboardShotPlan, storyboardEditSignature, storyboardPlanningSettings,
+      pushUndoSnapshot() {}, updateStoryboardNodeFrames: (_id, frames, patch) => update(node.id, { ...patch, storyboardFrames: frames }),
+      nodeApi: { planStoryboard: async body => {
+        assert.equal(body.shots.length, 1);
+        if (change === "shotDescription") update(node.id, { storyboardFrames: [{ ...node.data.storyboardFrames[0], shotDescription: "New request" }] });
+        if (change === "approach") update(node.id, { storyboardApproach: "Dialogue" });
+        return { response: { ok: true }, data: { plan: { frames: [{ ...makeFrame(1), phase: "single", shotId: "s1" }] } } };
+      } }
+    };
+    // React updates replace node data; retain the request's snapshot separately.
+    const initial = structuredClone(node);
+    deps.nodesRef.current = [initial];
+    const originalUpdate = update;
+    deps.updateNode = deps.updateStoryboardStatus = (_id, patch) => { originalUpdate(_id, patch); deps.nodesRef.current = [node]; };
+    await extract("planStoryboardNode", "generateStoryboardFrame", deps)(initial);
+    if (change) {
+      assert.match(node.data.error, /changed while planning/);
+      assert.equal(node.data.storyboardFrames[0].resultUrl, "/outputs/old-1.png");
+    } else {
+      assert.equal(node.data.error, "");
+      assert.equal(node.data.storyboardFrames[0].lens, "35mm");
+      assert.equal(node.data.storyboardPlanSceneDescription, storyboardShotListContext(node.data));
+      assert.equal(storyboardShotNeedsPlan(node.data.storyboardFrames[0]), false);
+    }
+  }
+});
 
 function generationHarness(options = {}) {
   const node = { id: "board", data: { storyboardFrames: [1, 2, 3].map(makeFrame), storyboardAutoQc: false, status: "ready" } };
@@ -36,7 +74,7 @@ function generationHarness(options = {}) {
       return [{ url: `/outputs/new-${request.index + 1}.png` }];
     },
     exportStoryboardFrameResult: async request => { exports.push(request); return { url: request.generated.url }; },
-    storyboardFrameWithVersion, storyboardFrameDirection, storyboardEditSignature,
+    storyboardFrameWithVersion, storyboardFrameDirection, storyboardEditSignature, storyboardShotListMode, storyboardShotNeedsPlan, storyboardShotSource,
     updateStoryboardNodeFrames: (_id, frames, patch) => update(node.id, { storyboardFrames: frames, ...patch }), loadOutputHistory() {}
   };
   return { node, requests, exports, run: extract("generateStoryboardNode", "reviewStoryboardGeneratedFrame", deps) };
@@ -67,6 +105,27 @@ test("Generate Missing and an empty selection cannot regenerate existing images"
   harness.node.data.storyboardFrames[1].resultUrl = "";
   await harness.run(harness.node);
   assert.equal(harness.requests.length, 1); assert.equal(harness.requests[0].index, 1);
+});
+
+test("unplanned Shot List edits cannot submit images, and successful selected revisions update the authored row only", async () => {
+  const harness = generationHarness(), { node } = harness;
+  node.data.storyboardApproach = "Shot List";
+  const row = node.data.storyboardFrames[1];
+  row.shotDescription = "Move closer on the doorway";
+  await harness.run(node, [row.id]);
+  assert.equal(harness.requests.length, 0);
+  assert.match(node.data.error, /Plan Shots/);
+  const before = structuredClone(node.data.storyboardFrames);
+  const revised = { ...row, prompt: "The door handle turns in close-up", shot: "CU" };
+  await harness.run(node, [row.id], { revisedFrames: [revised], instruction: "Close on the handle" });
+  assert.equal(harness.requests.length, 1);
+  assert.deepEqual(node.data.storyboardFrames[0], before[0]);
+  assert.deepEqual(node.data.storyboardFrames[2], before[2]);
+  const current = node.data.storyboardFrames[1];
+  assert.equal(current.shotDescription, revised.prompt);
+  assert.equal(storyboardShotNeedsPlan(current), false);
+  assert.equal(current.generatedDirection.shotDescription, revised.prompt);
+  assert.equal(current.versions[0].resultUrl, before[1].resultUrl);
 });
 
 test("protected and concurrently edited panels are never replaced", async () => {

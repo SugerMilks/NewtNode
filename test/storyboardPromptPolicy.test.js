@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { storyboardPromptPolicy } from "../src/storyboardPromptPolicy.js";
+import { storyboardCameraRenderingPrompt } from "../src/storyboardCinematography.js";
 import { storyboardFrameContext } from "../src/storyboardWorkflow.js";
 import { storyboardCastPrompt, assertStoryboardCharacterTags, storyboardCastPlanningRules, storyboardCastPlanIssues, storyboardQcCharacterInputs, storyboardPlannedCastPatch } from "../src/storyboardCast.js";
 import { storyboardReasoningSkill } from "../server/creative-llm.js";
@@ -28,7 +29,7 @@ const sceneReferenceMap = getFunction(editor, "storyboardSceneReferenceMapPrompt
 const propReferenceMap = getFunction(editor, "storyboardPropReferenceMapPrompt");
 const buildPrompt = getFunction(editor, "buildStoryboardFramePrompt", {
   ...styleConstants, stylePresetPrompts, shotPresetPrompts, lensPresetPrompts, typePresetPrompts,
-  storyboardPromptPolicy, storyboardCastPrompt, storyboardFrameContext, connectedDirectorPackageSource: () => null,
+  storyboardPromptPolicy, storyboardCameraRenderingPrompt, storyboardCastPrompt, storyboardFrameContext, connectedDirectorPackageSource: () => null,
   storyboardAspectRatioForNode: () => "16:9", storyboardSceneReferenceMapPrompt: sceneReferenceMap,
   storyboardPropReferenceMapPrompt: propReferenceMap, promptPiecesForSource: (source) => [source.data.prompt],
   storyboardPreviousFrameLabel: "PREVIOUS_FRAME.png", storyboardSpatialAnchorLabel: "SPATIAL_ANCHOR.png"
@@ -141,7 +142,7 @@ for (const useStoryboardStyle of [undefined, true, false]) {
     const plan = editorHandler("planStoryboardNode", "generateStoryboardFrame", {
       nodesRef: { current: [node] }, edgesRef: { current: [] }, buildIncomingByNode: () => ({}), expandStoryboardDirectorIncoming: () => ({}),
       storyboardSceneDescriptionForNode: () => "@Red removes a jacket.", connectedDirectorPackageSource: () => null, storyboardFrameCountForNode: () => 1,
-      updateNode: () => {}, updateStoryboardStatus: () => {}, storyboardTaskBusy: () => false, normalizeStoryboardFrameCountValue: () => "Auto", assertCharacterOutputReferences: () => {}, assertStoryboardCharacterTags,
+      updateNode: () => {}, updateStoryboardStatus: () => {}, storyboardTaskBusy: () => false, storyboardShotListMode: () => false, normalizeStoryboardFrameCountValue: () => "Auto", assertCharacterOutputReferences: () => {}, assertStoryboardCharacterTags,
       storyboardCharacterSummariesForNode: () => [{ name: "Red", tag: "Red" }], storyboardSceneReferenceSummaries: () => [], storyboardPropReferenceSummaries: () => [], workflowRequestContext: () => ({}),
       nodeApi: { planStoryboard: async (body) => { planRequest = body; return { response: { ok: false }, data: {} }; } },
       requireStoryboardPlanResponse: () => { throw new Error("Mock refusal preserves saved content"); }

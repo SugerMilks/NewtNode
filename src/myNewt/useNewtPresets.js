@@ -40,8 +40,10 @@ export function useNewtPresets(adapter) {
   const insert = (id = selectedId, replacements = bindings) => perform(async () => {
     if (!id) return;
     const projectId = live.current.projectId;
+    const canvasId = live.current.canvasId;
     const preset = await newtPresetsApi.get(id);
     if (projectId !== live.current.projectId) throw new Error("Project changed. Select the preset again in this project.");
+    if (canvasId !== live.current.canvasId) throw new Error("Canvas changed. Select the preset again on the intended canvas.");
     await live.current.insert(preset.graph, replacements);
     live.current.onStatus(`Inserted Newt Preset: ${preset.name}`);
   });

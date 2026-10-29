@@ -2,10 +2,11 @@ import React from "react";
 import { clamp, positiveModulo } from "../nodeGeometry.js";
 import { degreesToRadians, lerp, THREE, useThreeRuntimeReady } from "../threeRuntime.js";
 
-export function CameraControlViewport({ imageUrl, horizontalAngle, verticalAngle, zoom, onChange }) {
+export function CameraControlViewport({ imageUrl, horizontalAngle, verticalAngle, zoom, onChange, preserveImageAspect = false }) {
   const threeReady = useThreeRuntimeReady();
   const mountRef = React.useRef(null);
   const planeMaterialRef = React.useRef(null);
+  const planeRef = React.useRef(null);
   const cameraMarkerRef = React.useRef(null);
   const previewStateRef = React.useRef({ horizontalAngle, verticalAngle, zoom });
   const onChangeRef = React.useRef(onChange);
@@ -42,6 +43,7 @@ export function CameraControlViewport({ imageUrl, horizontalAngle, verticalAngle
     const planeMaterial = new THREE.MeshBasicMaterial({ color: 0x77807a, side: THREE.DoubleSide });
     planeMaterialRef.current = planeMaterial;
     const plane = new THREE.Mesh(planeGeometry, planeMaterial);
+    planeRef.current = plane;
     plane.position.y = 0.1;
     scene.add(plane);
 
@@ -177,6 +179,10 @@ export function CameraControlViewport({ imageUrl, horizontalAngle, verticalAngle
       }
 
       texture.colorSpace = THREE.SRGBColorSpace;
+      if (preserveImageAspect && planeRef.current) {
+        const ratio = texture.image.width / texture.image.height;
+        planeRef.current.scale.set(ratio >= 1 ? 1 : ratio, ratio >= 1 ? 1 / ratio : 1, 1);
+      }
       material.map = texture;
       material.color.set(0xffffff);
       material.needsUpdate = true;
@@ -186,7 +192,7 @@ export function CameraControlViewport({ imageUrl, horizontalAngle, verticalAngle
     return () => {
       cancelled = true;
     };
-  }, [imageUrl, threeReady]);
+  }, [imageUrl, threeReady, preserveImageAspect]);
 
   return (
     <div className="camera-viewport-shell" onPointerDown={(event) => event.stopPropagation()}>

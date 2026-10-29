@@ -9,7 +9,7 @@ const source = readFileSync(new URL("../src/NodeEditor.jsx", import.meta.url), "
 const body = source.slice(source.indexOf("  async function acceptAiImageEdit("), source.indexOf("  async function applyPreviewLayoutImageEdit("));
 function editor(nodes) {
   const nodesRef = { current: nodes }, applied = [], snapshots = [];
-  const dependencies = { nodesRef, normalizedResultItems, nonOverlappingPosition, storyboardPanelEditingLocked,
+  const dependencies = { nodesRef, normalizedResultItems, nonOverlappingPosition, storyboardPanelEditingLocked, activeCanvasRef: { current: "canvas-1" },
     pushUndoSnapshot: () => snapshots.push(structuredClone(nodesRef.current)),
     restorePreviewLayoutImageEdit: async (item) => applied.push(item),
     createNodeId: () => "new-image", createNodeData: () => ({}), defaultNodePosition: () => ({ x: 0, y: 0 }),

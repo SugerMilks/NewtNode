@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@fal-ai/client": "^1.8.0",
+    "@img/colour": "1.1.0",
     "@vitejs/plugin-react": "^5.0.0",
     "ajv": "^8.20.0",
     "concurrently": "^9.2.0",
@@ -27,10 +28,12 @@
     "marked": "^18.0.12",
     "multer": "^2.0.2",
     "parse5": "^8.0.1",
+    "pdfjs-dist": "6.4.299",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "sharp": "^0.35.4",
     "three": "^0.184.0",
+    "transformation-matrix": "^3.1.0",
     "vite": "^7.1.0"
   }
 }

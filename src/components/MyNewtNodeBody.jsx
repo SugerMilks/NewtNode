@@ -10,6 +10,7 @@ import { MyNewtTaskDetails } from "./MyNewtTaskDetails.jsx";
 import { MyNewtRemoteSettings } from "./MyNewtRemoteSettings.jsx";
 import { imageModelOptions, videoModelOptions } from "../modelOptions.js";
 import { NewtSkillsEditor } from "./NewtSkillsEditor.jsx";
+import { NewtLearningControls } from "./NewtLearningControls.jsx";
 
 export function MyNewtNodeBody({ node, config, incoming, onUpdate, onConnectStart, onDisconnectInput, connectedPortKeys, controller }) {
   const [voiceMessage, setVoiceMessage] = useState({ scope: "", text: "" });
@@ -46,6 +47,7 @@ export function MyNewtNodeBody({ node, config, incoming, onUpdate, onConnectStar
   return <div className="node-body my-newt-body">
     {!!history.length && <label className="my-newt-history">Task history<select aria-label="Newt task history" value={node.data.jobId || ""} disabled={busy || !terminal} onChange={(event) => selectTask(event.target.value)}><option value="">New task</option>{history.map((item) => <option key={item.id} value={item.id}>{new Date(item.startedAt).toLocaleDateString()} - {item.brief.slice(0, 80)}</option>)}</select></label>}
     <div className="my-newt-brief"><textarea aria-label="Newt brief" placeholder="What would you like to create?" value={node.data.brief || ""} onChange={(event) => patch({ brief: event.target.value })} readOnly={!terminal} />{terminal && !job && !settings.localOnly && <MyNewtVoiceButton voice={voice} disabled={busy} />}</div>
+    <NewtLearningControls key={projectId} learning={controller?.learning} />
     {terminal && !completedBrief && localPreview?.route === "blocked" && <p className="my-newt-message error" role="status">{localPreview.error}</p>}
     {(voice.active || voice.error) && <div className="my-newt-voice-status"><p className={`my-newt-message${voice.error ? " error" : ""}`} role={voice.error ? "alert" : "status"}>{voice.error || (voice.phase === "requesting" ? "Waiting for microphone..." : voice.phase === "recording" ? "Listening..." : "Transcribing...")}</p>{voice.active && <button type="button" className="my-newt-icon" title="Cancel dictation" aria-label="Cancel dictation" onClick={voice.cancel}><X size={15} /></button>}</div>}
     {!voice.active && voiceMessage.scope === voiceScope && voiceMessage.text && <p className="my-newt-message" role="status">{voiceMessage.text}</p>}

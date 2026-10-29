@@ -1,13 +1,16 @@
 import React from "react";
+import { normalizeProjectCanvases } from "./projectCanvases.js";
 
 export const nodeDraftStorageKey = "seedance-node-editor-draft-v1";
 
 export function loadNodeEditorDraft({ initialNodes = [], initialEdges = [], initialGroups = [], initialViewport = { x: 0, y: 0, scale: 1 }, normalizeEditorGraph, storageKey = nodeDraftStorageKey } = {}) {
-  const fallbackGraph = normalizeEditorGraph(initialNodes, initialEdges, initialGroups);
+  const fallbackGraph = normalizeProjectCanvases({ ...normalizeEditorGraph(initialNodes, initialEdges, initialGroups), viewport: initialViewport });
   const fallback = {
     nodes: fallbackGraph.nodes,
     edges: fallbackGraph.edges,
     groups: fallbackGraph.groups,
+    canvases: fallbackGraph.canvases,
+    activeCanvasId: fallbackGraph.activeCanvasId,
     viewport: initialViewport,
     projectId: null,
     projectName: "Untitled node project",
@@ -19,12 +22,14 @@ export function loadNodeEditorDraft({ initialNodes = [], initialEdges = [], init
   try {
     const parsed = JSON.parse(window.localStorage.getItem(storageKey) || "null");
     if (!parsed || !Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges)) return fallback;
-    const graph = normalizeEditorGraph(parsed.nodes, parsed.edges, parsed.groups);
+    const graph = normalizeProjectCanvases({ ...parsed, ...normalizeEditorGraph(parsed.nodes, parsed.edges, parsed.groups) });
     return {
       nodes: graph.nodes,
       edges: graph.edges,
       groups: graph.groups,
-      viewport: parsed.viewport || fallback.viewport,
+      canvases: graph.canvases,
+      activeCanvasId: graph.activeCanvasId,
+      viewport: graph.viewport,
       projectId: parsed.projectId || null,
       projectName: parsed.projectName || fallback.projectName,
       savedProjectName: parsed.savedProjectName || null,
@@ -40,6 +45,8 @@ export function nodeEditorDraftSnapshot({
   nodes,
   edges,
   groups,
+  canvases,
+  activeCanvasId,
   viewport,
   projectId,
   projectName,
@@ -51,6 +58,8 @@ export function nodeEditorDraftSnapshot({
     nodes,
     edges,
     groups,
+    canvases,
+    activeCanvasId,
     viewport,
     projectId,
     projectName,

@@ -95,6 +95,17 @@ test("Explore exposes independent Random selectors and a persistent default-on m
   assert.equal(render(undefined, 0, true).label("Explore Mode").props.disabled, true);
 });
 
+test("Explore References starts collapsed even with a legacy expanded setting", () => {
+  for (const data of [{}, { referencesOpen: true }, { referencesOpen: false }]) {
+    const fixture = render(undefined, 0, false, data);
+    const toggle = fixture.find(item => item.type === "button" && [item.props.children].flat().includes("References"));
+    assert.equal(toggle.props["aria-expanded"], false);
+    assert.equal(fixture.find(item => item.props?.className === "explore-inputs"), null);
+    toggle.props.onClick();
+    assert.deepEqual(fixture.updates, [], "opening references is local UI state, not a project edit");
+  }
+});
+
 test("persistent controls page through results, scrub directly and respect endpoints without changing the selected output", () => {
   const fixture = render();
   assert.equal(fixture.label("Scroll thumbnails left").props.disabled, true);

@@ -1,5 +1,6 @@
 import test from "node:test";
 import { storyboardFrameDirection, storyboardFrameWithVersion, storyboardEditSignature } from "../src/storyboardWorkflow.js";
+import { storyboardShotListMode, storyboardShotNeedsPlan, storyboardShotSource } from "../src/storyboardShotList.js";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { nodeApi } from "../src/api/newtApi.js";
@@ -66,7 +67,7 @@ for (const provider of ["fal", "krea", "atlas"]) {
       let reviews = 0;
       const deps = {
         nodesRef, edgesRef: { current: [] }, generationProvider: provider, storyboardImageSettings, normalizeStoryboardImageModel, runImageModelGeneration, assertCharacterOutputReferences, assertStoryboardCharacterTags,
-        storyboardTaskBusy: () => false, updateStoryboardStatus: updateNode, pushUndoSnapshot: () => {}, storyboardFrameWithVersion, storyboardFrameDirection, storyboardEditSignature,
+        storyboardTaskBusy: () => false, updateStoryboardStatus: updateNode, pushUndoSnapshot: () => {}, storyboardFrameWithVersion, storyboardFrameDirection, storyboardEditSignature, storyboardShotListMode, storyboardShotNeedsPlan, storyboardShotSource,
         storyboardCharacterSummariesForNode: () => [], storyboardFrameCastForNode: () => ({ references: [] }),
         buildIncomingByNode: () => ({}), expandStoryboardDirectorIncoming: (incoming) => incoming,
         normalizedStoryboardFrames: (frames) => frames, storyboardSceneDescriptionForNode: () => "The character walks to the door", storyboardPlanIsCurrent: () => true,

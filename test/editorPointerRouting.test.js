@@ -26,7 +26,7 @@ test("unused Editor body surfaces bubble to canvas selection/drag without steali
 });
 
 test("controls, their labels and timeline interaction surfaces never start a node drag", () => {
-  for (const closest of ["input", "textarea", "select", "button", "a", "label", "[contenteditable]", ".editor-ruler", ".editor-track-lane", ".editor-gap-menu"]) {
+  for (const closest of ["input", "textarea", "select", "button", "a", "label", "[contenteditable]", ".editor-ruler", ".editor-track-lane", ".editor-gap-menu", ".editor-scrollbar"]) {
     assert.deepEqual(pointerDown({ closest }), { stopped: true, prevented: false, menuClosed: closest !== ".editor-gap-menu" }, closest);
   }
   assert.deepEqual(pointerDown({ scrollbar: true }), { stopped: true, prevented: false, menuClosed: true });

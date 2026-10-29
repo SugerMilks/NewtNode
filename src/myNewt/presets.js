@@ -3,6 +3,7 @@ import { migrateRetiredGraph } from "../retiredNodes.js";
 import { resetCopiedNodeRuntime, remapImportedGraph, createNodeId } from "../workflowState.js";
 import { estimatedNodeRect, groupToRect } from "../nodeGeometry.js";
 import { cleanReferenceTag } from "../referenceTags.js";
+import { storyboardShotListMode, storyboardShotRows } from "../storyboardShotList.js";
 
 const types = new Set(nodeTypeDefinitions.map((entry) => entry.type));
 const privateField = /^(?:.*apiKey.*|.*password.*|.*secret.*|accessToken|refreshToken|authorization|jobId|myNewtSummary)$/i;
@@ -101,7 +102,9 @@ export function bindNewtPresetInputs(graph, bindings = {}, availableNodes = []) 
     if (affected.has(node.id)) {
       data = { ...data, resultUrl: "", resultItems: [], resultText: "", error: "", status: "ready", locked: false, selectedResultIndex: 0 };
       if (node.type === "skillDirector") data = { ...data, skillDirectorBuilt: false, skillDirectorLocks: {}, styleDirection: "", motionDirection: "", shotList: "", skillDirectorRevisionHistory: [], skillDirectorScenes: [], skillDirectorActiveSceneId: "", compiledPrompt: "" };
-      if (node.type === "storyboard") data = { ...data, storyboardFrames: [], storyboardBoardUrl: "", storyboardPlanFingerprint: "" };
+      if (node.type === "storyboard") data = { ...data,
+        storyboardFrames: storyboardShotListMode(data) ? storyboardShotRows(data.storyboardFrames || []).map(({ description, ...row }) => ({ ...row, shotDescription: description, prompt: "", shotPlanSource: "" })) : [],
+        storyboardBoardUrl: "", storyboardPlanFingerprint: "", storyboardPlanSceneDescription: "" };
       if (node.type === "preview") data = { ...data, previewLayout: [], previewLayoutItems: [] };
     }
     return { ...node, data };

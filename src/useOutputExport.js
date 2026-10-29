@@ -6,7 +6,7 @@ const terminalStatuses = new Set(["complete", "partial", "failed", "canceled"]);
 const resumableStatuses = new Set([undefined, "queued", "running"]);
 const message = error => error?.message || String(error || "The server did not return an export result.");
 const settingsSignature = settings => JSON.stringify({ ...settings, autoExport: false });
-const sourceIdentity = item => JSON.stringify([item.url, item.type, item.version || ""]);
+const sourceIdentity = item => JSON.stringify([item.canonicalUrl || item.url, item.type, item.version || ""]);
 const emptySources = [], emptyContext = {};
 
 export function outputOwnerKey(node, context = {}) {

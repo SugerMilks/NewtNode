@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="720" viewBox="0 0 720 720">
+  <defs>
+    <linearGradient id="sun" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffce73" />
+      <stop offset="1" stop-color="#f47b45" />
+    </linearGradient>
+    <clipPath id="badge"><circle cx="360" cy="305" r="205" /></clipPath>
+  </defs>
+  <rect x="0" y="0" width="720" height="720" fill="#f6efde" />
+  <g clip-path="url(#badge)">
+    <circle cx="360" cy="305" r="205" fill="#173d39" />
+    <circle cx="420" cy="244" r="92" fill="url(#sun)" />
+    <path d="M90 485L291 219L390 343L457 284L637 485Z" fill="#faf2d9" />
+    <path d="M291 219L390 343L340 324L322 342L301 298L264 322Z" fill="#82a69a" />
+    <path d="M457 284L637 485L430 485L514 388Z" fill="#82a69a" />
+    <path d="M120 485Q312 392 586 476V550H100Z" fill="#e1b970" />
+    <path d="M122 512Q322 422 586 504V550H100Z" fill="#173d39" />
+  </g>
+  <path d="M354 127L360 111L366 127L382 133L366 139L360 155L354 139L338 133Z" fill="#f6efde" />
+  <text x="360" y="585" text-anchor="middle" font-family="sans-serif" font-size="55" font-weight="700" letter-spacing="5" fill="#173d39">NORTH STAR</text>
+  <text x="360" y="627" text-anchor="middle" font-family="sans-serif" font-size="19" letter-spacing="6" fill="#537369">TRAIL SUPPLY</text>
+</svg>

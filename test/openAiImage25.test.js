@@ -169,9 +169,8 @@ test("Krea selection normalizes sizes and unsupported backgrounds without reduci
   }
 });
 
-test("Image workspace and node controls share current Krea formats and preserve them on reload", async () => {
+test("Image Model and creative node controls share current Krea formats and preserve them on reload", async () => {
   const editor = await readFile(new URL("../src/NodeEditor.jsx", import.meta.url), "utf8");
-  const workspace = await readFile(new URL("../src/main.jsx", import.meta.url), "utf8");
   const deps = { ...modelOptions, ...image25, ...seedream5Pro, ...nanoBanana21, isRetiredNanoBanana2Model: () => false };
   const functions = (source, names, extra = {}) => {
     const scope = { ...deps, ...extra };
@@ -183,14 +182,11 @@ test("Image workspace and node controls share current Krea formats and preserve 
     return new Function(...Object.keys(scope), `${code}\nreturn {${names.join(",")}};`)(...Object.values(scope));
   };
   const nodes = functions(editor, ["imageModelAspectRatioOptions", "imageModelSupportedAspectRatios", "imageModelResolutionOptions", "isOpenAiImageModel", "normalizeImageModelAspectRatio", "isAutoImageAspectRatio", "extractAspectRatio"]);
-  const image = functions(workspace, ["imageResolutionOptionsForModel", "imageAspectRatiosForModel"]);
   for (const model of models) {
     assert.deepEqual(nodes.imageModelAspectRatioOptions(model, "krea"), ["Auto", ...image25.openAiImage25KreaAspectRatios]);
     assert.deepEqual(nodes.imageModelResolutionOptions(model, "krea"), ["1K", "2K", "4K"]);
-    assert.deepEqual(image.imageResolutionOptionsForModel(model, "krea"), ["1K", "2K", "4K"]);
     for (const ratio of image25.openAiImage25KreaAspectRatios) {
       assert.equal(nodes.normalizeImageModelAspectRatio(ratio, model), ratio);
-      assert.ok(image.imageAspectRatiosForModel(model).includes(ratio));
     }
   }
   const storyboardOptions = new Function("openAiImage25KreaAspectRatios", `${editor.match(/const storyboardAspectRatioOptions = .*;/)[0]} return storyboardAspectRatioOptions;`)(image25.openAiImage25KreaAspectRatios);
@@ -201,7 +197,6 @@ test("Image workspace and node controls share current Krea formats and preserve 
   const explore = editor.slice(editor.indexOf('if (node.type === "explore") {'), editor.indexOf('if (node.type === "explore") {') + 1600);
   assert.match(explore, /ratios=\{imageModelAspectRatioOptions\(node.data.model, generationProvider\)/);
   assert.match(explore, /resolutions=\{imageModelResolutionOptions\(node.data.model, generationProvider\)/);
-  assert.match(workspace, /imageProvider === "krea" && isOpenAiImage25Model\(imageModel\) \? openAiImage25KreaAspectRatios/);
 });
 
 test("Krea transport records the variant and adapts Auto, rejecting invalid requests before upload", async () => {

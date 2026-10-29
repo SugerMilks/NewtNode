@@ -17,7 +17,7 @@ export function registerExploreRoutes(app, { runTextLlm, runMediaDescriptionLlm,
         project: { id: body.projectId || "node-workspace", name: body.projectName || body.workflowName || "Node workspace" },
         node: { id: body.nodeId, title: body.nodeTitle || "Explore" },
         settings: { creativeTask: body.creativeTask, action: body.action, directions: body.count,
-          styleFamily: body.styleFamily, gradePreset: body.gradePreset, exploreMode: body.exploreMode, directionLooks: body.directionLooks },
+          styleFamily: body.styleFamily, gradePreset: body.gradePreset, exploreMode: body.exploreMode, directionLooks: body.directionLooks, directionBriefs: body.directionBriefs },
         cost: estimateCost({ provider: result.provider, usage: result.usage, helperUsages: result.usages,
           hasMainRequest: Object.hasOwn(result, "usage") }) });
     };
@@ -26,7 +26,7 @@ export function registerExploreRoutes(app, { runTextLlm, runMediaDescriptionLlm,
       if (!Number.isInteger(body.count) || body.count < 1 || body.count > exploreMaxDirections) throw new Error(`Explore requires between 1 and ${exploreMaxDirections} directions.`);
       const request = exploreRequest({ data: { ...body, directionCount: body.count, variations: 1, exploreDirections: body.previousDirections },
         prompt: body.prompt, references: body.references, parents: body.parents, style: body.connectedStyle ?? body.style,
-        camera: body.camera, action: body.action, note: body.note, directionLooks: body.directionLooks });
+        camera: body.camera, action: body.action, note: body.note, directionLooks: body.directionLooks, directionBriefs: body.directionBriefs });
       if (!["explore", "push", "refine", "combine"].includes(request.action)) throw new Error("This action does not require a new plan.");
       const inputs = [...request.references, ...request.parents.map(item => ({ ...item, role: "direction" }))];
       if (inputs.some(item => !["product", "character", "mood", "direction"].includes(item.role) || typeof item.url !== "string" || !/^\/(?:uploads|outputs|workflow-assets|saved_workflows)\//.test(item.url) || item.url.includes(".."))) {

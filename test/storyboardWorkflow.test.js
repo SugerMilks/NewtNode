@@ -114,6 +114,45 @@ test("new planning returns structured continuity and native Auto, while custom c
   assert.equal(api.calls.length, 2);
 });
 
+test("camera personality reaches planning and selected revisions without adding LLM calls", async () => {
+  for (const personality of [undefined, "Restrained", "Expressive", "Bold"]) {
+    const api = routes({ response: { ...plan(), frames: [frame(1, { angle: "Dutch Angle" })] } });
+    const result = await api.request("plan-v2", { storyboardCameraPersonality: personality });
+    assert.equal(result.code, 200);
+    assert.equal(result.body.plan.frames[0].angle, "Dutch Angle");
+    assert.equal(api.calls.length, 1);
+    assert.match(api.calls[0].prompt, new RegExp(`CAMERA PERSONALITY: ${personality || "Expressive"}`));
+    api.setResponse({ summary: "Keep the shot, clarify action", frames: [frame(1, { angle: "Dutch Angle" })], affectedFrameIds: [], warnings: [] });
+    const revision = await api.request("revise", { storyboardCameraPersonality: personality, frames: [frame(1, { angle: "Dutch Angle" })], frameIds: ["f1"], instruction: "Clarify the opening door" });
+    assert.equal(revision.code, 200);
+    assert.equal(api.calls.length, 2);
+    assert.match(api.calls[1].prompt, /preserve existing camera choices unless the newest request/);
+    assert.equal(revision.body.revision.frames[0].angle, "Dutch Angle");
+  }
+});
+
+test("Shot List plans exact user rows, retains their IDs and rejects overrides without replay", async () => {
+  const shots = [1, 2].map(number => ({ id: `f${number}`, number, description: `The doorway at moment ${number}`, shot: "WS", lens: "35mm", angle: "None" }));
+  const api = routes({ response: { ...plan(), frames: [frame(), frame(2)] } });
+  const request = { storyboardApproach: "Shot List", shots };
+  const result = await api.request("plan-v2", request);
+  assert.equal(result.code, 200);
+  assert.deepEqual(result.body.plan.frames.map(item => item.id), ["f1", "f2"]);
+  assert.match(api.calls[0].prompt, /AUTHORITATIVE SHOT LIST/);
+  assert.match(api.calls[0].prompt, /Never add, remove, combine or expand shots/);
+  assert.match(api.calls[0].systemPrompt, /Shot List is user-authored/);
+  assert.equal(api.calls.length, 1);
+  for (const frames of [[frame()], [frame(2), frame()], [frame(1, { lens: "85mm" }), frame(2)], [frame(1, { id: "invented" }), frame(2)]]) {
+    api.setResponse({ ...plan(), frames });
+    const count = api.calls.length;
+    assert.equal((await api.request("plan-v2", request)).code, 400);
+    assert.equal(api.calls.length, count + 1);
+  }
+  const count = api.calls.length;
+  assert.equal((await api.request("plan-v2", { ...request, shots: [{ ...shots[0], description: "" }], locations: [{ url: "/uploads/location.png", tag: "Room" }] })).code, 400);
+  assert.equal(api.calls.length, count);
+});
+
 const castCharacters = ["Lisa", "Sara"].map(tag => ({ tag, name: tag, url: `/outputs/${tag}.png` }));
 const castMember = (tag, visibility = "visible") => ({ tag, visibility, position: visibility === "visible" ? "screen-right midground" : "outside frame left", action: "Listening", eyeline: "Toward the other speaker" });
 const castRepairPatch = (frame, cast) => ({ number: frame.number, prompt: frame.prompt, beat: frame.beat, notes: frame.notes, cast,

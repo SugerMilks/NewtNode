@@ -10,8 +10,8 @@ import { videoModelNames } from "../src/modelOptions.js";
 
 test("Film Director exposes every supported video model", () => {
   assert.deepEqual(filmDirectorVideoModelOptions, [
-    videoModelNames.seedance,
     videoModelNames.seedance25,
+    videoModelNames.seedance,
     videoModelNames.klingO3Pro,
     videoModelNames.klingO34k,
     videoModelNames.minimaxH3

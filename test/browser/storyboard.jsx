@@ -1,6 +1,7 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
-import { NodeBody, createDefaultNodeData } from "virtual:storyboard-qa";
+import { NodeBody, createDefaultNodeData, normalizeCurrentNode } from "virtual:storyboard-qa";
+import { storyboardShotRows, storyboardShotListMode, mergeStoryboardShotPlan } from "../../src/storyboardShotList.js";
 import { imageModelOptions, videoModelOptions } from "../../src/modelOptions.js";
 import { storyboardFrameWithVersion } from "../../src/storyboardWorkflow.js";
 import { useStoryboardBoardOutput } from "../../src/useStoryboardBoardOutput.js";
@@ -11,7 +12,7 @@ const longScene = "The @Woman and @Man have a conversation at a table in @Coffee
 
 function fixture() {
   return { id: "board-qa", type: "storyboard", data: { ...createDefaultNodeData("storyboard", "Storyboard QA", 1),
-    sceneDescription: "An empty hallway. A door opens, revealing daylight.", storyboardTab: "view", useInternalStoryboardCharacters: false,
+    sceneDescription: "An empty hallway. A door opens, revealing daylight.", storyboardApproach: "Narrative", storyboardTab: "view", useInternalStoryboardCharacters: false,
     storyboardFrames: Array.from({ length: 9 }, (_, i) => ({ id: `f${i + 1}`, number: i + 1, shotId: `s${i + 1}`, phase: "single", purpose: "Reveal the doorway while maintaining the established eyeline and geography of the hallway.", prompt: `Panel ${i + 1}: Black-and-white storyboard line art. The door opens, revealing the empty hallway. Preserve the direction of light from the previous shot.`, shot: "WS", lens: "35mm", angle: "None", resultUrl: "/storyboard/MOOD_BOARD.png", status: "complete", versions: [{ resultUrl: "/storyboard/MOOD_BOARD.png", savedAt: 1, prompt: "The closed door.", shot: "CU" }] }))
   } };
 }
@@ -37,10 +38,12 @@ function Harness() {
   } });
   const replace = (ids, instruction) => {
     record({ action: instruction ? "revise" : "generate", ids, instruction });
-    setNode(current => ({ ...current, data: { ...current.data, storyboardFrames: current.data.storyboardFrames.map(frame => ids.includes(frame.id) ? storyboardFrameWithVersion(frame, { prompt: instruction || frame.prompt, shot: instruction ? "CU" : frame.shot }) : frame) } }));
+    setNode(current => ({ ...current, data: { ...current.data, storyboardFrames: current.data.storyboardFrames.map(frame => ids.includes(frame.id) ? storyboardFrameWithVersion(frame, { prompt: instruction || frame.prompt, shot: instruction ? "CU" : frame.shot, resultUrl: "/storyboard/MOOD_BOARD.png", status: "complete" }) : frame) } }));
   };
   return <main style={{ padding: 16 }}>
     <button onClick={() => { setNode(fixture()); setCalls([]); setScope(value => value + 1); }}>Reset QA fixture</button>
+    <button onClick={() => { setNode({ id: "board-qa", type: "storyboard", data: createDefaultNodeData("storyboard", "Shot List", 1) }); setCalls([]); setScope(value => value + 1); }}>New Shot List</button>
+    <button onClick={() => setNode(current => normalizeCurrentNode(JSON.parse(JSON.stringify(current))))}>Save and reopen</button>
     <button onClick={() => setNode(current => ({ ...current, data: { ...current.data, status: "running", storyboardTab: "view", storyboardFrames: current.data.storyboardFrames.map(frame => ({ ...frame, status: frame.id === "f2" ? "running" : "complete", qcWarning: frame.id === "f1" ? "QC warning: Check the listening partner." : "" })) } }))}>Rendering fixture</button>
     <button onClick={() => setNode(current => ({ ...current, data: { ...current.data, status: "complete", storyboardFrames: current.data.storyboardFrames.map(frame => frame.id === "f2" ? { ...frame, status: "complete" } : frame) } }))}>Complete fixture run</button>
     <button onClick={() => update(node.id, { storyboardTab: "setup", sceneDescription: longScene.repeat(5) })}>Long Setup fixture</button>
@@ -48,7 +51,10 @@ function Harness() {
     <label><input type="checkbox" checked={failBuild} onChange={event => setFailBuild(event.target.checked)} />Fail output preparation</label>
     <section className="node-card storyboard-node" style={{ position: "relative", width: "100%", maxWidth: 1200, margin: "16px auto" }}>
       <NodeBody node={node} imageModelOptions={imageModelOptions} videoModelOptions={videoModelOptions} generationProvider="fal" incoming={incoming} incomingByNode={{}} connectedPortKeys={new Set(["board-qa:sceneReferenceIn", ...(connectedScene ? ["board-qa:sceneDescriptionIn"] : [])])} onUpdate={update} onUndoSnapshot={() => record({ action: "undo" })}
-        onStoryboardPlan={(_node, options) => record({ action: "plan", options })}
+        onStoryboardPlan={(_node, options) => {
+          record({ action: "plan", options, shots: storyboardShotListMode(node.data) ? storyboardShotRows(node.data.storyboardFrames) : undefined });
+          if (storyboardShotListMode(node.data)) update(node.id, { storyboardFrames: mergeStoryboardShotPlan(node.data.storyboardFrames, storyboardShotRows(node.data.storyboardFrames).map(row => ({ ...row, shotId: row.id, phase: "single", prompt: `Storyboard drawing: ${row.description}`, shot: row.shot === "None" ? "WS" : row.shot, lens: row.lens === "None" ? "35mm" : row.lens }))), storyboardTab: "view" });
+        }}
         onStoryboardGenerateAll={(_node, ids) => replace(ids)} onStoryboardGenerateFrame={(_node, id) => replace([id])}
         onStoryboardRevise={(_node, ids, instruction) => replace(ids, instruction)}
         onStoryboardPrepare={prepare} onStoryboardExport={(_node, mode) => record({ action: "export", mode })}
@@ -57,7 +63,7 @@ function Harness() {
         onPreviewResizeStart={() => {}} onConnectStart={() => {}} onDisconnectInput={() => {}} />
     </section>
     <output aria-label="QA actions">{JSON.stringify(calls)}</output>
-    <output aria-label="QA panels">{JSON.stringify(node.data.storyboardFrames.map(({ id, prompt, shot, protected: locked, versions }) => ({ id, prompt, shot, protected: locked, versions: versions?.length || 0 })))}</output>
+    <output aria-label="QA panels">{JSON.stringify(node.data.storyboardFrames.map(({ id, prompt, shotDescription, shotPlanSource, shot, lens, angle, protected: locked, versions }) => ({ id, prompt, shotDescription, shotPlanSource, shot, lens, angle, protected: locked, versions: versions?.length || 0 })))}</output>
   </main>;
 }
 createRoot(document.getElementById("root")).render(<Harness />);

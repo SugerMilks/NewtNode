@@ -36,7 +36,8 @@ export async function runExploreGeneration({ node, prompt, references, style, ca
       return Array.from({ length: data.variations }, (_, variation) => ({
         id: `${direction.id}:${variation}`, direction, variation, request: resolved, status: "pending",
         settings: { model: data.model, resolution: data.resolution, aspectRatio: data.aspectRatio, quality: data.quality, background: data.background,
-          styleFamily: resolved.styleFamily, gradePreset: resolved.gradePreset, exploreMode: resolved.exploreMode }
+          styleFamily: resolved.styleFamily, gradePreset: resolved.gradePreset, exploreMode: resolved.exploreMode,
+          ...(resolved.contrastBrief ? { contrastBrief: resolved.contrastBrief } : {}) }
       }));
     });
     update({ exploreDirections: directions, exploreQueue: queue });

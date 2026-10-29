@@ -1,4 +1,4 @@
-import { videoModelNames, videoModelOptions } from "./modelOptions.js";
+import { videoDefaultModel, videoModelOptions } from "./modelOptions.js";
 
 export function videoModelSupportsFilmDirector(model = "") {
   const normalized = String(model || "").toLowerCase();
@@ -16,4 +16,4 @@ export function normalizeFilmDirectorVideoModel(value = "", fallback = "") {
   return "";
 }
 
-export const defaultFilmDirectorVideoModel = videoModelNames.seedance;
+export const defaultFilmDirectorVideoModel = videoDefaultModel;

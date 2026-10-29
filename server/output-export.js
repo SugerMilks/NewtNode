@@ -1,15 +1,16 @@
 import path from "node:path";
 import { constants, createReadStream, createWriteStream } from "node:fs";
-import { access, lstat, stat, realpath, mkdir, mkdtemp, open, opendir, link, rename, unlink, rm } from "node:fs/promises";
+import { access, lstat, stat, realpath, mkdir, mkdtemp, open, opendir, link, rename, unlink, rm, readFile, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { pipeline } from "node:stream/promises";
 import sharp from "sharp";
+import { sanitizeVectorSvg, vectorSvgLimits } from "./vector-svg.js";
 
 export const outputLimits = Object.freeze({ items: 100, jobs: 200, concurrent: 2, inspections: 4,
   sourceBytes: 20 * 1024 ** 3, pixels: 100000000, seconds: 86400, collisions: 10000, receipts: 2000, receiptBytes: 8 * 1024 ** 2 });
 const types = ["image", "video", "audio"];
-const formats = { image: ["original", "png", "jpeg", "webp"], video: ["original", "mp4", "mov"], audio: ["original", "wav", "mp3"] };
+const formats = { image: ["original", "png", "jpeg", "webp", "svg", "alpha"], video: ["original", "mp4", "mov"], audio: ["original", "wav", "mp3"] };
 const badChars = /[\x00-\x1f\x7f<>:"|?*\\/]/;
 const reserved = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i;
 const sameFile = (a, b) => a.dev === b.dev && a.ino === b.ino;
@@ -201,6 +202,7 @@ async function signature(filePath) {
   const handle = await open(filePath, "r");
   try {
     const data = Buffer.alloc(4096), { bytesRead } = await handle.read(data, 0, data.length, 0), bytes = data.subarray(0, bytesRead);
+    if (/^\s*(?:<\?xml\b|<svg\b)/i.test(bytes.toString("utf8"))) return { image: "svg" };
     if (bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) return { image: "png" };
     if (bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255) return { image: "jpeg" };
     if (/^GIF8[79]a/.test(bytes.toString("ascii", 0, 6))) return { image: "gif" };
@@ -229,6 +231,13 @@ async function signature(filePath) {
 export async function probeOutputMedia(filePath, ffprobePath, { signal } = {}) {
   canceled(signal);
   const detected = await signature(filePath);
+  if (detected.image === "svg") {
+    if ((await stat(filePath)).size > vectorSvgLimits.bytes) throw outputError("The SVG is too large to validate safely.");
+    const safe = sanitizeVectorSvg(await readFile(filePath), { allowEmpty: true });
+    await sharp(Buffer.from(safe.svg), { limitInputPixels: outputLimits.pixels, failOn: "error" }).stats();
+    canceled(signal);
+    return { type: "image", extension: ".svg", width: safe.width, height: safe.height, pages: 1, svg: safe.svg };
+  }
   if (detected.image) {
     const info = await sharp(filePath, { limitInputPixels: outputLimits.pixels, failOn: "error" }).metadata();
     if (info.format !== detected.image || !info.width || !info.height) throw outputError("The image contents are invalid or do not match their container.");
@@ -266,7 +275,10 @@ export function buildOutputFfmpegArgs(sourcePath, targetPath, media, destination
 
 export async function convertOutputMedia(sourcePath, targetPath, media, destination, { ffmpegPath, signal, onProgress } = {}) {
   canceled(signal);
-  if (destination.format === "original") {
+  if (destination.format === "svg" || (media.svg && destination.format === "original")) {
+    if (!media.svg) throw outputError("SVG export needs saved Vector artwork. Connect a Vector result with an SVG companion, or choose PNG.");
+    await writeFile(targetPath, media.svg, { flag: "wx", mode: 0o600, signal });
+  } else if (destination.format === "original") {
     const size = (await stat(sourcePath)).size;
     let copied = 0;
     const input = createReadStream(sourcePath);
@@ -274,9 +286,10 @@ export async function convertOutputMedia(sourcePath, targetPath, media, destinat
     await pipeline(input, createWriteStream(targetPath, { flags: "wx", mode: 0o600 }), { signal });
   } else if (media.type === "image") {
     if (media.pages > 1) throw outputError("Animated or multi-page images must use Original to retain every frame/page.");
-    let image = sharp(sourcePath, { limitInputPixels: outputLimits.pixels, failOn: "error" }).rotate();
+    let image = sharp(media.svg ? Buffer.from(media.svg) : sourcePath, { limitInputPixels: outputLimits.pixels, failOn: "error" }).rotate();
     if (destination.format === "jpeg") image = image.flatten({ background: "#ffffff" }).jpeg({ quality: destination.quality });
     else if (destination.format === "webp") image = image.webp({ quality: destination.quality });
+    else if (destination.format === "alpha") image = image.ensureAlpha().extractChannel("alpha").png();
     else image = image.png();
     await pipeline(image, createWriteStream(targetPath, { flags: "wx", mode: 0o600 }), { signal });
   } else {
@@ -347,7 +360,7 @@ export async function exportOutputItem(item, destination, { resolveAsset, ffprob
   canceled(signal);
   const inspected = await inspectOutputDestination(destination, { signal });
   const directory = await inspectOutputDestination(destination, { create: true, expected: inspected, signal });
-  const extension = destination.format === "original" ? media.extension : destination.format === "jpeg" ? ".jpg" : `.${destination.format}`;
+  const extension = destination.format === "original" ? media.extension : destination.format === "jpeg" ? ".jpg" : destination.format === "alpha" ? ".png" : `.${destination.format}`;
   if (!/^\.[a-z0-9]{2,5}$/.test(extension)) throw outputError("The source has no supported export extension.");
   const result = target => ({ sourceUrl: item.url, type: item.type, filePath: target, fileName: path.basename(target) });
   const first = path.join(directory.directory, `${item.name}${extension}`);

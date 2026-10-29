@@ -1,4 +1,4 @@
-import { capitalizeMediaType, fileNameFromLocalUrl, isLocalOutputUrl, mimeForOutputItem, outputMediaTypeForUrl } from "./mediaAssets.js";
+import { capitalizeMediaType, fileNameFromLocalUrl, isLocalOutputUrl, isLocalDraggableMediaUrl, mimeForOutputItem, outputMediaTypeForUrl } from "./mediaAssets.js";
 import { normalizedResultItems } from "./mediaResults.js";
 
 const defaultMaxProjectOutputItems = 25;
@@ -10,6 +10,7 @@ export function buildProjectOutputItems({
   projectName,
   getNodeResultMediaType,
   titleFallback,
+  includeInputs = false,
   maxItems = defaultMaxProjectOutputItems
 }) {
   const outputMap = new Map();
@@ -18,7 +19,7 @@ export function buildProjectOutputItems({
     const type = getNodeResultMediaType?.(node) || "";
     if (!type) return;
     [...normalizedResultItems(node.data.resultItems, node.data.resultUrl, type), ...(node.type === "editor" ? node.data.editorStills || [] : [])]
-      .filter((item) => isLocalOutputUrl(item.url))
+      .filter((item) => (includeInputs ? isLocalDraggableMediaUrl : isLocalOutputUrl)(item.url))
       .forEach((item, index) => {
         addProjectOutput(outputMap, {
           id: `node:${node.id}:${index}:${item.url}`,
@@ -58,7 +59,7 @@ export function buildProjectOutputItems({
 }
 
 function addProjectOutput(outputMap, item) {
-  if (!item?.url || !isLocalOutputUrl(item.url)) return;
+  if (!item?.url || !isLocalDraggableMediaUrl(item.url)) return;
   if (outputMap.has(item.url)) {
     const existing = outputMap.get(item.url);
     outputMap.set(item.url, {

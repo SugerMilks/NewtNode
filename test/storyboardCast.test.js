@@ -1,5 +1,6 @@
 import test from "node:test";
 import { storyboardFrameContext, storyboardFrameDirection, storyboardFrameWithVersion, storyboardEditSignature } from "../src/storyboardWorkflow.js";
+import { storyboardShotListMode, storyboardShotNeedsPlan, storyboardShotSource } from "../src/storyboardShotList.js";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import {
@@ -13,6 +14,7 @@ import { nodeApi } from "../src/api/newtApi.js";
 import { runImageModelGeneration } from "../src/nodeRunners/mediaModels.js";
 import { storyboardImageSettings, normalizeStoryboardImageModel } from "../src/storyboardImageModels.js";
 import { storyboardPromptPolicy } from "../src/storyboardPromptPolicy.js";
+import { storyboardCameraChoices, storyboardCameraRenderingPrompt } from "../src/storyboardCinematography.js";
 
 const characters = ["Dad", "Mom", "Daughter", "Son", "Neighbor", "Driver"].map((tag) => ({
   tag, name: tag, url: `/outputs/${tag}.png`, label: `${tag} Character Sheet`
@@ -121,12 +123,13 @@ test("actual plan normalization and editor persistence keep cast bindings withou
   const normalizeChoice = (value, choices, fallback) => choices.includes(value) ? value : fallback;
   const normalize = getFunction(server, "normalizeStoryboardPlanFrame", { normalizeChoice });
   const fromPlan = getFunction(editor, "storyboardFramesFromPlan", {
-    storyboardMaxFrameCount: 35, normalizeChoice, shotPresetNames: ["WS"], lensPresetNames: ["35mm"], typePresetNames: ["None"],
+    storyboardMaxFrameCount: 35, normalizeChoice, storyboardCameraChoices, shotPresetNames: ["WS"], lensPresetNames: ["35mm"], typePresetNames: ["None"],
     createStoryboardFrame: (number, patch) => ({ id: `frame-${number}`, number, ...patch }), storyboardPlannedCastPatch, storyboardFrameDirection
   });
   const [frame] = fromPlan([normalize(planned())]);
   assert.deepEqual(currentStoryboardCast(frame), planned().cast);
   assert.deepEqual(currentStoryboardCast(JSON.parse(JSON.stringify(frame))), frame.cast);
+  assert.equal(fromPlan([normalize(planned({ angle: "Dutch Angle" }))])[0].angle, "Dutch Angle");
 });
 
 test("actual editor source mapping works with internal and connected identities, without array-position aliases", () => {
@@ -188,7 +191,7 @@ for (const scenario of ["correct swapped identities", "missing sheet", "duplicat
       connectedImagePromptItems: () => [], uniqueStoryboardImagePromptItems
     });
     const buildStoryboardFramePrompt = getFunction(editor, "buildStoryboardFramePrompt", {
-      storyboardPromptPolicy, storyboardFrameContext,
+      storyboardPromptPolicy, storyboardCameraRenderingPrompt, storyboardFrameContext,
       connectedDirectorPackageSource: () => null, storyboardAspectRatioForNode: () => "16:9", storyboardCastPrompt,
       storyboardSceneReferenceMapPrompt: () => "", storyboardPropReferenceMapPrompt: () => "",
       shotPresetPrompts: {}, lensPresetPrompts: {}, typePresetPrompts: {}, storyboardContinuityInstruction: "Preserve physical geography.",
@@ -202,7 +205,7 @@ for (const scenario of ["correct swapped identities", "missing sheet", "duplicat
     const reviewStoryboardGeneratedFrame = new Function(...Object.keys(reviewDeps), `${reviewSource}\nreturn reviewStoryboardGeneratedFrame;`)(...Object.values(reviewDeps));
     const deps = {
       nodesRef: { current: [node] }, edgesRef: { current: [] }, generationProvider: "fal",
-      storyboardTaskBusy: () => false, updateStoryboardStatus: updateNode, pushUndoSnapshot: () => {}, storyboardFrameWithVersion, storyboardFrameDirection, storyboardEditSignature,
+      storyboardTaskBusy: () => false, updateStoryboardStatus: updateNode, pushUndoSnapshot: () => {}, storyboardFrameWithVersion, storyboardFrameDirection, storyboardEditSignature, storyboardShotListMode, storyboardShotNeedsPlan, storyboardShotSource,
       storyboardImageSettings, normalizeStoryboardImageModel, runImageModelGeneration, assertStoryboardCharacterTags,
       assertCharacterOutputReferences: () => {}, storyboardCharacterSummariesForNode: () => roster,
       storyboardFrameCastForNode: (_node, frame) => resolveStoryboardFrameCast(frame, roster),

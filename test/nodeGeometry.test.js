@@ -65,6 +65,24 @@ test("port geometry remains attached to a node independently of the viewport", (
   assert.deepEqual(scenePortPoint({ x: 1040, y: 35 }, localPoint), { x: 1347.5, y: 187.5 });
 });
 
+test("scroll-clipped Storyboard ports stay on the visible scroll boundary at any canvas zoom", () => {
+  const card = { left: 50, top: 60 }, clip = { left: 60, top: 100, right: 360, bottom: 300 };
+  const above = { left: 70, top: -400, width: 10, height: 10 };
+  const below = { ...above, top: 400 };
+  assert.deepEqual(localPortPointFromRects(above, card, 0.5, clip), { x: 50, y: 90 });
+  assert.deepEqual(localPortPointFromRects(below, card, 0.5, clip), { x: 50, y: 470 });
+  assert.deepEqual(localPortPointFromRects(above, card, 2, clip), { x: 12.5, y: 22.5 });
+  const visible = { ...above, top: 140 };
+  assert.deepEqual(localPortPointFromRects(visible, card, 0.5, clip), localPortPointFromRects(visible, card, 0.5));
+  const local = localPortPointFromRects(above, card, 0.5, clip);
+  assert.deepEqual(scenePortPoint({ x: 500, y: 200 }, local), { x: 550, y: 290 });
+  assert.deepEqual(scenePortPoint({ x: 600, y: 400 }, local), { x: 650, y: 490 });
+});
+
+test("clipped port coordinates stay finite when a scroll surface is smaller than its handle", () => {
+  assert.deepEqual(localPortPointFromRects({ left: 20, top: -50, width: 16, height: 16 }, { left: 0, top: 0 }, 1, { left: 10, right: 14, top: 10, bottom: 12 }), { x: 12, y: 11 });
+});
+
 test("agent placement skips every measured obstacle without moving existing nodes", () => {
   const occupied = [{ left: 0, top: 0, right: 700, bottom: 1100 }, { left: 900, top: -100, right: 1400, bottom: 1800 }, { left: 1500, top: 50, right: 1800, bottom: 1000 }];
   const original = structuredClone(occupied);

@@ -3,6 +3,9 @@ import { explorePlanSchema, normalizeExplorePlan } from "../src/explore.js";
 import { storyboardCastSchema } from "../src/storyboardCast.js";
 import { storyboardPlanSchema, storyboardRevisionSchema, storyboardReviewSchema, storyboardCastRepairSchema } from "../src/storyboardWorkflow.js";
 import { filmDirectorApproachOptions } from "../src/filmDirectorApproaches.js";
+import { scriptCatalogSchema, scriptOcrSchema, scriptShotsSchema } from "../src/storyboardScriptImport.js";
+import { storyboardCameraChoices } from "../src/storyboardCinematography.js";
+import { vectorLayerNameSchema } from "./vector-layer-names.js";
 
 export const creativeOpenAiModel = "gpt-6-astra";
 export const creativeFalModel = `openai/${creativeOpenAiModel}`;
@@ -21,6 +24,10 @@ const cameraShot = { number, shotFrame: nonempty, cameraAngle: nonempty, lensBeh
 const captions = object({ descriptions: list(nonempty, 1, 35) });
 
 export const creativeSchemas = {
+  "vector-layer-names": vectorLayerNameSchema,
+  "storyboard-script-catalog": scriptCatalogSchema,
+  "storyboard-script-ocr": scriptOcrSchema,
+  "storyboard-script-shotlist": scriptShotsSchema,
   "storyboard-plan-v2": storyboardPlanSchema,
   "storyboard-revision": storyboardRevisionSchema,
   "storyboard-cast-repair": storyboardCastRepairSchema,
@@ -50,7 +57,7 @@ export const creativeSchemas = {
       number,
       shot: { type: "string", enum: ["None", "CU", "MS", "WS", "ECU", "EWS"] },
       lens: { type: "string", enum: ["None", "8mm", "18mm", "35mm", "50mm", "85mm", "120mm"] },
-      angle: { type: "string", enum: ["None", "Macro", "Low Angle", "High Angle", "Extreme High", "Bird's Eye View", "Extreme Low", "Portrait", "Profile", "Selfie"] },
+      angle: { type: "string", enum: storyboardCameraChoices.angle },
       beat: nonempty, prompt: { ...nonempty, maxLength: 1400 }, notes: { ...text, maxLength: 240 }, cast: storyboardCastSchema
     }), 1, 35)
   }),
@@ -69,6 +76,8 @@ const ajv = new Ajv({ allErrors: true, strict: true });
 const validators = new Map(Object.entries(creativeSchemas).map(([route, schema]) => [route, ajv.compile(schema)]));
 
 export function creativeOutputBudget(route = "") {
+  if (route === "vector-layer-names") return 4000;
+  if (/^storyboard-script-/.test(route)) return 24000;
   if (/shotlist|revision|shot-repair|storyboard-plan|storyboard-cast-repair|explore-plan/.test(route)) return 24000;
   if (/video-analysis/.test(route)) return 16000;
   if (/visual-analysis/.test(route)) return 12000;
@@ -112,7 +121,7 @@ export function validateCreativeResponse(data, { route, provider, text: outputTe
   const validator = validators.get(route);
   if (!validator) return null;
   data = data?.data || data;
-  const label = route === "explore-plan" ? "Explore" : route.startsWith("storyboard") ? "Storyboard" : "Director";
+  const label = route === "explore-plan" ? "Explore" : route.startsWith("vector-") ? "Vector" : route.startsWith("storyboard") ? "Storyboard" : "Director";
   const contents = (Array.isArray(data?.output) ? data.output : []).flatMap((item) => item.content || []);
   if (data?.error || data?.status === "failed") throw new Error(`${label}: ${provider} could not complete this response.`);
   if (data?.partial || data?.status === "incomplete" || ["length", "content_filter"].includes(data?.choices?.[0]?.finish_reason)

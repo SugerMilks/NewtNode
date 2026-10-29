@@ -1,17 +1,19 @@
 import { storyboardCastSchema, storyboardPlannedCastPatch, storyboardCastPlanIssues, storyboardCharacterMentioned, currentStoryboardCast } from "./storyboardCast.js";
 import { cleanReferenceTag } from "./referenceTags.js";
 import { storyboardSpatialSchema, storyboardSpatialPlanIssues, storyboardSpatialPrompt } from "./storyboardSpatial.js";
+import { storyboardCameraChoices, normalizeStoryboardCameraPersonality } from "./storyboardCinematography.js";
 
-export const storyboardSkillVersion = "2.2.0";
+export const storyboardSkillVersion = "2.4.0";
 // Narrative remains the saved/planner value; Standard is its user-facing name.
 export const storyboardApproachDetails = {
+  "Shot List": { label: "Shot List", description: "One frame per shot, with your descriptions and camera choices guiding the sequence." },
   Narrative: { label: "Standard", description: "Story-first coverage of key actions, reveals, and emotional beats." },
   Dialogue: { label: "Dialogue", description: "Conversation-led coverage of speakers, listeners, reactions, and eyelines." },
   Action: { label: "Action", description: "Clear movement and cause and effect, with readable spatial continuity." },
   Commercial: { label: "Commercial", description: "Product or subject-led coverage with purposeful reveals and detail shots." },
   Montage: { label: "Montage", description: "Distinct moments or vignettes connected by an overall idea and rhythm." }
 };
-export const storyboardApproaches = Object.keys(storyboardApproachDetails);
+export const storyboardApproaches = Object.keys(storyboardApproachDetails).filter(value => value !== "Narrative");
 export const storyboardPacing = ["Measured", "Balanced", "Energetic"];
 const text = { type: "string", maxLength: 1400 };
 const requiredText = { ...text, minLength: 1, pattern: "\\S" };
@@ -21,9 +23,9 @@ export const storyboardFrameSchema = object({
   id: requiredText, number: { type: "integer", minimum: 1, maximum: 35 },
   shotId: requiredText, phase: { type: "string", enum: ["single", "opening", "transition", "ending"] },
   purpose: requiredText, beat: requiredText, prompt: requiredText, notes: text,
-  shot: { type: "string", enum: ["None", "CU", "MS", "WS", "ECU", "EWS"] },
-  lens: { type: "string", enum: ["None", "8mm", "18mm", "35mm", "50mm", "85mm", "120mm"] },
-  angle: { type: "string", enum: ["None", "Macro", "Low Angle", "High Angle", "Extreme High", "Bird's Eye View", "Extreme Low", "Portrait", "Profile", "Selfie"] },
+  shot: { type: "string", enum: storyboardCameraChoices.shot },
+  lens: { type: "string", enum: storyboardCameraChoices.lens },
+  angle: { type: "string", enum: storyboardCameraChoices.angle },
   durationSeconds: { type: "number", minimum: 0, maximum: 600 },
   stateBefore: text, stateAfter: text, cameraSide: text, cast: storyboardCastSchema, spatial: storyboardSpatialSchema
 });
@@ -53,8 +55,9 @@ export const storyboardReviewSchema = object({
 export function storyboardPlanningSettings(data = {}) {
   const duration = Number(data.storyboardTargetDuration);
   return {
-    approach: storyboardApproaches.includes(data.storyboardApproach) ? data.storyboardApproach : "Narrative",
+    approach: Object.hasOwn(storyboardApproachDetails, data.storyboardApproach) ? data.storyboardApproach : "Narrative",
     pacing: storyboardPacing.includes(data.storyboardPacing) ? data.storyboardPacing : "Balanced",
+    cameraPersonality: normalizeStoryboardCameraPersonality(data.storyboardCameraPersonality),
     targetDuration: Number.isFinite(duration) && duration > 0 ? Math.min(600, duration) : null
   };
 }
@@ -187,5 +190,5 @@ export function storyboardBoardSignature(frames = []) {
 }
 
 export function storyboardEditSignature(frames = []) {
-  return JSON.stringify(frames.map(frame => ({ ...storyboardFrameDirection(frame), resultUrl: frame.resultUrl || "", exportUrl: frame.exportUrl || "", protected: frame.protected === true })));
+  return JSON.stringify(frames.map(frame => ({ ...storyboardFrameDirection(frame), shotDescription: frame.shotDescription, shotPlanSource: frame.shotPlanSource, resultUrl: frame.resultUrl || "", exportUrl: frame.exportUrl || "", protected: frame.protected === true })));
 }

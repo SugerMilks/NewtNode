@@ -4,7 +4,7 @@ export const outputNameModes = [
   { value: "source", label: "Source Node Name" }, { value: "custom", label: "Custom Name" }
 ];
 export const outputFormatOptions = {
-  image: [{ value: "original", label: "Original" }, { value: "png", label: "PNG" }, { value: "jpeg", label: "JPEG" }, { value: "webp", label: "WebP" }],
+  image: [{ value: "original", label: "Original" }, { value: "png", label: "PNG" }, { value: "jpeg", label: "JPEG" }, { value: "webp", label: "WebP" }, { value: "svg", label: "SVG (Vector artwork)" }, { value: "alpha", label: "Alpha matte (PNG)" }],
   video: [{ value: "original", label: "Original" }, { value: "mp4", label: "MP4 (H.264)" }, { value: "mov", label: "MOV (H.264)" }],
   audio: [{ value: "original", label: "Original" }, { value: "wav", label: "WAV (PCM)" }, { value: "mp3", label: "MP3" }]
 };
@@ -32,7 +32,7 @@ export function normalizeOutputSettings(settings = {}) {
 
 export function outputFileStem(value, fallback = "Output") {
   let name = String(value || "").split(/[\\/]/).at(-1).replace(/[\u0000-\u001f\u007f<>:"|?*]/g, "_").replace(/[. ]+$/g, "").trim();
-  name = name.replace(/\.(?:png|jpe?g|webp|gif|tiff?|avif|heic|mp4|mov|webm|mkv|m4v|wav|mp3|m4a|aac|ogg|flac)$/i, "").replace(/[. ]+$/g, "");
+  name = name.replace(/\.(?:svg|png|jpe?g|webp|gif|tiff?|avif|heic|mp4|mov|webm|mkv|m4v|wav|mp3|m4a|aac|ogg|flac)$/i, "").replace(/[. ]+$/g, "");
   if (!name || /^\.+$/.test(name)) name = fallback;
   if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(name)) name = `_${name}`;
   // Leave room for numbering and extensions on byte-limited filesystems, without splitting Unicode characters.
@@ -61,9 +61,10 @@ export function outputCandidates(sources = [], inputSettings = {}, projectName =
       : settings.nameMode === "custom" ? settings.customName : item.fileName || original || item.label;
     const name = `${outputFileStem(value)}${settings.numbering ? `_${String(settings.startNumber + index).padStart(settings.padding, "0")}` : ""}`;
     const destination = settings.destinations[item.type];
-    const key = JSON.stringify([item.url, item.type, item.version || "", name, destination.path, destination.subfolder, destination.format,
+    const url = item.type === "image" && destination.format === "svg" && item.svgUrl ? item.svgUrl : item.url;
+    const key = JSON.stringify([url, item.type, item.version || "", name, destination.path, destination.subfolder, destination.format,
       destination.format === "original" || destination.format === "png" || destination.format === "wav" ? null : destination.quality]);
-    return { ...item, name, key };
+    return { ...item, url, canonicalUrl: item.url, name, key };
   });
 }
 

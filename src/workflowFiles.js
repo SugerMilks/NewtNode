@@ -10,6 +10,8 @@ export function buildWorkflowDocument({
   nodes = [],
   edges = [],
   groups = [],
+  canvases,
+  activeCanvasId,
   viewport = { x: 0, y: 0, scale: 1 }
 } = {}) {
   const now = updatedAt || new Date().toISOString();
@@ -22,12 +24,13 @@ export function buildWorkflowDocument({
     createdAt: createdAt || now,
     updatedAt: now,
     app: "NewtNode",
-    version: 1,
+    version: canvases ? 2 : 1,
     packagePath: packagePath || "",
     graph: {
       nodes,
       edges,
       groups,
+      ...(canvases ? { canvases, activeCanvasId } : {}),
       viewport
     }
   };

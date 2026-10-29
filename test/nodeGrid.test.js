@@ -137,16 +137,17 @@ test("canvas grid UI has pressed state, a multi-selection command, one undo snap
   assert.match(editor, /function handleCanvasWheel\(event\) \{\s+if \(event.target.closest\("\.selection-action-bar"\)\)/);
 });
 
-test("canvas has one bottom-right snap toggle instead of a zoom readout, with keyboard zoom preserved", () => {
+test("canvas snap toggle sits between presets and palette collapse, with keyboard zoom preserved", () => {
   const editor = readFileSync(new URL("../src/NodeEditor.jsx", import.meta.url), "utf8");
   const css = readFileSync(new URL("../src/nodeEditor.css", import.meta.url), "utf8");
   assert.equal((editor.match(/<CanvasSnapToggle\b/g) || []).length, 1);
   assert.doesNotMatch(editor, /zoomReadoutRef|zoom-controls|zoom-readout/);
   assert.doesNotMatch(css, /\.zoom-controls|\.zoom-readout|\.canvas-snap-toggle\.beside-outputs/);
-  const toggleRule = css.match(/\.canvas-snap-toggle\s*\{([^}]+)\}/)?.[1];
-  assert.match(toggleRule, /bottom: 12px;/);
-  assert.match(toggleRule, /right: 12px;/);
-  assert.doesNotMatch(toggleRule, /\btop:/);
+  assert.match(editor, /<PresetWorkflowPicker[^\n]+\/>\s*<CanvasSnapToggle[^\n]+\/>\s*<\/>\}\s*<button className="sidebar-hide"/);
+  const toggleRule = css.match(/\.node-toolbar \.canvas-snap-toggle\s*\{([^}]+)\}/)?.[1];
+  assert.ok(toggleRule);
+  assert.doesNotMatch(toggleRule, /position:\s*absolute|\b(?:top|bottom|right|left):/);
+  assert.match(css, /\.node-toolbar \.canvas-snap-toggle\[aria-pressed="true"\]/);
   assert.match(editor, /zoomViewportAtCanvasCenter\(1\.16\)/);
   assert.match(editor, /zoomViewportAtCanvasCenter\(1 \/ 1\.16\)/);
   assert.match(editor, /if \(commandKey && key === "0"\) \{\s*event.preventDefault\(\);\s*resetViewportZoom\(\)/);

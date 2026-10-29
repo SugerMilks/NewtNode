@@ -216,6 +216,18 @@ test("real review adapter sends prepared snapshots, provider connection, effort 
   assert.match(request.prompt, /essential to the story, remains a real action/);
 });
 
+test("both QC modes protect intentional cinematic composition without excusing continuity or anatomy failures", () => {
+  const prompt = getFunction("storyboardQcReviewPrompt", { storyboardPromptPolicy });
+  for (const qcMode of ["balanced", "deep"]) {
+    const text = prompt({ qcMode, angle: "Dutch Angle" });
+    assert.match(text, /Intentional camera expression is not broken perspective/);
+    assert.match(text, /Never straighten a requested tilted horizon/);
+    assert.match(text, /duplicated limbs or displaced occupants remain failures/);
+    assert.match(text, /Missing aesthetic flair alone is optional polish, not a paid retry/);
+    assert.match(text, /Fail unexplained disappearing occupants/);
+  }
+});
+
 test("Balanced tolerates acting nuance even on confirmation; Deep retains explicit performance scrutiny", () => {
   const prompt = getFunction("storyboardQcReviewPrompt", { storyboardPromptPolicy });
   const balanced = prompt({ adaptiveQc: true, qcMode: "balanced" });

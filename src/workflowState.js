@@ -1,3 +1,5 @@
+import { coverageJobState } from "./cameraCoverage.js";
+
 export function cloneGraphState(state) {
   return {
     nodes: (state.nodes || []).map(cloneNode),
@@ -20,6 +22,7 @@ export function workflowStateFingerprint(state = {}) {
     edges: (state.edges || []).map(cloneEdge),
     groups: (state.groups || []).map(cloneGroup),
     projectName: String(state.projectName || "Untitled node project").trim() || "Untitled node project",
+    ...(state.canvases ? { canvases: state.canvases.map(({ id, name }) => ({ id, name })) } : {}),
     projectPackagePath: state.projectPackagePath || ""
   });
 }
@@ -42,6 +45,10 @@ export function resetCopiedNodeRuntime(data = {}) {
   delete copy.myNewtProtection;
   delete copy.myNewtRunRecords;
   if (data.editorExportJob) copy.editorExportJob = null;
+  if (data.vectorJob) { copy.vectorJob = null; copy.status = copy.resultUrl ? "complete" : "ready"; copy.error = ""; }
+  if (data.coverageJob) copy.coverageJob = null;
+  if (data.coverageEnhancing) copy.coverageEnhancing = null;
+  if (copy.coverageShotJobs) copy.coverageShotJobs = [];
   if (data.outputSettings) {
     copy.outputSettings = { ...data.outputSettings, autoExport: false };
     copy.outputJob = null; copy.outputReceipts = []; copy.status = "ready"; copy.error = "";
@@ -82,6 +89,9 @@ export function dedupeEdges(edges) {
 export function clearStaleRunningState(node) {
   const original = node.data || {};
   let data = clearInterruptedMediaJob(original);
+  if (original.coverageEnhancing) data = { ...data, coverageEnhancing: null,
+    error: "Refinement was interrupted. Check History and the provider before running it again; no request was replayed." };
+  if (original.coverageJob || original.coverageEnhancing || original.coverageShotJobs?.length) data = { ...data, ...coverageJobState(original, true) };
   if (Array.isArray(original.exploreQueue)) {
     data = { ...data, exploreAction: "", exploreStopRequested: false,
       exploreQueue: original.exploreQueue.map(item => item.status === "running" ? { ...item, status: "uncertain", error: "Request interrupted. Check History and the provider before regenerating." } : item) };
@@ -120,7 +130,7 @@ export function remapImportedGraph(graph = {}, offset = {}, stamp = Date.now()) 
     idMap.set(node.id, nextId);
     return {
       ...cloneNode(node),
-      data: node.type === "myNewt" ? { ...node.data, jobId: "", myNewtSummary: null } : ["editor", "output"].includes(node.type) ? resetCopiedNodeRuntime(cloneNode(node).data) : cloneNode(node).data,
+      data: node.type === "myNewt" ? { ...node.data, jobId: "", myNewtSummary: null } : ["editor", "output", "cameraCoverage", "vector"].includes(node.type) ? resetCopiedNodeRuntime(cloneNode(node).data) : cloneNode(node).data,
       id: nextId,
       x: Math.round(node.x + safeOffset.x),
       y: Math.round(node.y + safeOffset.y)

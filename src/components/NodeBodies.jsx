@@ -858,7 +858,16 @@ export function SkillDirectorNodeBody({
             <strong>1. Scene Setup</strong>
             <small>{locks.setup ? "Locked" : "Add scene basics and references first"}</small>
           </div>
-          <div className="skill-director-stage-actions">
+          <div className="skill-director-stage-actions skill-director-setup-actions">
+            {(!videoModelValue || videoModelValue === "Seedance 2.5") && <div className="skill-director-draft-control">
+              <span>Draft</span>
+              <button type="button" className={`node-toggle ${draftMode ? "enabled" : ""}`} role="switch"
+                aria-label="Director Draft mode" aria-checked={draftMode}
+                disabled={running || (!draftMode && !supportsSeedanceDraft(generationProvider))}
+                title={`Seedance 2.5: ${seedanceDraftHint(generationProvider)} No plan rebuild required.`}
+                onPointerDown={event => event.stopPropagation()}
+                onClick={() => onUpdate(node.id, { skillSeedanceDraft: !draftMode })}><span aria-hidden="true" /></button>
+            </div>}
             <SkillDirectorLockButton locked={locks.setup} disabled={running || ((!setupReady || Boolean(musicError)) && !locks.setup)} label={locks.setup ? "Unlock scene setup" : "Lock scene setup"} onClick={handleSetupLock} />
           </div>
         </div>
@@ -904,12 +913,6 @@ export function SkillDirectorNodeBody({
                   ))}
                 </select>
               </label>
-              {(!videoModelValue || videoModelValue === "Seedance 2.5") && <label className="node-row">
-                <span>Draft (480p)</span>
-                <input type="checkbox" aria-label="Director Draft mode" checked={node.data.skillSeedanceDraft === true} disabled={running || (!draftMode && !supportsSeedanceDraft(generationProvider))}
-                  title={`Seedance 2.5: ${seedanceDraftHint(generationProvider)} No plan rebuild required.`}
-                  onChange={event => onUpdate(node.id, { skillSeedanceDraft: event.target.checked })} />
-              </label>}
               <label className="node-row">
                 <span>Aspect Ratio</span>
                 <select value={aspectRatioValue} disabled={running || locks.setup} onChange={(event) => onUpdate(node.id, { skillAspectRatio: event.target.value })}>

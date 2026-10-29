@@ -373,3 +373,9 @@ export function fileBaseName(fileName) {
     .replace(/\.[^.]+$/, "")
     .trim();
 }
+
+export function displayMediaUrl(itemOrUrl) {
+  const value = typeof itemOrUrl === "object" ? itemOrUrl?.url || itemOrUrl?.localUrl || "" : String(itemOrUrl || "");
+  return /^\/(?:uploads|outputs|workflow-assets|saved_workflows)\//.test(value) && /\.(?:mov|qt)$/i.test(value)
+    ? `/api/video-preview?url=${encodeURIComponent(value)}` : value;
+}

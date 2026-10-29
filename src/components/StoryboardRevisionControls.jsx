@@ -26,8 +26,9 @@ export function StoryboardExportMenu({ disabled, exporting, onExport }) {
   </div>;
 }
 
-export function StoryboardPlanButton({ busy, disabled, planning, hasPlan, protectedCount, onPlan }) {
+export function StoryboardPlanButton({ busy, disabled, planning, hasPlan, protectedCount, onPlan, shotList = false }) {
   const [confirming, setConfirming] = React.useState(false);
+  if (shotList) return <button type="button" disabled={busy || disabled || protectedCount > 0} title={protectedCount ? "Unprotect shots before planning directions" : "Plan exactly one frame per shot; keep existing images"} onClick={() => onPlan()}>{planning ? "Planning..." : "Plan Shots"}</button>;
   if (confirming) return <div className="storyboard-plan-confirm" role="alert">
     <span>Replace the current plan and panels?</span>
     <button type="button" disabled={busy || disabled || protectedCount > 0} onClick={() => { setConfirming(false); onPlan({ replace: true }); }}>Create New Plan</button>

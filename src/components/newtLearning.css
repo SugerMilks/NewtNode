@@ -1,0 +1,50 @@
+.newt-learning-controls { margin: 8px 0; min-width: 0; }
+.newt-learning-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.newt-learning-controls button, .newt-learning-dialog button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 32px; padding: 6px 10px; border: 1px solid #414141; border-radius: 6px; background: #272727; color: #efefef; font: inherit; cursor: pointer; }
+.newt-learning-controls button:disabled, .newt-learning-dialog button:disabled { opacity: .45; cursor: default; }
+.newt-learning-controls button[aria-pressed="true"], .newt-learning-dialog nav button[aria-pressed="true"], .newt-learning-dialog button.primary { background: #e2cc2b; border-color: #e2cc2b; color: #161616; }
+.newt-learning-controls button:focus-visible, .newt-learning-dialog :is(button, textarea, input, select, summary):focus-visible { outline: 2px solid #e2cc2b; outline-offset: 2px; }
+.newt-learning-controls.compact { border-bottom: 1px solid #363636; padding: 6px 10px; margin: 0; background: #171717; font-size: 12px; }
+.newt-learning-state { display: inline-flex; align-items: center; gap: 6px; margin-right: auto; }
+.newt-learning-note { display: grid; gap: 8px; margin-top: 10px; }
+.newt-learning-note label { display: grid; gap: 6px; font-size: 13px; }
+.newt-learning-note textarea { width: 100%; box-sizing: border-box; min-height: 80px; }
+.newt-learning-error { color: #ffa98d; overflow-wrap: anywhere; }
+.newt-learning-dialog { position: fixed; width: min(960px, calc(100vw - 32px)); max-width: none; height: min(760px, calc(100dvh - 32px)); max-height: none; box-sizing: border-box; margin: auto; padding: 18px; border: 1px solid #484848; border-radius: 8px; color: #eee; background: #191919; font-size: 14px; letter-spacing: 0; overflow: hidden; }
+.newt-learning-dialog[open] { display: flex; flex-direction: column; gap: 12px; }
+.newt-learning-dialog::backdrop { background: #000a; }
+.newt-learning-dialog header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.newt-learning-dialog :is(h2, h3, p) { margin: 0; }
+.newt-learning-dialog h2 { font-size: 18px; }
+.newt-learning-dialog h3 { font-size: 16px; overflow-wrap: anywhere; }
+.newt-learning-dialog nav { display: flex; gap: 6px; padding-bottom: 10px; border-bottom: 1px solid #373737; }
+.newt-learning-layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 18px; min-height: 0; flex: 1; }
+.newt-learning-layout aside { overflow-y: auto; padding-right: 8px; scrollbar-gutter: stable; border-right: 1px solid #373737; }
+.newt-learning-layout aside > button { width: 100%; display: grid; justify-content: stretch; text-align: left; margin-bottom: 6px; background: transparent; border-color: transparent; overflow-wrap: anywhere; }
+.newt-learning-layout aside > button[aria-pressed="true"] { border-color: #6c652d; background: #333020; }
+.newt-learning-layout main { min-width: 0; overflow: auto; scrollbar-gutter: stable; padding-right: 6px; display: flex; flex-direction: column; gap: 16px; }
+.newt-learning-dialog small, .newt-learning-meta { display: block; color: #aeaeae; font-size: 12px; margin-top: 4px; }
+.newt-learning-dialog :is(input:not([type="checkbox"]), textarea, select) { width: 100%; min-width: 0; box-sizing: border-box; border: 1px solid #484848; border-radius: 5px; padding: 8px; font: inherit; background: #101010; color: #eee; }
+.newt-learning-dialog textarea { resize: vertical; line-height: 1.5; }
+.newt-lesson-editor { display: grid; gap: 14px; }
+.newt-lesson-editor label { display: grid; gap: 6px; font-size: 13px; }
+.newt-lesson-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.newt-lesson-editor .newt-learning-check { display: flex; align-items: center; gap: 8px; }
+.newt-learning-session-title { display: flex; align-items: start; justify-content: space-between; gap: 10px; }
+.newt-learning-suggestion { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 1px solid #373737; }
+.newt-learning-suggestion > div:first-child { min-width: 0; overflow-wrap: anywhere; }
+.newt-learning-evidence { list-style: none; padding: 0; margin: 0; }
+.newt-learning-evidence li { display: flex; gap: 10px; padding: 10px 0; border-bottom: 1px solid #303030; overflow-wrap: anywhere; }
+.newt-learning-evidence img { width: 88px; height: 64px; object-fit: contain; flex-shrink: 0; background: #101010; border-radius: 4px; }
+.newt-learning-evidence p { font-size: 12px; line-height: 1.5; white-space: pre-wrap; }
+.newt-learning-evidence small { margin: 0 0 5px; }
+.newt-learning-progress { display: flex; gap: 8px; align-items: center; font-size: 12px; }
+.newt-learning-spinner { animation: newt-learning-spin 1s linear infinite; }
+@keyframes newt-learning-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .newt-learning-spinner { animation: none; } }
+@media (max-width: 650px) {
+  .newt-learning-dialog { padding: 12px; }
+  .newt-learning-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: 110px minmax(0, 1fr); gap: 10px; }
+  .newt-learning-layout aside { border-right: 0; border-bottom: 1px solid #373737; }
+  .newt-learning-suggestion { align-items: start; flex-direction: column; }
+}

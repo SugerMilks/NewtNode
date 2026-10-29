@@ -5,10 +5,12 @@ import React from "react";
 import { renderToString } from "react-dom/server";
 import { loadNodeEditorDraft } from "../src/useNodeEditorDraft.js";
 import { useWorkflowPersistence } from "../src/useWorkflowPersistence.js";
+import { normalizeProjectCanvases } from "../src/projectCanvases.js";
 
 const normalizeEditorGraph = (nodes, edges, groups = []) => ({ nodes, edges, groups });
 const blank = {
   nodes: [], edges: [], groups: [], viewport: { x: 0, y: 0, scale: 1 },
+  canvases: [{ id: "canvas-1", name: "Canvas 1", viewport: { x: 0, y: 0, scale: 1 } }], activeCanvasId: "canvas-1",
   projectId: null, projectName: "Untitled node project", savedProjectName: null,
   projectPackagePath: "", workflowFilePath: ""
 };
@@ -40,7 +42,7 @@ test("saved populated and intentionally empty drafts retain their graph and proj
       projectId: "saved-project", projectName: "My project", savedProjectName: "My project",
       projectPackagePath: "/projects/My project", workflowFilePath: "/projects/My project/My project.json"
     };
-    withStorage(() => JSON.stringify(draft), () => assert.deepEqual(loadNodeEditorDraft({ normalizeEditorGraph }), draft));
+    withStorage(() => JSON.stringify(draft), () => assert.deepEqual(loadNodeEditorDraft({ normalizeEditorGraph }), { ...draft, ...normalizeProjectCanvases(draft) }));
   }
 });
 
@@ -57,7 +59,7 @@ test("New Project clears the graph, selection and project association without mu
   let persistence, undoCleared = false;
   const setters = Object.fromEntries([
     "nodes", "edges", "groups", "viewport", "projectId", "projectName", "savedProjectName",
-    "projectPackagePath", "workflowFilePath", "selectedNodeIds", "selectedEdgeId", "projectMenuOpen", "fileMenuOpen"
+    "projectPackagePath", "workflowFilePath", "selectedNodeIds", "selectedEdgeId", "projectMenuOpen", "fileMenuOpen", "canvases", "activeCanvasId"
   ].map(key => [`set${key[0].toUpperCase()}${key.slice(1)}`, value => { updates[key] = value; }]));
   function Probe() {
     persistence = useWorkflowPersistence({

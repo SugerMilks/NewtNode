@@ -1,0 +1,33 @@
+.outpaint-canvas-dialog { width: min(1100px, 94vw); max-width: 94vw; max-height: 94vh; box-sizing: border-box; overflow: auto; border: 1px solid #494949; border-radius: 8px; padding: 20px; background: #202020; color: #eee; }
+.outpaint-canvas-dialog button, .outpaint-user-action { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 34px; padding: 7px 10px; border: 1px solid #454545; border-radius: 6px; background: #2d2d2d; color: #eee; font: inherit; cursor: pointer; }
+.outpaint-canvas-dialog button:disabled, .outpaint-user-action:disabled { opacity: .45; cursor: default; }
+.outpaint-canvas-dialog input { accent-color: #e0cd28; background: #121212; color: #eee; border: 1px solid #454545; border-radius: 4px; padding: 6px; font: inherit; }
+.outpaint-canvas-actions button:last-child { background: #e0cd28; color: #151515; border-color: #e0cd28; }
+.outpaint-user-action { max-width: 100%; flex-wrap: wrap; white-space: normal; }
+.outpaint-canvas-dialog::backdrop { background: #000b; }
+.outpaint-canvas-heading, .outpaint-canvas-toolbar, .outpaint-canvas-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.outpaint-canvas-heading { justify-content: space-between; }
+.outpaint-canvas-heading h2 { margin: 0; font-size: 20px; }
+.outpaint-canvas-heading small { font-size: 13px; font-weight: normal; color: #bac3d2; }
+.outpaint-canvas-dialog p { font-size: 13px; color: #cbd1db; }
+.outpaint-canvas-stage { position: relative; width: min(100%, calc(52vh * var(--view-aspect, 1.7778))); margin: 14px auto; overflow: hidden; background: #000; touch-action: none; }
+.outpaint-canvas-stage video { position: absolute; object-fit: fill; pointer-events: none; }
+.outpaint-canvas-region { position: absolute; border: 2px solid #fff; box-sizing: border-box; box-shadow: 0 0 0 3000px #0009; cursor: move; touch-action: none; }
+.outpaint-canvas-region:focus-visible { outline: 2px solid #80baff; outline-offset: 3px; }
+.outpaint-frame-caption { position: absolute; left: 8px; top: 6px; padding: 2px 5px; background: #0009; font-size: 12px; pointer-events: none; }
+.outpaint-canvas-dialog .outpaint-canvas-handle { position: absolute; width: 16px; height: 16px; min-width: 0; min-height: 0; padding: 0; background: white; border: 1px solid #222; border-radius: 0; }
+.outpaint-canvas-handle.nw { left: -8px; top: -8px; cursor: nwse-resize; }
+.outpaint-canvas-handle.ne { right: -8px; top: -8px; cursor: nesw-resize; }
+.outpaint-canvas-handle.sw { left: -8px; bottom: -8px; cursor: nesw-resize; }
+.outpaint-canvas-handle.se { right: -8px; bottom: -8px; cursor: nwse-resize; }
+.outpaint-canvas-toolbar input[type=range] { flex: 1; min-width: 120px; }
+.outpaint-snap-toggle { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.outpaint-snap-toggle small { color: #aebaca; }
+.outpaint-snap-guide { position: absolute; pointer-events: none; z-index: 2; }
+.outpaint-snap-guide.vertical { top: 0; bottom: 0; border-left: 1px dashed #76d7ff; }
+.outpaint-snap-guide.horizontal { left: 0; right: 0; border-top: 1px dashed #76d7ff; }
+.outpaint-canvas-fields { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
+.outpaint-canvas-fields label { display: grid; gap: 4px; font-size: 13px; }
+.outpaint-canvas-fields input { min-width: 0; width: 100%; box-sizing: border-box; }
+.outpaint-canvas-actions { justify-content: flex-end; margin-top: 18px; }
+@media (max-width: 650px) { .outpaint-canvas-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

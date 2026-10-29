@@ -1,4 +1,5 @@
 import { workflowContextPayload } from "../workflowContext.js";
+import { normalizeUtilityOutpaintSettings } from "../videoOutpaint.js";
 import {
   klingO3ProAspectRatioOptions,
   klingO3ProDurationOptions,
@@ -215,16 +216,19 @@ export function buildUtilityVideoRequest({
   referenceImageUrls = [],
   referenceVideoUrls = [],
   maskVideoUrls = [],
+  canvasVideoUrls = [],
   colorIdMatte,
   compositeVideo,
   voidNumFrames
 }) {
+  if (model === "Video Outpaint" && canvasVideoUrls.length > 1) throw new Error("Connect only one Canvas video for outpainting. No inputs have been discarded.");
   return {
     prompt,
     model,
     referenceImageUrls,
     referenceVideoUrls,
     maskVideoUrls,
+    ...(model === "Video Outpaint" ? { videoOutpaint: normalizeUtilityOutpaintSettings(node.data.videoOutpaint), canvasVideoUrl: canvasVideoUrls[0] || "" } : {}),
     extractFrame: {
       frameTime: node.data.extractFrameTime ?? 0,
       format: node.data.extractFrameFormat || "png"
@@ -267,6 +271,7 @@ export function buildUtilityVideoRequest({
       numInterpolatedFrames: node.data.wanVaceNumInterpolatedFrames || 0
     },
     wanVaceInpainting: {
+      ...(model === "Video Outpaint" ? { seed: node.data.seed ?? "" } : {}),
       negativePrompt: node.data.wanVaceNegativePrompt || "",
       matchInputNumFrames: node.data.wanVaceMatchInputNumFrames !== false,
       numFrames: node.data.wanVaceNumFrames || 81,
@@ -369,6 +374,8 @@ export function normalizeUtilityVideoGenerationResult(data, index) {
     type: "video",
     label: data.modelName || `Video ${index + 1}`,
     seed: data.seed,
-    cost: data.cost
+    cost: data.cost,
+    ...(data.videoOutpaint ? { videoOutpaint: data.videoOutpaint } : {}),
+    ...(data.warning ? { warning: data.warning } : {})
   };
 }

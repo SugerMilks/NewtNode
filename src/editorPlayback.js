@@ -1,6 +1,9 @@
 import { createEditorTimeline, editorActiveClips, editorEnd, clampEditor } from "./editorTimeline.js";
 
 const players = new Map();
+export function pauseEditorPlayback() {
+  for (const player of players.values()) player.pause();
+}
 export function editorPlayback(id) {
   if (!players.has(id)) players.set(id, createPlayback());
   return players.get(id);

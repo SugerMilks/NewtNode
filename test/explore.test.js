@@ -5,6 +5,7 @@ import { readFile } from "node:fs/promises";
 import { exploreDefaults, exploreRequest, exploreDirectionRequest, explorePlanningPrompt, normalizeExploreData, normalizeExplorePlan, explorePlanSchema, exploreSelectionPatch, validateExplorePlan, exploreImagePrompt, explorePlanningInstructions, exploreGrades, exploreStyleFamilies, exploreReferenceDescription } from "../src/explore.js";
 import { gradePresetPrompts } from "../src/colorLook.js";
 import { stylePresetPrompts } from "../src/modelOptions.js";
+import { exploreMediumGuidance } from "../src/exploreArtDirection.js";
 import { normalizedResultItems } from "../src/mediaResults.js";
 import { runExploreGeneration } from "../src/nodeRunners/explore.js";
 import { clearStaleRunningState } from "../src/workflowState.js";
@@ -64,6 +65,14 @@ test("removed Advanced Outputs state is discarded without altering saved images 
   assert.equal(open.resultUrl, legacy.resultUrl);
   assert.deepEqual(open.resultItems, legacy.resultItems);
   assert.deepEqual(normalizeExploreData({ ...open, advancedOutputsOpen: false }), legacy);
+});
+
+test("References expansion is not restored from legacy project data", () => {
+  assert.equal(Object.hasOwn(exploreDefaults(), "referencesOpen"), false);
+  const saved = { ...exploreDefaults(), resultItems: [item()], styleFamily: "Claymation", gradePreset: "None" };
+  for (const referencesOpen of [true, false]) {
+    assert.deepEqual(normalizeExploreData({ ...saved, referencesOpen }), normalizeExploreData(saved));
+  }
 });
 
 test("medium, reference authority and cinematic craft are explicit rather than a universal film filter", () => {
@@ -156,7 +165,7 @@ test("random choices balance each preset pool and resolved guidance remains cons
   const planning = JSON.parse(explorePlanningPrompt(request));
   request.directionLooks.forEach((look, index) => {
     const resolved = exploreDirectionRequest(request, index);
-    assert.equal(resolved.style, stylePresetPrompts[look.styleFamily]);
+    assert.equal(resolved.style, exploreMediumGuidance[look.styleFamily]);
     assert.equal(resolved.grade, gradePresetPrompts[look.gradePreset]);
     assert.equal(planning.lookGuidance.styles[look.styleFamily], resolved.style);
     assert.equal(planning.lookGuidance.grades[look.gradePreset], resolved.grade);
@@ -251,9 +260,9 @@ test("random batches save actual looks per result, resume the same choices and r
 });
 
 test("new look requests require updated backend support before paid planning", async t => {
-  let supported = false, posts = 0;
+  let supported = false, artDirection = false, posts = 0;
   t.mock.method(globalThis, "fetch", async (url, options) => {
-    if (String(url).endsWith("/api/health")) return Response.json({ routes: { exploreLookVariation: supported } });
+    if (String(url).endsWith("/api/health")) return Response.json({ routes: { exploreLookVariation: supported, exploreArtDirection: artDirection } });
     assert.equal(options.method, "POST"); posts++;
     return Response.json({ directions: [direction()] });
   });
@@ -261,6 +270,9 @@ test("new look requests require updated backend support before paid planning", a
   await assert.rejects(nodeApi.planExplore(request), /Restart.*No planning or generation was submitted/);
   assert.equal(posts, 0);
   supported = true;
+  await assert.rejects(nodeApi.planExplore(request), /broader art directions/);
+  assert.equal(posts, 0, "a version 2 backend cannot silently drop the new contrast assignments");
+  artDirection = true;
   await nodeApi.planExplore(request); assert.equal(posts, 1);
 });
 
@@ -348,7 +360,6 @@ test("reference descriptions show source names and connected settings without lo
   const source = data => ({ source: { data } });
   assert.equal(exploreReferenceDescription("imageIn"), "");
   assert.equal(exploreReferenceDescription("imageIn", [source({ title: "Bottle", fileName: "product.jpg" }), source({ title: "Packaging" })]), "Bottle: product.jpg\nPackaging");
-  assert.equal(exploreReferenceDescription("styleIn", [source({ title: "Look", stylePreset: "Vintage 8mm", gradePreset: "Jaws of Life" })]), "Look: Vintage 8mm / Jaws of Life");
   assert.equal(exploreReferenceDescription("cameraIn", [source({ title: "Camera", shotPreset: "Wide", lensPreset: "35mm", typePreset: "None" })]), "Camera: Wide / 35mm");
 });
 
@@ -554,11 +565,12 @@ test("actual canvas validator respects reference locks and rejects removed Explo
   const editor = await readFile(new URL("../src/NodeEditor.jsx", import.meta.url), "utf8");
   const start = editor.indexOf("  function getConnectionError(");
   const config = exploreCanvasConfig(editor);
-  const deps = { outputPortIdsForNode: node => node.type === "explore" ? config.output.map(port => port.id) : ["styleOut", "characterOut", "transferOut"], inputPortIdsForNode: () => ["styleIn", "characterIn", "transferIn", "promptIn"],
+  const deps = { outputPortIdsForNode: node => node.type === "explore" ? config.output.map(port => port.id) : ["styleOut", "characterOut", "transferOut"], inputPortIdsForNode: node => node.type === "explore" ? config.input.map(port => port.id) : ["styleIn", "characterIn", "transferIn", "promptIn"],
     isImageModelUnsupportedInput: () => false, isImageModelUnsupportedSource: () => false, isVideoModelUnsupportedInput: () => false, getPortCompatibilityError: () => "" };
   const validatorSource = editor.slice(start, editor.indexOf("  function getPortPoint(", start));
   const validate = new Function(...Object.keys(deps), validatorSource + ";return getConnectionError;")(...Object.values(deps));
   const target = { id: "e", type: "explore", data: {} };
+  assert.match(validate({ nodeId: "style", port: "styleOut" }, { nodeId: "e", port: "styleIn" }, [{ id: "style", type: "style", data: {} }, target]), /valid input/);
   assert.match(validate({ nodeId: "c", port: "characterOut" }, { nodeId: "e", port: "characterIn" }, [{ id: "c", type: "character", data: {} }, target]), /Lock/);
   assert.match(validate({ nodeId: "m", port: "transferOut" }, { nodeId: "e", port: "transferIn" }, [{ id: "m", type: "transfer", data: {} }, target]), /Lock/);
   const board = { id: "s", type: "storyboard", data: {} };
@@ -572,22 +584,30 @@ function exploreCanvasConfig(editor) {
   return new Function("Compass", "portColors", `return (${block[1]});`)(null, { image: "blue", style: "purple", prompt: "yellow", character: "cyan", transfer: "pink", camera: "red" });
 }
 
-test("restoring graphs drops only removed Explore output edges, keeping images and incoming style", async () => {
+test("restoring graphs drops removed Explore ports while keeping images and remaining references", async () => {
   const editor = await readFile(new URL("../src/NodeEditor.jsx", import.meta.url), "utf8");
   const config = exploreCanvasConfig(editor);
   assert.deepEqual(config.output.map(port => port.id), ["imageOut"]);
-  assert.ok(config.input.some(port => port.id === "styleIn"));
+  assert.deepEqual(config.input.map(port => port.id), ["promptIn", "imageIn", "characterIn", "transferIn", "cameraIn"]);
   const start = editor.indexOf("function normalizeEdgeForCurrentGraph(");
-  const deps = { cloneEdge: structuredClone, isModel3DNode: () => false, portColors: { style: "purple" },
+  const deps = { cloneEdge: structuredClone, isModel3DNode: () => false, hasCameraPreset: () => true,
+    portColors: { style: "purple", camera: "red", transfer: "pink", character: "cyan" },
     inputPortIdsForNode: node => node.type === "explore" ? config.input.map(port => port.id) : ["sourceIn", "styleIn", "promptIn", "imagePromptIn"],
-    outputPortIdsForNode: node => node.type === "explore" ? config.output.map(port => port.id) : ["styleOut"],
+    outputPortIdsForNode: node => node.type === "explore" ? config.output.map(port => port.id) : ["styleOut", "imageOut", "characterOut", "transferOut", "cameraOut", "promptOut"],
     isImageModelUnsupportedInput: () => false, isImageModelUnsupportedSource: () => false, isVideoModelUnsupportedInput: () => false, portsAreCompatible: () => true };
   const normalize = new Function(...Object.keys(deps), `${editor.slice(start, editor.indexOf("function transferTitleFromLegacy(", start))}; return normalizeEdgeForCurrentGraph;`)(...Object.values(deps));
-  const nodes = new Map(["explore", "preview", "imageModel", "text", "style"].map(type => [type, { id: type, type, data: {} }]));
+  const nodes = new Map(["explore", "preview", "imageModel", "text", "style", "image", "character", "transfer", "camera"].map(type => [type, { id: type, type, data: {} }]));
   const edge = (fromPort, target, toPort, source = "explore", color = "blue") => ({ id: `${source}:${fromPort}:${target}`, from: { nodeId: source, port: fromPort }, to: { nodeId: target, port: toPort }, color });
-  const removed = [edge("styleOut", "imageModel", "styleIn"), edge("promptOut", "text", "promptIn")];
-  const kept = [edge("imageOut", "preview", "sourceIn"), edge("imageOut", "imageModel", "imagePromptIn"), edge("styleOut", "explore", "styleIn", "style", "purple")];
+  const removed = [edge("styleOut", "imageModel", "styleIn"), edge("promptOut", "text", "promptIn"), edge("styleOut", "explore", "styleIn", "style", "purple")];
+  const kept = [edge("imageOut", "preview", "sourceIn"), edge("imageOut", "imageModel", "imagePromptIn"),
+    edge("styleOut", "imageModel", "styleIn", "style", "purple"), edge("imageOut", "explore", "imageIn", "image"),
+    edge("characterOut", "explore", "characterIn", "character", "cyan"), edge("transferOut", "explore", "transferIn", "transfer", "pink"),
+    edge("cameraOut", "explore", "cameraIn", "camera", "red"), edge("promptOut", "explore", "promptIn", "text", "yellow")];
   assert.deepEqual([...removed, ...kept].map(item => normalize(item, nodes)).filter(Boolean), kept);
+  const runStart = editor.indexOf("const outcome = await runExploreGeneration(");
+  const run = editor.slice(runStart, editor.indexOf("loadOutputHistory();", runStart));
+  assert.doesNotMatch(run, /incoming\.styleIn/);
+  assert.match(run, /incoming\.cameraIn/);
 });
 
 test("legacy Explore style text cannot leak through text or image-reference prompt helpers", async () => {

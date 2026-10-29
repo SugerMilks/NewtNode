@@ -44,7 +44,6 @@ export const imageModelOptions = [
   imageModelNames.openAiImage25Flare,
   imageModelNames.seedream5Pro
 ];
-export const imageWorkspaceModelOptions = [...imageModelOptions];
 export const creativeImageDefaultModel = imageModelNames.openAiImage25Sunburst;
 export const storyboardImageDefaultModel = imageModelNames.openAiImage25Flare;
 export const coverageModelOptions = [
@@ -179,14 +178,14 @@ export const videoModelNames = {
   wanFunControl: "Wan Fun Control",
   sam3Video: "SAM 3 Video"
 };
+export const videoDefaultModel = videoModelNames.seedance25;
 export const videoModelOptions = [
-  videoModelNames.seedance,
   videoModelNames.seedance25,
+  videoModelNames.seedance,
   videoModelNames.klingO3Pro,
   videoModelNames.klingO34k,
   videoModelNames.minimaxH3
 ];
-export const videoWorkspaceModelOptions = [...videoModelOptions];
 export const defaultModelPreferences = {
   image: Object.fromEntries(imageModelOptions.map((model) => [model, model === imageModelNames.openAiImage2 || isOpenAiImage25Model(model) || isSeedream5ProModel(model) || isNanoBanana21Model(model)])),
   video: Object.fromEntries(videoModelOptions.map((model) => [model, true]))
@@ -198,24 +197,23 @@ export function normalizeModelPreferences(value = {}) {
   const video = Object.fromEntries(videoModelOptions.map((model) => [model, Boolean(incomingVideo[model] ?? defaultModelPreferences.video[model])]));
 
   if (!Object.values(image).some(Boolean)) image[imageModelNames.openAiImage2] = true;
-  if (!Object.values(video).some(Boolean)) video[videoModelNames.seedance] = true;
+  if (!Object.values(video).some(Boolean)) video[videoDefaultModel] = true;
 
   return { image, video };
 }
-export function enabledImageModelOptions(preferences, { workspaceOnly = false } = {}) {
+export function enabledImageModelOptions(preferences) {
   const normalized = normalizeModelPreferences(preferences);
-  return (workspaceOnly ? imageWorkspaceModelOptions : imageModelOptions).filter((model) => normalized.image[model]);
+  return imageModelOptions.filter((model) => normalized.image[model]);
 }
-export function enabledVideoModelOptions(preferences, { workspaceOnly = false } = {}) {
+export function enabledVideoModelOptions(preferences) {
   const normalized = normalizeModelPreferences(preferences);
-  const options = workspaceOnly ? videoWorkspaceModelOptions : videoModelOptions;
-  return options.filter((model) => normalized.video[model]);
+  return videoModelOptions.filter((model) => normalized.video[model]);
 }
 export function firstEnabledImageModel(preferences) {
   return enabledImageModelOptions(preferences)[0] || imageModelNames.openAiImage2;
 }
-export function firstEnabledVideoModel(preferences, { workspaceOnly = false } = {}) {
-  return enabledVideoModelOptions(preferences, { workspaceOnly })[0] || videoModelNames.seedance;
+export function firstEnabledVideoModel(preferences) {
+  return enabledVideoModelOptions(preferences)[0] || videoDefaultModel;
 }
 
 export const model3DNames = {
@@ -256,6 +254,7 @@ export const patinaMapOptions = [
   { id: "height", label: "Height" }
 ];
 export const utilityVideoModelNames = {
+  videoOutpaint: "Video Outpaint",
   wanFunControl: "Wan Fun Control",
   extractFrame: "Extract Frame",
   colorIdMatte: "Color ID Matte",
@@ -328,6 +327,7 @@ export const utilityModelDescriptions = {
   [utilityImageModelNames.patina]: "Generates PBR texture maps such as basecolor, normal, roughness, metalness, and height.",
   [utilityImageModelNames.sam3Image]: "Segments prompted objects in an image and returns the masked result.",
   [utilityImageModelNames.birefnetImage]: "Removes an image background with BiRefNet and can optionally return the mask.",
+  [utilityVideoModelNames.videoOutpaint]: "Expand video framing with Seedance Edit (Fal or Atlas) or Wan VACE (Fal). Restore the original source over the generated extension.",
   [utilityVideoModelNames.wanFunControl]: "Uses a control video, optional reference image, and prompt to guide a new video.",
   [utilityVideoModelNames.extractFrame]: "Captures the current frame from a connected video and outputs it as a still image.",
   [utilityVideoModelNames.colorIdMatte]: "Creates a black and white ID matte video from frames matching a picked source-video color.",

@@ -48,7 +48,9 @@ export function resizePlainTextNode(startSize = {}, delta = {}) {
 }
 
 export function estimatedNodeWidth(type) {
+  if (type === "cameraCoverage") return 780;
   if (type === "output") return 420;
+  if (type === "vector") return 900;
   if (type === "editor") return 1100;
   if (type === "explore") return 650;
   if (type === "myNewt") return 410;
@@ -65,7 +67,9 @@ export function estimatedNodeWidth(type) {
 }
 
 export function estimatedNodeHeight(type) {
+  if (type === "cameraCoverage") return 1040;
   if (type === "output") return 590;
+  if (type === "vector") return 1020;
   if (type === "editor") return 470;
   if (type === "explore") return 680;
   if (type === "myNewt") return 650;
@@ -140,11 +144,21 @@ export function pointInRect(rect, point) {
   return point.x >= rect.left && point.x <= rect.right && point.y >= rect.top && point.y <= rect.bottom;
 }
 
-export function localPortPointFromRects(portRect, nodeRect, renderedScale = 1) {
+export function localPortPointFromRects(portRect, nodeRect, renderedScale = 1, clipRect = null) {
   const scale = Number.isFinite(renderedScale) && renderedScale > 0 ? renderedScale : 1;
+  let x = portRect.left + portRect.width / 2;
+  let y = portRect.top + portRect.height / 2;
+  // Clipped ports retain an anchor at the visible scroll edge, never at the
+  // hidden element's off-node coordinates. Work in screen pixels before scaling.
+  if (clipRect) {
+    const insetX = Math.min(portRect.width / 2, Math.max(0, clipRect.right - clipRect.left) / 2);
+    const insetY = Math.min(portRect.height / 2, Math.max(0, clipRect.bottom - clipRect.top) / 2);
+    x = clamp(x, clipRect.left + insetX, clipRect.right - insetX);
+    y = clamp(y, clipRect.top + insetY, clipRect.bottom - insetY);
+  }
   return {
-    x: (portRect.left + portRect.width / 2 - nodeRect.left) / scale,
-    y: (portRect.top + portRect.height / 2 - nodeRect.top) / scale
+    x: (x - nodeRect.left) / scale,
+    y: (y - nodeRect.top) / scale
   };
 }
 

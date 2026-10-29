@@ -1,0 +1,35 @@
+.project-canvas-area { min-width: 0; min-height: 0; display: flex; flex-direction: column; position: relative; overflow: visible; }
+.project-canvas-area > .node-canvas { flex: 1; min-height: 0; }
+.project-canvas-tabs { display: flex; align-items: center; gap: 4px; min-width: 0; position: relative; z-index: 35; padding: 0 0 8px; margin: 0 12px 0 50px; color: rgba(244, 240, 232, .58); }
+.canvas-tab-strip { display: flex; align-items: center; gap: 4px; overflow-x: auto; scrollbar-width: thin; min-width: 0; flex: 1; }
+.canvas-tab-item { display: flex; align-items: center; flex: 0 0 auto; min-width: 0; max-width: min(240px, 100%); height: 26px; box-sizing: border-box; border: 1px solid transparent; border-radius: 999px; background: rgba(255, 255, 255, .045); }
+.canvas-tab-item.active { background: #ddc631; color: #121212; }
+.canvas-tab-item.is-dragging { opacity: .45; }
+.canvas-tab-item > button[draggable="true"] { cursor: grab; user-select: none; }
+.canvas-tab-item.is-dragging > button { cursor: grabbing; }
+.canvas-tab-drop-indicator { position: absolute; width: 2px; border-radius: 1px; background: #ddc631; box-shadow: 0 0 0 1px #111; pointer-events: none; }
+.canvas-tab-item > button { display: flex; align-items: center; justify-content: center; gap: 4px; background: transparent; border: 0; border-radius: 999px; color: inherit; height: 24px; padding: 0 8px; font-size: 12px; font-weight: 600; line-height: 1; letter-spacing: 0; cursor: pointer; min-width: 0; }
+.canvas-tab-item > button > svg { flex-shrink: 0; }
+.canvas-tab-item > button > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.canvas-tab-item:not(.active):hover, .canvas-tab-tool:hover { background: #242424; color: #f3f0e9; }
+.canvas-tab-item.active > button:hover { background: rgba(0, 0, 0, .06); }
+.canvas-tab-item > button:focus-visible, .canvas-tab-tool:focus-visible { outline: 2px solid currentColor; outline-offset: -3px; }
+.canvas-tab-item input { width: 160px; min-width: 0; height: 22px; box-sizing: border-box; color: #121212; background: rgba(255, 255, 255, .3); border: 1px solid rgba(0, 0, 0, .25); border-radius: 999px; margin-left: 1px; padding: 0 8px; font-size: 12px; font-weight: 600; letter-spacing: 0; }
+.canvas-tab-tool { flex: 0 0 32px; align-self: center; width: 32px; height: 32px; display: grid; place-items: center; background: transparent; border: 0; color: inherit; border-radius: 999px; cursor: pointer; }
+.canvas-tab-popover { position: absolute; top: calc(100% - 4px); right: 42px; width: min(260px, calc(100% - 16px)); padding: 8px; border: 1px solid #393939; border-radius: 6px; background: #1d1d1d; box-shadow: 0 8px 24px #0006; display: grid; gap: 3px; }
+.canvas-tab-popover.canvas-tab-context-menu { left: 0; right: auto; overflow-y: auto; overscroll-behavior: contain; }
+.canvas-tab-context-menu button > svg { flex-shrink: 0; }
+.canvas-tab-popover button { background: transparent; border: 0; padding: 9px; color: #e2e2dd; display: flex; align-items: center; gap: 10px; text-align: left; overflow-wrap: anywhere; border-radius: 4px; cursor: pointer; }
+.canvas-tab-popover button:hover { background: #303030; }
+.canvas-tab-popover button:disabled { opacity: .35; cursor: default; }
+.canvas-tab-popover input { min-width: 0; width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid #454545; border-radius: 4px; background: #111; color: #eee; }
+.canvas-search-results { max-height: 280px; overflow-y: auto; display: grid; }
+.canvas-search-results [aria-current="page"] { color: #e6d43a; }
+.canvas-working { animation: canvas-working-spin 1s linear infinite; flex-shrink: 0; }
+@keyframes canvas-working-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .canvas-working { animation: none; } }
+.node-card[hidden] { display: none !important; }
+.project-output-scope { display: flex; gap: 2px; padding: 0 0 8px; }
+.project-output-scope button { flex: 1; min-width: 0; font-size: 11px; padding: 6px 3px; border: 0; border-radius: 4px; background: #171717; color: #aaa; }
+.project-output-scope button[aria-pressed="true"] { background: #30302a; color: #efe9b8; }
+@media (max-width: 700px) { .canvas-tab-popover { right: 4px; } .canvas-tab-item { max-width: min(160px, 100%); } }

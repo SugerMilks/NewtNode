@@ -25,7 +25,18 @@
 .editor-range-controls { gap: 3px; }
 .editor-range-controls output { font: 11px ui-monospace, SFMono-Regular, monospace; color: #bdc0b4; width: 80px; text-align: center; }
 .editor-view-tools { margin-left: auto; }
-.editor-scroll { overflow: auto; max-height: 600px; scrollbar-color: #55564f #171916; scrollbar-width: auto; overscroll-behavior: contain; }
+.editor-scroll { overflow: auto; max-height: 600px; scrollbar-color: auto; scrollbar-width: auto; overscroll-behavior: contain; }
+.editor-scroll::-webkit-scrollbar { width: 10px; height: 0; }
+.editor-scroll::-webkit-scrollbar-track { background: #171916; }
+.editor-scroll::-webkit-scrollbar-thumb { background: #55564f; border: 2px solid #171916; border-radius: 4px; }
+.editor-scrollbar-row { flex-shrink: 0; padding: 5px 12px 5px 148px; background: #181b17; border-top: 1px solid #383936; border-bottom: 1px solid #383936; }
+.editor-scrollbar { position: relative; height: 16px; background: #0d100d; border-radius: 4px; cursor: pointer; touch-action: none; }
+.editor-scrollbar:focus-visible { outline: 2px solid #dfcd2c; outline-offset: 2px; }
+.editor-scrollbar-thumb { position: absolute; top: 3px; height: 10px; background: #777d72; border: 1px solid #9aa18f; border-radius: 4px; cursor: grab; }
+.editor-scrollbar:hover .editor-scrollbar-thumb, .editor-scrollbar:focus-visible .editor-scrollbar-thumb { background: #9ba38f; }
+.editor-scrollbar:active .editor-scrollbar-thumb { cursor: grabbing; }
+.editor-scrollbar[aria-disabled="true"] { cursor: default; }
+.editor-scrollbar[aria-disabled="true"] .editor-scrollbar-thumb { opacity: .35; cursor: default; }
 .editor-track-table { position: relative; min-width: 100%; }
 .editor-ruler-row { display: flex; height: 44px; background: #181b17; position: sticky; top: 0; z-index: 4; }
 .editor-track-head { position: sticky; left: 0; width: 148px; flex: 0 0 148px; display: flex; align-items: center; padding: 0 9px; gap: 2px; background: #22251f; border-right: 1px solid #43463d; z-index: 3; }

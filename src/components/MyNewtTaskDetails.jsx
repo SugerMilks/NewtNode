@@ -15,6 +15,7 @@ export function MyNewtTaskDetails({ job, focusNode }) {
       {job.execution === "local" ? <div className="my-newt-estimate">$0.00 · Local</div> : <div className="my-newt-estimate">Media estimate: {job.plan.estimatedGenerationCost == null ? "Unpriced" : formatRunCost(job.plan.estimatedGenerationCost)} <span title="Reasoning, quality checks, retries and variable provider usage are additional estimated costs.">+ LLM usage</span></div>}
     </details>}
     {!!job.skills?.items?.length && <details className="my-newt-plan"><summary>Task skills</summary><ul>{job.skills.items.map(item => <li key={item.id}>{item.title} · {item.source} v{item.baseVersion || item.version} · {item.revision.slice(0, 8)}</li>)}</ul></details>}
+    {!!job.lessons?.length && <details className="my-newt-plan"><summary>Applied lessons</summary><ul>{job.lessons.map(item => <li key={item.id}>{item.title} · {item.scope} · v{item.revision}</li>)}</ul></details>}
     {job.pending?.operation === "run" && <section className="my-newt-run-preview" aria-label="Planned generation">
       {!preview ? <span><Loader2 size={14} /> Preparing run details...</span> : <>
         <strong>{preview.title}</strong>

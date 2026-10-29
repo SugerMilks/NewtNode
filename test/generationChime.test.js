@@ -20,3 +20,12 @@ test("generation chime stays silent for individual progress, failures, and loade
   assert.equal(shouldNotifyNodeGenerationComplete(node("text", "text", "running"), node("text", "text", "complete")), false);
   assert.equal(shouldNotifyNodeGenerationComplete(node("image", "imageModel", "complete"), node("image", "imageModel", "complete")), false);
 });
+
+
+test("Vector chimes only for a newly completed request, not restoration or uncertain recovery", () => {
+  assert.equal(shouldNotifyNodeGenerationComplete(node("v", "vector", "running"), node("v", "vector", "complete")), true);
+  assert.equal(shouldNotifyNodeGenerationComplete(node("v", "vector", "error"), node("v", "vector", "complete")), false);
+  assert.equal(shouldNotifyNodeGenerationComplete(node("v", "vector", "complete"), node("v", "vector", "complete")), false);
+  assert.equal(shouldNotifyNodeGenerationComplete(node("v", "vector", "running"), node("v", "vector", "error")), false);
+  assert.equal(shouldNotifyNodeGenerationComplete(null, node("v", "vector", "complete")), false);
+});

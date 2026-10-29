@@ -1,6 +1,7 @@
 import { appendResultItems } from "./mediaResults.js";
 
 export function nodeBatchCount(node, maxCount = 4) {
+  if (node.type === "utility" && node.data.utilityMode === "video" && node.data.utilityVideoModel === "Video Outpaint") return 1;
   const count = Number(node.data.batchCount || 1);
   const max = Math.max(1, Number(maxCount) || 4);
   return Math.min(max, Math.max(1, Number.isFinite(count) ? count : 1));

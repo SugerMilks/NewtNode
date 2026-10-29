@@ -22,6 +22,9 @@ test("sidebar presets are direct menu actions, with delete actions only for user
   for (const selectedId of ["system", "user", ""]) {
     const html = render(selectedId);
     assert.match(html, /aria-haspopup="menu" aria-expanded="false"/);
+    assert.match(html, /aria-label="Preset Workflows"/);
+    assert.match(html, /lucide-workflow/);
+    assert.doesNotMatch(html, /<span>Preset Workflow<\/span>|lucide-chevron-down/);
     for (const name of ["Standard Workflow \\(System\\)", "My workflow \\(User\\)"]) {
       const insert = html.match(new RegExp(`<button[^>]*role="menuitem"[^>]*aria-label="Insert ${name}"[^>]*>`))[0];
       assert.ok(!insert.includes('disabled=""'));
@@ -31,7 +34,7 @@ test("sidebar presets are direct menu actions, with delete actions only for user
   }
 });
 
-test("preset selector is below Recent Projects in the sidebar, never in the Newt node", () => {
+test("project menu icons share the sidebar header, never the Newt node", () => {
   const html = renderToStaticMarkup(React.createElement(module.exports.MyNewtNodeBody, {
     node: { id: "newt", data: {} }, config: { input: [] }, incoming: {}, controller: { presets: presets("system") }
   }));
@@ -39,7 +42,12 @@ test("preset selector is below Recent Projects in the sidebar, never in the Newt
   const editor = readFileSync(new URL("../src/NodeEditor.jsx", import.meta.url), "utf8");
   const sidebar = editor.slice(editor.indexOf('<aside className="node-toolbar">'), editor.indexOf("</aside>"));
   assert.ok(sidebar.indexOf("<PresetWorkflowPicker") > sidebar.indexOf("Recent Projects"));
-  assert.ok(sidebar.indexOf("<PresetWorkflowPicker") < sidebar.indexOf("visibleNodeCatalog.map"));
+  assert.ok(sidebar.indexOf("<PresetWorkflowPicker") < sidebar.indexOf('className="project-tools"'));
+  assert.match(sidebar, /<SidebarMenu label="File" icon=\{FolderOpen\}/);
+  assert.match(sidebar, /<SidebarMenu label="Recent Projects" icon=\{FolderClock\}/);
+  assert.doesNotMatch(sidebar, /<span>Nodes<\/span>|file-menu-trigger|project-picker-trigger/);
+  assert.match(sidebar, /<span>New Project<\/span>/);
+  for (const action of ["saveProject", "saveProjectAsLocalFile", "openWorkflowFromSystemPicker", "importWorkflowFromSystemPicker"]) assert.ok(sidebar.includes(`onClick={() => ${action}()}`));
 });
 
 test("sidebar retains busy protection and recoverable errors without a second setup panel", () => {

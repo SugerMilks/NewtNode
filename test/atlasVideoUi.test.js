@@ -7,17 +7,70 @@ import { buildSync } from "esbuild";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { parseFragment } from "parse5";
-import { videoModelOptions } from "../src/modelOptions.js";
+import { videoDefaultModel, videoModelNames, videoModelOptions, enabledVideoModelOptions, firstEnabledVideoModel, normalizeModelPreferences } from "../src/modelOptions.js";
 
 const source = readFileSync(new URL("../src/NodeEditor.jsx", import.meta.url), "utf8");
 const compiled = buildSync({
-  stdin: { contents: `${source}\nexport { NodeBody, connectedAssetItems, runVideoModelGeneration, videoModelSelectionPatch, normalizeCurrentNode };`, resolveDir: fileURLToPath(new URL("../src", import.meta.url)), loader: "jsx" },
+  stdin: { contents: `${source}\nexport { NodeBody, connectedAssetItems, runVideoModelGeneration, videoModelSelectionPatch, normalizeCurrentNode, createDefaultNodeData };`, resolveDir: fileURLToPath(new URL("../src", import.meta.url)), loader: "jsx" },
   bundle: true, write: false, platform: "node", format: "cjs", packages: "external", jsx: "automatic",
   define: { "import.meta.env": "{}" }, external: ["/newt-mark.png"], loader: { ".css": "empty" }
 });
 const module = { exports: {} };
 new Function("require", "module", "exports", compiled.outputFiles[0].text)(createRequire(import.meta.url), module, module.exports);
 const { NodeBody } = module.exports;
+
+test("fresh video defaults select Seedance 2.5 without enabling Draft or editing", () => {
+  const { createDefaultNodeData } = module.exports;
+  assert.equal(videoDefaultModel, videoModelNames.seedance25);
+  const data = createDefaultNodeData("videoModel", "Video Model", 1);
+  assert.equal(data.model, videoDefaultModel);
+  assert.equal(data.duration, "15 seconds");
+  assert.equal(data.resolution, "720p");
+  assert.equal(data.aspectRatio, "16:9 (Landscape)");
+  assert.equal(data.generateAudio, true);
+  assert.equal(data.seedanceDraft === true, false);
+  assert.equal(data.seedanceTask || "reference", "reference");
+  assert.equal(createDefaultNodeData("frameIt", "Frame It", 1).frameItVideoModel, videoDefaultModel);
+  assert.equal(createDefaultNodeData("skillDirector", "Director", 1).skillVideoModel, videoDefaultModel);
+  for (const provider of ["fal", "krea", "atlas"]) {
+    const view = renderVideo(data.model, { provider, data });
+    assert.equal(hasAttr(option(view, videoDefaultModel), "selected"), true);
+    assert.equal(attr(view.elements.find(element => attr(element, "aria-label") === "Seedance Draft mode"), "aria-checked"), "false");
+  }
+});
+
+test("video creation prefers Seedance 2.5 while respecting disabled models", () => {
+  const start = source.indexOf("  function createNodeData(");
+  const end = source.indexOf("\n  function ", start + 1);
+  assert.ok(start >= 0 && end > start);
+  const onlyKling = { video: Object.fromEntries(videoModelOptions.map(model => [model, model === videoModelNames.klingO3Pro])) };
+  const disabled25 = { video: { [videoDefaultModel]: false } };
+  const allDisabled = { video: Object.fromEntries(videoModelOptions.map(model => [model, false])) };
+  for (const [preferences, expected] of [[{}, videoDefaultModel], [disabled25, videoModelNames.seedance], [onlyKling, videoModelNames.klingO3Pro], [allDisabled, videoDefaultModel]]) {
+    const enabled = enabledVideoModelOptions(preferences);
+    const create = new Function("createDefaultNodeData", "enabledVideoModels", "videoDefaultModel", "videoModelSelectionPatch", `${source.slice(start, end)}\nreturn createNodeData;`)(module.exports.createDefaultNodeData, enabled, videoDefaultModel, module.exports.videoModelSelectionPatch);
+    assert.equal(create("videoModel", "Video Model", 1).model, expected);
+    assert.equal(firstEnabledVideoModel(preferences), expected);
+  }
+  assert.equal(normalizeModelPreferences(disabled25).video[videoDefaultModel], false);
+});
+
+test("new video defaults do not migrate saved models or legacy missing-model choices", () => {
+  const { normalizeCurrentNode } = module.exports;
+  for (const model of videoModelOptions) {
+    const node = { id: "saved", type: "videoModel", data: { model, prompt: "Keep this scene", resultUrl: "/outputs/existing.mp4", resultItems: [{ url: "/outputs/existing.mp4", type: "video" }] } };
+    const before = structuredClone(node);
+    const reopened = normalizeCurrentNode(node);
+    assert.equal(reopened.data.model, model);
+    assert.equal(reopened.data.prompt, before.data.prompt);
+    assert.equal(reopened.data.resultUrl, before.data.resultUrl);
+    assert.deepEqual(reopened.data.resultItems, before.data.resultItems);
+    assert.deepEqual(node, before);
+    assert.equal(normalizeCurrentNode({ id: "frame", type: "frameIt", data: { frameItVideoModel: model } }).data.frameItVideoModel, model);
+  }
+  assert.equal(normalizeCurrentNode({ id: "old", type: "videoModel", data: {} }).data.model, videoModelNames.seedance);
+  assert.equal(normalizeCurrentNode({ id: "old-frame", type: "frameIt", data: {} }).data.frameItVideoModel, videoModelNames.seedance);
+});
 
 function renderVideo(model, { provider = "atlas", data = {}, incoming = {} } = {}) {
   const saved = { model, prompt: "A quiet scene.", duration: "5 seconds", resolution: "720p", aspectRatio: "16:9", settingsOpen: true, ...data };

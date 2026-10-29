@@ -3,6 +3,8 @@ import { Slice, Play, Pause, Camera, Undo2, Redo2, Magnet, Link2, Unlink2, Lock,
   Plus, Trash2, Copy, ZoomIn, ZoomOut, Scan, MonitorPlay, Settings2, Download, Loader2, X, ChevronFirst, ChevronLast, Brackets } from "lucide-react";
 import { PortHandle } from "./NodePorts.jsx";
 import { EditorMonitor } from "./EditorMonitor.jsx";
+import { EditorTimelineScrollbar, useEditorTimelineViewport } from "./EditorTimelineViewport.jsx";
+import { editorTrackHeaderWidth } from "../editorViewport.js";
 import { editorPlayback } from "../editorPlayback.js";
 import { editorApi } from "../api/newtApi.js";
 import { chooseEditorExportPath } from "../editorExport.js";
@@ -59,13 +61,17 @@ export function EditorNodeBody({ node, config, sources = [], workflowContext = {
   const timeline = draft || saved, latest = React.useRef({});
   latest.current = { node, saved, sources, workflowContext, onUpdate, onUndoSnapshot, onPreviewOpen };
   const range = editorRange(timeline), end = editorEnd(timeline), px = zoom / timeline.fps;
-  const minFrames = Math.ceil(840 / px), contentFrames = Math.max(minFrames, end + timeline.fps * 4), contentWidth = contentFrames * px;
   const job = node.data.editorExportJob, exporting = Boolean(job);
   const selected = editorSelection(timeline, selection, linked), selectedLocked = selected.some(c => timeline.tracks.find(t => t.id === c.trackId)?.locked);
   const linkedLocked = editorSelection(timeline, selection, true).some(c => timeline.tracks.find(t => t.id === c.trackId)?.locked);
   const currentClip = timeline.clips.find(c => c.id === selection[0]), currentAsset = timeline.assets.find(a => a.id === currentClip?.assetId);
   const canUndo = undo.current.length > 0, canRedo = redo.current.length > 0;
   const step = [1, 2, 5, 10, 15, 30, 60, 120, 300].find(s => s * zoom >= 85) || 600;
+  const scrollId = React.useId();
+  const { viewport, scrollTo, prepareFit } = useEditorTimelineViewport({ scroller, zoom, fps: timeline.fps, frame: transport.frame, contentEnd: end });
+  // One viewport of empty tail allows playhead-anchored zoom even on a short sequence.
+  const tail = Math.max(timeline.fps * 4, Math.ceil((viewport.viewportWidth - editorTrackHeaderWidth) / px));
+  const contentFrames = Math.max(Math.ceil(840 / px), end + tail), contentWidth = contentFrames * px;
 
   React.useEffect(() => {
     mounted.current = true; player.mount(); player.setTimeline(latest.current.saved); player.seek(latest.current.node.data.editorPlayhead || 0);
@@ -189,7 +195,10 @@ export function EditorNodeBody({ node, config, sources = [], workflowContext = {
   function split() { perform(t => editorSplit(t, player.getSnapshot().frame, selection, linked)); }
   function remove() { perform(t => editorDelete(t, selection, linked)); setSelection([]); }
   function changeZoom(next) { onUpdate(node.id, { editorZoom: normalizeEditorZoom(next) }); }
-  function fit() { changeZoom((scroller.current?.clientWidth - 148 || 700) / Math.max(5, end / timeline.fps + 1)); }
+  function fit() {
+    const next = (scroller.current?.clientWidth - 148 || 700) / Math.max(5, end / timeline.fps + 1);
+    prepareFit(next); changeZoom(next);
+  }
   function copyClips(event, cut = false) {
     if (event.target.closest("input,textarea,select,[contenteditable='true']")) return;
     event.preventDefault(); event.stopPropagation();
@@ -276,7 +285,7 @@ export function EditorNodeBody({ node, config, sources = [], workflowContext = {
   }
   function handleBodyPointerDown(event) {
     if (!event.target.closest(".editor-gap-menu")) setGapMenu(null);
-    if (event.button !== 0 || event.target === scroller.current || event.target.closest("input,textarea,select,button,a,label,[contenteditable],.editor-ruler,.editor-track-lane,.editor-gap-menu")) {
+    if (event.button !== 0 || event.target === scroller.current || event.target.closest("input,textarea,select,button,a,label,[contenteditable],.editor-ruler,.editor-track-lane,.editor-gap-menu,.editor-scrollbar")) {
       event.stopPropagation();
       return;
     }
@@ -392,7 +401,7 @@ export function EditorNodeBody({ node, config, sources = [], workflowContext = {
       <label>Height<input aria-label="Sequence height" type="number" min="2" max="4096" step="2" value={timeline.height} onChange={event => perform(t => ({ ...t, height: Number(event.target.value) }))} /></label>
       <span>MP4 / H.264 + AAC</span></div>}
     {monitor && <EditorMonitor nodeId={node.id} timeline={timeline} allowNodeDrag />}
-    <div className="editor-scroll" ref={scroller}>
+    <div className="editor-scroll" ref={scroller} id={scrollId}>
       <div className="editor-track-table" style={{ width: contentWidth + 148 }}>
         <div className="editor-ruler-row"><div className="editor-track-head editor-ruler-head"><span>{timeline.fps} fps</span></div>
           <div className="editor-ruler" style={{ width: contentWidth }} role="slider" aria-label="Timeline playhead" aria-valuemin={0} aria-valuemax={end} aria-valuenow={transport.frame} tabIndex={0} onPointerDown={beginScrub}>
@@ -419,6 +428,7 @@ export function EditorNodeBody({ node, config, sources = [], workflowContext = {
         <div className="editor-playhead" style={{ left: 148 + transport.frame * px, height: 44 + timeline.tracks.length * 68 }} aria-hidden="true"><span /></div>
       </div>
     </div>
+    <EditorTimelineScrollbar viewport={viewport} scrollTo={scrollTo} controls={scrollId} />
     <div className="editor-bottom-bar"><div className="editor-add-tracks"><button onClick={() => perform(t => editorAddTrack(t, "video"))} title="Add video track"><Plus size={13} />Video</button><button onClick={() => perform(t => editorAddTrack(t, "audio"))} title="Add audio track"><Plus size={13} />Audio</button></div>
       <span>{importing ? "Loading media..." : transport.buffering ? "Buffering..." : `${timeline.clips.length} clips`}</span><output>{editorTimecode(Math.max(0, range.end - range.start), timeline.fps)}</output>
       <div className="editor-tool-group"><Tool icon={Unlink2} label="Unlink selected audio/video" disabled={!selected.some(c => c.linkGroup) || linkedLocked} onClick={unlinkSelection} /><Tool icon={Copy} label="Duplicate clips (Cmd/Ctrl+D)" disabled={!selected.length || selectedLocked} onClick={() => perform(t => editorDuplicate(t, selection, linked))} /><Tool icon={Trash2} label="Delete clips (Delete / Backspace)" disabled={!selected.length || selectedLocked} onClick={remove} /></div></div>

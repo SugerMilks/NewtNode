@@ -14,6 +14,7 @@ Current release: `v3.0.0-beta.0`
 
 ## What It Does
 
+- Open directly into Projects, with Stats and Settings available in the top navigation. Each project can contain multiple canvases. Image and video generation live in their corresponding nodes; there are no separate Image or Video pages.
 - Build media workflows visually with typed node ports and dependency-aware `Run All`.
 - Generate image, video, audio, text, utility, and 3D outputs through local API routes.
 - Use the Composer node to block camera, pose, image planes, props, maquettes, and guide frames before generation.
@@ -48,6 +49,16 @@ Atlas supports **GPT Image 2, Image 2.5 Sunburst/Flare, and Nano Banana 2/Pro**,
 Provider-specific reference, duration, resolution, mask, and audio limits are validated before upload/submission. Unsupported settings fail clearly instead of dropping inputs or silently switching providers. Atlas Seedance 2.5 does **not** expose a `1920p` or native `4k` output option; explicitly supported super-resolution tiers are distinct. Paid submissions are never automatically retried or moved to another provider after failure. Video jobs have no NewtNode job-duration cutoff; read-only status checks keep polling the submitted job with bounded backoff.
 
 Atlas estimates use verified standard prices only, without promotional or account discounts. Token-billed or unverified costs remain variable/unknown, never zero. Atlas is wired into the existing weekly/manual pricing refresh using its [public pricing catalog](https://api.atlascloud.ai/api/v1/pricing/models). Verification used public schemas/catalogs and mocked requests; no paid generation or live API-key test was performed. [Atlas API reference](https://www.atlascloud.ai/docs/en/openapi-index).
+
+## Video Outpaint
+
+Choose **Utility > Video > Video Outpaint**, connect one source video, choose a target ratio, and use **Canvas Edit** to position or resize the output frame. **Prepare canvas** builds a local preview and mask without a paid generation. A connected black-padded Canvas video can optionally supply the framing instead.
+
+**Seedance Edit** uses the existing Seedance 2.5 editing route through Fal or Atlas; **Wan VACE 14B** uses Fal. Krea is not supported for this operation. Provider priority follows Settings; enable Fal, or disable Krea and enable Atlas for Seedance. Enter a prompt, or optionally use **Draft prompt** to analyze sampled frames with the active vision LLM (a separate API charge), then **Run Outpaint**. Only one video is submitted per run. No hidden paid QC, automatic paid retry, or cross-provider retry is added.
+
+**Restore source** preserves the original interior, with an adjustable inward blend at the boundary, and restores source audio. Final delivery is a ProRes MOV; the browser uses an MP4 display proxy while downloads and downstream nodes retain the MOV. Short Wan sources may repeat to meet its minimum frame count; Seedance preserves the requested segment length. Crop-only framing stays local. If local finishing fails, the paid raw render remains available with a warning. Inspect generated edges and motion before delivery.
+
+Adapted only the Video Outpaint feature and its required helpers from [kungfukoi/Newt_Node](https://github.com/kungfukoi/Newt_Node), reference commit `340e11e9868c20af0f15c0ee60bbe10d1c709969`. Other features from that branch were not merged.
 
 ## Audio Model
 
@@ -133,7 +144,7 @@ The release retains VS Git ancestry so clean `main` checkouts can update without
 
 ## Requirements
 
-- Node.js 20 or newer is recommended.
+- Node.js 22.13 or newer is required for PDF script import; Node.js 24 LTS or newer is recommended.
 - npm.
 - At least one supported provider API key for remote generation.
 - Fal is required for Fal-hosted models and utilities.
@@ -222,13 +233,19 @@ WorkflowName/
     manifest.json
 ```
 
-## Ideogram Image Generation
+## Ideogram Vector
 
-The **Image Model** node also offers **Ideogram 4.5** through the existing enabled Fal credential. With no connected images it generates from text. Connecting Image Prompt, Character or Mood Board images switches to reference editing: one source image and up to four guide images. **Source image** defaults to the first connected image and can be changed in Settings; the remaining images are guides. The other image models and the default model stay unchanged.
+Add **Vector** from the Nodes palette to create graphic artwork as editable SVGs using the existing enabled Fal key. **Text to vector** accepts a design brief and optional connected image references; **Vectorize image** converts one connected image, with a simpler-shapes option. Choose quality, aspect ratio and optional seed in Settings. Every explicit run adds a saved variant.
 
-Choose Low, Medium or High quality (High by default). Text-to-image offers 1K or 2K and supported aspect ratios, mapped to exact provider-native dimensions; 4K, Auto and 21:9 are unavailable in that mode. Prompt expansion is enabled by default and can be turned off. Reference editing uses Regular precision and automatic source proportions; Ideogram may reduce output dimensions. Text-only size and expansion controls are hidden during edits, with their settings retained for text runs. For masks or High precision use Image Edit. Switching from Extra High or Maximum maps to High; the edit-only Very Low maps to Low. Saved workflows retain these settings, source selection and generated results, and History records the returned seed and actual provider settings.
+**Font Reference** accepts a sample image or renders a local font file into a specimen. **Draw Layout** opens a popup sketch canvas with pen, eraser, shapes, arrows, text labels, undo/redo and optional reference underlays. Saved sketches remain editable; guidance images and backgrounds stay with the project. Both are optional Text-to-vector references, share the five-image limit with subjects/Mood Boards, and never start generation when applied. Exact font matching and composition remain model-dependent.
 
-The [Fal generation schema](https://fal.ai/models/ideogram/v4.5/api) and [reference edit schema](https://fal.ai/models/ideogram/v4.5/edit/api), verified October 4, 2026, accept prompts up to 10,000 characters including generated reference instructions, and one image per node batch request. References must be managed local images, at most 25 MB each, up to 24 megapixels and within 1:6 to 6:1 proportions. Missing or invalid references block the run before submission; they are never silently dropped. Cost is shown as variable until a reliable quote is available. Paid requests are not automatically retried or moved to another provider. This option is limited to the Image Model node; Character, Coverage, Storyboard and other workspaces keep their current model lists. Validation uses mocks; live entitlement and output quality still require an approved paid test.
+Inspect the SVG against light, dark or checker backgrounds. Settings and input connections are always visible, while Layers can be collapsed. Editable SVG and PNG files stay in the project's output storage; layer saves also retain an alpha matte. The image output connects to Preview and other image nodes using its PNG companion. All assets stay with saved workflow packages. SVG is validated as passive artwork before preview or export. Existing Ideogram 4.5 Image Edit and Image 2.5 workflows remain intact.
+
+Published estimates range from $0.13–$0.32 per generated SVG, or $0.10 per converted image, depending on the selected operation and references. Tests use mocks and local fixtures; live account access and output quality have not been tested with credits. See [the Vector guide](docs/ideogram-vector.md).
+
+## Ideogram 4.5 compatibility
+
+Ideogram 4.5 is currently available in **Image Edit**, while the new **Vector** node handles editable SVG artwork. Previously saved Ideogram Image Model nodes use the existing Nano Banana Pro migration and preserve their prompts, connections, results and History. Image 2.5 Sunburst and Flare generation, and the Image Edit default, remain unchanged.
 
 ## Image Editing
 

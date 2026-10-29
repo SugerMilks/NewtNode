@@ -15,6 +15,51 @@ function ensureOk(response, data, fallbackMessage) {
 }
 
 export async function fetchJsonApi(path, options = {}, label = "Request") {
+  if (["/api/output/validate", "/api/output/export"].includes(path) && ["svg", "alpha"].includes(JSON.parse(options.body || "{}").destinations?.image?.format)) {
+    const health = await getJson("/api/health", "Could not verify Vector export support.");
+    if (health.routes?.vectorArtworkEditor !== true) throw Object.assign(new Error("Restart NewtNode to activate SVG and alpha export. No files were exported."), { status: 409 });
+  }
+  if (path.startsWith("/api/vector-looks")) {
+    const health = await getJson("/api/health", "Could not verify saved looks support.");
+    if (health.routes?.vectorArtworkEditor !== true) throw new Error("Restart NewtNode to activate saved Vector looks.");
+    const response = await fetch(localApiFetchUrl(path), options);
+    return { response, data: await readJsonResponse(response, label) };
+  }
+  if (path.startsWith("/api/node/vector-layers/")) {
+    const health = await getJson("/api/health", "Could not verify Vector layer support.");
+    if (health.routes?.vectorLayers !== true) throw new Error("Restart NewtNode to activate Vector layers. Your artwork is unchanged.");
+    const layerBody = JSON.parse(options.body || "{}");
+    if (layerBody.editorVersion >= 2 && health.routes?.vectorLayerEditor !== true) throw new Error("Restart NewtNode to activate the expanded Vector Layers editor. Your artwork is unchanged.");
+    if (layerBody.editorVersion >= 3 && health.routes?.vectorLayerTransforms !== true) throw new Error("Restart NewtNode to activate moving and resizing Vector layers. Your artwork is unchanged.");
+    if (layerBody.editorVersion >= 4 && health.routes?.vectorLayerOrganization !== true) throw new Error("Restart NewtNode to activate Vector grouping and automatic backgrounds. Your artwork is unchanged.");
+    if (layerBody.editorVersion >= 5 && health.routes?.vectorLayerAutoGroups !== true) throw new Error("Restart NewtNode to activate automatic Text and Background groups. Your artwork is unchanged.");
+    if (layerBody.editorVersion >= 6 && health.routes?.vectorArtworkEditor !== true) throw new Error("Restart NewtNode to activate Edit Artwork, colors and editable text. Your original artwork is unchanged.");
+    const edits = (layerBody.operations || []).flatMap(operation => operation?.type === "batch" ? operation.operations || [] : [operation]);
+    if (edits.some(operation => operation?.type === "group" && operation.mode === "selection") && health.routes?.vectorSelectionGrouping !== true) throw new Error("Restart NewtNode to activate grouping across selected layers. Your original artwork is unchanged.");
+    options.signal?.throwIfAborted();
+    const response = await fetch(localApiFetchUrl(path), options);
+    return { response, data: await readJsonResponse(response, label) };
+  }
+  if (path === "/api/node/ideogram-vector" && options.method === "POST") {
+    const health = await getJson("/api/health", "Could not verify Ideogram Vector support.");
+    if (health.routes?.ideogramVector !== true) throw Object.assign(new Error("Restart NewtNode to activate Ideogram Vector. No generation was submitted."), { status: 409, noSubmission: true });
+    options.signal?.throwIfAborted();
+  }
+  if (path === "/api/node/camera-coverage" || path === "/api/node/camera-coverage-capture") {
+    const health = await getJson("/api/health", "Could not verify ReFrame support.");
+    if (health.routes?.cameraCoverage !== true) throw Object.assign(new Error("Restart NewtNode to activate ReFrame. No generation was submitted."), { status: 409 });
+    const body = JSON.parse(options.body || "{}");
+    if (path === "/api/node/camera-coverage" && body.kind === "pass" && body.protectFraming === true && health.routes?.cameraCoverageFraming !== true) {
+      throw Object.assign(new Error("Restart NewtNode to activate Protect Framing. No generation was submitted."), { status: 409 });
+    }
+    if (path === "/api/node/camera-coverage" && body.kind === "pass" && (body.pathMode === "travel" || body.poses?.length > 6) && health.routes?.cameraCoverageTravel !== true) {
+      throw Object.assign(new Error("Restart NewtNode to activate straight camera travel and updated path limits. No generation was submitted."), { status: 409 });
+    }
+  }
+  if (["/api/node/storyboard-plan-v2", "/api/node/storyboard-revise", "/api/node/storyboard-review", "/api/node/storyboard-script-build"].includes(path) && JSON.parse(options.body || "{}").storyboardCameraPersonality) {
+    const health = await getJson("/api/health", "Could not verify Storyboard Camera Personality support.");
+    if (health.routes?.storyboardCinematography !== true) throw new Error("Restart NewtNode to activate Storyboard Camera Personality. No AI planning was submitted.");
+  }
   if (path === "/api/node/generate-image") {
     const body = JSON.parse(options.body || "{}");
     if (isNanoBanana21Model(body.model)) {
@@ -34,7 +79,7 @@ export async function fetchJsonApi(path, options = {}, label = "Request") {
     }
   }
   const videoRequest = isVideoGenerationRequest(path, options);
-  if (videoRequest || isImageModelRequest(path, options) || path === "/api/node/explore-plan" || /^\/api\/node\/storyboard-(?:plan|plan-v2|revise|review|qc)$/.test(path)) {
+  if (videoRequest || isImageModelRequest(path, options) || path.startsWith("/api/node/camera-coverage") || path === "/api/node/ideogram-vector" || path === "/api/node/explore-plan" || /^\/api\/node\/storyboard-(?:plan|plan-v2|revise|review|qc|script-(?:inspect|page|analyze|build))$/.test(path)) {
     // Never replay a paid media POST after an uncertain response, including via Newt.
     try {
       const response = await fetch(requestUrl, options);
@@ -129,6 +174,7 @@ function canRetryLocalApi(path) {
 }
 
 function localApiRouteKey(path) {
+  if (path.includes("video-outpaint")) return "videoOutpaint";
   if (path.startsWith("/api/output/")) return "outputExport";
   if (path.startsWith("/api/editor/")) return "editorTimeline";
   if (path.includes("generate-audio")) return "generateAudio";
@@ -169,6 +215,26 @@ export const editorApi = {
   render: body => postJson("/api/editor/render", body, "Editor export"),
   job: id => getJson(`/api/editor/jobs/${encodeURIComponent(id)}`, "Editor export status"),
   cancel: id => requestData(`/api/editor/jobs/${encodeURIComponent(id)}`, { method: "DELETE" }, "Cancel Editor export")
+};
+
+export const cameraCoverageApi = {
+  start: body => postJson("/api/node/camera-coverage", body, "ReFrame"),
+  job: id => getJson(`/api/node/camera-coverage/${encodeURIComponent(id)}`, "ReFrame status"),
+  capture: body => postJson("/api/node/camera-coverage-capture", body, "Capture coverage shot")
+};
+
+export const ideogramVectorApi = {
+  looks: () => getJson("/api/vector-looks", "Saved Vector looks"),
+  saveLook: body => postJson("/api/vector-looks", body, "Save Vector look"),
+  removeLook: id => deleteJson(`/api/vector-looks/${encodeURIComponent(id)}`, "Remove Vector look"),
+  nameLayers: (body, { signal } = {}) => requestData("/api/node/vector-layers/name", { ...jsonBody({ ...body, editorVersion: body.editorVersion || 2 }), signal }, "Name vector layers"),
+  inspectLayers: (body, { signal } = {}) => requestData("/api/node/vector-layers/inspect", { ...jsonBody(body), signal }, "Vector layers"),
+  saveLayers: (body, { signal } = {}) => requestData("/api/node/vector-layers/save", { ...jsonBody(body), signal }, "Save vector layers"),
+  pricing: () => getJson("/api/node/ideogram-vector-pricing", "Vector pricing"),
+  generate: (body, { signal } = {}) => requestData("/api/node/ideogram-vector", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal
+  }, "Ideogram Vector"),
+  job: requestId => getJson(`/api/node/ideogram-vector/${encodeURIComponent(requestId)}`, "Vector request status")
 };
 
 export const outputApi = {
@@ -212,6 +278,27 @@ export const newtSkillsApi = {
   save: (id, body) => postJson(`/api/my-newt/skills/${encodeURIComponent(id)}`, body, "Could not save this skill."),
   reset: (id, expectedRevision) => postJson(`/api/my-newt/skills/${encodeURIComponent(id)}/reset`, { expectedRevision }, "Could not reset this skill.")
 };
+
+// Explicit single-attempt requests: a lost analysis response must never trigger another paid call.
+export async function newtLearningApi(action, body = {}, id = "") {
+  const health = await getJson("/api/health", "Could not check Watch Me support.");
+  if (!health?.routes?.myNewtLearning) throw new Error("Restart NewtNode to activate Watch Me and the learning library.");
+  if (action === "analyze" && !health.routes.myNewtLearningAnalysis) throw new Error("Restart NewtNode to activate the Watch Me analysis fix. No analysis was submitted.");
+  const base = "/api/my-newt/learning";
+  const read = action === "list" || action === "get";
+  const route = action === "list" ? base : action === "create" ? `${base}/sessions`
+    : action === "update" ? `${base}/lessons/${encodeURIComponent(id)}`
+      : `${base}/sessions/${encodeURIComponent(id)}${action === "get" ? "" : `/${action}`}`;
+  const url = localApiFetchUrl(`${route}${read ? `?projectId=${encodeURIComponent(body.projectId)}` : ""}`);
+  try {
+    const response = await fetch(url, { method: read ? "GET" : "POST", headers: { "Content-Type": "application/json", "X-Newt-Local": "1" },
+      ...(read ? {} : { body: JSON.stringify(body) }) });
+    return ensureOk(response, await readJsonResponse(response, "Newt learning"), "Could not update Newt learning.");
+  } catch (error) {
+    if (action === "analyze" && !error.status) throw new Error("The analysis response was interrupted and may have been billed. Reload the session to check its status. No automatic retry was submitted.");
+    throw error;
+  }
+}
 
 async function requireSystemPresetBackend() {
   const health = await getJson("/api/health", "Could not check the preset library.");
@@ -339,6 +426,7 @@ export const nodeApi = {
     if (body.version >= 2) {
       const health = await getJson("/api/health", "Could not verify Explore look controls.");
       if (health.routes?.exploreLookVariation !== true) throw new Error("Restart the NewtNode backend to activate Explore's new look controls. No planning or generation was submitted.");
+      if (body.version >= 3 && health.routes?.exploreArtDirection !== true) throw new Error("Restart the NewtNode backend to activate Explore's broader art directions. No planning or generation was submitted.");
     }
     return postJson("/api/node/explore-plan", body, "Explore planning");
   },
@@ -392,8 +480,20 @@ export const nodeApi = {
     return fetchJsonApi("/api/node/generate-image", jsonBody(body), label);
   },
 
-  planStoryboard(body, label = "Storyboard planning") {
+  async planStoryboard(body, label = "Storyboard planning") {
+    if (body.storyboardApproach === "Shot List") {
+      const health = await getJson("/api/health", "Could not verify Storyboard Shot List support.");
+      if (health.routes?.storyboardShotList !== true) throw new Error("Restart the NewtNode backend to activate Storyboard Shot List. No planning or generation was submitted.");
+    }
     return fetchJsonApi("/api/node/storyboard-plan-v2", jsonBody(body), label);
+  },
+
+  async storyboardScript(mode, body) {
+    if (!["inspect", "analyze", "build", "page"].includes(mode)) throw new Error("Unknown script import action.");
+    const health = await getJson("/api/health", "Could not verify PDF script import support.");
+    if (health.routes?.storyboardScriptImport !== true) throw new Error("Restart NewtNode to activate PDF script import. No AI analysis was submitted.");
+    const { response, data } = await fetchJsonApi(`/api/node/storyboard-script-${mode}`, jsonBody(body), "PDF script import");
+    return ensureOk(response, data, "PDF script import failed.");
   },
 
   reviseStoryboard(body) { return fetchJsonApi("/api/node/storyboard-revise", jsonBody(body), "Storyboard revision"); },
@@ -436,7 +536,24 @@ export const nodeApi = {
     return ensureOk(response, await readJsonResponse(response, "Draft completion"), "Could not finish the draft.");
   },
 
-  utilityVideo(body, label = "Utility video generation") {
+  async prepareVideoOutpaint(body) {
+    const health = await getJson("/api/health", "Could not verify Video Outpaint support.");
+    if (health.routes?.videoOutpaint !== true) throw new Error("Restart NewtNode to activate Video Outpaint. No generation was submitted.");
+    return requestData("/api/node/video-outpaint-prepare", jsonBody(body), "Could not prepare the outpainting canvas.");
+  },
+
+  async analyzeVideoOutpaint(body) {
+    let response;
+    try { response = await fetch(localApiFetchUrl("/api/node/video-outpaint-prompt"), jsonBody(body)); }
+    catch { throw new Error("Prompt analysis was interrupted. Check History before trying again; the request was not resubmitted."); }
+    return ensureOk(response, await readJsonResponse(response, "Outpainting prompt"), "Could not draft the outpainting prompt.");
+  },
+
+  async utilityVideo(body, label = "Utility video generation") {
+    if (body.model === "Video Outpaint") {
+      const health = await getJson("/api/health", "Could not verify Video Outpaint support.");
+      if (health.routes?.videoOutpaint !== true) throw new Error("Restart NewtNode to activate Video Outpaint. No generation was submitted.");
+    }
     return fetchJsonApi("/api/node/utility-video", jsonBody(body), label);
   }
 };
@@ -539,11 +656,19 @@ export const workflowApi = {
     return getJson(`/api/saved-workflows/${encodeURIComponent(fileName)}`, "Could not load workflow.");
   },
 
-  save(workflow) {
+  async save(workflow) {
+    if (workflow.canvases) {
+      const health = await getJson("/api/health", "Could not verify multi-canvas saving.");
+      if (!health.routes?.projectCanvases) throw new Error("Restart NewtNode to enable multi-canvas projects. Your current project has not been overwritten.");
+    }
     return postJson("/api/saved-workflows", workflow, "Could not save workflow.");
   },
 
-  registerPackage(workflow) {
+  async registerPackage(workflow) {
+    if ((workflow.workflow || workflow).graph?.canvases) {
+      const health = await getJson("/api/health", "Could not verify multi-canvas packages.");
+      if (!health.routes?.projectCanvases) throw new Error("Restart NewtNode to open multi-canvas packages safely.");
+    }
     return postJson("/api/saved-workflows/register-package", workflow, "Could not register workflow package.");
   },
 
