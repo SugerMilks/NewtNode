@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { storyboardContinuityRules, storyboardRenderSceneContext } from "../src/storyboardContinuity.js";
 import { storyboardPromptPolicy } from "../src/storyboardPromptPolicy.js";
 import { storyboardCameraRenderingPrompt } from "../src/storyboardCinematography.js";
 import { storyboardFrameContext } from "../src/storyboardWorkflow.js";
@@ -28,6 +29,7 @@ const styleConstants = new Function(`${editor.slice(editor.indexOf("const storyb
 const sceneReferenceMap = getFunction(editor, "storyboardSceneReferenceMapPrompt");
 const propReferenceMap = getFunction(editor, "storyboardPropReferenceMapPrompt");
 const buildPrompt = getFunction(editor, "buildStoryboardFramePrompt", {
+  storyboardContinuityRules, storyboardRenderSceneContext, connectedText: items => items.map(item => item.text).join("\n"),
   ...styleConstants, stylePresetPrompts, shotPresetPrompts, lensPresetPrompts, typePresetPrompts,
   storyboardPromptPolicy, storyboardCameraRenderingPrompt, storyboardCastPrompt, storyboardFrameContext, connectedDirectorPackageSource: () => null,
   storyboardAspectRatioForNode: () => "16:9", storyboardSceneReferenceMapPrompt: sceneReferenceMap,
@@ -62,6 +64,30 @@ test("the image prompt carries physical occupancy through current, previous and 
   assert.match(prompt, /PREVIOUS_FRAME\.png/);
   assert.match(prompt, /SPATIAL_ANCHOR\.png/);
   assert.match(prompt, /"Man sheet", defines @Man ONLY/);
+  assert.match(prompt, /WORLD-SPACE CONTINUITY/);
+  assert.match(prompt, /PROP STATE/);
+  assert.match(prompt, /CAMERA AXIS AND INSERTS/);
+  assert.match(prompt, /FRAME-LOCAL TIME/);
+});
+
+test("Shot List image and QC prompts keep the current laptop state and omit future authored reveals", () => {
+  const frame = { number: 4, shot: "MS", prompt: "@Woman reacts; laptop still faces @Man.", stateBefore: "Computer faces @Man", stateAfter: "Computer still faces @Man" };
+  const node = { data: { storyboardApproach: "Shot List", sceneDescription: "Two opposite seats at the cafe table." } };
+  const allShots = "Shot 5: Turn laptop toward @Woman. Shot 8: A whale appears outside.";
+  const options = { castReferences: [], activeLocationSources: [], activePropSources: [], hasSpatialAnchorReference: true };
+  const prompt = buildPrompt(node, frame, allShots, {}, {}, options);
+  assert.match(prompt, /Computer still faces @Man/);
+  assert.match(prompt, /Two opposite seats/);
+  assert.doesNotMatch(prompt, /Shot 5:|whale appears outside/);
+  assert.match(prompt, /explicit blocking changes override older prop states/);
+  const connected = buildPrompt(node, frame, allShots, { sceneDescriptionIn: [{ text: "Connected scene context" }] }, {}, options);
+  assert.match(connected, /Connected scene context/);
+  assert.doesNotMatch(connected, /Two opposite seats/);
+  const qcPrompt = getFunction(server, "storyboardQcReviewPrompt", { storyboardPromptPolicy, storyboardContinuityRules });
+  const qc = qcPrompt({ framePrompt: prompt, qcMode: "balanced" });
+  assert.equal(qc.split(storyboardContinuityRules).length, 2, "shared policy is not duplicated in a paid QC prompt");
+  assert.match(qc, /World-space and prop audit/);
+  assert.match(qc, /subtle performance|Subtle performance/);
 });
 
 for (const useStoryboardStyle of [undefined, true, false]) {
@@ -116,7 +142,7 @@ for (const useStoryboardStyle of [undefined, true, false]) {
   test(`${mode} review respects references without demanding their hues or re-describing outfits`, async () => {
     let request;
     const review = getFunction(server, "reviewStoryboardFrameWithOpenAi", {
-      storyboardQcCharacterInputs, storyboardQcUnavailable, storyboardQcReviewPrompt: getFunction(server, "storyboardQcReviewPrompt", { storyboardPromptPolicy }),
+      storyboardQcCharacterInputs, storyboardQcUnavailable, storyboardQcReviewPrompt: getFunction(server, "storyboardQcReviewPrompt", { storyboardPromptPolicy, storyboardContinuityRules }),
       runMediaDescriptionLlm: async (body) => { request = body; return { text: '{"pass":true}', usages: [] }; },
       storyboardVisionFalModel: "mock", storyboardVisionOpenAiModel: "mock", estimateTextProcessingCost: () => ({}),
       normalizeStoryboardQcResult: (value) => value, parseStoryboardPlanJson: JSON.parse

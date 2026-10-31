@@ -1,9 +1,10 @@
 import React from "react";
-import { ArrowUpRight, Brush, Check, Circle, Download, Eraser, Hand, LoaderCircle, Maximize, Minus, Pencil, Plus, Redo2, Scan, Square, Trash2, Type, Undo2, X } from "lucide-react";
-import { drawImageEditMarks, imageEditColors, imageEditHasPixels, imageEditPoint, imageEditSize } from "../imageEdit.js";
+import { ArrowUpRight, Brush, Check, Circle, Download, Eraser, Hand, LoaderCircle, Maximize, Minus, MoveHorizontal, Pencil, Plus, Redo2, Scan, Square, Trash2, Type, Undo2, X } from "lucide-react";
+import { drawImageEditMarks, imageEditColors, imageEditDefaultModel, imageEditModels, imageEditHasPixels, imageEditPoint, imageEditSize } from "../imageEdit.js";
 import { nodeApi } from "../api/newtApi.js";
 import { openAiImage25Models } from "../openAiImage25.js";
 import { ideogramImageEditModel, ideogramImageEditQualityOptions, ideogramImageEditPrecisionOptions } from "../ideogramImageEdit.js";
+import { nanoBanana21ModelName, nanoBanana21ResolutionOptions } from "../nanoBanana21.js";
 import { appendWorkflowContextFormFields } from "../workflowContext.js";
 import { notifyGenerationTaskComplete } from "../generationChime.js";
 import "./imageEditStudio.css";
@@ -32,8 +33,9 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider 
   const [prompt, setPrompt] = React.useState("");
   const [mode, setMode] = React.useState("edit");
   const [blank, setBlank] = React.useState(false);
-  const [model, setModel] = React.useState(openAiImage25Models.sunburst);
+  const [model, setModel] = React.useState(imageEditDefaultModel);
   const [quality, setQuality] = React.useState("high");
+  const [resolution, setResolution] = React.useState("2K");
   const [editPrecision, setEditPrecision] = React.useState("regular");
   const [zoom, setZoom] = React.useState(1);
   const [pan, setPan] = React.useState({ x: 0, y: 0 });
@@ -51,6 +53,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider 
   const [cursor, setCursor] = React.useState(null);
   const drawingRef = React.useRef(null), selectionRef = React.useRef(null), stageRef = React.useRef(null), surfaceRef = React.useRef(null);
   const dragRef = React.useRef(null), busyRef = React.useRef(false), rootRef = React.useRef(null);
+  const compareDragRef = React.useRef(null);
   const result = versions[resultIndex];
   const reviewing = Boolean(result);
   const marks = draft ? [...history.marks, draft] : history.marks;
@@ -58,9 +61,10 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider 
   const hasSelection = history.marks.some((mark) => mark.layer === "selection" && mark.tool !== "eraser");
   const dirty = history.marks.length || prompt.trim();
   const isIdeogram = model === ideogramImageEditModel;
+  const isNano = model === nanoBanana21ModelName;
   const qualityOptions = isIdeogram ? ideogramImageEditQualityOptions : ["high", "xhigh", "max"];
-  const providerAvailable = provider === "fal" || (!isIdeogram && provider === "atlas");
-  const providerLabel = isIdeogram && !providerAvailable ? "Fal required" : provider === "atlas" ? "Atlas Cloud" : provider === "fal" ? "Fal" : provider === "krea" ? "Krea" : "Unavailable";
+  const providerAvailable = provider === "fal" || (model === openAiImage25Models.sunburst && provider === "atlas");
+  const providerLabel = (isIdeogram || isNano) && !providerAvailable ? "Fal required" : provider === "atlas" ? "Atlas Cloud" : provider === "fal" ? "Fal" : provider === "krea" ? "Krea" : "Unavailable";
   const resultProvider = result?.provider || result?.cost?.provider;
 
   React.useEffect(() => { rootRef.current?.focus(); }, []);
@@ -74,12 +78,18 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider 
     const stage = stageRef.current;
     const wheel = (event) => {
       event.preventDefault(); event.stopPropagation();
+      if (compareDragRef.current) return;
       if (event.ctrlKey || event.metaKey) setZoom((value) => Math.max(0.5, Math.min(5, value * Math.exp(-event.deltaY * 0.008))));
       else setPan((value) => ({ x: value.x - event.deltaX, y: value.y - event.deltaY }));
     };
     stage.addEventListener("wheel", wheel, { passive: false });
     return () => stage.removeEventListener("wheel", wheel);
   }, []);
+  React.useEffect(() => {
+    const cancel = () => finishComparison(true);
+    window.addEventListener("blur", cancel);
+    return () => { window.removeEventListener("blur", cancel); finishComparison(); };
+  }, [reviewing, view, resultIndex]);
   React.useEffect(() => {
     if (!busy) return;
     const start = Date.now(); setElapsed(0);
@@ -109,22 +119,62 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider 
   function close() { if (!busyRef.current && !saving) dirty ? setConfirmClose(true) : onClose(); }
   function keyboard(event) {
     event.stopPropagation();
-    if (event.key === "Escape") { event.preventDefault(); close(); return; }
+    if (event.key === "Escape") { event.preventDefault(); compareDragRef.current ? finishComparison(true) : close(); return; }
     if (event.key === "Tab") {
       const container = confirmClose ? rootRef.current.querySelector(".ies-confirm") : rootRef.current;
-      const controls = [...container.querySelectorAll('button:not(:disabled), a[href], input:not(:disabled), textarea:not(:disabled), select:not(:disabled)')].filter((element) => element.offsetParent && !element.matches(":disabled"));
+      const controls = [...container.querySelectorAll('button:not(:disabled), a[href], input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [role="slider"][tabindex="0"]')].filter((element) => element.offsetParent && !element.matches(":disabled"));
       const first = controls[0], last = controls.at(-1);
       if (event.shiftKey && (document.activeElement === first || !controls.includes(document.activeElement))) { event.preventDefault(); last?.focus(); }
       else if (!event.shiftKey && (document.activeElement === last || !controls.includes(document.activeElement))) { event.preventDefault(); first?.focus(); }
     }
+    if (event.target.closest(".ies-split-line")) { comparisonKeyboard(event); return; }
     if (event.target.closest("input, textarea, select")) return;
     if ((event.metaKey || event.ctrlKey) && ["z", "y"].includes(event.key.toLowerCase())) {
       event.preventDefault(); event.shiftKey || event.key.toLowerCase() === "y" ? redo() : undo();
     }
   }
   function point(event) { return imageEditPoint(event.clientX, event.clientY, surfaceRef.current.getBoundingClientRect()); }
+  function startComparison(event) {
+    event.stopPropagation();
+    if (event.button !== 0 || busy || dragRef.current || compareDragRef.current) return;
+    event.preventDefault();
+    const rect = surfaceRef.current.getBoundingClientRect();
+    event.currentTarget.focus({ preventScroll: true });
+    event.currentTarget.setPointerCapture(event.pointerId);
+    compareDragRef.current = { pointerId: event.pointerId, element: event.currentTarget, split,
+      offset: event.clientX - (rect.left + rect.width * split / 100) };
+  }
+  function moveComparison(event) {
+    event.stopPropagation();
+    const drag = compareDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    const rect = surfaceRef.current.getBoundingClientRect();
+    setSplit(imageEditPoint(event.clientX - drag.offset, event.clientY, rect).x * 100);
+  }
+  function finishComparison(cancel = false) {
+    const drag = compareDragRef.current;
+    if (!drag) return;
+    compareDragRef.current = null;
+    if (cancel) setSplit(drag.split);
+    if (drag.element.hasPointerCapture(drag.pointerId)) drag.element.releasePointerCapture(drag.pointerId);
+  }
+  function endComparison(event) {
+    event.stopPropagation();
+    if (compareDragRef.current?.pointerId !== event.pointerId) return;
+    if (event.type === "pointerup") moveComparison(event);
+    finishComparison(event.type !== "pointerup");
+  }
+  function comparisonKeyboard(event) {
+    if (compareDragRef.current || event.metaKey || event.ctrlKey || event.altKey) return;
+    const step = event.shiftKey ? 10 : 1;
+    const change = { ArrowLeft: -step, ArrowDown: -step, ArrowRight: step, ArrowUp: step }[event.key];
+    if (change === undefined && !["Home", "End"].includes(event.key)) return;
+    event.preventDefault(); event.stopPropagation();
+    setSplit(value => event.key === "Home" ? 0 : event.key === "End" ? 100 : Math.max(0, Math.min(100, value + change)));
+  }
   function pointerDown(event) {
-    if (event.button !== 0 || busy || !size || dragRef.current) return;
+    if (event.button !== 0 || busy || !size || dragRef.current || compareDragRef.current) return;
     event.preventDefault(); event.stopPropagation();
     const start = point(event);
     if (!reviewing && tool === "text" && !note.trim()) { setError("Enter a text note first, then place it on the image."); return; }
@@ -171,7 +221,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider 
       if (blank && !drawing) throw new Error("Draw a sketch first.");
       const form = new FormData();
       appendWorkflowContextFormFields(form, workflowContext);
-      for (const [key, value] of Object.entries({ sourceUrl: base.url, requestId: crypto.randomUUID(), prompt, mode, model, quality, blank: String(blank), nodeId: item.editContext?.nodeId || "", nodeTitle: item.label || "Image Edit" })) form.append(key, value);
+      for (const [key, value] of Object.entries({ sourceUrl: base.url, requestId: crypto.randomUUID(), prompt, mode, model, ...(isNano ? { resolution } : { quality }), blank: String(blank), nodeId: item.editContext?.nodeId || "", nodeTitle: item.label || "Image Edit" })) form.append(key, value);
       if (isIdeogram) form.append("editPrecision", editPrecision);
       if (drawing) form.append("drawing", drawing, "drawing.png");
       if (selection) form.append("selection", selection, "selection.png");
@@ -214,7 +264,10 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider 
             <img src={reviewing ? result.before : base.url} alt="Original image" draggable={false} style={{ visibility: blank && !reviewing ? "hidden" : "visible" }} onLoad={(event) => setSize({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })} onError={() => setError("Could not load the original full-resolution image.")} />
             {!reviewing && size && <><canvas ref={drawingRef} aria-label="Drawing canvas" width={Math.round(size.width * previewScale)} height={Math.round(size.height * previewScale)} /><canvas ref={selectionRef} aria-label="Selection canvas" className="ies-selection" width={Math.round(size.width * previewScale)} height={Math.round(size.height * previewScale)} /></>}
             {reviewing && view !== "original" && <img className="ies-result" src={result.url} alt="Edited result" draggable={false} style={{ clipPath: view === "split" ? `inset(0 0 0 ${split}%)` : undefined }} />}
-            {reviewing && view === "split" && <div className="ies-split-line" style={{ left: `${split}%` }} />}
+            {reviewing && view === "split" && <div className="ies-split-line" role="slider" tabIndex={0} aria-label="Comparison divider" aria-orientation="horizontal" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(split)} aria-valuetext={`${Math.round(split)}% original, ${100 - Math.round(split)}% edited`} title="Drag to compare original and edit"
+              style={{ left: `${split}%`, "--ies-compare-scale": 1 / zoom }} onPointerDown={startComparison} onPointerMove={moveComparison} onPointerUp={endComparison} onPointerCancel={endComparison} onLostPointerCapture={endComparison} onBlur={() => finishComparison(true)}>
+              <span className="ies-split-handle" aria-hidden="true"><MoveHorizontal size={18} /></span>
+            </div>}
             {cursor && !reviewing && !busy && ["pen", "eraser"].includes(tool) && <div className="ies-brush-cursor" style={{ left: `${cursor.x * 100}%`, top: `${cursor.y * 100}%`, width: Math.max(3, brushSize / 100 * Math.min(displaySize.width, displaySize.height)), aspectRatio: "1", borderColor: tool === "eraser" ? "#fff" : layer === "selection" ? "#72efd8" : color }} />}
           </div>
           {busy && <div className="ies-progress" role="status"><LoaderCircle size={22} className="ies-spinning" /><span>Generating edit</span><time>{Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, "0")}</time></div>}
@@ -222,28 +275,28 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider 
         </div>
         <div className="ies-viewbar">
           <span>{size ? `${size.width} x ${size.height}` : ""}</span>
-          {reviewing && <div className="ies-review-controls"><div className="ies-segment">{["original", "split", "result"].map((value) => <button type="button" key={value} className={view === value ? "active" : ""} onClick={() => setView(value)}>{value === "split" ? "Compare" : value === "result" ? "Edit" : "Original"}</button>)}</div>{view === "split" && <input aria-label="Comparison split" type="range" min="0" max="100" value={split} onChange={(e) => setSplit(Number(e.target.value))} />}</div>}
+          {reviewing && <div className="ies-review-controls"><div className="ies-segment">{["original", "split", "result"].map((value) => <button type="button" key={value} className={view === value ? "active" : ""} onClick={() => setView(value)}>{value === "split" ? "Compare" : value === "result" ? "Edit" : "Original"}</button>)}</div></div>}
           <div className="ies-zoom"><IconButton icon={Minus} label="Zoom out" onClick={() => setZoom((v) => Math.max(0.5, v - 0.25))} /><output>{Math.round(zoom * 100)}%</output><IconButton icon={Plus} label="Zoom in" onClick={() => setZoom((v) => Math.min(5, v + 0.25))} /><IconButton icon={Maximize} label="Fit image" onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }); }} /></div>
         </div>
       </div>
       <aside className="ies-sidebar">
         {!reviewing && <fieldset disabled={busy || saving}>
-          <label>Model<select aria-label="Edit model" value={model} onChange={(e) => { setModel(e.target.value); setQuality("high"); setError(""); }}><option value={openAiImage25Models.sunburst}>Image 2.5 Sunburst</option><option value={ideogramImageEditModel}>{ideogramImageEditModel}</option></select></label>
-          <label>Method<select aria-label="Edit method" value={mode} onChange={(e) => { setMode(e.target.value); if (e.target.value !== "sketch") setBlank(false); if (e.target.value === "remove") { setActiveLayer("selection"); setTool("pen"); } }}><option value="edit">Edit image</option><option value="sketch">Render sketch</option><option value="remove">Remove selected</option></select></label>
+          <label>Model<select aria-label="Edit model" value={model} onChange={(e) => { setModel(e.target.value); setQuality("high"); setError(""); }}>{imageEditModels.map(value => <option key={value} value={value}>{modelLabel(value)}</option>)}</select></label>
+          <label>Method<select aria-label="Edit method" value={mode} onChange={(e) => { setMode(e.target.value); if (e.target.value !== "sketch") setBlank(false); if (e.target.value === "remove") { setActiveLayer("selection"); setTool("pen"); } }}><option value="edit">Edit image</option><option value="sketch">Generate from Sketch</option><option value="remove">Remove selected</option></select></label>
           {mode === "sketch" && <label className="ies-checkbox"><input type="checkbox" checked={blank} onChange={(e) => { setBlank(e.target.checked); if (e.target.checked) setActiveLayer("drawing"); }} />Blank canvas</label>}
           <div className="ies-color-row" aria-label="Drawing color">{imageEditColors.map((value) => <button type="button" key={value} aria-label={`Color ${value}`} title={value} aria-pressed={color === value} className={`ies-swatch ${color === value ? "active" : ""}`} style={{ background: value }} onClick={() => setColor(value)} disabled={layer === "selection"} />)}<input aria-label="Custom drawing color" type="color" value={color} onChange={(e) => setColor(e.target.value)} disabled={layer === "selection"} /></div>
           <label className="ies-slider">{tool === "text" ? "Text size" : "Brush size"}<output>{brushSize.toFixed(1)}</output><input aria-label="Brush size" type="range" min="0.2" max="12" step="0.2" value={brushSize} onChange={(e) => setBrushSize(Number(e.target.value))} /></label>
           <label className="ies-slider">Opacity<output>{opacity}%</output><input aria-label="Drawing opacity" type="range" min="10" max="100" value={opacity} onChange={(e) => setOpacity(Number(e.target.value))} disabled={layer === "selection"} /></label>
           {tool === "text" && <label>Text note<textarea aria-label="Text note" rows={2} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} /></label>}
           <label>Prompt<textarea className="ies-prompt" aria-label="Edit prompt" rows={5} maxLength={isIdeogram ? 10000 : 16000} placeholder={mode === "remove" ? "Additional direction (optional)" : "Describe the change..."} value={prompt} onChange={(e) => setPrompt(e.target.value)} /></label>
-          <label>Quality<select aria-label="Edit quality" value={quality} onChange={(e) => setQuality(e.target.value)}>{qualityOptions.map((value) => <option key={value} value={value}>{qualityLabels[value]}</option>)}</select></label>
+          {isNano ? <label>Resolution<select aria-label="Edit resolution" value={resolution} onChange={(e) => setResolution(e.target.value)}>{nanoBanana21ResolutionOptions.map(value => <option key={value} value={value}>{value}</option>)}</select></label> : <label>Quality<select aria-label="Edit quality" value={quality} onChange={(e) => setQuality(e.target.value)}>{qualityOptions.map((value) => <option key={value} value={value}>{qualityLabels[value]}</option>)}</select></label>}
           {isIdeogram && <label>Precision<select aria-label="Edit precision" value={editPrecision} onChange={(e) => setEditPrecision(e.target.value)}>{ideogramImageEditPrecisionOptions.map((value) => <option key={value} value={value}>{value === "high" ? "High" : "Regular"}</option>)}</select></label>}
         </fieldset>}
         <div className="ies-run-section">
           <small>{modelLabel(result?.model || result?.cost?.model || model)} <span>{resultProvider === "fal.ai" ? "Fal" : resultProvider || providerLabel}</span></small>
           {!reviewing && <button className="ies-primary" type="button" onClick={generate} disabled={busy || !size || !providerAvailable || (mode === "remove" ? !hasSelection : !prompt.trim() && !(mode === "sketch" && hasDrawing))}><Brush size={17} />{busy ? "Generating..." : "Generate Edit"}</button>}
           {!reviewing && showApiCosts && <small className="ies-cost">Variable API cost</small>}
-          {!reviewing && !providerAvailable && <p role="status" className="ies-warning">{isIdeogram ? "Enable Fal in Settings to use Ideogram 4.5 image editing. Atlas Cloud and Krea are not supported for this model." : "Enable Fal, or disable Krea and enable Atlas Cloud in Settings. Krea does not support masked edits."}</p>}
+          {!reviewing && !providerAvailable && <p role="status" className="ies-warning">{isIdeogram || isNano ? `Enable Fal in Settings to use ${model} image editing. Atlas Cloud and Krea are not supported for this model in Draw and Edit.` : "Enable Fal, or disable Krea and enable Atlas Cloud in Settings. Krea does not support masked edits."}</p>}
         </div>
         {versions.length > 0 && <label>Versions<select aria-label="Edit version" value={resultIndex} disabled={busy || saving} onChange={(e) => { setResultIndex(Number(e.target.value)); setView("split"); }}><option value="-1">Current draft</option>{versions.map((version, i) => <option key={version.url} value={i}>Edit {i + 1}</option>)}</select></label>}
         {reviewing && <div className="ies-result-actions">

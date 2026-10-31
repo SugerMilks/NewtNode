@@ -114,6 +114,27 @@ test("new planning returns structured continuity and native Auto, while custom c
   assert.equal(api.calls.length, 2);
 });
 
+test("a disconnected Fal plan preserves panels, records unknown usage and releases its running guard", async () => {
+  const api = routes({ estimateCost: ({ usage }) => ({ amountUsd: usage === null ? null : .01, currency: "USD" }), response: () => {
+    throw Object.assign(new Error("Lost the connection to Fal. Check Fal history before planning again."), {
+      llmResult: { provider: "fal", model: "fixture-model", endpoint: "openrouter/router", text: "", usage: null }
+    });
+  } });
+  const frames = [frame(1, { resultUrl: "/outputs/keep.png", versions: [{ resultUrl: "/outputs/older.png" }] })];
+  const before = structuredClone(frames);
+  const failed = await api.request("plan-v2", { frames });
+  assert.equal(failed.code, 400);
+  assert.match(failed.body.error, /Lost the connection.*Existing panels have been preserved/);
+  assert.equal(failed.body.plan, undefined);
+  assert.equal(failed.body.cost.amountUsd, null);
+  assert.equal(api.history.length, 1);
+  assert.equal(api.history[0].cost.amountUsd, null);
+  assert.equal(api.calls.length, 1);
+  assert.deepEqual(frames, before);
+  api.setResponse(plan());
+  assert.equal((await api.request("plan-v2")).code, 200);
+});
+
 test("camera personality reaches planning and selected revisions without adding LLM calls", async () => {
   for (const personality of [undefined, "Restrained", "Expressive", "Bold"]) {
     const api = routes({ response: { ...plan(), frames: [frame(1, { angle: "Dutch Angle" })] } });
@@ -122,11 +143,15 @@ test("camera personality reaches planning and selected revisions without adding 
     assert.equal(result.body.plan.frames[0].angle, "Dutch Angle");
     assert.equal(api.calls.length, 1);
     assert.match(api.calls[0].prompt, new RegExp(`CAMERA PERSONALITY: ${personality || "Expressive"}`));
+    assert.match(api.calls[0].prompt, /WORLD-SPACE CONTINUITY/);
+    assert.match(api.calls[0].prompt, /CAMERA AXIS AND INSERTS/);
+    assert.match(api.calls[0].prompt, /PROP STATE/);
     api.setResponse({ summary: "Keep the shot, clarify action", frames: [frame(1, { angle: "Dutch Angle" })], affectedFrameIds: [], warnings: [] });
     const revision = await api.request("revise", { storyboardCameraPersonality: personality, frames: [frame(1, { angle: "Dutch Angle" })], frameIds: ["f1"], instruction: "Clarify the opening door" });
     assert.equal(revision.code, 200);
     assert.equal(api.calls.length, 2);
     assert.match(api.calls[1].prompt, /preserve existing camera choices unless the newest request/);
+    assert.match(api.calls[1].prompt, /FRAME-LOCAL TIME/);
     assert.equal(revision.body.revision.frames[0].angle, "Dutch Angle");
   }
 });

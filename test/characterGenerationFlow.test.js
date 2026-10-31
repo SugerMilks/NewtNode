@@ -5,9 +5,15 @@ import { nodeApi } from "../src/api/newtApi.js";
 import * as workflow from "../src/characterSheetWorkflow.js";
 import * as library from "../src/characterSheetLibrary.js";
 import { characterVideoSheetPrompt } from "../src/characterVideoSheets.js";
+import * as nonHumanPrompts from "../src/characterNonHuman.js";
+import * as autoWardrobe from "../src/characterAutoWardrobe.js";
 import { runCharacterSheetGeneration, runCharacterWardrobeEdit } from "../src/nodeRunners/mediaModels.js";
 
 const source = await readFile(new URL("../src/NodeEditor.jsx", import.meta.url), "utf8");
+const sheetPrompts = new Function(`${source.slice(
+  source.indexOf("const characterSheetPrompt ="),
+  source.indexOf("const characterVoicePrompt =")
+)}\nreturn { characterSheetPrompt, cinematicCharacterSheetPrompt };`)();
 const handlers = source.slice(
   source.indexOf("  async function generateCharacterWardrobeVariant("),
   source.indexOf("  function unlockCharacterNode(")
@@ -22,13 +28,14 @@ const helpers = helperNames.map((name) => {
   return source.slice(start, source.indexOf("\n}", start) + 2);
 }).join("\n");
 
-function existingCharacter({ legacyCu = false } = {}) {
+function existingCharacter({ legacyCu = false, cinematic = false, nonHuman = false } = {}) {
   const data = {
     title: "Character", characterName: "Emma", status: "ready",
     characterPortrait: { localUrl: "/uploads/portrait.png", thumbnailUrl: "/thumb.jpg" },
     characterSheetModel: "Nano Banana Pro",
     characterPhysicalDetails: "Freckles",
-    cinematicCharacterSheet: false, cuVideoGeneration: true,
+    cinematicCharacterSheet: cinematic, cuVideoGeneration: true,
+    ...(nonHuman ? { nonHumanCharacter: true } : {}),
     activeWardrobeId: "blue",
     characterWardrobes: ["blue", "red"].map((id) => ({ id, localUrl: `/uploads/${id}.png` })),
     characterCustomSheets: [{ id: "client", localUrl: "/uploads/custom.png" }],
@@ -66,9 +73,9 @@ function editor(t, data, { failAt = 0, error = "Provider rejected the request." 
   });
   const deps = {
     generationProvider: "fal",
-    ...workflow, ...library, characterVideoSheetPrompt,
+    ...workflow, ...library, ...nonHumanPrompts, ...autoWardrobe, characterVideoSheetPrompt,
     runCharacterSheetGeneration, runCharacterWardrobeEdit, nodesRef,
-    characterSheetPrompt: "Regular base", cinematicCharacterSheetPrompt: "Cinematic regular base",
+    ...sheetPrompts,
     characterVoicePrompt: "", characterTraitPrompt: () => "", activeCharacterVoice: () => null,
     characterTag: () => "Emma", workflowRequestContext: () => ({}), pushUndoSnapshot: () => {},
     createCharacterWardrobeEditMaskDataUrl: () => assert.fail("Character must not create static masks"),
@@ -122,11 +129,31 @@ test("real Character lock regenerates only regular sheets when its Cinematic set
   await app.activate();
   assert.equal(app.data().error, "");
   assert.equal(app.requests().length, 3);
+  assert.match(app.requests()[0].prompt, /target sRGB color is RGB\(125, 125, 125\), HEX #7D7D7D/);
+  assert.match(app.requests()[0].prompt, /uniform across all six panels/);
+  assert.match(app.requests()[0].prompt, /no gradients, vignettes, texture, or color casts/);
+  assert.match(app.requests()[0].prompt, /Keep the white spacing between panels white/);
   assert.equal(app.requests().every((request) => !request.nodeTitle.includes("CU Video")), true);
   assert.deepEqual(app.data().characterBaseVideoSheet, before.characterBaseVideoSheet);
   assert.deepEqual(app.data().characterSheetVariants.map((variant) => variant.videoGenerated.url),
     before.characterSheetVariants.map((variant) => variant.videoGenerated.url));
   assert.deepEqual(app.progress.at(-1), { completed: 3, total: 3 });
+});
+
+test("the cinematic background update preserves saved sheets until explicit base regeneration", async (t) => {
+  const before = existingCharacter({ cinematic: true });
+  const app = editor(t, before);
+  await app.activate();
+  assert.equal(app.requests().length, 0);
+  assert.deepEqual(app.data().characterBaseSheet, before.characterBaseSheet);
+  assert.deepEqual(app.data().characterBaseVideoSheet, before.characterBaseVideoSheet);
+  assert.deepEqual(app.data().characterSheetVariants, before.characterSheetVariants);
+
+  await app.activate({ forceRegenerateBase: true });
+  assert.equal(app.data().error, "");
+  assert.equal(app.requests().length, 6);
+  assert.match(app.requests()[0].prompt, /RGB\(125, 125, 125\), HEX #7D7D7D/);
+  assert.doesNotMatch(app.requests()[1].prompt, /#7D7D7D|RGB\(125, 125, 125\)/);
 });
 
 test("real Regenerate Base rebuilds both masters from the portrait and all wardrobes", async (t) => {
@@ -135,6 +162,8 @@ test("real Regenerate Base rebuilds both masters from the portrait and all wardr
   assert.equal(app.data().error, "");
   const requests = app.requests();
   assert.equal(requests.length, 6);
+  assert.match(requests[0].prompt, /clean white background/);
+  assert.doesNotMatch(requests[0].prompt, /#7D7D7D|RGB\(125, 125, 125\)/);
   assert.deepEqual(requests.slice(0, 2).map((request) => request.imagePromptUrls), [
     ["/uploads/portrait.png"], ["/uploads/portrait.png"]
   ]);
@@ -191,6 +220,69 @@ test("real Character lock preserves an explicitly selected custom sheet without 
   assert.equal(app.requests().length, 0);
 });
 
+for (const cinematic of [false, true]) {
+  test(`Non-Human replaces human base, CU and wardrobe prompts with Cinematic ${cinematic}`, async (t) => {
+    const before = existingCharacter({ cinematic });
+    const app = editor(t, { ...before, nonHumanCharacter: true, characterPhysicalDetails: "Four eyes and a feathered tail" });
+    assert.equal(app.requests().length, 0, "changing an option alone must not generate");
+    assert.deepEqual(app.data().characterSheetVariants, before.characterSheetVariants);
+    await app.activate();
+    assert.equal(app.data().error, "");
+    const requests = app.requests();
+    assert.equal(requests.length, 6);
+    for (const request of requests) {
+      assert.match(request.prompt, /Do not humanize the character/);
+      assert.doesNotMatch(request.prompt, /person's identity|natural skin texture and natural skin tones|men's tight swim trunks|For a female character|underlying hair and skin/);
+    }
+    assert.match(requests[0].prompt, /exactly six panels/);
+    assert.match(requests[1].prompt, /exactly three panels/);
+    for (const request of requests.slice(0, 2)) {
+      assert.deepEqual(request.imagePromptUrls, ["/uploads/portrait.png"]);
+      assert.match(request.prompt, /Defining physical details requirement: Four eyes and a feathered tail/);
+      assert.match(request.prompt, /do not force swimwear/);
+    }
+    assert.match(requests[0].prompt, cinematic ? /RGB\(125, 125, 125\), HEX #7D7D7D/ : /clean white background/);
+    assert.deepEqual(requests.slice(2).map(request => request.imagePromptUrls), [
+      ["/outputs/new-1.png", "/uploads/blue.png"], ["/outputs/new-2.png", "/uploads/blue.png"],
+      ["/outputs/new-1.png", "/uploads/red.png"], ["/outputs/new-2.png", "/uploads/red.png"]
+    ]);
+    for (const request of requests.slice(2)) {
+      assert.equal(request.characterWardrobeEdit, true);
+      assert.match(request.prompt, /Adapt the referenced garments to the existing body/);
+    }
+    assert.deepEqual(app.data().characterCustomSheets, before.characterCustomSheets);
+    await app.activate();
+    assert.equal(app.requests().length, 6, "completed non-human sheets are reusable");
+  });
+}
+
+test("Non-Human wardrobe retries and new outfits reuse the saved non-human masters", async (t) => {
+  const before = existingCharacter({ nonHuman: true });
+  const app = editor(t, before);
+  await app.regenerateWardrobe("blue");
+  await app.addWardrobes([{ id: "green", localUrl: "/uploads/green.png" }]);
+  assert.equal(app.data().error, "");
+  assert.equal(app.requests().length, 4);
+  for (const request of app.requests()) {
+    assert.match(request.prompt, /Do not humanize the character/);
+    assert.match(request.prompt, /Omit an anatomically incompatible item/);
+    assert.equal(request.characterWardrobeEdit, true);
+    assert.ok(["/outputs/base.png", "/outputs/cu-base.png"].includes(request.imagePromptUrls[0]));
+  }
+  assert.deepEqual(app.data().characterBaseSheet, before.characterBaseSheet);
+  assert.deepEqual(app.data().characterBaseVideoSheet, before.characterBaseVideoSheet);
+});
+
+test("disabling Non-Human restores human prompts on the next explicit build", async (t) => {
+  const app = editor(t, { ...existingCharacter({ nonHuman: true }), nonHumanCharacter: false });
+  await app.activate();
+  assert.equal(app.data().error, "");
+  assert.equal(app.requests().length, 6);
+  assert.match(app.requests()[0].prompt, /men's tight swim trunks/);
+  assert.match(app.requests()[1].prompt, /natural skin texture and natural skin tones/);
+  assert.doesNotMatch(app.requests()[0].prompt, /Do not humanize the character/);
+});
+
 test("real automatic wardrobe addition reuses both independent bases and existing outfits", async (t) => {
   const before = existingCharacter();
   const app = editor(t, before);
@@ -203,6 +295,136 @@ test("real automatic wardrobe addition reuses both independent bases and existin
   assert.deepEqual(app.data().characterSheetVariants.slice(0, 3), before.characterSheetVariants);
   assert.equal(app.data().characterSheetVariants[3].wardrobeId, "green");
   assert.deepEqual(app.progress.at(-1), { completed: 2, total: 2 });
+});
+
+function autoWardrobeCharacter({ fresh = false, nonHuman = false, cu = true } = {}) {
+  const data = { ...existingCharacter({ nonHuman }), autoWardrobe: true, cuVideoGeneration: cu,
+    characterWardrobes: [], characterCustomSheets: [], activeWardrobeId: "" };
+  data.characterSheetVariants = data.characterSheetVariants.slice(0, 1);
+  if (fresh) {
+    data.characterBaseSheet = null;
+    data.characterBaseVideoSheet = null;
+    data.characterBaseSignature = "";
+    data.characterBaseVideoSignature = "";
+    data.characterSheetVariants = [];
+  }
+  return data;
+}
+
+for (const nonHuman of [false, true]) {
+  test(`Auto Wardrobe completes a portrait outfit and reuses it for CU (non-human=${nonHuman})`, async (t) => {
+    const before = autoWardrobeCharacter({ nonHuman });
+    const app = editor(t, before);
+    await app.activate();
+    assert.equal(app.data().error, "");
+    assert.deepEqual(app.requests().map(request => request.imagePromptUrls), [
+      ["/outputs/base.png", "/uploads/portrait.png"],
+      ["/outputs/cu-base.png", "/outputs/new-1.png"]
+    ]);
+    assert.match(app.requests()[0].prompt, /otherwise infer footwear/);
+    assert.match(app.requests()[0].imagePromptLabels[1], /Original portrait/);
+    assert.match(app.requests()[1].imagePromptLabels[1], /Completed Auto Wardrobe/);
+    assert.match(app.requests()[1].prompt, /Do not invent another outfit/);
+    assert.equal(app.requests().every(request => request.characterWardrobeEdit === true), true);
+    if (nonHuman) assert.match(app.requests()[0].prompt, /never invent human feet/);
+    assert.deepEqual(app.data().characterBaseSheet, before.characterBaseSheet);
+    assert.deepEqual(app.data().characterWardrobes, []);
+    assert.equal(app.data().activeWardrobeId, autoWardrobe.characterAutoWardrobeId);
+    assert.equal(app.data().resultUrl, "/outputs/new-1.png");
+    assert.equal(library.characterOutputReference(app.data(), { video: true }).url, "/outputs/new-2.png");
+    assert.deepEqual(library.characterSheetChoices(app.data()).map(choice => choice.tabLabel), ["Base", "Sheet 1"]);
+    assert.deepEqual(app.progress.at(-1), { completed: 2, total: 2 });
+    await app.activate();
+    assert.equal(app.requests().length, 2, "completed outfits must not regenerate on a second lock");
+  });
+}
+
+test("a fresh Auto Wardrobe character creates independent bases before applying its outfit", async (t) => {
+  const app = editor(t, autoWardrobeCharacter({ fresh: true }));
+  await app.activate();
+  assert.equal(app.data().error, "");
+  assert.deepEqual(app.requests().map(request => request.imagePromptUrls), [
+    ["/uploads/portrait.png"], ["/uploads/portrait.png"],
+    ["/outputs/new-1.png", "/uploads/portrait.png"],
+    ["/outputs/new-2.png", "/outputs/new-3.png"]
+  ]);
+  assert.match(app.requests()[0].prompt, /Foundation wardrobe rule/);
+  assert.deepEqual(app.progress.at(-1), { completed: 4, total: 4 });
+});
+
+test("Auto Wardrobe coexists with uploaded outfits and retains an explicit outfit selection", async (t) => {
+  const before = { ...existingCharacter(), autoWardrobe: true };
+  const app = editor(t, before);
+  await app.activate();
+  assert.equal(app.requests().length, 2);
+  assert.deepEqual(app.data().characterSheetVariants.slice(2), before.characterSheetVariants.slice(1));
+  assert.equal(app.data().activeWardrobeId, "blue");
+  assert.equal(app.data().resultUrl, "/outputs/blue.png");
+});
+
+test("a failed Auto Wardrobe CU preserves the finished outfit and retries only the missing CU on lock", async (t) => {
+  const app = editor(t, autoWardrobeCharacter(), { failAt: 2 });
+  await app.activate();
+  assert.equal(app.requests().length, 2);
+  assert.equal(app.data().resultUrl, "/outputs/new-1.png");
+  assert.match(app.data().characterVariantNotice, /1 CU video wardrobe sheet/);
+  assert.equal(library.characterOutputReference(app.data(), { video: true }).url, "/outputs/new-1.png");
+  await app.activate();
+  assert.equal(app.requests().length, 3);
+  assert.deepEqual(app.requests()[2].imagePromptUrls, ["/outputs/cu-base.png", "/outputs/new-1.png"]);
+  assert.equal(app.data().characterVariantNotice, "");
+  assert.equal(app.data().characterSheetVariants[1].autoWardrobeImageUrl, "/outputs/new-1.png");
+});
+
+test("failed Auto Wardrobe generation never sends a base as downstream output or silently retries", async (t) => {
+  const app = editor(t, autoWardrobeCharacter(), { failAt: 1 });
+  await app.activate();
+  assert.equal(app.requests().length, 1);
+  assert.equal(app.data().resultUrl, "");
+  assert.equal(library.characterOutputReference(app.data()), null);
+  assert.match(app.data().characterVariantNotice, /1 wardrobe sheet/);
+});
+
+test("changing regular cinematic treatment also refreshes the auto CU outfit without rebuilding its master", async (t) => {
+  const app = editor(t, autoWardrobeCharacter());
+  await app.activate();
+  // Model an explicit build after changing the regular sheet's rendering.
+  app.data().cinematicCharacterSheet = true;
+  await app.activate();
+  assert.equal(app.requests().length, 5);
+  assert.deepEqual(app.requests().slice(2).map(request => request.imagePromptUrls), [
+    ["/uploads/portrait.png"], ["/outputs/new-3.png", "/uploads/portrait.png"],
+    ["/outputs/cu-base.png", "/outputs/new-4.png"]
+  ]);
+  assert.equal(app.data().characterBaseVideoSheet.url, "/outputs/cu-base.png");
+  assert.deepEqual(app.progress.at(-1), { completed: 3, total: 3 });
+});
+
+test("Auto Wardrobe regeneration reuses both masters and keeps matching regular/CU outfits", async (t) => {
+  const app = editor(t, autoWardrobeCharacter());
+  await app.regenerateWardrobe(autoWardrobe.characterAutoWardrobeId);
+  assert.deepEqual(app.requests().map(request => request.imagePromptUrls), [
+    ["/outputs/base.png", "/uploads/portrait.png"], ["/outputs/cu-base.png", "/outputs/new-1.png"]
+  ]);
+  assert.equal(app.data().characterSheetVariants[1].autoWardrobeImageUrl, "/outputs/new-1.png");
+});
+
+test("turning Auto Wardrobe off retains uploads and stops requesting the portrait outfit", async (t) => {
+  const before = { ...existingCharacter(), autoWardrobe: true };
+  const app = editor(t, before);
+  await app.activate();
+  app.data().autoWardrobe = false;
+  await app.activate();
+  assert.equal(app.requests().length, 2);
+  assert.deepEqual(app.data().characterSheetVariants, before.characterSheetVariants);
+});
+
+test("Auto Wardrobe without CU needs only one outfit generation", async (t) => {
+  const app = editor(t, autoWardrobeCharacter({ cu: false }));
+  await app.activate();
+  assert.equal(app.requests().length, 1);
+  assert.equal(app.data().characterSheetVariants[1].videoGenerated, undefined);
+  assert.deepEqual(app.progress.at(-1), { completed: 1, total: 1 });
 });
 
 for (const failAt of [1, 2]) {

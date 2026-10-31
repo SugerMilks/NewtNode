@@ -11,9 +11,10 @@ import "../../src/nodeEditor.css";
 const longScene = "The @Woman and @Man have a conversation at a table in @CoffeeShop. There are two coffee @Cups on the table, one in front of each person. The @Woman sits on the left and listens as the @Man talks. She takes a sip and gives a subtle laugh. He reaches across the table and holds her hand. The mood becomes serious. A tear rolls down her cheek. He tells her it will be okay. They remain silent for a moment, then she wipes away the tear and smiles.\n\n";
 
 function fixture() {
+  const dragFixture = new URLSearchParams(window.location.search).has("drag");
   return { id: "board-qa", type: "storyboard", data: { ...createDefaultNodeData("storyboard", "Storyboard QA", 1),
     sceneDescription: "An empty hallway. A door opens, revealing daylight.", storyboardApproach: "Narrative", storyboardTab: "view", useInternalStoryboardCharacters: false,
-    storyboardFrames: Array.from({ length: 9 }, (_, i) => ({ id: `f${i + 1}`, number: i + 1, shotId: `s${i + 1}`, phase: "single", purpose: "Reveal the doorway while maintaining the established eyeline and geography of the hallway.", prompt: `Panel ${i + 1}: Black-and-white storyboard line art. The door opens, revealing the empty hallway. Preserve the direction of light from the previous shot.`, shot: "WS", lens: "35mm", angle: "None", resultUrl: "/storyboard/MOOD_BOARD.png", status: "complete", versions: [{ resultUrl: "/storyboard/MOOD_BOARD.png", savedAt: 1, prompt: "The closed door.", shot: "CU" }] }))
+    storyboardFrames: Array.from({ length: 9 }, (_, i) => ({ id: `f${i + 1}`, number: i + 1, shotId: `s${i + 1}`, phase: "single", purpose: "Reveal the doorway while maintaining the established eyeline and geography of the hallway.", prompt: `Panel ${i + 1}: Black-and-white storyboard line art. The door opens, revealing the empty hallway. Preserve the direction of light from the previous shot.`, shot: "WS", lens: "35mm", angle: "None", resultUrl: dragFixture ? `/outputs/storyboard-qa-${i + 1}.png` : "/storyboard/MOOD_BOARD.png", status: "complete", versions: [{ resultUrl: "/storyboard/MOOD_BOARD.png", savedAt: 1, prompt: "The closed door.", shot: "CU" }] }))
   } };
 }
 function Harness() {
@@ -22,8 +23,15 @@ function Harness() {
   const [scope, setScope] = React.useState(0);
   const [failBuild, setFailBuild] = React.useState(false);
   const [connectedScene, setConnectedScene] = React.useState(false);
+  const [tagReferences, setTagReferences] = React.useState(false);
+  const [renameCharacter, setRenameCharacter] = React.useState(false);
   const incoming = {
     sceneReferenceIn: [{ source: { id: "location", type: "image", data: { title: "CoffeeShop", resultUrl: "/storyboard/MOOD_BOARD.png" } } }],
+    ...(tagReferences ? {
+      characterIn: ["Woman", "Man"].map(name => ({ source: { id: name, type: "character", data: { title: "Character", characterName: name === "Woman" && renameCharacter ? "Hero" : name, locked: false, activated: false } } })),
+      sceneReferenceIn: [{ source: { id: "location", type: "image", data: { title: "Courtyard", resultUrl: "" } } }],
+      propsIn: [{ source: { id: "prop", type: "image", data: { title: "Cup", resultUrl: "" } } }]
+    } : {}),
     ...(connectedScene ? { sceneDescriptionIn: [{ source: { id: "scene", type: "plainText", data: { title: "Connected scene", text: longScene.repeat(5) } } }] } : {})
   };
   const record = value => setCalls(current => [...current, value]);
@@ -44,10 +52,14 @@ function Harness() {
     <button onClick={() => { setNode(fixture()); setCalls([]); setScope(value => value + 1); }}>Reset QA fixture</button>
     <button onClick={() => { setNode({ id: "board-qa", type: "storyboard", data: createDefaultNodeData("storyboard", "Shot List", 1) }); setCalls([]); setScope(value => value + 1); }}>New Shot List</button>
     <button onClick={() => setNode(current => normalizeCurrentNode(JSON.parse(JSON.stringify(current))))}>Save and reopen</button>
+    <button onClick={() => update(node.id, { status: "planning", storyboardTab: "setup" })}>Planning fixture</button>
+    <button onClick={() => update(node.id, { status: "error", error: "Mock planning failure" })}>Fail planning fixture</button>
     <button onClick={() => setNode(current => ({ ...current, data: { ...current.data, status: "running", storyboardTab: "view", storyboardFrames: current.data.storyboardFrames.map(frame => ({ ...frame, status: frame.id === "f2" ? "running" : "complete", qcWarning: frame.id === "f1" ? "QC warning: Check the listening partner." : "" })) } }))}>Rendering fixture</button>
     <button onClick={() => setNode(current => ({ ...current, data: { ...current.data, status: "complete", storyboardFrames: current.data.storyboardFrames.map(frame => frame.id === "f2" ? { ...frame, status: "complete" } : frame) } }))}>Complete fixture run</button>
     <button onClick={() => update(node.id, { storyboardTab: "setup", sceneDescription: longScene.repeat(5) })}>Long Setup fixture</button>
     <label><input type="checkbox" checked={connectedScene} onChange={event => setConnectedScene(event.target.checked)} />Connected Scene Text</label>
+    <label><input type="checkbox" checked={tagReferences} onChange={event => setTagReferences(event.target.checked)} />Tag reference inputs</label>
+    <label><input type="checkbox" checked={renameCharacter} onChange={event => setRenameCharacter(event.target.checked)} />Rename Character</label>
     <label><input type="checkbox" checked={failBuild} onChange={event => setFailBuild(event.target.checked)} />Fail output preparation</label>
     <section className="node-card storyboard-node" style={{ position: "relative", width: "100%", maxWidth: 1200, margin: "16px auto" }}>
       <NodeBody node={node} imageModelOptions={imageModelOptions} videoModelOptions={videoModelOptions} generationProvider="fal" incoming={incoming} incomingByNode={{}} connectedPortKeys={new Set(["board-qa:sceneReferenceIn", ...(connectedScene ? ["board-qa:sceneDescriptionIn"] : [])])} onUpdate={update} onUndoSnapshot={() => record({ action: "undo" })}

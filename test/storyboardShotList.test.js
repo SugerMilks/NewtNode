@@ -51,6 +51,22 @@ test("shot descriptions and planning provenance follow generated versions and re
   assert.equal(restored.versions.at(-1).resultUrl, "/outputs/new.png");
 });
 
+test("explicit planning tags exact connected script names and retains ready signatures, source text and media", () => {
+  const originals = [row(1, { shotDescription: "The man sits left and woman right.", resultUrl: "/outputs/old.png",
+    versions: [{ resultUrl: "/outputs/older.png" }], sourceScript: { dialogue: "The man is here.", pages: [1] } })];
+  const refs = [{ nodeId: "m", tag: "Man", name: "Man" }, { nodeId: "w", tag: "Woman", name: "Woman" }];
+  const before = structuredClone(originals);
+  const [result] = mergeStoryboardShotPlan(originals, planned(originals), refs);
+  assert.equal(result.shotDescription, "The @Man sits left and @Woman right.");
+  assert.equal(result.prompt, "Planned action 1");
+  assert.equal(result.resultUrl, originals[0].resultUrl);
+  assert.deepEqual(result.versions, originals[0].versions);
+  assert.deepEqual(result.sourceScript, originals[0].sourceScript);
+  assert.equal(result.generatedDirection.shotDescription, originals[0].shotDescription);
+  assert.equal(storyboardShotNeedsPlan(JSON.parse(JSON.stringify(result))), false);
+  assert.deepEqual(originals, before);
+});
+
 test("gallery camera edits do not accidentally approve unplanned Setup descriptions", () => {
   const original = mergeStoryboardShotPlan([row()], planned([row()]))[0];
   assert.equal(storyboardShotNeedsPlan({ ...original, ...storyboardShotGalleryPatch(original, { lens: "85mm" }) }), false);

@@ -3,6 +3,7 @@ import { storyboardFrameDirection, storyboardFrameWithVersion, storyboardEditSig
 import { storyboardShotListMode, storyboardShotNeedsPlan, storyboardShotSource } from "../src/storyboardShotList.js";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { storyboardRenderSceneContext } from "../src/storyboardContinuity.js";
 import { nodeApi } from "../src/api/newtApi.js";
 import { assertCharacterOutputReferences } from "../src/characterSheetLibrary.js";
 import { coverageModelOptions, storyboardImageModelOptions, creativeImageDefaultModel, storyboardImageDefaultModel, imageModelNames } from "../src/modelOptions.js";
@@ -66,6 +67,7 @@ for (const provider of ["fal", "krea", "atlas"]) {
       const generate = t.mock.method(nodeApi, "generateImage", async () => ({ response: { ok: true }, data: { image: { localUrl: "/frame.png" } } }));
       let reviews = 0;
       const deps = {
+        storyboardRenderSceneContext, connectedText: () => "",
         nodesRef, edgesRef: { current: [] }, generationProvider: provider, storyboardImageSettings, normalizeStoryboardImageModel, runImageModelGeneration, assertCharacterOutputReferences, assertStoryboardCharacterTags,
         storyboardTaskBusy: () => false, updateStoryboardStatus: updateNode, pushUndoSnapshot: () => {}, storyboardFrameWithVersion, storyboardFrameDirection, storyboardEditSignature, storyboardShotListMode, storyboardShotNeedsPlan, storyboardShotSource,
         storyboardCharacterSummariesForNode: () => [], storyboardFrameCastForNode: () => ({ references: [] }),

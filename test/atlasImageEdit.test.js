@@ -226,6 +226,7 @@ test("Studio cost hint defaults hidden and follows API Cost without clearing the
 
 test("Studio follows provider changes, enables Fal and Atlas, and blocks Krea or unavailable providers", async (t) => {
   const state = studio(t, { provider: "atlas", falAvailable: false });
+  elements(state.render()).find(element => element.props["aria-label"] === "Edit model").props.onChange({ target: { value: "OpenAI Image 2.5 Sunburst" } });
   const network = t.mock.method(globalThis, "fetch", () => { throw new Error("No network in UI tests"); });
   for (const [provider, label, available] of [["atlas", "Atlas Cloud", true], ["fal", "Fal", true], ["krea", "Krea", false], ["", "Unavailable", false]]) {
     const tree = state.render({ provider });
@@ -246,6 +247,7 @@ test("Studio follows provider changes, enables Fal and Atlas, and blocks Krea or
 
 test("Studio keeps falAvailable compatibility but explicit provider availability wins", (t) => {
   const state = studio(t, { falAvailable: true });
+  elements(state.render()).find(element => element.props["aria-label"] === "Edit model").props.onChange({ target: { value: "OpenAI Image 2.5 Sunburst" } });
   const enabled = (tree) => !elements(tree).find((element) => element.type === "button" && element.props.className === "ies-primary").props.disabled;
   assert.equal(enabled(state.render()), true);
   assert.match(renderToStaticMarkup(state.render()), /Sunburst <span>Fal<\/span>/);

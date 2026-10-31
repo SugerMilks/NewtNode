@@ -431,6 +431,10 @@ export const nodeApi = {
     return postJson("/api/node/explore-plan", body, "Explore planning");
   },
   async editImage(form) {
+    if (isNanoBanana21Model(form.get("model"))) {
+      const health = await getJson("/api/health", "Could not verify Nano Banana 2.1 editing support.");
+      if (health.routes?.imageEditingNanoBanana21 !== true) throw new Error("Restart NewtNode to activate Nano Banana 2.1 in Draw and Edit. No generation was submitted.");
+    }
     // Never replay a potentially billed edit through the localhost fallback.
     let response;
     try {

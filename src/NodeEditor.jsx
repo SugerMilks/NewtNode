@@ -8,6 +8,10 @@ import { StoryboardPlanButton, StoryboardRevisionControls, StoryboardExportMenu 
 import { StoryboardShotList } from "./components/StoryboardShotList.jsx";
 import { storyboardCameraPersonalities, storyboardCameraChoices, storyboardCameraRenderingPrompt } from "./storyboardCinematography.js";
 import { storyboardShotListMode, storyboardShotDescription, storyboardShotRows, storyboardShotListError, storyboardShotListContext, storyboardShotNeedsPlan, storyboardShotSource, storyboardShotGalleryPatch, mergeStoryboardShotPlan } from "./storyboardShotList.js";
+import { storyboardReferenceTagMatches, storyboardReferenceHighlightParts } from "./storyboardReferenceTags.js";
+import { tagImportedScriptFrames } from "./storyboardScriptImport.js";
+import { storyboardContinuityRules, storyboardContinuityFrames, storyboardRenderSceneContext } from "./storyboardContinuity.js";
+import { setStoryboardFrameDragImage } from "./storyboardFrameDrag.js";
 import { StoryboardScriptImport, StoryboardScriptSource } from "./components/StoryboardScriptImport.jsx";
 import { useStoryboardBoardOutput, storyboardBoardIsCurrent, storyboardBoardBuildSignature, storyboardBoardCanBuild } from "./useStoryboardBoardOutput.js";
 import { exploreDefaults, normalizeExploreData, exploreModels } from "./explore.js";
@@ -199,6 +203,8 @@ import {
   generateCharacterBaseSheets,
   upsertCharacterWardrobeVariant
 } from "./characterSheetWorkflow.js";
+import { nonHumanCharacterBasePrompt, nonHumanCharacterIdentityPrompt, nonHumanCharacterWardrobePrompt } from "./characterNonHuman.js";
+import { characterAutoWardrobeId, characterAutoWardrobePrompt, characterWardrobesForGeneration, isAutoCharacterWardrobe } from "./characterAutoWardrobe.js";
 import { normalizeOpenAiImage2Quality, openAiImage2Quality, openAiImage2QualityOptions } from "./openAiImage2.js";
 import { isOpenAiImage25Model, openAiImage25Variant, normalizeOpenAiImage25Quality, normalizeOpenAiImage25Background, openAiImage25QualityOptions, openAiImage25BackgroundOptions, openAiImage25KreaAspectRatios, openAiImage25KreaResolutionOptions, openAiImage25KreaSelection } from "./openAiImage25.js";
 import { isCoverageNode, isUtilityCoverageModel, coverageMethods, coveragePreviewItems, coverageShotsForMethod, normalizeCoverageMethod } from "./coveragePresets.js";
@@ -625,7 +631,7 @@ const maxCharacterCustomSheets = 16;
 const characterSheetPrompt =
   "Make one image:\n\nStudy the reference image of the character and preserve the person's identity, physical features, proportions, image quality, and visual style as closely as possible.\n\nCreate one high-resolution horizontal character photo sheet on a clean white background. The final image must contain exactly six panels and exactly six total depictions of the same character. Follow this fixed layout precisely:\n- On the left side, place two tall vertical full-body panels side by side: one full body front view, then one full body side profile.\n- On the right side, place four equal 1:1 square face close-up panels in a clean 2 by 2 grid: top left is a left side face profile, top right is a right side face profile, bottom left is a front face portrait with a resting neutral expression, and bottom right is a front face portrait with a natural talking expression with the mouth slightly open.\n\nEach panel must contain exactly one view only. Keep the grid clean, evenly spaced, and clearly separated by simple white spacing. Do not generate any additional views, duplicate depictions, merged two-in-one panels, alternate variations, split sheets, comparison images, multiple sheets, text, labels, props, frames, or borders.";
 const cinematicCharacterSheetPrompt =
-  "Make one image:\n\nStudy the reference image of the character and preserve the person's identity, physical features and proportions as closely as possible. It's important the image is realistic with natural skin texture and natural skin tones. Preserve only the skin detail and texture naturally visible in the reference image, with subtle tonal variation, natural translucency, and restrained matte-to-satin highlights. Do not invent, exaggerate, sharpen, or outline pores, wrinkles, blemishes, facial lines, or other skin features that are not clearly present in the reference. Skin must not look plastic, waxy, airbrushed, porcelain, oily, overly smooth, glossy, synthetic, or digitally retouched. Avoid excessive specular highlights, HDR sheen, beauty-filter smoothing, and CG skin texture. High-end cinematic still frame, shot on ARRI Alexa 35, high quality prime lens, high dynamic range, shallow depth of field, atmospheric cinematography, subtle halation, very gentle lens bloom that does not soften identity-defining detail, fine film grain, realistic lens softness, very slight atmospheric haze, imperfect real-camera texture, high production value, feature film look.\n\nThe final image must contain exactly six panels and exactly six total depictions of the same character placed on the same solid gray background. Follow this fixed layout precisely:\n- On the left side, place two tall vertical full-body panels side by side: one full body front view, then one full body side profile.\n- On the right side, place four equal 1:1 square face close-up panels in a clean 2 by 2 grid: top left is a left side face profile, top right is a right side face profile, bottom left is a front face portrait with a resting neutral expression, and bottom right is a front face portrait with a natural talking expression with the mouth slightly open.\n\nEach panel must contain exactly one view only. Keep the grid clean, evenly spaced, and clearly separated by simple white spacing. Do not generate any additional views, duplicate depictions, merged two-in-one panels, alternate variations, split sheets, comparison images, multiple sheets, text, labels, props, frames, or borders.";
+  "Make one image:\n\nStudy the reference image of the character and preserve the person's identity, physical features and proportions as closely as possible. It's important the image is realistic with natural skin texture and natural skin tones. Preserve only the skin detail and texture naturally visible in the reference image, with subtle tonal variation, natural translucency, and restrained matte-to-satin highlights. Do not invent, exaggerate, sharpen, or outline pores, wrinkles, blemishes, facial lines, or other skin features that are not clearly present in the reference. Skin must not look plastic, waxy, airbrushed, porcelain, oily, overly smooth, glossy, synthetic, or digitally retouched. Avoid excessive specular highlights, HDR sheen, beauty-filter smoothing, and CG skin texture. High-end cinematic still frame, shot on ARRI Alexa 35, high quality prime lens, high dynamic range, shallow depth of field, atmospheric cinematography, subtle halation, very gentle lens bloom that does not soften identity-defining detail, fine film grain, realistic lens softness, very slight atmospheric haze, imperfect real-camera texture, high production value, feature film look.\n\nThe final image must contain exactly six panels and exactly six total depictions of the same character placed on the same solid, evenly lit neutral gray background. The background's target sRGB color is RGB(125, 125, 125), HEX #7D7D7D. Keep the exposed backdrop uniform across all six panels, with no gradients, vignettes, texture, or color casts. Apply the cinematic lighting and color treatment to the character without tinting, brightening, or darkening the backdrop. Keep the white spacing between panels white; the gray color applies only to each panel's background. Follow this fixed layout precisely:\n- On the left side, place two tall vertical full-body panels side by side: one full body front view, then one full body side profile.\n- On the right side, place four equal 1:1 square face close-up panels in a clean 2 by 2 grid: top left is a left side face profile, top right is a right side face profile, bottom left is a front face portrait with a resting neutral expression, and bottom right is a front face portrait with a natural talking expression with the mouth slightly open.\n\nEach panel must contain exactly one view only. Keep the grid clean, evenly spaced, and clearly separated by simple white spacing. Do not generate any additional views, duplicate depictions, merged two-in-one panels, alternate variations, split sheets, comparison images, multiple sheets, text, labels, props, frames, or borders.";
 const characterVoicePrompt =
   "Use the provided dialogue audio file for the character and make sure the dialogue is seamlessly and realistically integrated into the scene with professional mixing techniques.";
 const composerReferencePrompt = (writtenPrompt = "") => {
@@ -1497,6 +1503,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (!active) return undefined;
     function blockPagePinchOutsideCanvas(event) {
       if (!event.ctrlKey && !event.metaKey) return;
+      if (event.target.closest?.("[data-image-viewport]")) return;
 
       const canvas = canvasRef.current;
       if (canvas?.contains(event.target)) return;
@@ -1506,6 +1513,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     }
 
     function blockBrowserGestureOutsideCanvas(event) {
+      if (event.target.closest?.("[data-image-viewport]")) return;
       const canvas = canvasRef.current;
       if (canvas?.contains(event.target)) return;
 
@@ -2791,7 +2799,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
   function removeCharacterWardrobe(nodeId, wardrobeId) {
     const node = nodesRef.current.find((item) => item.id === nodeId);
-    if (!node) return;
+    if (!node || node.data.status === "compiling") return;
     const wardrobes = (node.data.characterWardrobes || []).filter((item) => item.id !== wardrobeId);
     const variants = (node.data.characterSheetVariants || []).filter((variant) => variant.wardrobeId !== wardrobeId);
     const activeWardrobeId = node.data.activeWardrobeId === wardrobeId ? wardrobes[0]?.id || "" : node.data.activeWardrobeId;
@@ -2801,6 +2809,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     pushUndoSnapshot();
     const patch = {
       characterWardrobes: wardrobes,
+      ...(wardrobeId === characterAutoWardrobeId ? { autoWardrobe: false } : {}),
       activeWardrobeId,
       activeCharacterSheetId: selectedId
     };
@@ -2878,12 +2887,15 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     regenerateVideo = false,
     onGenerationComplete = () => {}
   } = {}) {
+    const autoWardrobe = isAutoCharacterWardrobe(wardrobe);
     let generated = regenerateImage ? null : existingVariant?.generated || null;
-    if (!(generated?.url || generated?.localUrl)) {
+    const needsImage = !(generated?.url || generated?.localUrl);
+    if (needsImage) {
       generated = await runCharacterWardrobeEdit({
         node,
         provider: generationProvider,
-        prompt: characterWardrobeEditPrompt,
+        prompt: autoWardrobe ? characterAutoWardrobePrompt({ nonHuman: node.data.nonHumanCharacter === true })
+          : node.data.nonHumanCharacter === true ? nonHumanCharacterWardrobePrompt() : characterWardrobeEditPrompt,
         baseSheet,
         wardrobe,
         workflowContext: workflowRequestContext(),
@@ -2892,7 +2904,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       onGenerationComplete();
     }
 
-    let videoGenerated = regenerateVideo ? null : existingVariant?.videoGenerated || null;
+    let videoGenerated = regenerateVideo || (autoWardrobe && needsImage) ? null : existingVariant?.videoGenerated || null;
     let videoError = "";
     if (
       node.data.cuVideoGeneration
@@ -2903,9 +2915,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         videoGenerated = await runCharacterWardrobeEdit({
           node,
           provider: generationProvider,
-          prompt: characterVideoWardrobeEditPrompt,
+          prompt: autoWardrobe ? characterAutoWardrobePrompt({ video: true, nonHuman: node.data.nonHumanCharacter === true })
+            : node.data.nonHumanCharacter === true ? nonHumanCharacterWardrobePrompt({ video: true }) : characterVideoWardrobeEditPrompt,
           baseSheet: baseVideoSheet,
-          wardrobe,
+          wardrobe: autoWardrobe ? { ...generated, id: characterAutoWardrobeId } : wardrobe,
           workflowContext: workflowRequestContext(),
           characterTag: characterTag(node),
           sheetKind: "video"
@@ -2925,6 +2938,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         baseSheetUrl: baseSheet.url || baseSheet.localUrl || "",
         baseSignature,
         ...(videoGenerated && baseVideoSignature ? { baseVideoSignature } : {}),
+        ...(autoWardrobe && videoGenerated ? { autoWardrobeImageUrl: generated.localUrl || generated.url } : {}),
         generated,
         ...(videoGenerated ? { videoGenerated } : {})
       },
@@ -2935,7 +2949,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
   async function regenerateCharacterWardrobe(nodeId, wardrobeId) {
     const node = nodesRef.current.find((item) => item.id === nodeId);
     if (!node || node.data.status === "compiling") return;
-    const wardrobe = (node.data.characterWardrobes || []).find((item) => item.id === wardrobeId);
+    const wardrobe = characterWardrobesForGeneration(node.data).find((item) => item.id === wardrobeId);
     if (!wardrobe) return;
     const baseSheet = node.data.characterBaseSheet || characterSheetVariantForWardrobeId(node.data, characterDefaultWardrobeId)?.generated;
     const baseSignature = node.data.characterBaseSignature || characterBaseGenerationSignature(node.data);
@@ -3067,11 +3081,15 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       return;
     }
 
-    const wardrobes = Array.isArray(node.data.characterWardrobes) ? node.data.characterWardrobes : [];
-    const desiredWardrobeId = characterWardrobeVariantId(activeCharacterWardrobe(node));
+    const wardrobes = characterWardrobesForGeneration(node.data);
+    const desiredWardrobeId = characterWardrobeVariantId(activeCharacterWardrobe(node)
+      || wardrobes.find(isAutoCharacterWardrobe));
     const selectedVoice = activeCharacterVoice(node);
     const physicalDetailsPrompt = characterPhysicalDetailsPrompt(node.data);
-    const baseCharacterSheetPrompt = node.data.cinematicCharacterSheet ? cinematicCharacterSheetPrompt : characterSheetPrompt;
+    const nonHuman = node.data.nonHumanCharacter === true;
+    const baseCharacterSheetPrompt = nonHuman
+      ? nonHumanCharacterBasePrompt({ cinematic: Boolean(node.data.cinematicCharacterSheet) })
+      : node.data.cinematicCharacterSheet ? cinematicCharacterSheetPrompt : characterSheetPrompt;
     const generateCuVideoSheet = Boolean(node.data.cuVideoGeneration);
     const baseSignature = characterBaseGenerationSignature(node.data);
     const storedBaseSheet = node.data.characterBaseSheet || characterSheetVariantForWardrobeId(node.data, characterDefaultWardrobeId)?.generated || null;
@@ -3115,7 +3133,9 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       const wardrobePlans = wardrobes.map((wardrobe) => {
         const existingVariant = characterSheetVariantForWardrobeId(node.data, wardrobe.id);
         const imageCurrent = canReuseBase && characterWardrobeVariantIsCurrent(existingVariant, wardrobe, baseSignature);
-        const videoCurrent = canReuseBaseVideo && characterWardrobeVariantIsCurrent(
+        const autoVideoMatches = !isAutoCharacterWardrobe(wardrobe) || (imageCurrent
+          && existingVariant.autoWardrobeImageUrl === (existingVariant.generated.localUrl || existingVariant.generated.url));
+        const videoCurrent = autoVideoMatches && canReuseBaseVideo && characterWardrobeVariantIsCurrent(
           existingVariant,
           wardrobe,
           baseSignature,
@@ -3156,7 +3176,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         generateBase: () => runCharacterSheetGeneration({
           node,
           provider: generationProvider,
-          prompt: [baseCharacterSheetPrompt, characterNeutralBaseWardrobePrompt, physicalDetailsPrompt].filter(Boolean).join("\n\n"),
+          prompt: [baseCharacterSheetPrompt, nonHuman ? "" : characterNeutralBaseWardrobePrompt, physicalDetailsPrompt].filter(Boolean).join("\n\n"),
           portrait,
           wardrobe: null,
           workflowContext: workflowRequestContext(),
@@ -3165,7 +3185,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         generateVideo: () => runCharacterSheetGeneration({
           node,
           provider: generationProvider,
-          prompt: [characterVideoSheetPrompt, characterVideoNeutralBaseWardrobePrompt, characterVideoIdentityContinuityPrompt, physicalDetailsPrompt].filter(Boolean).join("\n\n"),
+          prompt: [...(nonHuman ? [nonHumanCharacterBasePrompt({ video: true })]
+            : [characterVideoSheetPrompt, characterVideoNeutralBaseWardrobePrompt, characterVideoIdentityContinuityPrompt]), physicalDetailsPrompt].filter(Boolean).join("\n\n"),
           portrait,
           wardrobe: null,
           workflowContext: workflowRequestContext(),
@@ -3671,7 +3692,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         props: storyboardPropReferenceSummaries(incoming.propsIn || [], currentIncomingByNode)
       }, "Storyboard planning");
       const plan = requireStoryboardPlanResponse(response, data);
-      const plannedFrames = shotList ? mergeStoryboardShotPlan(existing, storyboardFramesFromPlan(plan.frames)) : storyboardFramesFromPlan(plan.frames);
+      const plannedFrames = shotList ? mergeStoryboardShotPlan(existing, storyboardFramesFromPlan(plan.frames), storyboardReferenceCandidates(currentNode, incoming, currentIncomingByNode)) : storyboardFramesFromPlan(plan.frames);
       const liveNode = nodesRef.current.find(item => item.id === currentNode.id);
       const liveIncoming = buildIncomingByNode(nodesRef.current, edgesRef.current)[currentNode.id] || {};
       if (!liveNode || storyboardEditSignature(liveNode.data.storyboardFrames) !== storyboardEditSignature(existing) || storyboardSceneDescriptionForNode(liveNode, liveIncoming) !== sceneDescription
@@ -3821,6 +3842,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const qcEnabled = currentNode.data.storyboardAutoQc !== false;
     const successes = [];
     const failures = [];
+    const correctionWarnings = [];
 
     updateNode(currentNode.id, { ...imageSettings, status: "running", storyboardTab: "view", error: "" });
     for (const frame of targetFrames) {
@@ -3854,30 +3876,39 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         let generated = null;
         let qcResult = null;
         let qcRetryCount = 0;
+        let correctionError = "";
         const maxAttempts = qcEnabled ? 2 : 1;
 
         for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
           patchStoryboardFrame(currentNode.id, frame.id, { status: "running", error: "", qcWarning: "" });
-          const generatedItems = await runImageModelGeneration({
-            node: {
-              ...currentNode,
-              data: {
-                ...currentNode.data,
-                title: `${currentNode.data.title || "Storyboard"} Frame ${String(frame.number).padStart(3, "0")}`,
-                model: normalizeStoryboardImageModel(currentNode.data.model),
-                quality: "high",
-                background: "auto",
-                aspectRatio,
-                resolution
-              }
-            },
-            prompt,
-            aspectRatio,
-            imagePromptItems,
-            workflowContext,
-            index: frame.number - 1
-          });
-          generated = Array.isArray(generatedItems) ? generatedItems[0] || null : generatedItems;
+          try {
+            const generatedItems = await runImageModelGeneration({
+              node: {
+                ...currentNode,
+                data: {
+                  ...currentNode.data,
+                  title: `${currentNode.data.title || "Storyboard"} Frame ${String(frame.number).padStart(3, "0")}`,
+                  model: normalizeStoryboardImageModel(currentNode.data.model),
+                  quality: "high",
+                  background: "auto",
+                  aspectRatio,
+                  resolution
+                }
+              },
+              prompt,
+              aspectRatio,
+              imagePromptItems,
+              workflowContext,
+              index: frame.number - 1
+            });
+            const nextImage = Array.isArray(generatedItems) ? generatedItems[0] || null : generatedItems;
+            if (!nextImage?.url) throw new Error("Storyboard frame generation returned no image.");
+            generated = nextImage;
+          } catch (error) {
+            if (!attempt || !generated?.url || original?.resultUrl || original?.exportUrl) throw error;
+            correctionError = `QC correction failed: ${error.message || "Connection interrupted"}. The first image is retained with its QC warning. The correction may still be billed; check History and the provider before rerunning.`;
+            break;
+          }
 
           if (!qcEnabled) break;
 
@@ -3886,7 +3917,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
             node: currentNode,
             frame,
             generated,
-            sceneDescription,
+            sceneDescription: storyboardRenderSceneContext(currentNode.data, sceneDescription, connectedText(incoming.sceneDescriptionIn || [])),
             framePrompt: prompt,
             characterReferences: frameCast.references.map(({ tag, url }) => ({ tag, url })),
             continuityReferenceItems
@@ -3924,7 +3955,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           resultVersion: Date.now(),
           fileName: exported.fileName || generated.fileName || "",
           status: "complete",
-          error: "",
+          error: correctionError,
           qcPassed: qcResult && qcResult.severity !== "unreviewed" ? Boolean(qcResult.pass) : null,
           qcReviewStatus: !qcEnabled ? "disabled" : qcResult?.severity === "unreviewed" ? "unreviewed" : "reviewed",
           qcWarning: qcResult && !qcResult.pass ? `QC warning: ${qcResult.summary || "Frame may have continuity or physical logic issues."}` : "",
@@ -3935,6 +3966,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
           revisionInstruction: instruction
         });
         patchStoryboardFrame(currentNode.id, frame.id, nextFrame);
+        if (correctionError) correctionWarnings.push(correctionError);
         successes.push({ ...generated, url: exported.url, label: `Frame ${String(frame.number).padStart(3, "0")}` });
       } catch (error) {
         patchStoryboardFrame(currentNode.id, frame.id, { status: "error", error: error.message || "Frame generation failed." });
@@ -3946,7 +3978,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     updateStoryboardNodeFrames(currentNode.id, normalizedStoryboardFrames(latestNode.data.storyboardFrames), {
       status: successes.length ? "complete" : "error",
       storyboardTab: "view",
-      error: failures.length ? `${failures.length} frame${failures.length === 1 ? "" : "s"} failed. ${failures[0]?.message || ""}`.trim() : "",
+      error: [failures.length ? `${failures.length} frame${failures.length === 1 ? "" : "s"} failed. ${failures[0]?.message || ""}`.trim() : "", correctionWarnings[0]].filter(Boolean).join(" "),
       resultText: successes.map((item) => item.text).filter(Boolean).join("\n\n")
     });
     loadOutputHistory();
@@ -6637,7 +6669,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       }
       if (node.type === "character") {
         const references = [data.characterPortrait, ...(data.characterWardrobes || [])].filter(Boolean).map((item) => ({ url: item.localUrl || item.url, label: item.name || item.fileName || "Character reference" }));
-        const count = (1 + (data.characterWardrobes?.length || 0)) * (data.cuVideoGeneration ? 2 : 1);
+        const count = (1 + characterWardrobesForGeneration(data).length) * (data.cuVideoGeneration ? 2 : 1);
         const settings = { model: normalizeCharacterSheetModel(data.characterSheetModel), resolution: isSeedream5ProModel(data.characterSheetModel) ? "2K" : "4K", aspectRatio: "16:9", quality: "high", batchCount: count, referenceCount: 2, provider: generationProvider };
         return { ...base, ...settings, count, references, upperBound: true, estimatedCost: estimateImageRunCost(settings) };
       }
@@ -7800,7 +7832,7 @@ function NodeBody({
   if (node.type === "character") {
     const portrait = node.data.characterPortrait;
     const customSheets = normalizeCharacterCustomSheets(node.data);
-    const wardrobes = Array.isArray(node.data.characterWardrobes) ? node.data.characterWardrobes : [];
+    const wardrobes = characterWardrobesForGeneration(node.data);
     const voices = Array.isArray(node.data.characterVoices) ? node.data.characterVoices : [];
     const activeVoice = activeCharacterVoice(node);
     const selectedTraits = Array.isArray(node.data.characterTraits) ? node.data.characterTraits : [];
@@ -7946,7 +7978,10 @@ function NodeBody({
                   {portrait?.localUrl || portrait?.url ? (
                     <img {...fullResolutionImageProps(portrait)} src={previewImageUrl(portrait)} alt="Character portrait" loading="lazy" decoding="async" />
                   ) : (
-                    <UserRound size={28} />
+                    <span className="character-portrait-empty">
+                      <UserRound size={28} />
+                      <small>Headshots Only</small>
+                    </span>
                   )}
                   <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => onCharacterPortraitUpload(node, event.target.files?.[0])} />
                 </label>
@@ -7965,7 +8000,7 @@ function NodeBody({
                   <span className="character-section-label">Physical Details <span className="character-optional-label">(Optional)</span></span>
                   <textarea
                     value={node.data.characterPhysicalDetails || ""}
-                    placeholder="Defining features, e.g. glass left eye, wooden prosthetic leg"
+                    placeholder="Defining features, e.g. overweight beer belly, wooden prosthetic leg"
                     onChange={(event) => onUpdate(node.id, { characterPhysicalDetails: event.target.value })}
                   />
                 </label>
@@ -7974,7 +8009,7 @@ function NodeBody({
                 <section className="character-section wardrobe drop-enabled" onDragOver={allowFileDrop} onDrop={(event) => handleCharacterDrop(event, "wardrobe")}>
                   <div className="character-section-head">
                     <span className="character-section-label">Wardrobe</span>
-                    {wardrobes.length < maxCharacterWardrobes && (
+                    {(node.data.characterWardrobes?.length || 0) < maxCharacterWardrobes && (
                       <label className="character-add-button" title="Upload wardrobe images">
                         <Plus size={13} />
                         <input type="file" accept="image/png,image/jpeg,image/webp" multiple disabled={compiling} onChange={(event) => onCharacterWardrobesUpload(node, event.target.files)} />
@@ -8012,6 +8047,7 @@ function NodeBody({
                             className="character-remove"
                             aria-label={`Remove ${wardrobe.fileName || "wardrobe"}`}
                             title={`Remove ${wardrobe.fileName || "wardrobe"}`}
+                            disabled={compiling}
                             onPointerDown={(event) => event.stopPropagation()}
                             onClick={(event) => {
                               event.preventDefault();
@@ -8057,8 +8093,18 @@ function NodeBody({
                   />
                   <span>
                     <strong>Cinematic Sheet</strong>
-                    <small>Natural skin texture and film-quality realism</small>
+                    <small>{node.data.nonHumanCharacter === true ? "Cinematic lighting with the original character design" : "Natural skin texture and film-quality realism"}</small>
                   </span>
+                </label>
+                <label className="character-section character-option-row" title="Preserve the reference's species, anatomy, surface materials, and stylization instead of imposing human realism.">
+                  <input
+                    type="checkbox"
+                    aria-label="Non-Human"
+                    checked={node.data.nonHumanCharacter === true}
+                    disabled={compiling || locked}
+                    onChange={(event) => onUpdate(node.id, { nonHumanCharacter: event.target.checked })}
+                  />
+                  <span><strong>Non-Human</strong></span>
                 </label>
                 <label className="character-section character-option-row">
                   <input
@@ -8071,6 +8117,16 @@ function NodeBody({
                     <strong>CU Video Generation</strong>
                     <small>Creates a simplified close-up video sheet for every wardrobe</small>
                   </span>
+                </label>
+                <label className="character-section character-option-row" title="Create a complete matching outfit, including suitable shoes, from the clothing shown in the portrait. Uploaded wardrobes remain separate outfits.">
+                  <input
+                    type="checkbox"
+                    aria-label="Auto Wardrobe"
+                    checked={node.data.autoWardrobe === true}
+                    disabled={compiling || locked}
+                    onChange={(event) => onUpdate(node.id, { autoWardrobe: event.target.checked })}
+                  />
+                  <span><strong>Auto Wardrobe</strong></span>
                 </label>
                 <section
                   className="character-section character-sheet-library drop-enabled"
@@ -8275,6 +8331,11 @@ function NodeBody({
     const runningStoryboard = node.data.status === "running" || preparingCharacters;
     const planningStoryboard = node.data.status === "planning";
     const exportingStoryboard = node.data.status === "exporting";
+    const storyboardActivityLabel = planningStoryboard ? (shotList ? "Planning shots" : "Planning storyboard")
+      : preparingCharacters ? "Generating character sheets"
+        : runningStoryboard ? "Generating storyboard frames"
+          : compilingStoryboardBoard ? "Preparing storyboard output"
+            : exportingStoryboard ? "Exporting storyboard boards" : "";
     const storyboardLocked = planningStoryboard || runningStoryboard || exportingStoryboard || compilingStoryboardBoard || ["revising", "reviewing-sequence"].includes(node.data.status);
     const panelEditingLocked = storyboardPanelEditingLocked(node);
     const activeTab = runningStoryboard || exportingStoryboard || compilingStoryboardBoard ? "view" : storedStoryboardTab;
@@ -8458,9 +8519,9 @@ function NodeBody({
           </div>
           <div className="storyboard-actions">
             {activeTab === "setup" && <StoryboardPlanButton shotList={shotList} busy={storyboardLocked} disabled={!sceneDescription.trim() || Boolean(shotListError)} planning={planningStoryboard} hasPlan={frames.some(frame => frame.prompt || frame.resultUrl)} protectedCount={frames.filter(frame => frame.protected).length} onPlan={options => onStoryboardPlan?.(node, options)} />}
-            {(preparingCharacters || exportingStoryboard || compilingStoryboardBoard) && (
-              <span className="storyboard-action-busy" title={preparingCharacters ? "Generating character sheets" : compilingStoryboardBoard ? "Preparing storyboard output" : "Exporting storyboard boards"}>
-                <Loader2 size={15} />
+            {storyboardActivityLabel && (
+              <span className="storyboard-action-busy" role="status" aria-label={storyboardActivityLabel} title={storyboardActivityLabel}>
+                <Loader2 size={15} aria-hidden="true" />
               </span>
             )}
             {(runningStoryboard || frames.some(frame => frame.prompt && !frame.protected && !frame.resultUrl && !frame.exportUrl)) && <button type="button" className="primary" onClick={() => onStoryboardGenerateAll?.(node, frames.filter(frame => !frame.protected && !frame.resultUrl && !frame.exportUrl && (!shotList || !storyboardShotNeedsPlan(frame))).map(frame => frame.id))} disabled={storyboardLocked || !sceneDescription.trim() || (shotList && !frames.some(frame => !frame.protected && !frame.resultUrl && !frame.exportUrl && !storyboardShotNeedsPlan(frame)))} title="Generate only panels without an image">
@@ -8486,7 +8547,8 @@ function NodeBody({
               onUpdate={patch => onUpdate(node.id, patch)} onApply={imported => {
                 if (storyboardLocked) return;
                 onUndoSnapshot?.();
-                const nextFrames = normalizedStoryboardFrames(imported);
+                const references = storyboardReferenceCandidates(node, storyboardIncoming, incomingByNode);
+                const nextFrames = normalizedStoryboardFrames(tagImportedScriptFrames(frames, imported, references));
                 onUpdate(node.id, { ...clearStoryboardBoardPatch(), storyboardApproach: "Shot List", storyboardFrames: nextFrames,
                   storyboardSelectedFrameIds: [], selectedFrameId: nextFrames[0]?.id || "", storyboardSequenceReview: null,
                   resultItems: storyboardResultItems(nextFrames), resultUrl: nextFrames.find(frame => frame.resultUrl)?.resultUrl || "" });
@@ -8499,7 +8561,12 @@ function NodeBody({
                 renderDescription={(frame, disabled) => <TaggedPromptTextarea className="storyboard-tagged-editor" ariaLabel={`Shot ${frame.number} description`} maxLength={1400}
                   value={storyboardShotDescription(frame)} placeholder="Describe this shot..." tagMatches={storyboardSceneTagMatches(storyboardShotDescription(frame), node, storyboardIncoming, incomingByNode)} readOnly={disabled}
                   onChange={event => updateFrame(frame.id, { shotDescription: event.target.value, shotPlanSource: "" })} />}
-                context={<details className="storyboard-shot-context"><summary>Scene Context</summary><textarea aria-label="Shot list scene context" value={connectedSceneDescription || node.data.sceneDescription || ""} readOnly={storyboardLocked || sceneDescriptionConnected} placeholder="Optional scene context" onChange={event => onUpdate(node.id, { sceneDescription: event.target.value })} /></details>} /> : <label className="storyboard-scene-field">
+                context={<details className="storyboard-shot-context"><summary>Scene Context</summary>
+                  <TaggedPromptTextarea className="storyboard-tagged-editor" ariaLabel="Shot list scene context"
+                    value={connectedSceneDescription || node.data.sceneDescription || ""} tagMatches={storyboardSceneTagMatches(connectedSceneDescription || node.data.sceneDescription || "", node, storyboardIncoming, incomingByNode)}
+                    readOnly={storyboardLocked || sceneDescriptionConnected} placeholder="Optional scene context"
+                    onChange={event => onUpdate(node.id, { sceneDescription: event.target.value })} />
+                </details>} /> : <label className="storyboard-scene-field">
                 <span>Scene Description</span>
                 <TaggedPromptTextarea
                   className="storyboard-tagged-editor"
@@ -8692,6 +8759,7 @@ function NodeBody({
                       if (dragItem) setOutputItemDragData(event.dataTransfer, dragItem, outputDragMime);
                       event.dataTransfer.effectAllowed = dragItem ? "copyMove" : "move";
                       event.dataTransfer.setData("application/x-storyboard-frame-id", frame.id);
+                      setStoryboardFrameDragImage(event, frame.number);
                     }}
                     onDragEnd={() => clearOutputItemDragData(storyboardFrameOutputItem(frame))}
                     onDragOverCapture={handleFrameDragOver}
@@ -12158,6 +12226,8 @@ function createDefaultNodeData(type, label, count) {
       customCharacterTraits: "",
       characterSheetModel: characterSheetDefaultModel,
       cinematicCharacterSheet: false,
+      nonHumanCharacter: false,
+      autoWardrobe: false,
       cuVideoGeneration: false,
       useCustomCharacterSheet: false,
       customCharacterSheet: null,
@@ -13538,58 +13608,58 @@ function imageModelReferenceTagMatches(prompt, imageItems = [], characterItems =
   return [...uniqueMatches.values()];
 }
 
-function storyboardCharacterTagMatches(prompt, node, externalItems = [], incomingByNode = null) {
-  const text = String(prompt || "");
+function storyboardCharacterTagCandidates(node, externalItems = [], incomingByNode = null) {
   const internalCandidates = storyboardUsesInternalCharacters(node)
     ? normalizedStoryboardCharacters(node.data?.storyboardCharacters)
         .filter((character) => character.name || character.portrait?.localUrl)
-        .map((character, index) => ({
+        .map((character) => ({
           nodeId: `${node.id}:${character.id}`,
           tag: storyboardCharacterTag(character),
-          color: referenceTagPalette[index % referenceTagPalette.length],
+          name: character.name,
+          color: portColors.character,
           type: "character"
         }))
     : [];
-  const externalCandidates = activeConnectedCharacterSources(externalItems, incomingByNode)
-    .map((source, index) => ({
-      nodeId: source.id,
-      tag: characterTag(source),
-      color: referenceTagPalette[(internalCandidates.length + index) % referenceTagPalette.length],
-      type: "character"
-    }));
+  // Tag decoration follows connections, not whether their media is ready for generation.
+  const externalCandidates = [
+    ...externalItems.map(({ source }) => source).filter(source => source.type === "character"),
+    ...activeConnectedCharacterSources(externalItems, incomingByNode)
+  ].map((source) => ({
+    nodeId: source.id,
+    tag: characterTag(source),
+    name: source.data.characterName || source.data.title,
+    color: portColors.character,
+    type: "character"
+  }));
   const uniqueCandidates = new Map();
 
   [...internalCandidates, ...externalCandidates].forEach((candidate) => {
     if (!candidate.tag) return;
-    uniqueCandidates.set(candidate.tag.toLowerCase(), candidate);
+    uniqueCandidates.set(candidate.nodeId, candidate);
   });
 
-  return [...uniqueCandidates.values()].filter((match) => promptHasTag(text, match.tag));
+  return [...uniqueCandidates.values()];
 }
 
-function storyboardSceneReferenceTagMatches(prompt, items = [], colorOffset = 0) {
-  const text = String(prompt || "");
+function storyboardSceneReferenceTagCandidates(items = []) {
   return items
     .map(({ source, edge }, index) => {
       const outputItem = connectedOutputItem(source, edge);
-      const url = outputItem?.url || connectedOutputUrl(source, edge);
-      if (!url) return null;
       const label = cleanImageReferenceLabel(source.data?.title || outputItem?.label || sourceLabel(source) || `Reference ${index + 1}`) || `Reference ${index + 1}`;
       return {
         nodeId: source.id,
         tag: cleanPromptTag(source.data?.title || label) || `Reference${index + 1}`,
-        color: portColors.image || referenceTagPalette[(colorOffset + index) % referenceTagPalette.length],
+        name: source.data?.title || label,
+        color: portColors.image,
         type: "location-reference"
       };
-    })
-    .filter(Boolean)
-    .filter((match) => promptHasTag(text, match.tag));
+    });
 }
 
-function storyboardSceneTagMatches(prompt, node, incoming = {}, incomingByNode = null) {
-  const characterMatches = storyboardCharacterTagMatches(prompt, node, incoming.characterIn, incomingByNode);
-  const referenceMatches = storyboardSceneReferenceTagMatches(prompt, incoming.sceneReferenceIn || [], characterMatches.length);
-  const propMatches = storyboardSceneReferenceTagMatches(prompt, incoming.propsIn || [], characterMatches.length + referenceMatches.length)
+function storyboardReferenceCandidates(node, incoming = {}, incomingByNode = null) {
+  const characterMatches = storyboardCharacterTagCandidates(node, incoming.characterIn, incomingByNode);
+  const referenceMatches = storyboardSceneReferenceTagCandidates(incoming.sceneReferenceIn || []);
+  const propMatches = storyboardSceneReferenceTagCandidates(incoming.propsIn || [])
     .map((match) => ({ ...match, type: "prop-reference" }));
   const uniqueMatches = new Map();
 
@@ -13599,6 +13669,10 @@ function storyboardSceneTagMatches(prompt, node, incoming = {}, incomingByNode =
   });
 
   return [...uniqueMatches.values()];
+}
+
+function storyboardSceneTagMatches(prompt, node, incoming = {}, incomingByNode = null) {
+  return storyboardReferenceTagMatches(prompt, storyboardReferenceCandidates(node, incoming, incomingByNode));
 }
 
 function referenceTagCandidates(items = [], colorOffset = 0, fallbackPrefix = "Image") {
@@ -13626,6 +13700,7 @@ function characterTagCandidates(items = [], colorOffset = 0) {
 function promptHighlightParts(value, tagMatches = []) {
   const text = String(value || "");
   if (!text) return [{ text: "", active: false }];
+  if (tagMatches.some(match => Array.isArray(match.mentions))) return storyboardReferenceHighlightParts(text, tagMatches);
 
   const tagMap = new Map(tagMatches.map((match) => [match.tag.toLowerCase(), match]));
   const parts = [];
@@ -14898,7 +14973,9 @@ function storyboardVideoReferencePromptPiece(items = []) {
 function characterImagePromptPieces(source, namedCharacterReferences = false) {
   const sheetLabel = characterReferenceLabel(source, namedCharacterReferences);
   return [
-    `CHARACTER REFERENCE: The image reference labeled "${sheetLabel}" is mandatory. Use it as the only source for the character's identity, face, hair, body proportions, selected wardrobe, and recognizable details. Render this same character in the requested scene without inventing a replacement character.`,
+    source.data.nonHumanCharacter === true
+      ? `CHARACTER REFERENCE: The image reference labeled "${sheetLabel}" is mandatory and is the sole identity and selected-wardrobe reference for this non-human character. For this character only: ${nonHumanCharacterIdentityPrompt}`
+      : `CHARACTER REFERENCE: The image reference labeled "${sheetLabel}" is mandatory. Use it as the only source for the character's identity, face, hair, body proportions, selected wardrobe, and recognizable details. Render this same character in the requested scene without inventing a replacement character.`,
     characterGenerationPhysicalDetailsPrompt(source.data),
     characterTraitPrompt(source.data)
   ].filter(Boolean);
@@ -14908,6 +14985,7 @@ function characterVideoPromptPieces(source, audioIndex) {
   if (!source.data.locked || !source.data.activated || !characterOutputReference(source.data)) return [];
   return [
     "The connected character sheet defines the character's visual identity and selected wardrobe. Keep the character consistent throughout the shot.",
+    source.data.nonHumanCharacter === true ? `For @${characterTag(source)} only: ${nonHumanCharacterIdentityPrompt}` : "",
     characterGenerationPhysicalDetailsPrompt(source.data),
     characterTraitPrompt(source.data),
     audioIndex && activeCharacterVoice(source)
@@ -14924,6 +15002,7 @@ function characterTraitPrompt(data = {}) {
     .filter(Boolean);
   const traits = [...new Set([...presetTraits, ...customTraits])];
   if (!traits.length) return "";
+  if (data.nonHumanCharacter === true) return `The character characteristics are ${traits.join(", ")}. Express them in a way consistent with the reference's species, anatomy, and visual style, without adding human facial features or changing its design.`;
   return `The character characteristics are authentic, ${traits.join(", ")} and realistically displayed. These traits should be considered when rendering generations.`;
 }
 
@@ -14940,7 +15019,7 @@ function characterGenerationPhysicalDetailsPrompt(data = {}) {
 }
 
 function activeCharacterWardrobe(node) {
-  const wardrobes = Array.isArray(node?.data?.characterWardrobes) ? node.data.characterWardrobes : [];
+  const wardrobes = characterWardrobesForGeneration(node?.data);
   return wardrobes.find((wardrobe) => wardrobe.id === node.data.activeWardrobeId) || null;
 }
 
@@ -15508,6 +15587,8 @@ function normalizeCurrentNode(node) {
       characterVoices: Array.isArray(data.characterVoices) ? data.characterVoices : [],
       characterTraits: Array.isArray(data.characterTraits) ? data.characterTraits : [],
       characterSheetModel: normalizeCharacterSheetModel(data.characterSheetModel),
+      nonHumanCharacter: data.nonHumanCharacter === true,
+      autoWardrobe: data.autoWardrobe === true,
       characterSheetVariants,
       characterBaseSheet,
       characterBaseSignature: String(data.characterBaseSignature || ""),
@@ -16098,51 +16179,12 @@ function storyboardFrameReferenceUrl(frame = {}) {
   return frame.exportUrl || frame.resultUrl || "";
 }
 
-function storyboardFrameContinuityText(frame = {}) {
-  return [frame.beat, frame.prompt, frame.notes, frame.shot, frame.angle]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
-}
-
-function isStoryboardInsertFrame(frame = {}) {
-  const text = storyboardFrameContinuityText(frame);
-  if (!text) return false;
-  return /\b(insert|cutaway|detail|prop|object|macro|still life|phone screen|screen close|message|muffin)\b/.test(text)
-    || /\b(close[-\s]?up|closeup|extreme close[-\s]?up)\b/.test(text);
-}
-
-function isStoryboardSpatialAnchorFrame(frame = {}) {
-  if (!storyboardFrameReferenceUrl(frame) || isStoryboardInsertFrame(frame)) return false;
-  const shot = String(frame.shot || "").toUpperCase();
-  if (shot === "CU" || shot === "ECU") return false;
-  return true;
-}
-
 function storyboardContinuityReferenceItems(node, frame) {
   const frames = normalizedStoryboardFrames(node?.data?.storyboardFrames);
-  const frameIndex = frames.findIndex((item) => item.id === frame.id);
-  if (frameIndex <= 0) return [];
-  const previousFrames = [...frames.slice(0, frameIndex)].reverse();
-  const previousFrame = previousFrames.find((item) => storyboardFrameReferenceUrl(item));
-  if (!previousFrame) return [];
-
-  const references = [{
-    url: storyboardFrameReferenceUrl(previousFrame),
-    label: storyboardPreviousFrameLabel
-  }];
-  const previousFrameIsSpatialAnchor = isStoryboardSpatialAnchorFrame(previousFrame);
-  if (!previousFrameIsSpatialAnchor) {
-    const spatialAnchorFrame = previousFrames.find((item) => isStoryboardSpatialAnchorFrame(item));
-    const spatialAnchorUrl = storyboardFrameReferenceUrl(spatialAnchorFrame);
-    if (spatialAnchorUrl && spatialAnchorUrl !== storyboardFrameReferenceUrl(previousFrame)) {
-      references.push({
-        url: spatialAnchorUrl,
-        label: storyboardSpatialAnchorLabel
-      });
-    }
-  }
-  return references;
+  return storyboardContinuityFrames(frames, frame, storyboardFrameReferenceUrl).map((item, index) => ({
+    url: storyboardFrameReferenceUrl(item),
+    label: index ? storyboardSpatialAnchorLabel : storyboardPreviousFrameLabel
+  }));
 }
 
 function storyboardImagePromptItemsForFrame(baseItems = [], continuityReferenceItems = []) {
@@ -16254,6 +16296,7 @@ function storyboardRequiredPropSourcesForFrame(frame, sceneDescription = "", pro
 }
 
 function buildStoryboardFramePrompt(node, frame, sceneDescription = "", incoming = {}, incomingByNode = null, options = {}) {
+  sceneDescription = storyboardRenderSceneContext(node.data, sceneDescription, connectedText(incoming.sceneDescriptionIn || []));
   const storyboardStyleEnabled = node.data.useStoryboardStyle !== false;
   const sceneReferenceSources = Array.isArray(options.activeLocationSources)
     ? options.activeLocationSources
@@ -16288,7 +16331,7 @@ function buildStoryboardFramePrompt(node, frame, sceneDescription = "", incoming
       ? `If an uploaded image labeled ${storyboardPreviousFrameLabel} is present, use it for the preceding action state, physical occupancy, lighting direction and recurring objects. It is NOT an identity source: the named character sheets remain identity authority. Preserve an occupant when their established place remains in view; do not copy genuinely out-of-frame cast, faces or rendering style into the new shot. Do not let an insert or close-up redefine room geography or the 180 degree line. Follow current-frame blocking, including intentional camera reverses and crossings.`
       : "",
     options.hasSpatialAnchorReference
-      ? `If an uploaded image labeled ${storyboardSpatialAnchorLabel} is present, use it for physical room geography, occupied seats/places and object placement, not identity or rendering style. Project that established layout into the current camera view: an in-view occupied seat cannot become empty just because the other character is the focus. Respect actual tighter crops, occlusion, camera reverses and explicit physical moves. Do not copy the anchor's exact composition or add people whose positions fall outside the current frame.`
+      ? `If an uploaded image labeled ${storyboardSpatialAnchorLabel} is present, use it for physical room geography, occupied seats/places and object placement, not identity or rendering style. It is the establishing geography authority if a later frame drifted. Project that established layout into the current camera view: an in-view occupied seat cannot become empty just because the other character is the focus. Current-frame stateBefore/stateAfter and explicit blocking changes override older prop states or seating; do not undo a motivated laptop turn just to match the anchor. Respect actual tighter crops, occlusion, camera reverses and explicit physical moves. Do not copy the anchor's exact composition or add people whose positions fall outside the current frame.`
       : ""
   ].filter(Boolean);
   const frameHeader = [
@@ -16310,6 +16353,7 @@ function buildStoryboardFramePrompt(node, frame, sceneDescription = "", incoming
     ...cameraPieces,
     storyboardCameraRenderingPrompt(frame),
     storyboardContinuityInstruction,
+    storyboardContinuityRules,
     sceneReferenceMap,
     propReferenceMap,
     ...sceneContinuityPieces,

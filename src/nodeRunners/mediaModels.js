@@ -3,6 +3,7 @@ import { characterSheetGenerationSettings } from "../characterSheetModels.js";
 import { storyboardCharacterImageSettings } from "../storyboardImageModels.js";
 import { isOpenAiImage25Model, openAiImage25KreaSelection } from "../openAiImage25.js";
 import { characterVideoBaseReferences } from "../characterVideoSheets.js";
+import { isAutoCharacterWardrobe } from "../characterAutoWardrobe.js";
 import { workflowContextPayload } from "../workflowContext.js";
 
 export async function runImageModelGeneration({ node, prompt, aspectRatio, imagePromptItems, workflowContext, index }) {
@@ -253,7 +254,9 @@ export async function runCharacterWardrobeEdit({
 
   const references = [
     { url: baseUrl, label: isVideoSheet ? "Locked Base Identity CU Video Sheet" : "Locked Base Identity Character Sheet" },
-    { url: wardrobeUrl, label: "Wardrobe clothing footwear accessories hats glasses sunglasses not identity" }
+    { url: wardrobeUrl, label: isAutoCharacterWardrobe(wardrobe)
+      ? isVideoSheet ? "Completed Auto Wardrobe sheet - outfit only, not identity or layout" : "Original portrait - visible wardrobe and style for outfit completion, not layout"
+      : "Wardrobe clothing footwear accessories hats glasses sunglasses not identity" }
   ];
   const { response, data } = await nodeApi.generateImage({
     prompt,

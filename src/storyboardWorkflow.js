@@ -3,7 +3,7 @@ import { cleanReferenceTag } from "./referenceTags.js";
 import { storyboardSpatialSchema, storyboardSpatialPlanIssues, storyboardSpatialPrompt } from "./storyboardSpatial.js";
 import { storyboardCameraChoices, normalizeStoryboardCameraPersonality } from "./storyboardCinematography.js";
 
-export const storyboardSkillVersion = "2.4.0";
+export const storyboardSkillVersion = "2.5.0";
 // Narrative remains the saved/planner value; Standard is its user-facing name.
 export const storyboardApproachDetails = {
   "Shot List": { label: "Shot List", description: "One frame per shot, with your descriptions and camera choices guiding the sequence." },

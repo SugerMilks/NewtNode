@@ -23,6 +23,29 @@ function clamp(value, minimum, maximum) {
   return Math.min(maximum, Math.max(minimum, value));
 }
 
+export function clampImagePreviewViewport(view, image, stage) {
+  const scale = clamp(Number(view.scale) || 1, 1, 8);
+  if (scale === 1) return { scale: 1, x: 0, y: 0 };
+  const limitX = Math.max(0, (image.width * scale - stage.width) / 2);
+  const limitY = Math.max(0, (image.height * scale - stage.height) / 2);
+  return { scale, x: clamp(view.x, -limitX, limitX), y: clamp(view.y, -limitY, limitY) };
+}
+
+export function zoomImagePreviewAt(view, factor, point, image, stage) {
+  const scale = clamp(view.scale * factor, 1, 8);
+  const ratio = scale / view.scale;
+  return clampImagePreviewViewport({
+    scale,
+    x: point.x - (point.x - view.x) * ratio,
+    y: point.y - (point.y - view.y) * ratio
+  }, image, stage);
+}
+
+export function imagePreviewWheelFactor(event, pageHeight) {
+  const delta = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? pageHeight : 1);
+  return Math.exp(-clamp(delta, -240, 240) * 0.006);
+}
+
 export function clampCropRect(rect = {}, minimumPercent = 8) {
   const minimum = clamp(Number(minimumPercent) || 8, 0.1, 100);
   const rawX = Number(rect.x);

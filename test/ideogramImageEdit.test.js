@@ -6,6 +6,7 @@ import sharp from "sharp";
 import { ideogramImageEditModel as model, ideogramImageEditEndpoint, buildIdeogramImageEditFalRequest, ideogramImageEditCost,
   ideogramImageEditQualityOptions, ideogramImageEditPrecisionOptions } from "../src/ideogramImageEdit.js";
 import { openAiImage25Models } from "../src/openAiImage25.js";
+import { nanoBanana21ModelName, nanoBanana21FalEditEndpoint } from "../src/nanoBanana21.js";
 import { imageEditSize, buildImageEditPrompt } from "../src/imageEdit.js";
 import { prepareImageEdit, finishImageEdit, generateFalImageEdit, createIdeogramImageEditClient } from "../server/image-edit.js";
 import { registerImageEditRoutes } from "../server/routes/imageEdit.js";
@@ -231,23 +232,27 @@ test("Ideogram failures stay cached and saved output survives a History failure"
 });
 
 
-test("server wiring captures one Ideogram key for uploads, submission and charge lookup", async () => {
+for (const editModel of [model, nanoBanana21ModelName]) test(`server wiring captures one ${editModel} key for uploads, submission and charge lookup`, async () => {
   const source = readFileSync(new URL("../server/index.js", import.meta.url), "utf8");
   const start = source.indexOf("  generate: async (", source.indexOf("registerImageEditRoutes(app, {"));
   const body = source.slice(start + "  generate: ".length, source.indexOf(",\n  save:", start));
   const process = { env: { FAL_KEY: "fixture-initial-key" } };
   const client = { fixture: true }, observed = [];
-  const dependencies = { process, ideogramImageEditModel: model, fal: {}, atlasMedia: {}, generateFalImageEdit,
+  const dependencies = { process, ideogramImageEditModel: model, nanoBanana21ModelName, nanoBanana21FalEditEndpoint, fal: {}, atlasMedia: {}, generateFalImageEdit,
     httpError: (status, message) => Object.assign(new Error(message), { status }),
     createIdeogramImageEditClient: (key) => { observed.push(["client", key]); return client; },
+    createSingleSubmissionFalClient: ({ credentials, endpoint, model: selected }) => {
+      assert.equal(endpoint, nanoBanana21FalEditEndpoint); assert.equal(selected, nanoBanana21ModelName);
+      observed.push(["client", credentials]); return client;
+    },
     uploadImageInputToFal: async (_image, _index, uploadClient) => { observed.push(["upload", uploadClient]); process.env.FAL_KEY = "fixture-changed-key"; return "https://fixture.invalid/source.png"; },
     subscribeFal: async (_endpoint, _options, _context, submittedClient, billingKey) => { observed.push(["submit", submittedClient, billingKey]); return { data: { images: [{ url: "https://fixture.invalid/result.png" }] } }; },
     firstFalImageResult: (data) => data.images[0]
   };
   const generate = new Function(...Object.keys(dependencies), `return (${body});`)(...Object.values(dependencies));
-  await generate({ provider: "fal", model, prompt: "Change", images: [Buffer.from("source")] });
+  await generate({ provider: "fal", model: editModel, prompt: "Change", images: [Buffer.from("source")] });
   assert.deepEqual(observed, [["client", "fixture-initial-key"], ["upload", client], ["submit", client, "fixture-initial-key"]]);
   process.env.FAL_KEY = "";
-  await assert.rejects(generate({ provider: "fal", model, prompt: "Change", images: [Buffer.from("source")] }), /Enable Fal/);
+  await assert.rejects(generate({ provider: "fal", model: editModel, prompt: "Change", images: [Buffer.from("source")] }), /Enable Fal/);
   assert.equal(observed.length, 3);
 });

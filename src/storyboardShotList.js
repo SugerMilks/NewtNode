@@ -1,5 +1,6 @@
 import { storyboardFrameDirection } from "./storyboardWorkflow.js";
 import { storyboardCameraChoices } from "./storyboardCinematography.js";
+import { tagStoryboardReferences } from "./storyboardReferenceTags.js";
 
 const cameraChoices = storyboardCameraChoices;
 export const storyboardShotCameraChoices = cameraChoices;
@@ -52,14 +53,14 @@ export function storyboardShotPlanIssues(frames, shots) {
   }
   return issues;
 }
-export function mergeStoryboardShotPlan(originals, planned) {
+export function mergeStoryboardShotPlan(originals, planned, references = []) {
   const rows = validateStoryboardShots(storyboardShotRows(originals));
   const issues = storyboardShotPlanIssues(planned, rows);
   if (issues.length) throw new Error(issues.join(" "));
   return planned.map((direction, index) => {
     const original = originals[index];
     // Planning changes directions, never the existing image, its versions or protection.
-    const frame = { ...original, ...direction, shotDescription: storyboardShotDescription(original),
+    const frame = { ...original, ...direction, shotDescription: tagStoryboardReferences(storyboardShotDescription(original), references),
       resultUrl: original.resultUrl || "", exportUrl: original.exportUrl || "", resultFallbackUrl: original.resultFallbackUrl || "",
       fileName: original.fileName || "", resultVersion: original.resultVersion || 0, versions: original.versions || [], protected: original.protected === true,
       generatedDirection: original.generatedDirection || (original.resultUrl || original.exportUrl ? { ...storyboardFrameDirection(original), castSource: original.castSource, shotDescription: original.shotDescription, shotPlanSource: original.shotPlanSource } : undefined),

@@ -94,13 +94,14 @@ function adapterFixture({ provider = "openai", data, onRequest = () => {} } = {}
     openAiLlmBody, falLlmInput, creativeFinalOutputText, validateCreativeResponse, myNewtTokenCost,
     llmResponseEndpoints, llmResponseModel, llmUsageCost, currentAtlasLlmRates,
     activeLlmCredential: () => "mock-key", createFalClient: (options) => options,
+    createStoryboardFalClient: (options) => ({ ...options, storyboardRecovery: true }),
     requestLlmResponse: (body, connection) => requestLlmResponse(body, connection, {
       request: async (url, options) => { onRequest(url, JSON.parse(options.body), options); return { ok: true, json: async () => data }; }
     }),
     creativeUsageContext: new AsyncLocalStorage(),
     estimateTextProcessingCost: ({ usage }) => ({ amountUsd: usage?.cost ?? 0 }),
     fetch: async (url, options) => { onRequest(url, JSON.parse(options.body)); return { ok: true, json: async () => data }; },
-    subscribeFal: async (url, options) => { onRequest(url, options.input); return data; },
+    subscribeFal: async (url, options, context, client) => { onRequest(url, options.input, context, client); return data; },
     extractFalText: (value) => value.output || "",
     extractOpenAiResponseText: (value) => value.output_text || "",
     falResultUsage: (value) => value.usage,
@@ -143,6 +144,26 @@ test("Fal mood-board analysis explicitly enables mandatory reasoning and still v
   const result = await api.runMediaDescriptionLlm({ ...request, route: "film-director-visual-analysis", inputs: [{ url: "/outputs/mood-board.png" }] });
   assert.equal(result.text, visualOutput);
   assert.equal(result.usages[0].cost, 0.02);
+});
+
+test("Fal Storyboard text and vision adapters use same-request recovery without changing other routes", async () => {
+  for (const vision of [false, true]) {
+    for (const route of ["storyboard-reference-analysis", "film-director-visual-analysis"]) {
+      let calls = 0;
+      const api = adapterFixture({ provider: "fal", data: { output: JSON.stringify({ assets: [{ tag: "@Room", description: "A doorway" }] }), usage: { cost: .02 } },
+        onRequest: (endpoint, _body, context, client) => {
+          calls++;
+          assert.equal(context.route, route);
+          assert.equal(Boolean(client.storyboardRecovery), route.startsWith("storyboard-"));
+          assert.equal(client.credentials, "mock-key");
+          if (client.storyboardRecovery) assert.equal(client.endpoint, endpoint);
+        } });
+      const options = { ...request, route, inputs: [{ url: "/outputs/room.png" }] };
+      const result = await (vision ? api.runMediaDescriptionLlm(options) : api.runTextLlm(options));
+      assert.equal((result.usage || result.usages[0]).cost, .02);
+      assert.equal(calls, 1);
+    }
+  }
 });
 
 test("Explore text and vision adapters forward the locally normalized plan without another paid request", async () => {

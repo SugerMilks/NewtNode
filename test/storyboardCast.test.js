@@ -3,6 +3,7 @@ import { storyboardFrameContext, storyboardFrameDirection, storyboardFrameWithVe
 import { storyboardShotListMode, storyboardShotNeedsPlan, storyboardShotSource } from "../src/storyboardShotList.js";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { storyboardContinuityRules, storyboardRenderSceneContext } from "../src/storyboardContinuity.js";
 import {
   assertStoryboardCharacterTags, storyboardCharacterMentioned, storyboardCastPlanIssues,
   storyboardPlannedCastPatch, currentStoryboardCast, resolveStoryboardFrameCast,
@@ -149,7 +150,7 @@ test("actual editor source mapping works with internal and connected identities,
 
 test("QC gets full identity sheets with explicit labels alongside generated and continuity frames", async () => {
   let captured;
-  const prompt = getFunction(server, "storyboardQcReviewPrompt", { storyboardPromptPolicy });
+  const prompt = getFunction(server, "storyboardQcReviewPrompt", { storyboardPromptPolicy, storyboardContinuityRules });
   const review = getFunction(server, "reviewStoryboardFrameWithOpenAi", {
     storyboardQcCharacterInputs, storyboardQcUnavailable, storyboardQcReviewPrompt: prompt,
     runMediaDescriptionLlm: async (request) => { captured = request; return { text: '{"pass":true}', usages: [] }; },
@@ -191,6 +192,7 @@ for (const scenario of ["correct swapped identities", "missing sheet", "duplicat
       connectedImagePromptItems: () => [], uniqueStoryboardImagePromptItems
     });
     const buildStoryboardFramePrompt = getFunction(editor, "buildStoryboardFramePrompt", {
+      storyboardContinuityRules, storyboardRenderSceneContext, connectedText: () => "",
       storyboardPromptPolicy, storyboardCameraRenderingPrompt, storyboardFrameContext,
       connectedDirectorPackageSource: () => null, storyboardAspectRatioForNode: () => "16:9", storyboardCastPrompt,
       storyboardSceneReferenceMapPrompt: () => "", storyboardPropReferenceMapPrompt: () => "",
@@ -204,6 +206,7 @@ for (const scenario of ["correct swapped identities", "missing sheet", "duplicat
     };
     const reviewStoryboardGeneratedFrame = new Function(...Object.keys(reviewDeps), `${reviewSource}\nreturn reviewStoryboardGeneratedFrame;`)(...Object.values(reviewDeps));
     const deps = {
+      storyboardRenderSceneContext, connectedText: () => "",
       nodesRef: { current: [node] }, edgesRef: { current: [] }, generationProvider: "fal",
       storyboardTaskBusy: () => false, updateStoryboardStatus: updateNode, pushUndoSnapshot: () => {}, storyboardFrameWithVersion, storyboardFrameDirection, storyboardEditSignature, storyboardShotListMode, storyboardShotNeedsPlan, storyboardShotSource,
       storyboardImageSettings, normalizeStoryboardImageModel, runImageModelGeneration, assertStoryboardCharacterTags,

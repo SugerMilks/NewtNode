@@ -31,7 +31,7 @@ function Harness() {
       let pixels = 0; for (let i = 3; i < rgba.length; i += 4) if (rgba[i]) pixels++;
       layers[name] = { width: layer.width, height: layer.height, pixels }; URL.revokeObjectURL(url);
     }
-    setReport(JSON.stringify({ model: form.get("model"), provider, editPrecision: form.get("editPrecision"), mode: form.get("mode"), blank: form.get("blank"), prompt: form.get("prompt"), quality: form.get("quality"), layers }, null, 2));
+    setReport(JSON.stringify({ model: form.get("model"), provider, editPrecision: form.get("editPrecision"), resolution: form.get("resolution"), mode: form.get("mode"), blank: form.get("blank"), prompt: form.get("prompt"), quality: form.get("quality"), layers }, null, 2));
     await new Promise((resolve) => setTimeout(resolve, 500));
     const canvas = document.createElement("canvas"); canvas.width = image.width; canvas.height = image.height;
     const ctx = canvas.getContext("2d"); ctx.filter = "hue-rotate(30deg)"; ctx.drawImage(image, 0, 0);

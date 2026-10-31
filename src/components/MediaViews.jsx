@@ -5,6 +5,7 @@ import { capitalizeMediaType, displayMediaUrl, finishOutputItemDragData, fullRes
 import { clampCropRect, containedMediaSize, moveCropRect, resizeCropRect } from "../mediaPreviewLayout.js";
 import { normalizedResultItems, resultDownloadFileName } from "../mediaResults.js";
 import { OutputDrawerResizeHandle } from "./OutputDrawerResizeHandle.jsx";
+import { useImagePreviewViewport } from "./useImagePreviewViewport.js";
 
 const LazyModel3DViewer = React.lazy(() => import("./Model3DViewer.jsx").then((module) => ({ default: module.Model3DViewer })));
 const LazyImageEditStudio = React.lazy(() => import("./ImageEditStudio.jsx").then((module) => ({ default: module.ImageEditStudio })));
@@ -301,6 +302,9 @@ export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onResto
   const KindIcon = displayItem.type === "video" ? Film : displayItem.type === "audio" ? FileAudio : displayItem.type === "model3d" ? Box : FileImage;
   const label = displayItem.label || displayItem.fileName || `${capitalizeMediaType(displayItem.type)} preview`;
   const canEditImage = displayItem.type === "image" && ["previewLayout", "storyboardFrame", "nodeResult"].includes(displayItem.editContext?.type) && typeof onApplyImageEdit === "function";
+  const imageViewport = useImagePreviewViewport({ stageRef: lightboxStageRef, imageSize: containedImageSize,
+    enabled: displayItem.type === "image" && !aiMode, sourceKey: displayItem.url,
+    canPan: !cropMode && !textMode && !editBusy, isEditing: () => Boolean(cropDragRef.current || textDragRef.current) });
 
   React.useEffect(() => {
     activeItemRef.current = displayItem;
@@ -469,6 +473,7 @@ export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onResto
       const commandKey = event.metaKey || event.ctrlKey;
       const key = event.key.toLowerCase();
       if (event.key === "Escape") {
+        if (imageViewport.cancelPan()) { event.preventDefault(); event.stopImmediatePropagation(); return; }
         onClose();
         return;
       }
@@ -928,7 +933,7 @@ export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onResto
             {label}
           </span>
           <div className="output-lightbox-header-actions">
-            {displayItem.type === "image" && onAcceptAiEdit && <button type="button" onClick={() => setAiMode(true)} disabled={editBusy || cropMode || toneMode || curvesMode || textMode} title="Draw and edit image" aria-label="Draw and edit image"><Pencil size={15} /></button>}
+            {displayItem.type === "image" && onAcceptAiEdit && <button type="button" className="output-lightbox-advanced-edit" onClick={() => setAiMode(true)} disabled={editBusy || cropMode || toneMode || curvesMode || textMode} title="Draw, sketch, and edit with AI" aria-label="Advanced Edit"><Pencil size={15} />Advanced Edit</button>}
             {canEditImage && (
               <div className="output-lightbox-tools" aria-label="Layout image editing tools">
                 <button type="button" className={cropMode ? "active" : ""} onClick={() => {
@@ -1152,19 +1157,26 @@ export function OutputPreviewLightbox({ item, onClose, onApplyImageEdit, onResto
             <button type="button" onClick={resetTextOverlay} disabled={editBusy}>Reset</button>
           </div>
         )}
-        <div className="output-lightbox-stage" ref={lightboxStageRef}>
+        <div className={`output-lightbox-stage ${imageViewport.panning ? "panning" : ""}`} ref={lightboxStageRef}
+          data-image-viewport={displayItem.type === "image" ? "" : undefined}
+          data-pannable={displayItem.type === "image" && !cropMode && !textMode && imageViewport.view.scale > 1 ? "" : undefined}
+          role={displayItem.type === "image" ? "region" : undefined}
+          tabIndex={displayItem.type === "image" ? 0 : undefined} aria-label={displayItem.type === "image" ? "Image preview" : undefined}
+          {...(displayItem.type === "image" ? imageViewport.handlers : {})}>
           {displayItem.type === "image" && (
             <div
               className={`output-lightbox-image-editor ${containedImageSize.width && containedImageSize.height ? "sized" : ""} ${cropMode ? "cropping" : ""} ${textMode ? "texting" : ""}`}
               ref={imageEditorRef}
               style={containedImageSize.width && containedImageSize.height ? {
                 width: `${containedImageSize.width}px`,
-                height: `${containedImageSize.height}px`
+                height: `${containedImageSize.height}px`,
+                transform: `translate3d(${imageViewport.view.x}px, ${imageViewport.view.y}px, 0) scale(${imageViewport.view.scale})`
               } : undefined}
             >
               <img
                 src={toneMode && tonePreviewUrl ? tonePreviewUrl : displayItem.url}
                 alt={label}
+                draggable={false}
                 onLoad={(event) => {
                   if (toneMode && tonePreviewUrl) return;
                   setImageNaturalSize({

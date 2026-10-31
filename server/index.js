@@ -33,6 +33,7 @@ import { registerAudioModelRoutes } from "./routes/audioModel.js";
 import { registerExploreRoutes } from "./routes/explore.js";
 import { createCameraCoverageService, registerCameraCoverageRoutes } from "./camera-coverage.js";
 import { createSingleSubmissionFalClient } from "./fal-single-submission.js";
+import { createStoryboardFalClient } from "./storyboard-fal.js";
 import { registerStoryboardRoutes } from "./routes/storyboard.js";
 import { registerStoryboardScriptRoutes } from "./routes/storyboardScripts.js";
 import { scriptFileByteLimit } from "../src/storyboardScriptImport.js";
@@ -48,7 +49,7 @@ import { createVectorLayerNamer } from "./vector-layer-names.js";
 import { ideogramVectorCost, ideogramVectorRates } from "../src/ideogramVector.js";
 import { generateFalImageEdit, createIdeogramImageEditClient } from "./image-edit.js";
 import { ideogramImageEditModel } from "../src/ideogramImageEdit.js";
-import { isNanoBanana21Model, nanoBanana21ModelName, nanoBanana21FalTextEndpoint, nanoBanana21Ratios, validateNanoBanana21Request, nanoBanana21Cost } from "../src/nanoBanana21.js";
+import { isNanoBanana21Model, nanoBanana21ModelName, nanoBanana21FalTextEndpoint, nanoBanana21FalEditEndpoint, nanoBanana21Ratios, validateNanoBanana21Request, nanoBanana21Cost } from "../src/nanoBanana21.js";
 import { createNanoBanana21Generator } from "./nano-banana-21.js";
 import { normalizeOpenAiEditMask, finishOpenAiMaskedEdit } from "./openai-edit-mask.js";
 import { normalizeCharacterWardrobeRequest } from "./character-wardrobe.js";
@@ -85,6 +86,7 @@ import { createStoryboardQc } from "./storyboard-qc.js";
 import { storyboardPlanIssues, storyboardQcUnavailable } from "../src/storyboardPlanValidation.js";
 import { assertStoryboardCharacterTags, storyboardCastPlanningRules, storyboardCastPlanIssues, storyboardQcCharacterInputs } from "../src/storyboardCast.js";
 import { storyboardPromptPolicy } from "../src/storyboardPromptPolicy.js";
+import { storyboardContinuityRules } from "../src/storyboardContinuity.js";
 import {
   apiKeyProviderIds,
   apiKeyProviderPreferences,
@@ -702,7 +704,7 @@ registerImageEditRoutes(app, {
     if ((await stat(filePath)).size > 32 * 1024 * 1024) throw httpError(400, "Image editing supports source files up to 32 MB.");
     return { buffer: await readFile(filePath) };
   },
-  generate: async ({ provider, model, prompt, quality, editPrecision, size, images, mask }) => {
+  generate: async ({ provider, model, prompt, quality, editPrecision, resolution, size, images, mask }) => {
     if (provider === "atlas") {
       const key = String(process.env.ATLAS_API_KEY || "").trim();
       return atlasMedia.image({ model, prompt, quality, size,
@@ -711,10 +713,13 @@ registerImageEditRoutes(app, {
     }
     const falKey = String(process.env.FAL_KEY || "").trim();
     if (model === ideogramImageEditModel && !falKey) throw httpError(400, "Enable Fal in Settings for Ideogram 4.5 image editing.");
-    const client = model === ideogramImageEditModel ? createIdeogramImageEditClient(falKey) : fal;
-    return generateFalImageEdit({ model, prompt, quality, editPrecision, size, images, mask }, {
+    const nano = model === nanoBanana21ModelName;
+    if (nano && !falKey) throw httpError(400, "Enable Fal in Settings for Nano Banana 2.1 image editing.");
+    const client = nano ? createSingleSubmissionFalClient({ credentials: falKey, endpoint: nanoBanana21FalEditEndpoint, model })
+      : model === ideogramImageEditModel ? createIdeogramImageEditClient(falKey) : fal;
+    return generateFalImageEdit({ model, prompt, quality, editPrecision, resolution, size, images, mask }, {
       uploadImage: (image, index) => uploadImageInputToFal(image, index, client),
-      subscribe: (endpoint, options, context) => subscribeFal(endpoint, options, context, client, model === ideogramImageEditModel ? falKey : undefined), firstImage: firstFalImageResult
+      subscribe: (endpoint, options, context) => subscribeFal(endpoint, options, context, client, nano || model === ideogramImageEditModel ? falKey : undefined), firstImage: firstFalImageResult
     });
   },
   save: async (req, buffer) => {
@@ -911,6 +916,7 @@ function buildHealthPayload() {
       atlasCloud: true,
       apiCostVisibility: true,
       imageEditing: true,
+      imageEditingNanoBanana21: true,
       ideogramVector: true,
       vectorLayers: true,
       vectorLayerEditor: true,
@@ -9933,7 +9939,9 @@ async function runTextLlm({
     const data = await subscribeFal(skillDirectorLlmEndpoint, {
       input: falLlmInput({ model: falModel, prompt, systemPrompt, route }),
       logs: true
-    }, { route, model: falModel }, createFalClient({ credentials: key }));
+    }, { route, model: falModel }, route.startsWith("storyboard-")
+      ? createStoryboardFalClient({ credentials: key, endpoint: skillDirectorLlmEndpoint, model: falModel })
+      : createFalClient({ credentials: key }));
     const text = extractFalText(data).trim();
     return checkedCreativeLlmResult({
       text,
@@ -10010,7 +10018,9 @@ async function runMediaDescriptionLlm({
         ...falLlmInput({ model: falModel, prompt, systemPrompt, route })
       },
       logs: true
-    }, { route, model: falModel }, createFalClient({ credentials: key }));
+    }, { route, model: falModel }, route.startsWith("storyboard-")
+      ? createStoryboardFalClient({ credentials: key, endpoint, model: falModel })
+      : createFalClient({ credentials: key }));
     return checkedCreativeLlmResult({
       text: extractFalText(data).trim(),
       usages: [falResultUsage(data)].filter(Boolean),
@@ -12528,6 +12538,8 @@ Intentional camera expression is not broken perspective: honor requested Dutch r
 7. Rendering: apply the explicit rendering policy above, even if an old prompt or source reference describes a different look.
 8. Cast audit: compare each visible tagged character against that tag's original identity sheet. Multiple views in a sheet are ONE person. Check for a duplicated person replacing another, blended faces or wardrobe, extra people, missing visible cast, and an offscreen person incorrectly shown. Compare the exact tag-to-position, foreground/background depth, action, prop ownership and eyeline assignments in FRAME CAST AND BLOCKING. A clearly wrong identity or swapped assignment is a major failure, not harmless variation. Do not require an offscreen person's face, or a visible face on a back view/foreground shoulder. Judge stylized line-art likeness by available distinctive features, not photographic detail. Original identity sheets outrank earlier frames; the current frame's camera-relative blocking outranks a prior shot's screen coordinates. Never require every character mentioned in the full scene to appear in this frame. A correction must name the affected @tags and their correct positions, without swapping their reference bindings.
 9. Occupancy audit: use PHYSICAL STAGING, the previous image and spatial anchor to check the actual field of view, not only the declared visible cast. A listening partner must not vanish while their established seat/area remains visible. In a two-person table scene, a broad view of the same table cannot have an empty half where the other person still sits. An offscreen label alone does not excuse this. Pass a genuine tighter crop, reverse, insert, motivated opaque occlusion or explicit exit; a partial shoulder/hand/body is visible and need not show a face. A lens label alone is not evidence of reframing. Fail unexplained disappearing occupants as major continuity errors; preserve the intended camera and restore missing in-view people, rather than inventing an exit or forcing all scene characters into a legitimate single.
+10. World-space and prop audit: independently compare occupied chairs, table edges and fixed landmarks with the establishing spatial anchor, not just screen-left/right or a previous frame that may have drifted. Compare the display face versus lid back, keyboard reach, hand-entry directions and near/far shoulders with the current before/after state. A claim of "same side" or a populated cast list is not proof of a physically possible camera view. The anchor wins for unchanged geography; explicit current movements and prop changes win over its older state. Inspect incidental visible props too, without requiring cropped-out props. Missing or ambiguous visual evidence warrants uncertainty, not an invented violation.
+${framePrompt.includes(storyboardContinuityRules) ? "" : storyboardContinuityRules}
 
 Return this exact JSON shape:
 {

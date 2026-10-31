@@ -8,6 +8,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { openAiImage25Models } from "../src/openAiImage25.js";
 import { ideogramImageEditModel, ideogramImageEditQualityOptions } from "../src/ideogramImageEdit.js";
+import { nanoBanana21ModelName, nanoBanana21ResolutionOptions } from "../src/nanoBanana21.js";
 
 // Exercise controls and multipart construction with fake hooks/canvases. No provider calls.
 const source = readFileSync(new URL("../src/components/ImageEditStudio.jsx", import.meta.url), "utf8");
@@ -73,21 +74,24 @@ function studio(t, initialProps = {}) {
   return { render, change, resize, paint, requests, generate: () => generateButton(render()).props.onClick() };
 }
 
-test("Image Edit keeps Sunburst, High quality and existing controls as its defaults", (t) => {
+test("Image Edit defaults to Ideogram, High quality and Regular precision, with Nano Banana and Sunburst available", (t) => {
   const state = studio(t);
   const tree = state.render();
-  assert.equal(find(tree, "Edit model").props.value, openAiImage25Models.sunburst);
-  assert.deepEqual(options(find(tree, "Edit model")), [openAiImage25Models.sunburst, ideogramImageEditModel]);
+  assert.equal(find(tree, "Edit model").props.value, ideogramImageEditModel);
+  assert.deepEqual(options(find(tree, "Edit model")), [ideogramImageEditModel, nanoBanana21ModelName, openAiImage25Models.sunburst]);
   assert.equal(find(tree, "Edit quality").props.value, "high");
-  assert.deepEqual(options(find(tree, "Edit quality")), ["high", "xhigh", "max"]);
-  assert.equal(find(tree, "Edit precision"), undefined);
-  assert.equal(find(tree, "Edit prompt").props.maxLength, 16000);
-  assert.match(renderToStaticMarkup(tree), /Image 2.5 Sunburst <span>Fal<\/span>/);
+  assert.deepEqual(options(find(tree, "Edit quality")), ideogramImageEditQualityOptions);
+  assert.equal(find(tree, "Edit precision").props.value, "regular");
+  assert.equal(find(tree, "Edit prompt").props.maxLength, 10000);
+  const sketchMethod = React.Children.toArray(find(tree, "Edit method").props.children).find(option => option.props.value === "sketch");
+  assert.equal(sketchMethod.props.children, "Generate from Sketch");
+  assert.match(renderToStaticMarkup(tree), /Ideogram 4.5 <span>Fal<\/span>/);
 });
 
 test("model switching updates controls without discarding the prompt, drawing or undo history", (t) => {
   const state = studio(t);
   state.paint();
+  state.change("Edit model", openAiImage25Models.sunburst);
   state.change("Edit quality", "max");
   state.change("Edit model", ideogramImageEditModel);
   let tree = state.render();
@@ -108,6 +112,7 @@ test("model switching updates controls without discarding the prompt, drawing or
 
 test("both models submit explicit model and quality, while precision is Ideogram-only", async (t) => {
   const state = studio(t);
+  state.change("Edit model", openAiImage25Models.sunburst);
   await state.generate();
   assert.equal(state.requests[0].get("model"), openAiImage25Models.sunburst);
   assert.equal(state.requests[0].get("quality"), "high");
@@ -154,6 +159,7 @@ test("Ideogram needs Fal and never submits through Atlas, Krea or an unavailable
 
 test("Ideogram permits its wider edit aspect ratios while Sunburst validation is preserved", async (t) => {
   const state = studio(t);
+  state.change("Edit model", openAiImage25Models.sunburst);
   state.resize(4000, 1000);
   await state.generate();
   assert.equal(state.requests.length, 0);
@@ -162,4 +168,114 @@ test("Ideogram permits its wider edit aspect ratios while Sunburst validation is
   await state.generate();
   assert.equal(state.requests.length, 1);
   assert.equal(state.requests[0].get("model"), ideogramImageEditModel);
+});
+
+test("Nano Banana uses resolution controls and retains drawing, selections and prompt when switching models", async (t) => {
+  const state = studio(t);
+  state.paint();
+  find(state.render(), "Selection layer").props.onClick();
+  state.paint();
+  state.change("Edit model", nanoBanana21ModelName);
+  const tree = state.render();
+  assert.equal(find(tree, "Edit resolution").props.value, "2K");
+  assert.deepEqual(options(find(tree, "Edit resolution")), nanoBanana21ResolutionOptions);
+  assert.equal(find(tree, "Edit quality"), undefined);
+  assert.equal(find(tree, "Edit precision"), undefined);
+  assert.equal(find(tree, "Undo stroke").props.disabled, false);
+  state.change("Edit resolution", "4K");
+  await state.generate();
+  const form = state.requests[0];
+  assert.equal(form.get("model"), nanoBanana21ModelName);
+  assert.equal(form.get("resolution"), "4K");
+  assert.equal(form.get("quality"), null);
+  assert.equal(form.get("editPrecision"), null);
+  assert.equal(form.get("drawing").type, "image/png");
+  assert.equal(form.get("selection").type, "image/png");
+  assert.equal(form.get("prompt"), "Keep the framing and make the jacket blue");
+  state.change("Edit version", "-1");
+  state.change("Edit model", ideogramImageEditModel);
+  assert.equal(find(state.render(), "Edit quality").props.value, "high");
+  assert.equal(find(state.render(), "Undo stroke").props.disabled, false);
+  state.change("Edit model", nanoBanana21ModelName);
+  assert.equal(find(state.render(), "Edit resolution").props.value, "4K");
+});
+
+test("Nano Banana editing requires Fal without silent provider or model fallback", async (t) => {
+  const state = studio(t);
+  state.change("Edit model", nanoBanana21ModelName);
+  for (const provider of ["atlas", "krea", ""]) {
+    assert.equal(generateButton(state.render({ provider })).props.disabled, true);
+    await state.generate();
+  }
+  assert.equal(state.requests.length, 0);
+  assert.equal(generateButton(state.render({ provider: "fal" })).props.disabled, false);
+});
+
+function comparison(state, rect = { left: 100, top: 50, width: 400, height: 240 }) {
+  const surface = elements(state.render()).find(element => element.props.className?.startsWith("ies-surface"));
+  surface.props.ref.current = { getBoundingClientRect: () => rect };
+  const captured = new Set();
+  const element = { focus() {}, setPointerCapture: id => captured.add(id), hasPointerCapture: id => captured.has(id), releasePointerCapture: id => captured.delete(id) };
+  const divider = () => find(state.render(), "Comparison divider");
+  const event = (clientX, type = "pointermove", pointerId = 1) => ({ clientX, clientY: 120, type, pointerId, button: 0,
+    currentTarget: element, preventDefault() {}, stopPropagation() {} });
+  const keyboard = (key, shiftKey = false) => state.render().props.onKeyDownCapture({ key, shiftKey, target: { closest: selector => selector === ".ies-split-line" }, preventDefault() {}, stopPropagation() {} });
+  return { divider, event, keyboard, captured, value: () => divider().props["aria-valuenow"], transform: () => elements(state.render()).find(element => element.props.className?.startsWith("ies-surface")).props.style.transform };
+}
+
+test("comparison is dragged on the image without a separate range, pan, marks or extra generation", async t => {
+  const state = studio(t); state.paint(); await state.generate();
+  const compare = comparison(state);
+  assert.equal(find(state.render(), "Comparison split"), undefined);
+  assert.equal(compare.value(), 50);
+  assert.equal(compare.divider().props.role, "slider");
+  const transform = compare.transform();
+  compare.divider().props.onPointerDown(compare.event(308, "pointerdown"));
+  assert.equal(compare.value(), 50, "grabbing the wide hit area does not jump the divider");
+  assert.ok(compare.captured.has(1));
+  compare.divider().props.onPointerMove(compare.event(408));
+  assert.equal(compare.value(), 75);
+  assert.equal(compare.transform(), transform);
+  compare.divider().props.onPointerMove(compare.event(200, "pointermove", 2));
+  assert.equal(compare.value(), 75, "a second pointer cannot steal the drag");
+  compare.divider().props.onPointerUp(compare.event(448, "pointerup"));
+  assert.equal(compare.value(), 85); assert.equal(compare.captured.size, 0);
+  assert.equal(state.requests.length, 1);
+  const result = elements(state.render()).find(element => element.props.className === "ies-result");
+  assert.equal(result.props.style.clipPath, "inset(0 0 0 85%)");
+  state.change("Edit version", "-1");
+  assert.equal(find(state.render(), "Undo stroke").props.disabled, false);
+});
+
+test("divider follows zoomed/panned bounds, clamps at edges and supports keyboard adjustment", async t => {
+  const state = studio(t); await state.generate();
+  const compare = comparison(state, { left: -200, top: -100, width: 800, height: 480 });
+  compare.divider().props.onPointerDown(compare.event(200, "pointerdown"));
+  compare.divider().props.onPointerMove(compare.event(400));
+  assert.equal(compare.value(), 75);
+  compare.divider().props.onPointerMove(compare.event(900));
+  assert.equal(compare.value(), 100);
+  compare.divider().props.onPointerUp(compare.event(-400, "pointerup"));
+  assert.equal(compare.value(), 0);
+  compare.keyboard("ArrowRight"); assert.equal(compare.value(), 1);
+  compare.keyboard("ArrowRight", true); assert.equal(compare.value(), 11);
+  compare.keyboard("End"); assert.equal(compare.value(), 100);
+  compare.keyboard("ArrowRight"); assert.equal(compare.value(), 100);
+  compare.keyboard("Home"); assert.equal(compare.value(), 0);
+  assert.equal(state.requests.length, 1);
+});
+
+for (const cancellation of ["pointercancel", "lostpointercapture", "blur", "Escape"]) test(`comparison ${cancellation} restores the split and releases the pointer without closing`, async t => {
+  const state = studio(t); await state.generate();
+  const compare = comparison(state);
+  compare.divider().props.onPointerDown(compare.event(300, "pointerdown"));
+  compare.divider().props.onPointerMove(compare.event(400));
+  assert.equal(compare.value(), 75);
+  if (cancellation === "Escape") compare.keyboard("Escape");
+  else if (cancellation === "blur") compare.divider().props.onBlur();
+  else compare.divider().props[cancellation === "pointercancel" ? "onPointerCancel" : "onLostPointerCapture"](compare.event(400, cancellation));
+  assert.equal(compare.value(), 50); assert.equal(compare.captured.size, 0);
+  assert.equal(find(state.render(), "Discard edit draft"), undefined);
+  compare.divider().props.onPointerMove(compare.event(450));
+  assert.equal(compare.value(), 50);
 });

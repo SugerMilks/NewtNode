@@ -38,6 +38,7 @@ const requiredHealthRoutes = [
   "editorTimeline",
   "outputExport",
   "imageEditing",
+  "imageEditingNanoBanana21",
   "ideogramVector",
   "vectorLayers",
   "vectorLayerEditor",

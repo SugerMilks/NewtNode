@@ -5,6 +5,7 @@ import { createCreativeAnalysisCache, creativeAnalysisKey } from "../creative-an
 import { assertStoryboardCharacterTags, storyboardCastPlanningRules } from "../../src/storyboardCast.js";
 import { storyboardPromptPolicy } from "../../src/storyboardPromptPolicy.js";
 import { storyboardSpatialRules } from "../../src/storyboardSpatial.js";
+import { storyboardContinuityRules } from "../../src/storyboardContinuity.js";
 import { storyboardShotListMode, validateStoryboardShots, storyboardShotPlanIssues } from "../../src/storyboardShotList.js";
 import { storyboardPlanIssues } from "../../src/storyboardPlanValidation.js";
 import { storyboardCinematographyPlanningPrompt } from "../../src/storyboardCinematography.js";
@@ -69,7 +70,7 @@ Resolve these character staging decisions yourself using the scene, current fram
       assertStoryboardCharacterTags(characters);
       const frames = Array.isArray(body.frames) ? body.frames : [];
       if (frames.length > 35 || new Set(frames.map(frame => frame.id)).size !== frames.length) throw new Error("Storyboard needs up to 35 uniquely identified panels.");
-      const context = `Scene: ${scene}\nPlanning settings: ${JSON.stringify(storyboardPlanningSettings(body))}\nNotes: ${String(body.notes || "").slice(0, 8000)}\nCharacters: ${JSON.stringify(characters.map(({ name, tag }) => ({ name, tag })))}\n${storyboardCastPlanningRules}\n${storyboardSpatialRules}\n${storyboardCinematographyPlanningPrompt(body.storyboardCameraPersonality)}\n${storyboardPromptPolicy(body.useStoryboardStyle !== false)}`;
+      const context = `Scene: ${scene}\nPlanning settings: ${JSON.stringify(storyboardPlanningSettings(body))}\nNotes: ${String(body.notes || "").slice(0, 8000)}\nCharacters: ${JSON.stringify(characters.map(({ name, tag }) => ({ name, tag })))}\n${storyboardCastPlanningRules}\n${storyboardSpatialRules}\n${storyboardContinuityRules}\n${storyboardCinematographyPlanningPrompt(body.storyboardCameraPersonality)}\n${storyboardPromptPolicy(body.useStoryboardStyle !== false)}`;
       if (mode === "plan-v2") {
         const shots = shotList ? validateStoryboardShots(body.shots) : null;
         const count = shots ? shots.length : /^auto$/i.test(String(body.frameCount || "Auto")) ? null : Number(body.frameCount);

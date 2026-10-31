@@ -1,4 +1,5 @@
 import { storyboardCameraChoices } from "./storyboardCinematography.js";
+import { tagStoryboardReferences } from "./storyboardReferenceTags.js";
 
 export const scriptPageWarning = 30;
 export const scriptPageLimit = 50;
@@ -111,4 +112,11 @@ export function mergeImportedScriptFrames(existing, imported, mode, confirmed) {
   const frames = mode === "append" && hasWork ? [...existing, ...imported] : imported;
   if (!frames.length || frames.length > 35) throw new Error("A Storyboard can contain up to 35 shots. Import into a new Storyboard or select fewer scenes.");
   return frames.map((frame, index) => ({ ...frame, number: index + 1 }));
+}
+
+export function tagImportedScriptFrames(existing, merged, references) {
+  const existingIds = new Set(existing.map(frame => frame.id));
+  return merged.map(frame => existingIds.has(frame.id) ? frame : {
+    ...frame, shotDescription: tagStoryboardReferences(frame.shotDescription ?? frame.prompt ?? "", references)
+  });
 }

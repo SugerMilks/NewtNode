@@ -3,6 +3,7 @@ import { createSingleSubmissionFalClient } from "./fal-single-submission.js";
 import { buildOpenAiImage25FalRequest, openAiImage25Models } from "../src/openAiImage25.js";
 import { ideogramImageEditModel, validateIdeogramImageEditRequest, buildIdeogramImageEditFalRequest } from "../src/ideogramImageEdit.js";
 import { buildImageEditPrompt, imageEditMaxPixels, imageEditSize } from "../src/imageEdit.js";
+import { nanoBanana21ModelName, nanoBanana21FalEditEndpoint, buildNanoBanana21Input, validateNanoBanana21Request } from "../src/nanoBanana21.js";
 
 const decode = (buffer) => sharp(buffer, { limitInputPixels: imageEditMaxPixels, animated: false, failOn: "error" });
 
@@ -27,8 +28,13 @@ export async function prepareImageEdit({ source, drawing, selection, prompt, mod
   const canvas = blank ? await sharp({ create: { width, height, channels: 4, background: "#ffffff" } }).png().toBuffer() : original;
   const guide = drawing ? await decode(canvas).composite([{ input: drawing }]).png().toBuffer() : null;
   let mask = null;
+  let selectionGuide = null;
   if (selection) {
-    if (model === ideogramImageEditModel) {
+    if (model === nanoBanana21ModelName) {
+      // Nano Banana takes reference images, not an API mask. Keep selection
+      // weights separately for exact protected-pixel restoration after the edit.
+      selectionGuide = await decode(selection).extractChannel(3).png().toBuffer();
+    } else if (model === ideogramImageEditModel) {
       const alpha = await decode(selection).extractChannel(3).raw().toBuffer();
       let edited = false, protectedPixels = false;
       const pixels = Buffer.alloc(alpha.length);
@@ -44,7 +50,7 @@ export async function prepareImageEdit({ source, drawing, selection, prompt, mod
     }
   }
   return { original, width, height, size, selection, mask, submittedPrompt,
-    images: blank ? [guide] : [original, guide].filter(Boolean) };
+    images: blank ? [guide] : [original, guide, selectionGuide].filter(Boolean) };
 }
 
 export async function finishImageEdit(prepared, generated) {
@@ -67,8 +73,13 @@ export async function finishImageEdit(prepared, generated) {
 
 // Dependencies are supplied by the existing server provider adapter, keeping uploads and
 // paid submissions on its configured Fal client and allowing offline transport checks.
-export async function generateFalImageEdit({ model, prompt, quality, editPrecision, size, images, mask }, { uploadImage, subscribe, firstImage }) {
+export async function generateFalImageEdit({ model, prompt, quality, editPrecision, resolution = "2K", size, images, mask }, { uploadImage, subscribe, firstImage }) {
   const ideogram = model === ideogramImageEditModel;
+  const nano = model === nanoBanana21ModelName;
+  if (nano) {
+    if (!Array.isArray(images) || !images[0]) throw Object.assign(new Error("Nano Banana 2.1 needs a source image."), { status: 400 });
+    validateNanoBanana21Request({ prompt, images: images.map((_, index) => `reference-${index}`), resolution, aspectRatio: "auto", maskUrl: mask });
+  }
   if (ideogram) {
     if (!Array.isArray(images) || !images[0]) throw Object.assign(new Error("Ideogram 4.5 needs a source image."), { status: 400 });
     validateIdeogramImageEditRequest({ prompt, quality, editPrecision, referenceCount: images.length - 1, hasMask: Boolean(mask) });
@@ -77,7 +88,9 @@ export async function generateFalImageEdit({ model, prompt, quality, editPrecisi
   }
   const imageUrls = await Promise.all(images.map((buffer, index) => uploadImage({ buffer, mimeType: "image/png", fileName: `edit-reference-${index + 1}.png` }, index)));
   const maskUrl = mask ? await uploadImage({ buffer: mask, mimeType: "image/png", fileName: "edit-mask.png" }, images.length) : undefined;
-  const { endpoint, input } = ideogram
+  const { endpoint, input } = nano
+    ? { endpoint: nanoBanana21FalEditEndpoint, input: buildNanoBanana21Input({ prompt, images: imageUrls, resolution, aspectRatio: "auto" }) }
+    : ideogram
     ? buildIdeogramImageEditFalRequest({ prompt, quality, editPrecision, imageUrls, maskUrl })
     : buildOpenAiImage25FalRequest({ model, prompt, quality, size, imageUrls, maskUrl });
   const result = await subscribe(endpoint, { input, logs: true }, { route: "edit-image", model });

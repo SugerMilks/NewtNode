@@ -22,7 +22,8 @@ export function validateNanoBanana21Request({ prompt, images = [], resolution = 
   if (!["fal", "krea"].includes(provider)) fail("Nano Banana 2.1 requires Fal or Krea in Settings. Atlas Cloud support is not yet verified.");
   if (typeof prompt !== "string" || prompt.trim().length < 3 || prompt.trim().length > 50000) fail("Nano Banana 2.1 needs a prompt between 3 and 50,000 characters.");
   if (!nanoBanana21ResolutionOptions.includes(resolution)) fail("Nano Banana 2.1 supports 1K, 2K, or 4K resolution.");
-  if (!nanoBanana21Ratios(provider).includes(aspectRatio)) fail(`Choose a supported Nano Banana 2.1 aspect ratio for ${provider === "krea" ? "Krea" : "Fal"}.`);
+  const sourceAspect = aspectRatio === "auto" && provider === "fal" && Array.isArray(images) && images.length > 0;
+  if (!sourceAspect && !nanoBanana21Ratios(provider).includes(aspectRatio)) fail(`Choose a supported Nano Banana 2.1 aspect ratio for ${provider === "krea" ? "Krea" : "Fal"}.`);
   if (!Array.isArray(images) || images.length > 14 || images.some(url => typeof url !== "string" || !url.trim())) fail("Nano Banana 2.1 accepts up to 14 valid image references. Remove extra or missing references before running.");
   if (maskUrl || (background && background !== "auto" && background !== "opaque")) fail("Nano Banana 2.1 does not support pixel masks or transparent backgrounds in this integration. Use Image Edit for masked edits.");
 }

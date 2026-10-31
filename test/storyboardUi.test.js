@@ -13,11 +13,60 @@ import { myNewtSnapshot } from "../src/myNewt/contract.js";
 import { storyboardApproaches, storyboardApproachDetails, storyboardPlanningSettings } from "../src/storyboardWorkflow.js";
 
 const source = readFileSync(new URL("../src/NodeEditor.jsx", import.meta.url), "utf8");
-const compiled = buildSync({ stdin: { contents: `${source}\nexport { NodeBody, normalizeEditorGraph, createDefaultNodeData };`, resolveDir: fileURLToPath(new URL("../src", import.meta.url)), loader: "jsx" }, bundle: true, write: false, platform: "node", format: "cjs", packages: "external", jsx: "automatic", define: { "import.meta.env": "{}" }, external: ["/newt-mark.png"], loader: { ".css": "empty" } });
+const compiled = buildSync({ stdin: { contents: `${source}\nexport { NodeBody, normalizeEditorGraph, createDefaultNodeData, buildIncomingByNode, storyboardSceneTagMatches, activeConnectedCharacterSources, portColors };`, resolveDir: fileURLToPath(new URL("../src", import.meta.url)), loader: "jsx" }, bundle: true, write: false, platform: "node", format: "cjs", packages: "external", jsx: "automatic", define: { "import.meta.env": "{}" }, external: ["/newt-mark.png"], loader: { ".css": "empty" } });
 const module = { exports: {} };
 new Function("require", "module", "exports", compiled.outputFiles[0].text)(createRequire(import.meta.url), module, module.exports);
-const { NodeBody, normalizeEditorGraph, createDefaultNodeData } = module.exports;
+const { NodeBody, normalizeEditorGraph, createDefaultNodeData, buildIncomingByNode, storyboardSceneTagMatches, activeConnectedCharacterSources, portColors } = module.exports;
 const frame = { id: "f1", number: 1, prompt: "Doorway", resultUrl: "/outputs/current.png", protected: true, versions: [{ resultUrl: "/outputs/previous.png", savedAt: 1, prompt: "Previous doorway" }] };
+
+for (const [kind, description, expectedMarks] of [
+  ["@tags", "@Woman and @man in @Courtyard with @Cup. @WomanExtra and @Unknown stay plain.", ["@Woman", "@man", "@Courtyard", "@Cup"]],
+  ["script names", "Frame the woman right and man left in the courtyard with a cup. WomanExtra and @Unknown stay plain.", ["woman", "man", "courtyard", "cup"]]
+]) test(`Storyboard ${kind} follow live input connections and port colors before media is generated`, () => {
+  const board = { id: "b", type: "storyboard", data: { ...createDefaultNodeData("storyboard", "Storyboard", 1),
+    sceneDescription: description, storyboardFrames: [{ ...frame, protected: false, shotDescription: description, prompt: description }] } };
+  const sources = [
+    { id: "woman", type: "character", data: { title: "Character", characterName: "Woman", locked: false, activated: false } },
+    { id: "man", type: "character", data: { title: "Character 2", characterName: "Man", locked: false, activated: false } },
+    { id: "location", type: "image", data: { title: "Courtyard", resultUrl: "" } },
+    { id: "prop", type: "image", data: { title: "Cup", resultUrl: "" } }
+  ];
+  const edges = sources.map(source => ({ from: { nodeId: source.id, port: source.type === "character" ? "characterOut" : "imageOut" },
+    to: { nodeId: board.id, port: source.type === "character" ? "characterIn" : source.id === "prop" ? "propsIn" : "sceneReferenceIn" } }));
+  const before = structuredClone({ board, sources, edges });
+  const incoming = () => buildIncomingByNode([board, ...sources], edges);
+  const matches = () => storyboardSceneTagMatches(description, board, incoming()[board.id], incoming());
+  assert.deepEqual(matches().map(({ tag, color }) => [tag, color]), [["Woman", portColors.character], ["Man", portColors.character], ["Courtyard", portColors.image], ["Cup", portColors.image]]);
+  assert.deepEqual(activeConnectedCharacterSources(incoming()[board.id].characterIn, incoming()), [], "UI color must not make unfinished characters usable for generation");
+  assert.deepEqual(storyboardSceneTagMatches(description, board, {}), []);
+
+  const collect = (element, predicate) => [...(predicate(element) ? [element] : []), ...(element.childNodes || []).flatMap(child => collect(child, predicate))];
+  const attr = (element, name) => element.attrs?.find(attribute => attribute.name === name)?.value;
+  const text = element => element.nodeName === "#text" ? element.value : (element.childNodes || []).map(text).join("");
+  for (const [approach, tab, expectedEditors] of [["Shot List", "setup", 2], ["Dialogue", "setup", 1], ["Shot List", "view", 1]]) {
+    const node = { ...board, data: { ...board.data, storyboardApproach: approach, storyboardTab: tab } };
+    const render = connected => parseFragment(renderToStaticMarkup(React.createElement(NodeBody, { node, imageModelOptions, videoModelOptions,
+      generationProvider: "fal", incoming: connected ? incoming()[board.id] : {}, incomingByNode: incoming(), connectedPortKeys: new Set(),
+      onUpdate() { assert.fail("Highlighting must not change node data"); } })));
+    assert.equal(collect(render(false), element => element.tagName === "mark").length, 0);
+    const root = render(true);
+    const editors = collect(root, element => attr(element, "class")?.includes("tagged-prompt-editor"));
+    assert.equal(editors.length, expectedEditors);
+    for (const editor of editors) {
+      const marks = collect(editor, element => element.tagName === "mark");
+      assert.deepEqual(marks.map(text), expectedMarks);
+      assert.deepEqual(marks.map(mark => attr(mark, "style")), [portColors.character, portColors.character, portColors.image, portColors.image].map(color => `--tag-color:${color}`));
+      const textarea = collect(editor, element => element.tagName === "textarea")[0];
+      assert.equal(text(textarea), description);
+    }
+  }
+  assert.deepEqual({ board, sources, edges }, before);
+  sources[0].data.characterName = "Hero";
+  assert.deepEqual(matches().map(match => match.tag), ["Man", "Courtyard", "Cup"]);
+  edges.splice(1, 1);
+  assert.deepEqual(matches().map(match => match.tag), ["Courtyard", "Cup"]);
+  assert.equal(board.data.storyboardFrames[0].shotDescription, description);
+});
 
 test("Storyboard approach labels and descriptions match selection without changing stored planning values", () => {
   const find = (node, predicate) => predicate(node) ? node : (node.childNodes || []).map(child => find(child, predicate)).find(Boolean);
@@ -85,6 +134,38 @@ test("new Storyboards start with one Shot List row; authored rows and legacy sum
   }
   delete saved.data.storyboardApproach;
   assert.equal(normalizeEditorGraph([saved], [], []).nodes[0].data.storyboardApproach, "Narrative");
+});
+
+test("Storyboard activity spinner shows planning and running work and clears on success or failure", () => {
+  const attr = (element, name) => element.attrs?.find(attribute => attribute.name === name)?.value;
+  const find = (element, predicate) => predicate(element) ? element : (element.childNodes || []).map(child => find(child, predicate)).find(Boolean);
+  const cases = [
+    ["planning", "Shot List", "Planning shots"], ["planning", "Dialogue", "Planning storyboard"],
+    ["running", "Shot List", "Generating storyboard frames"], ["compiling-characters", "Shot List", "Generating character sheets"],
+    ["compiling-board", "Shot List", "Preparing storyboard output"], ["exporting", "Shot List", "Exporting storyboard boards"],
+    ["ready", "Shot List", ""], ["complete", "Shot List", ""], ["error", "Shot List", ""]
+  ];
+  for (const [status, approach, label] of cases) {
+    const node = { id: "b", type: "storyboard", data: { ...createDefaultNodeData("storyboard", "Storyboard", 1), status,
+      storyboardApproach: approach, sceneDescription: "A door opens", storyboardTab: "setup",
+      storyboardFrames: [{ ...frame, protected: false, shotDescription: "A door opens" }] } };
+    const before = structuredClone(node);
+    const root = parseFragment(renderToStaticMarkup(React.createElement(NodeBody, { node, imageModelOptions, videoModelOptions,
+      generationProvider: "fal", incoming: {}, incomingByNode: {}, connectedPortKeys: new Set(), onUpdate() { assert.fail("render must not change state"); } })));
+    const spinner = find(root, element => attr(element, "class") === "storyboard-action-busy");
+    if (label) {
+      assert.ok(spinner, status);
+      assert.equal(attr(spinner, "role"), "status");
+      assert.equal(attr(spinner, "aria-label"), label);
+      assert.equal(attr(spinner, "title"), label);
+      assert.equal(attr(find(spinner, element => element.tagName === "svg"), "aria-hidden"), "true");
+      if (status === "planning") {
+        const button = spinner.parentNode.childNodes.find(element => element.tagName === "button");
+        assert.equal(attr(button, "disabled"), "");
+      }
+    } else assert.equal(spinner, undefined, status);
+    assert.deepEqual(node, before);
+  }
 });
 
 test("Storyboard Shot List scrolls separately from its typed setup inputs", () => {

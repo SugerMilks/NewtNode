@@ -143,6 +143,9 @@ test("PDF shot planning receives the same camera personality without an extra re
     assert.match(h.calls[0].prompt, new RegExp(`CAMERA PERSONALITY: ${personality || "Expressive"}`));
     assert.match(h.calls[0].prompt, /camera directions in a source script outrank personality/);
     assert.match(h.calls[0].prompt, /do not return extra JSON fields/i);
+    assert.match(h.calls[0].prompt, /WORLD-SPACE CONTINUITY/);
+    assert.match(h.calls[0].prompt, /PROP STATE/);
+    assert.match(h.calls[0].prompt, /CAMERA AXIS AND INSERTS/);
   }
 });
 

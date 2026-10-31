@@ -496,6 +496,29 @@
   min-width: 0;
 }
 
+.output-lightbox-header-actions { flex-shrink: 0; }
+.output-lightbox header .output-lightbox-advanced-edit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  gap: 6px;
+  width: auto;
+  height: 32px;
+  margin-right: 10px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  color: #d0d0d0;
+  background: rgba(255, 255, 255, 0.055);
+  font-size: 12px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+.output-lightbox header .output-lightbox-advanced-edit:hover:not(:disabled) { background: rgba(255, 255, 255, 0.1); }
+.output-lightbox header .output-lightbox-advanced-edit:focus-visible { outline: 2px solid #aaa; outline-offset: 2px; }
+.output-lightbox header .output-lightbox-advanced-edit:disabled { opacity: 0.45; cursor: not-allowed; }
+
 .output-lightbox-tools {
   padding: 3px;
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -792,6 +815,11 @@
   object-fit: contain;
 }
 
+.output-lightbox-stage[data-image-viewport] { min-width: 0; overflow: clip; contain: paint; isolation: isolate; overscroll-behavior: contain; touch-action: none; outline: none; }
+.output-lightbox-stage[data-image-viewport]:focus-visible { box-shadow: inset 0 0 0 1px rgba(221, 198, 49, 0.5); }
+.output-lightbox-stage[data-pannable] { cursor: grab; }
+.output-lightbox-stage[data-pannable].panning { cursor: grabbing; }
+
 .output-lightbox-image-editor {
   position: relative;
   display: block;
@@ -800,6 +828,8 @@
   max-width: 100%;
   height: fit-content;
   max-height: 100%;
+  will-change: transform;
+  backface-visibility: hidden;
 }
 
 .output-lightbox-image-editor > img {
@@ -911,6 +941,12 @@
 
 .output-lightbox-audio audio {
   width: min(520px, 72vw);
+}
+
+@media (max-width: 760px) {
+  .output-lightbox.image header { flex-wrap: wrap; gap: 6px; padding: 6px 10px; }
+  .output-lightbox.image .output-lightbox-header-actions { width: 100%; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
+  .output-lightbox.image .output-lightbox-tools { flex-wrap: wrap; gap: 4px; }
 }
 
 .node-canvas {
@@ -4905,15 +4941,16 @@ video.newtnode-video-fallback {
 .storyboard-shot-content { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 8px; align-items: start; }
 .storyboard-shot-content .storyboard-shot-thumbnail { width: 90px; aspect-ratio: 16 / 9; min-height: 0; padding: 0; overflow: hidden; background: #10120f; color: #8c9187; }
 .storyboard-shot-thumbnail img { width: 100%; height: 100%; object-fit: contain; }
-.storyboard-shot-content .tagged-prompt-editor { width: 100%; min-width: 0; height: 104px; min-height: 80px; resize: vertical; overflow: hidden; border-radius: 5px; background: #10120f; }
-.storyboard-shot-content .tagged-prompt-editor textarea, .storyboard-shot-content .tagged-prompt-highlighter { box-sizing: border-box; width: 100%; height: 100%; min-height: 0; padding: 8px; font-size: 12px; font-weight: 500; line-height: 1.45; overflow: auto; scrollbar-gutter: stable; scrollbar-width: auto; }
-.storyboard-shot-content .tagged-prompt-editor textarea { resize: none; }
-.storyboard-shot-content .tagged-prompt-highlighter { scrollbar-color: transparent transparent; overflow-anchor: none; }
-.storyboard-shot-content .tagged-prompt-highlighter::-webkit-scrollbar { display: initial; }
+:is(.storyboard-shot-content, .storyboard-shot-context) .tagged-prompt-editor { width: 100%; min-width: 0; height: 104px; min-height: 80px; resize: vertical; overflow: hidden; border-radius: 5px; background: #10120f; }
+:is(.storyboard-shot-content, .storyboard-shot-context) .tagged-prompt-editor textarea, :is(.storyboard-shot-content, .storyboard-shot-context) .tagged-prompt-highlighter { box-sizing: border-box; width: 100%; height: 100%; min-height: 0; padding: 8px; font-size: 12px; font-weight: 500; line-height: 1.45; overflow: auto; scrollbar-gutter: stable; scrollbar-width: auto; }
+:is(.storyboard-shot-content, .storyboard-shot-context) .tagged-prompt-editor textarea { resize: none; }
+:is(.storyboard-shot-content, .storyboard-shot-context) .tagged-prompt-highlighter { scrollbar-color: transparent transparent; overflow-anchor: none; }
+:is(.storyboard-shot-content, .storyboard-shot-context) .tagged-prompt-highlighter::-webkit-scrollbar { display: initial; }
 .storyboard-shot-list .storyboard-shot-add { width: 100%; margin-top: 6px; background: transparent; }
 .storyboard-shot-context { color: #aaa; font-size: 11px; margin: 6px 0 10px; }
 .storyboard-shot-context summary { cursor: pointer; padding: 5px 0; }
-.storyboard-shot-context textarea { box-sizing: border-box; width: 100%; min-height: 80px; padding: 8px; resize: vertical; color: #eee; background: #10120f; border: 1px solid #3a3c37; border-radius: 5px; font-size: 12px; }
+.storyboard-shot-context .tagged-prompt-editor { height: 80px; font-size: 12px; font-weight: 500; line-height: 1.45; }
+.storyboard-shot-context textarea { background: transparent; border: 1px solid #3a3c37; border-radius: 5px; }
 .storyboard-shot-count { font-size: 12px; padding: 7px 9px; }
 
 .storyboard-script-import { min-width: 0; border-bottom: 1px solid #383b35; padding: 0 0 12px; font-size: 12px; color: #d9dcd7; }
@@ -5686,6 +5723,20 @@ video.newtnode-video-fallback {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.character-portrait-empty {
+  display: grid;
+  justify-items: center;
+  gap: 7px;
+  max-width: 100%;
+  padding: 12px;
+  text-align: center;
+}
+
+.character-portrait-empty small {
+  font-size: 11px;
+  line-height: 1.3;
 }
 
 .character-main-preview:hover {

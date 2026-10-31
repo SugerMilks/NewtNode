@@ -5,6 +5,7 @@ import sharp from "sharp";
 import { createStoryboardQc, storyboardQcImage, storyboardQcInputs, storyboardQcDecision, storyboardQcFailureTypes } from "../server/storyboard-qc.js";
 import { creativeSchemas, validateCreativeResponse } from "../server/creative-llm.js";
 import { storyboardPromptPolicy } from "../src/storyboardPromptPolicy.js";
+import { storyboardContinuityRules } from "../src/storyboardContinuity.js";
 import { storyboardQcCharacterInputs } from "../src/storyboardCast.js";
 import { storyboardQcUnavailable } from "../src/storyboardPlanValidation.js";
 
@@ -198,7 +199,7 @@ test("real review adapter sends prepared snapshots, provider connection, effort 
   let request;
   const review = getFunction("reviewStoryboardFrameWithOpenAi", {
     storyboardQcCharacterInputs, storyboardQcUnavailable,
-    storyboardQcReviewPrompt: getFunction("storyboardQcReviewPrompt", { storyboardPromptPolicy }),
+    storyboardQcReviewPrompt: getFunction("storyboardQcReviewPrompt", { storyboardPromptPolicy, storyboardContinuityRules }),
     normalizeStoryboardQcResult: getFunction("normalizeStoryboardQcResult", { normalizeChoice: (value, options, fallback) => options.includes(value) ? value : fallback }),
     storyboardVisionFalModel: "mock-fal", storyboardVisionOpenAiModel: "mock-direct",
     parseStoryboardPlanJson: JSON.parse, estimateTextProcessingCost: () => ({ amountUsd: 0.12 }),
@@ -217,7 +218,7 @@ test("real review adapter sends prepared snapshots, provider connection, effort 
 });
 
 test("both QC modes protect intentional cinematic composition without excusing continuity or anatomy failures", () => {
-  const prompt = getFunction("storyboardQcReviewPrompt", { storyboardPromptPolicy });
+  const prompt = getFunction("storyboardQcReviewPrompt", { storyboardPromptPolicy, storyboardContinuityRules });
   for (const qcMode of ["balanced", "deep"]) {
     const text = prompt({ qcMode, angle: "Dutch Angle" });
     assert.match(text, /Intentional camera expression is not broken perspective/);
@@ -229,7 +230,7 @@ test("both QC modes protect intentional cinematic composition without excusing c
 });
 
 test("Balanced tolerates acting nuance even on confirmation; Deep retains explicit performance scrutiny", () => {
-  const prompt = getFunction("storyboardQcReviewPrompt", { storyboardPromptPolicy });
+  const prompt = getFunction("storyboardQcReviewPrompt", { storyboardPromptPolicy, storyboardContinuityRules });
   const balanced = prompt({ adaptiveQc: true, qcMode: "balanced" });
   const deep = prompt({ adaptiveQc: true, qcMode: "deep" });
   assert.match(balanced, /Judge whether the intended story beat reads, not literal execution/);

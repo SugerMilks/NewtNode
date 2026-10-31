@@ -35,6 +35,7 @@ export function characterBaseGenerationSignature(data = {}) {
     portraitUrl,
     model: normalizeCharacterSheetModel(data.characterSheetModel),
     cinematic: Boolean(data.cinematicCharacterSheet),
+    ...(data.nonHumanCharacter === true ? { nonHuman: true } : {}),
     physicalDetails: String(data.characterPhysicalDetails || "").trim()
   });
 }
@@ -44,6 +45,7 @@ export function characterBaseVideoGenerationSignature(data = {}) {
     version: characterVideoSheetPromptVersion,
     portraitUrl: data.characterPortrait?.localUrl || data.characterPortrait?.url || "",
     model: normalizeCharacterSheetModel(data.characterSheetModel),
+    ...(data.nonHumanCharacter === true ? { nonHuman: true } : {}),
     physicalDetails: String(data.characterPhysicalDetails || "").trim()
   });
 }

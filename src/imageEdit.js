@@ -1,6 +1,9 @@
 import { openAiImage25Models } from "./openAiImage25.js";
 import { ideogramImageEditModel, validateIdeogramImageEditRequest } from "./ideogramImageEdit.js";
+import { nanoBanana21ModelName } from "./nanoBanana21.js";
 
+export const imageEditDefaultModel = ideogramImageEditModel;
+export const imageEditModels = [ideogramImageEditModel, nanoBanana21ModelName, openAiImage25Models.sunburst];
 export const imageEditColors = ["#f4f4f4", "#191919", "#ed5959", "#f4a340", "#e4cf37", "#57bd83", "#42b9d0", "#648cf5"];
 export const imageEditModes = ["edit", "sketch", "remove"];
 export const imageEditMaxPixels = 24000000;
@@ -12,6 +15,10 @@ export function imageEditPoint(clientX, clientY, rect) {
 export function imageEditSize(width, height, model = openAiImage25Models.sunburst) {
   if (![width, height].every((value) => Number.isInteger(value) && value > 0) || width * height > imageEditMaxPixels)
     throw new Error("This image is too large for the editor. Use an image up to 24 megapixels.");
+  if (model === nanoBanana21ModelName) {
+    if (Math.max(width / height, height / width) > 8) throw new Error("Nano Banana 2.1 supports aspect ratios between 1:8 and 8:1. Crop this image before generating an edit.");
+    return { width, height };
+  }
   if (model === ideogramImageEditModel) {
     if (Math.max(width / height, height / width) > 6) throw new Error("Ideogram 4.5 supports aspect ratios between 1:6 and 6:1. Crop this image before generating an edit.");
     // Auto sizing keeps source geometry; the provider may render oversized sources smaller.
@@ -33,8 +40,9 @@ export function buildImageEditPrompt({ prompt = "", mode = "edit", hasDrawing = 
   if (!imageEditModes.includes(mode)) throw new Error("Choose an image editing method.");
   const brief = String(prompt).trim();
   const ideogram = model === ideogramImageEditModel;
+  const nano = model === nanoBanana21ModelName;
   if (!ideogram && brief.length > 16000) throw new Error("Keep the edit prompt under 16,000 characters.");
-  if (blank && mode !== "sketch") throw new Error("A blank canvas is only available for Render sketch.");
+  if (blank && mode !== "sketch") throw new Error("A blank canvas is only available for Generate from Sketch.");
   if (mode === "remove" && !hasSelection) throw new Error("Select the area to remove first.");
   if (!brief && mode !== "remove" && !(mode === "sketch" && hasDrawing)) throw new Error("Describe the edit you want to make.");
   if (blank && !hasDrawing) throw new Error("Draw your sketch before generating.");
@@ -44,7 +52,9 @@ export function buildImageEditPrompt({ prompt = "", mode = "edit", hasDrawing = 
       ? "The drawn marks are a composition sketch. Turn their shapes, placement and colors into finished visual content according to the brief. Preserve the sketch's intended arrangement, not its rough pen texture unless requested."
       : `${ideogram ? "The guide reference shows" : "Image 2 shows"} annotations over the same original. Circles, arrows, outlines, handwriting and colored strokes are editing instructions and location guides, not artwork to copy into the result. Interpret them together with the brief. Remove every guide mark from the final image; use the clean original to recover the underlying content. Only include literal text if the brief explicitly requests visible text.`
       : "Use the written brief to direct the edit.",
-    hasSelection ? ideogram
+    hasSelection ? nano
+      ? `Image ${hasDrawing ? 3 : 2} is a black-and-white selection guide aligned exactly with image 1. White indicates the area to edit; black indicates protected content. Use this guide only to locate the requested change in image 1. Keep the framing and geometry aligned with the original. Do not include the guide or its colors in the finished image.`
+      : ideogram
       ? "The black area of the provided edit mask is the selected region; white pixels are protected. Change only the black region. Preserve everything else. Do not reproduce the selection overlay."
       : "The transparent area of the provided edit mask is the selected region. Change only that region. Preserve everything else. Do not reproduce the selection overlay." : "",
     mode === "remove" ? "Remove the selected content and reconstruct the exposed area naturally from its surroundings. Do not add replacement objects unless requested." : "",
