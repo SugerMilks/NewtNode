@@ -17,6 +17,28 @@ const paths = [
   () => myNewtApi.request("job", { route: "/api/node/generate-video", body: {} })
 ];
 
+test("Kling 4 checks backend capability before a single paid request", async (t) => {
+  const calls = [];
+  let supported = false;
+  t.mock.method(globalThis, "fetch", async (url, options = {}) => {
+    calls.push({ url, options });
+    if (String(url).endsWith("/api/health")) return Response.json({ routes: { kling4: supported } });
+    return Response.json({ video: { localUrl: "/outputs/kling4.mp4" } });
+  });
+  const request = { model: "Kling 4", prompt: "A scene.", duration: "30 seconds", resolution: "720p" };
+  await assert.rejects(nodeApi.generateVideo(request), /Restart.*Kling 4.*No generation was submitted/);
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].url, /api\/health$/);
+  supported = true;
+  calls.length = 0;
+  const result = await nodeApi.generateVideo(request);
+  assert.equal(result.data.video.localUrl, "/outputs/kling4.mp4");
+  assert.equal(calls.length, 2);
+  assert.match(calls[0].url, /api\/health$/);
+  assert.equal(calls[1].options.method, "POST");
+  assert.deepEqual(JSON.parse(calls[1].options.body), request);
+});
+
 test("only video generation requests bypass the generic fallback", () => {
   assert.equal(isVideoGenerationRoute("/api/node/generate-video"), true);
   assert.equal(isVideoGenerationRoute("/api/node/generate-image"), false);

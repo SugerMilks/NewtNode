@@ -1,6 +1,12 @@
+import { normalizeCameraCoverageData, reframeToolName } from "./cameraCoverage.js";
+
 // Retired tools stay loadable in saved projects and presets without deleting media.
 export function migrateRetiredNode(node) {
   const data = node.data || {};
+  if (node.type === "cameraCoverage") return {
+    ...node, type: "utility",
+    data: { ...normalizeCameraCoverageData(data), utilityMode: "video", utilityVideoModel: reframeToolName, resultType: "image" }
+  };
   if (node.type === "coverage") return {
     ...node, type: "utility",
     data: { ...data, title: /^Coverage(?: \d+)?$/.test(data.title || "") ? "Utility" : data.title || "Utility", utilityMode: "image", utilityImageModel: "Coverage", resultType: "image" }
@@ -17,6 +23,6 @@ export function migrateRetiredGraph(graph) {
   return { ...graph, nodes: (graph.nodes || []).map(migrateRetiredNode), edges: (graph.edges || []).flatMap(edge => {
     const source = originals.get(edge.from?.nodeId), target = originals.get(edge.to?.nodeId);
     if (target?.type === "composer" || (source?.type === "composer" && edge.from.port !== "imageOut")) return [];
-    return [{ ...edge, ...(source?.type === "coverage" ? { from: { ...edge.from, port: "utilityOut" } } : {}) }];
+    return [{ ...edge, ...(["coverage", "cameraCoverage"].includes(source?.type) ? { from: { ...edge.from, port: "utilityOut" } } : {}) }];
   }) };
 }

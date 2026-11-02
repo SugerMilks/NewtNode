@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { buildAtlasVideoRequest, supportsAtlasVideoModel } from "../src/atlasVideos.js";
+import { ProviderPricing } from "../server/provider-pricing.js";
 
 const image = "https://example.com/image.png";
 const end = "https://example.com/end.png";
@@ -195,4 +196,62 @@ test("builder is synchronous, JSON-serializable, deterministic, and does not mut
   result.reference_images.pop();
   assert.equal(images.length, 2);
   assert.equal(inputs.prompt, "[Image2] moves.");
+});
+
+test("Atlas Kling 4 recognition and text requests use the verified v4 contract", () => {
+  for (const model of ["Kling 4", " Kling 4.0 ", "Kling v4"]) {
+    assert.equal(supportsAtlasVideoModel(model), true);
+    assert.deepEqual(request({ model, prompt: "A crane turns toward the camera.", duration: "30 seconds", resolution: "720p", aspectRatio: "21:9" }), {
+      model: "kwaivgi/kling-v4.0/text-to-video", prompt: "A crane turns toward the camera.", duration: 30,
+      resolution: "720p", aspect_ratio: "21:9"
+    });
+  }
+  assert.equal(supportsAtlasVideoModel("Kling 4 Pro"), false);
+  assert.equal(supportsAtlasVideoModel("Kling 4K"), false);
+});
+
+test("Atlas Kling 4 frame and reference requests preserve inputs and choose exact endpoints", () => {
+  const frames = request({ model: "Kling 4", startImage: image, endImage: end });
+  assert.equal(frames.model, "kwaivgi/kling-v4.0/image-to-video");
+  assert.equal(frames.image, image);
+  assert.equal(frames.last_image, end);
+  assert.equal("ratio" in frames, false);
+  assert.equal("aspect_ratio" in frames, false);
+  const references = Object.freeze([image, end]);
+  const result = request({ model: "Kling 4", prompt: "@image_2 follows the camera in @video_1.", images: references, videos: [video], duration: 3 });
+  assert.equal(result.model, "kwaivgi/kling-v4.0/reference-to-video");
+  assert.deepEqual(result.reference_images, references);
+  assert.deepEqual(result.reference_videos, [video]);
+  assert.equal(result.prompt, "@image_2 follows the camera in @video_1.");
+  assert.equal(result.duration, 3);
+  assert.equal(result.resolution, "1080p");
+  assert.equal("ratio" in result, false);
+  assert.equal("generate_audio" in result, false);
+  assert.deepEqual(references, [image, end]);
+  assert.equal(request({ model: "Kling 4", startImage: "/uploads/source.png" }).image, "/uploads/source.png");
+});
+
+test("Atlas Kling 4 rejects unsupported settings and malformed media before submission", () => {
+  const model = "Kling 4";
+  for (const duration of [2, 31, 5.5, "Auto"]) rejects({ model, duration }, /duration/);
+  for (const resolution of ["4k", "1080p-esr", "480p"]) rejects({ model, resolution }, /resolution|720p|1080p/);
+  rejects({ model, images: copies(image, 11) }, /at most 10/);
+  rejects({ model, videos: copies(video, 6) }, /at most 5/);
+  rejects({ model, audios: [audio] }, /audio/i);
+  rejects({ model, seed: 42 }, /does not document a seed/);
+  rejects({ model, seedanceDraft: true }, /Draft mode requires/);
+  rejects({ model, seedanceTask: "edit" }, /requires Seedance 2.5/);
+  rejects({ model, multi_prompt: [] }, /Unsupported Atlas video settings/);
+  rejects({ model, images: ["file:///tmp/source.png"] }, /URL/);
+  rejects({ model, startImage: "https://user:secret@example.com/source.png" }, /URL/);
+});
+
+test("Atlas Kling 4 prices remain unknown without a verified quoting contract", async () => {
+  let calls = 0;
+  const pricing = new ProviderPricing({ pricing: {}, getKey: () => "unused-test-key", fetchImpl: async () => { calls += 1; throw new Error("Must not request unverified quotes"); } });
+  for (const fields of [{}, { startImage: image }, { images: [image], videos: [video] }]) {
+    const input = request({ model: "Kling 4", ...fields });
+    assert.equal(await pricing.atlasInput(input, "unused-test-key"), null);
+  }
+  assert.equal(calls, 0);
 });

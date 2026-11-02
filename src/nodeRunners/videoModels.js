@@ -1,4 +1,5 @@
 import { workflowContextPayload } from "../workflowContext.js";
+import { isKling4Model, kling4DurationOptions, kling4ResolutionOptions, kling4AspectRatioOptions } from "../kling4.js";
 import { normalizeUtilityOutpaintSettings } from "../videoOutpaint.js";
 import {
   klingO3ProAspectRatioOptions,
@@ -31,7 +32,9 @@ export { videoModelSupportsFilmDirector };
 
 export function filmDirectorVideoDuration(model, durationSeconds, fallback = "") {
   const normalizedModel = String(model || "").toLowerCase();
-  const options = isMiniMaxH3Model(model)
+  const options = isKling4Model(model)
+    ? kling4DurationOptions
+    : isMiniMaxH3Model(model)
     ? minimaxH3DurationOptions
     : isSeedance25Model(model)
       ? seedance25DurationOptions.filter((option) => option !== "Auto")
@@ -61,7 +64,9 @@ export function filmDirectorVideoDuration(model, durationSeconds, fallback = "")
 
 export function filmDirectorVideoResolution(model, resolution, fallback = "") {
   const normalizedModel = String(model || "").toLowerCase();
-  const options = isMiniMaxH3Model(model)
+  const options = isKling4Model(model)
+    ? kling4ResolutionOptions
+    : isMiniMaxH3Model(model)
     ? minimaxH3ResolutionOptions
     : isSeedance25Model(model)
       ? seedance25ResolutionOptions
@@ -82,7 +87,9 @@ export function filmDirectorVideoResolution(model, resolution, fallback = "") {
 
 export function filmDirectorVideoAspectRatio(model, aspectRatio, fallback = "") {
   const normalizedModel = String(model || "").toLowerCase();
-  const options = isMiniMaxH3Model(model)
+  const options = isKling4Model(model)
+    ? kling4AspectRatioOptions
+    : isMiniMaxH3Model(model)
     ? minimaxH3AspectRatioOptions.filter((option) => option !== "Adaptive")
     : isSeedance25Model(model)
       ? seedance25AspectRatioOptions.filter((option) => option !== "Auto")
@@ -130,6 +137,7 @@ export function buildVideoGenerationRequest({
     ? normalizeFilmDirectorVideoModel(activeFilmDirector.videoModel, node.data.model)
     : node.data.model;
   const seedanceTask = isSeedance25Model(node.data.model) ? node.data.seedanceTask || "reference" : "reference";
+  if (isKling4Model(model) && referenceAudioUrls.length) throw new Error("Kling 4 does not accept reference audio files. Disconnect Reference Audio before generating.");
   const editing = validateSeedance25Task({ model, seedanceTask, videos: referenceVideoUrls,
     startFrames: startFrameUrls, endFrames: endFrameUrls, filmDirector: activeFilmDirector });
   const usesMusic = filmDirectorUsesMusic(activeFilmDirector?.approach, [activeFilmDirector?.musicReference]);
@@ -157,13 +165,15 @@ export function buildVideoGenerationRequest({
     aspectRatio: editing ? "Auto" : activeFilmDirector
       ? filmDirectorVideoAspectRatio(model, activeFilmDirector.aspectRatio, node.data.aspectRatio)
       : node.data.aspectRatio,
-    generateAudio: usesMusic ? true : activeFilmDirector
-      ? filmDirectorVideoGenerateAudio(activeFilmDirector.audioMode, normalizeVideoGenerateAudio(node.data.generateAudio))
-      : normalizeVideoGenerateAudio(node.data.generateAudio),
-    klingCfgScale: node.data.klingCfgScale ?? 0.5,
-    negativePrompt: node.data.negativePrompt || "",
-    seed: node.data.seed || "",
-    enableSafetyChecker: node.data.enableSafetyChecker !== false,
+    ...(!isKling4Model(model) ? {
+      generateAudio: usesMusic ? true : activeFilmDirector
+        ? filmDirectorVideoGenerateAudio(activeFilmDirector.audioMode, normalizeVideoGenerateAudio(node.data.generateAudio))
+        : normalizeVideoGenerateAudio(node.data.generateAudio),
+      klingCfgScale: node.data.klingCfgScale ?? 0.5,
+      negativePrompt: node.data.negativePrompt || "",
+      seed: node.data.seed || "",
+      enableSafetyChecker: node.data.enableSafetyChecker !== false
+    } : {}),
     startFrameUrls,
     endFrameUrls,
     referenceImageUrls,

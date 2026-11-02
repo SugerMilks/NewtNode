@@ -15,7 +15,8 @@ import { setStoryboardFrameDragImage } from "./storyboardFrameDrag.js";
 import { StoryboardScriptImport, StoryboardScriptSource } from "./components/StoryboardScriptImport.jsx";
 import { useStoryboardBoardOutput, storyboardBoardIsCurrent, storyboardBoardBuildSignature, storyboardBoardCanBuild } from "./useStoryboardBoardOutput.js";
 import { exploreDefaults, normalizeExploreData, exploreModels } from "./explore.js";
-import { cameraCoverageDefaults, normalizeCameraCoverageData, selectCoverageVersion } from "./cameraCoverage.js";
+import { cameraCoverageDefaults, normalizeCameraCoverageData, selectCoverageVersion, isReframeNode, isReframeTool, reframeOutputPort,
+  reframeToolSelectionPatch, reframeUtilityTransition } from "./cameraCoverage.js";
 import { vectorDefaults, normalizeVectorData } from "./ideogramVector.js";
 const VectorNodeBody = React.lazy(() => import("./components/VectorNodeBody.jsx").then(module => ({ default: module.VectorNodeBody })));
 const CameraCoverageNodeBody = React.lazy(() => import("./components/CameraCoverageNodeBody.jsx").then(module => ({ default: module.CameraCoverageNodeBody })));
@@ -281,6 +282,7 @@ import { isSeedance25Model } from "./seedance25.js";
 import { selectedSeedanceDraft, supportsSeedanceDraft, seedanceDraftProviderName, seedanceDraftHint } from "./seedanceDraft.js";
 import { finishSeedanceDraft } from "./nodeRunners/seedanceDraft.js";
 import { supportsAtlasVideoModel } from "./atlasVideos.js";
+import { isKling4Model, kling4DurationOptions, kling4ResolutionOptions, kling4AspectRatioOptions } from "./kling4.js";
 import {
   isMiniMaxH3Model,
   minimaxH3AspectRatioOptions,
@@ -441,7 +443,7 @@ const nodeCatalog = nodeTypeDefinitions.map((definition) => ({
 
 const nodeHelpContent = {
   vector: {
-    title: "Vector Node",
+    title: "Vector Model",
     lines: ["Create editable SVG artwork from a design brief, or convert one connected image into vector shapes through your enabled Fal account.",
       "Text to Vector accepts up to five optional image references. Vectorize Image converts one source without a prompt; Simple favors fewer shapes.",
       "Every click generates one saved variant. Settings changes preserve previous variants. SVG exports retain editable shapes; PNG exports and the blue image output work with existing image nodes.",
@@ -2128,6 +2130,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const previous = nodesRef.current.find((node) => node.id === nodeId);
     if (previous?.type === "utility" && !isCoverageNode(previous) && isCoverageNode({ ...previous, data: { ...previous.data, ...patch } })) {
       patch = { ...utilityImageModelSelectionPatch(previous.data, utilityImageModelNames.coverage), ...patch };
+    }
+    if (previous?.type === "utility") {
+      patch = reframeUtilityTransition(previous.data, patch);
+      if (!patch) return;
     }
     let nextUtilityData = null;
     let nextCameraData = null;
@@ -5138,7 +5144,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         setEdges((current) => {
           const replacesSingleComposerCharacterInput = isComposerCharacterInputPort(to.port, targetNodeForConnection);
           const replacesSingleAutoAspectInput = isAutoAspectNode(targetNodeForConnection) && to.port === "imageIn";
-          const replacesSingleCoverageInput = (isCoverageNode(targetNodeForConnection) || targetNodeForConnection?.type === "cameraCoverage") && to.port === "imageIn";
+          const replacesSingleCoverageInput = (isCoverageNode(targetNodeForConnection) || isReframeNode(targetNodeForConnection)) && to.port === "imageIn";
           const replacesSingleAudioInput = targetNodeForConnection?.type === "audioModel" && to.port === "audioIn";
           const replacesSingleStoryboardSceneInput = targetNodeForConnection?.type === "storyboard" && to.port === "sceneDescriptionIn";
           let nextEdges = current.filter((edge) => {
@@ -5195,11 +5201,11 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const compatibilityError = getPortCompatibilityError(source, from.port, target, to.port);
     if (compatibilityError) return compatibilityError;
     if (target.type === "output") return "";
-    if (target.type === "cameraCoverage") return "";
+    if (isReframeNode(target)) return "";
     if (target.type === "vector") {
       if (to.port === "transferIn" && target.data.vectorMode === "vectorize") return "Mood Board is available in Text to vector mode only";
-      if (source.type === "character" && (!source.data.locked || !source.data.activated)) return "Lock the Character before connecting it to Vector Node";
-      if (source.type === "transfer" && (!source.data.activated || !source.data.resultUrl)) return "Lock the Mood Board before connecting it to Vector Node";
+      if (source.type === "character" && (!source.data.locked || !source.data.activated)) return "Lock the Character before connecting it to Vector Model";
+      if (source.type === "transfer" && (!source.data.activated || !source.data.resultUrl)) return "Lock the Mood Board before connecting it to Vector Model";
       return "";
     }
     if (target.type === "explore") {
@@ -5209,7 +5215,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       if (source.type === "camera" && !hasCameraPreset(source)) return "Choose a Camera preset before connecting";
       return "";
     }
-    if (["explore", "cameraCoverage", "vector"].includes(source.type) && target.type !== "audioModel") return "";
+    if ((["explore", "vector"].includes(source.type) || isReframeNode(source)) && target.type !== "audioModel") return "";
     if (source.type === "editor") {
       if (target.type === "preview") return "";
       if (!connectedOutputItem(source, { from, to })?.url) return "Export the current Editor sequence before connecting it to a video input";
@@ -5466,7 +5472,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     const bounds = getNodeBounds(nodeId);
     const hasMeasuredBounds = bounds.right > bounds.left && bounds.bottom > bounds.top;
     const left = hasMeasuredBounds ? bounds.left : node.x;
-    const right = hasMeasuredBounds ? bounds.right : node.x + estimatedNodeWidth(node.type);
+    const right = hasMeasuredBounds ? bounds.right : node.x + estimatedNodeWidth(isReframeNode(node) ? "cameraCoverage" : node.type);
     const top = hasMeasuredBounds ? bounds.top : node.y;
     const bottom = hasMeasuredBounds ? bounds.bottom : node.y + 260;
     const ports = visiblePortIdsForNode(node);
@@ -6356,7 +6362,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         includeCharacters: supportsVideoCharacters
       });
       assertCharacterOutputReferences(videoIncoming.characterIn);
-      const prompt = buildEffectiveVideoPrompt(basePrompt, videoIncoming, currentIncomingByNode);
+      const prompt = buildVideoModelPrompt(currentNode, basePrompt, videoIncoming, currentIncomingByNode);
       const runs = nodeRunIndexes(batchCount).map((index) =>
         runVideoModelGeneration({
           node: currentNode,
@@ -6472,6 +6478,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (type === "storyboard") return { resolution: imageModelResolutionOptions(model, generationProvider), aspectRatio: isNanoBanana21Model(model) ? storyboardAspectRatioOptions.filter(ratio => nanoBanana21Ratios(generationProvider).includes(ratio)) : generationProvider === "krea" && isOpenAiImage25Model(model) ? openAiImage25KreaAspectRatios : storyboardAspectRatioOptions };
     if (["imageModel", "coverage", "utility"].includes(type)) return { resolution: imageModelResolutionOptions(model, generationProvider), aspectRatio: imageModelAspectRatioOptions(model, generationProvider), quality: isSeedream5ProModel(model) ? ["high"] : isOpenAiImage25Model(model) ? openAiImage25QualityOptions : openAiImage2QualityOptions };
     if (type !== "videoModel") return {};
+    if (isKling4Model(model)) return { duration: kling4DurationOptions, resolution: kling4ResolutionOptions, aspectRatio: kling4AspectRatioOptions };
     if (isMiniMaxH3Model(model)) return { duration: minimaxH3DurationOptions, resolution: minimaxH3ResolutionOptions, aspectRatio: minimaxH3AspectRatioOptions };
     if (isSeedance25Model(model)) return { duration: seedance25DurationOptions.filter((value) => value !== "Auto"), resolution: seedance25ResolutionOptions, aspectRatio: seedance25AspectRatioOptions };
     if (isKlingO3Model(model)) return { duration: klingO3ProDurationOptions, resolution: isKlingO34kModel(model) ? klingO34kResolutionOptions : klingO3ProResolutionOptions, aspectRatio: klingO3ProAspectRatioOptions };
@@ -6659,7 +6666,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         if (isSeedance25Model(model) && (pack ? pack.seedanceDraft : data.seedanceDraft) === true) Object.assign(settings, { seedanceDraft: true, resolution: "480p" });
         if (settings.seedanceTask !== "edit" && /auto/i.test(String(settings.duration))) throw new Error("Choose an explicit video duration before running Newt.");
         const prompt = [connectedDirectorPackageText(incoming.directorIn, byNode), connectedText(incoming.promptIn) || data.prompt].filter(Boolean).join("\n\n");
-        return { ...base, ...settings, references, prompt: buildEffectiveVideoPrompt(prompt, display, byNode), audio: settings.generateAudio ? "Audio on" : "Audio off", estimatedCost: estimateVideoRunCost(settings) };
+        return { ...base, ...settings, references, prompt: buildEffectiveVideoPrompt(prompt, display, byNode, model), audio: isKling4Model(model) ? "Audio controls unavailable" : settings.generateAudio ? "Audio on" : "Audio off", estimatedCost: estimateVideoRunCost(settings) };
       }
       if (node.type === "storyboard") {
         const references = storyboardImagePromptItems(node, incoming, byNode);
@@ -7307,6 +7314,7 @@ function NodeCard({
   const frameItScalable = isFrameItNode(node);
   const utilityFrameItClass = node.type === "utility" && frameItScalable ? "utility-frame-it" : "";
   const utilityModel3DClass = node.type === "utility" && isModel3DNode(node) ? "utility-3d" : "";
+  const utilityReframeClass = node.type === "utility" && isReframeNode(node) ? "utility-reframe" : "";
   const plainTextSize = node.type === "plainText" ? normalizePlainTextNodeSize(node.data) : null;
 
   return (
@@ -7314,7 +7322,7 @@ function NodeCard({
       ref={cardRef}
       hidden={hidden}
       inert={hidden ? true : undefined}
-      className={`node-card ${node.type === "composer" ? "node-type-composer" : `${node.type} node-type-${node.type}`} ${utilityFrameItClass} ${utilityModel3DClass} ${nodeColor ? "has-node-color" : ""} ${selected ? "selected" : ""} ${tagHighlight ? "reference-tag-highlighted" : ""} ${moodBoardScalable ? "mood-board-scalable" : ""} ${storyboardScalable ? "storyboard-scalable" : ""} ${frameItScalable ? "frame-it-scalable" : ""}`}
+      className={`node-card ${node.type === "composer" ? "node-type-composer" : `${node.type} node-type-${node.type}`} ${utilityFrameItClass} ${utilityModel3DClass} ${utilityReframeClass} ${nodeColor ? "has-node-color" : ""} ${selected ? "selected" : ""} ${tagHighlight ? "reference-tag-highlighted" : ""} ${moodBoardScalable ? "mood-board-scalable" : ""} ${storyboardScalable ? "storyboard-scalable" : ""} ${frameItScalable ? "frame-it-scalable" : ""}`}
       style={{
         transform: `translate(${node.x}px, ${node.y}px)`,
         "--preview-scale": node.data.previewScale || 1,
@@ -7694,16 +7702,18 @@ function NodeBody({
   if (node.type === "vector") {
     const imageInputs = (incoming.imageIn || []).map(({ source, edge }) => ({ ...(connectedOutputItem(source, edge) || { url: "", label: sourceLabel(source) }), ...(source.type === "transfer" ? { role: "moodBoard" } : {}) }));
     const moodBoardInputs = (incoming.transferIn || []).map(({ source, edge }) => connectedOutputItem(source, edge) || { url: "", label: sourceLabel(source) });
-    return <React.Suspense fallback={<div className="node-body">Loading Vector Node...</div>}><VectorNodeBody node={node} config={config}
+    return <React.Suspense fallback={<div className="node-body">Loading Vector Model...</div>}><VectorNodeBody node={node} config={config}
       prompt={incoming.promptIn?.length ? connectedText(incoming.promptIn) : node.data.prompt} promptConnected={Boolean(incoming.promptIn?.length)}
       imageInputs={imageInputs} imageConnected={Boolean(incoming.imageIn?.length)} onUpdate={onUpdate} workflowContext={workflowContext}
       moodBoardInputs={moodBoardInputs} moodBoardConnected={Boolean(incoming.transferIn?.length)}
       onPreviewOpen={onPreviewOpen} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput}
       connectedPortKeys={connectedPortKeys} showApiCosts={showApiCosts} /></React.Suspense>;
   }
-  if (node.type === "cameraCoverage") {
+  if (isReframeNode(node)) {
     const sources = (incoming.imageIn || []).map(({ source, edge }) => connectedOutputItem(source, edge)).filter(item => item?.url);
-    return <React.Suspense fallback={<div className="node-body">Loading ReFrame...</div>}><CameraCoverageNodeBody node={node} config={config}
+    const reframeConfig = { input: config.input.filter(port => port.id === "imageIn"), output: outputPortDefinitionsForNode(node) };
+    return <React.Suspense fallback={<div className="node-body">Loading ReFrame...</div>}><CameraCoverageNodeBody node={node} config={reframeConfig}
+      renderToolSwitcher={node.type === "utility" ? disabled => <UtilityVideoToolSwitcher node={node} onUpdate={onUpdate} disabled={disabled} /> : undefined}
       sources={sources} connected={Boolean(incoming.imageIn?.length)} onUpdate={onUpdate} workflowContext={workflowContext} onPreviewOpen={onPreviewOpen}
       onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}
       imageModels={imageModelOptions} provider={generationProvider} showApiCosts={showApiCosts}
@@ -9286,8 +9296,7 @@ function NodeBody({
       const nextIndex = ((index % previewItems.length) + previewItems.length) % previewItems.length;
       const item = previewItems[nextIndex];
       if (!item?.url) return;
-      const coverageSource = previewSource.sourceNodeType === "cameraCoverage"
-        ? incoming.sourceIn?.find(({ source }) => source.id === previewSource.sourceNodeId)?.source : null;
+      const coverageSource = incoming.sourceIn?.find(({ source }) => source.id === previewSource.sourceNodeId && isReframeNode(source))?.source;
       onUpdate(previewSource.sourceNodeId, {
         selectedResultIndex: item.sourceResultIndex ?? nextIndex,
         resultUrl: item.url,
@@ -10052,9 +10061,10 @@ function NodeBody({
           {isVideoMode ? (
             <>
               <NodeRow label="Model">
-                <select value={utilityVideoModel} onChange={(event) => onUpdate(node.id, { utilityVideoModel: event.target.value, resultUrl: "", resultItems: [], resultType: utilityVideoOutputType(event.target.value), error: "" })}>
+                <select value={utilityVideoModel} disabled={running || node.data.outpaintBusy} onChange={(event) => onUpdate(node.id, utilityVideoModelSelectionPatch(node.data, event.target.value))}>
                   <option>{utilityVideoModelNames.wanFunControl}</option>
                   <option>{utilityVideoModelNames.videoOutpaint}</option>
+                  <option>{utilityVideoModelNames.reframe}</option>
                   <option>{utilityVideoModelNames.extractFrame}</option>
                   <option>{utilityVideoModelNames.colorIdMatte}</option>
                   <option>{utilityVideoModelNames.compositeVideo}</option>
@@ -10990,6 +11000,7 @@ function NodeBody({
   const isKlingO34k = isKlingO34kModel(effectiveVideoModel);
   const isKlingO3Pro = isKlingO3ProModel(effectiveVideoModel);
   const isKlingO3 = isKlingO34k || isKlingO3Pro;
+  const isKling4 = isKling4Model(effectiveVideoModel);
   const isSeedance25 = isSeedance25Model(effectiveVideoModel);
   const seedanceDraft = isSeedance25 && (directorConnected ? directorSettings?.seedanceDraft : node.data.seedanceDraft) === true;
   const draftUnavailable = seedanceDraft && !supportsSeedanceDraft(generationProvider);
@@ -11042,6 +11053,8 @@ function NodeBody({
     ...pricedCharacterReferences.map((item) => ({ url: item.url, label: item.label, type: "image" }))
   ]);
   const pricedReferenceVideos = uniqueAssetItems(connectedAssetItems(displayIncoming.referenceVideoIn));
+  const kling4SourceFrameAspect = isKling4 && Boolean(displayIncoming.startFrameIn?.length)
+    && !pricedReferenceImages.length && !pricedReferenceVideos.length;
   const atlasSeedance25ReferenceCounts = isAtlasVideo && isSeedance25 ? {
     images: pricedReferenceImages.length,
     videos: pricedReferenceVideos.length,
@@ -11069,7 +11082,7 @@ function NodeBody({
     ? [promptPort, activeDirectorPort, referenceVideoPort, referenceImagePort, characterPort]
     : isMiniMaxH3
       ? [promptPort, activeDirectorPort, startFramePort, endFramePort, referenceImagePort, referenceVideoPort, referenceAudioPort, characterPort]
-    : isKlingO3
+    : isKlingO3 || isKling4
       ? [promptPort, activeDirectorPort, startFramePort, endFramePort, referenceImagePort, referenceVideoPort, characterPort]
     : isSam3Video
       ? [promptPort, activeDirectorPort, referenceVideoPort]
@@ -11191,7 +11204,7 @@ function NodeBody({
             ))}
           </div>
         )}
-        {characterConnected && !isSam3Video && <div className="effective-prompt-preview"><span>Character identity and selected voice instructions applied</span></div>}
+        {characterConnected && !isSam3Video && <div className="effective-prompt-preview"><span>{isKling4 ? "Character identity instructions applied" : "Character identity and selected voice instructions applied"}</span></div>}
         {!isSam3Video && (
           <NodeRow label="Generations">
             <select
@@ -11309,7 +11322,7 @@ function NodeBody({
               </button>
             </NodeRow>
           </>
-        ) : isKlingO3 ? (
+        ) : isKlingO3 || isKling4 ? (
           <>
             <NodeRow label="Start Frame" inputPort={settingsOpen ? startFramePort : null} node={node} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}>
               <button className={incoming.startFrameIn?.length ? "connected-field" : ""}>{connectedSummary(incoming.startFrameIn, "Optional image")}</button>
@@ -11328,20 +11341,20 @@ function NodeBody({
             </NodeRow>
             <NodeRow label="Duration">
               <select value={effectiveVideoDuration} disabled={directorConnected} onChange={(event) => onUpdate(node.id, { duration: event.target.value })}>
-                {(isKlingO34k ? klingO34kDurationOptions : klingO3ProDurationOptions).map((option) => <option key={option}>{option}</option>)}
+                {(isKling4 ? kling4DurationOptions : isKlingO34k ? klingO34kDurationOptions : klingO3ProDurationOptions).map((option) => <option key={option}>{option}</option>)}
               </select>
             </NodeRow>
             <NodeRow label="Resolution">
-              <select value={effectiveVideoResolution} disabled>
-                {(isKlingO34k ? klingO34kResolutionOptions : klingO3ProResolutionOptions).map((option) => <option key={option}>{option}</option>)}
+              <select value={effectiveVideoResolution} disabled={!isKling4 || directorConnected} onChange={(event) => onUpdate(node.id, { resolution: event.target.value })}>
+                {(isKling4 ? kling4ResolutionOptions : isKlingO34k ? klingO34kResolutionOptions : klingO3ProResolutionOptions).map((option) => <option key={option}>{option}</option>)}
               </select>
             </NodeRow>
             <NodeRow label="Aspect Ratio">
-              <select value={effectiveVideoAspectRatio} disabled={directorConnected} onChange={(event) => onUpdate(node.id, { aspectRatio: event.target.value })}>
-                {(isKlingO34k ? klingO34kAspectRatioOptions : klingO3ProAspectRatioOptions).map((option) => <option key={option}>{option}</option>)}
+              <select value={kling4SourceFrameAspect ? "source-frame" : effectiveVideoAspectRatio} disabled={directorConnected || kling4SourceFrameAspect} onChange={(event) => onUpdate(node.id, { aspectRatio: event.target.value })}>
+                {kling4SourceFrameAspect ? <option value="source-frame">Source frame</option> : (isKling4 ? kling4AspectRatioOptions : isKlingO34k ? klingO34kAspectRatioOptions : klingO3ProAspectRatioOptions).map((option) => <option key={option}>{option}</option>)}
               </select>
             </NodeRow>
-            {!isKlingO34k && (
+            {!isKlingO34k && !isKling4 && (
               <>
                 <NodeRow label="Prompt Strength">
                   <input type="range" min="0" max="1" step="0.05" value={node.data.klingCfgScale ?? 0.5} onChange={(event) => onUpdate(node.id, { klingCfgScale: Number(event.target.value) })} />
@@ -11352,7 +11365,7 @@ function NodeBody({
                 </NodeRow>
               </>
             )}
-            <NodeRow label="Generate Audio">
+            {!isKling4 && <NodeRow label="Generate Audio">
               <button
                 className={`node-toggle ${effectiveVideoGenerateAudio ? "enabled" : ""}`}
                 disabled={directorConnected}
@@ -11361,7 +11374,7 @@ function NodeBody({
               >
                 <span />
               </button>
-            </NodeRow>
+            </NodeRow>}
           </>
         ) : isSam3Video ? (
           <>
@@ -11426,9 +11439,27 @@ function NodeBody({
       </details>
       {isMiniMaxH3 && <small className="upload-status model-status-note">native stereo audio on Fal · 5-15 seconds · 480P-4K on Fal</small>}
       {isKlingO3 && <small className="upload-status model-status-note">Director shots compile to {isKlingO34k ? "native 4K " : ""}Kling multi-shot</small>}
+      {isKling4 && <small className="upload-status model-status-note">Audio controls unavailable · 3–30 seconds · Director uses the complete scene prompt</small>}
       {isSam3Video && <small className="upload-status model-status-note">segmentation mask model</small>}
     </div>
   );
+}
+
+function UtilityVideoToolSwitcher({ node, onUpdate, disabled = false }) {
+  const tools = Object.entries(utilityVideoModelNames).filter(([key]) => !["wanVaceMaskToVideo", "wanVaceInpainting"].includes(key));
+  return <div className="utility-specialized-switcher">
+    <div className="utility-mode-tabs" role="tablist" aria-label="Utility mode">
+      <button type="button" role="tab" aria-selected="false" disabled={disabled}
+        onClick={() => onUpdate(node.id, utilityImageModelSelectionPatch(node.data, node.data.utilityImageModel))}>Image</button>
+      <button className="active" type="button" role="tab" aria-selected="true">Video</button>
+    </div>
+    <label className="utility-specialized-model"><span>Tool</span>
+      <select aria-label="Video utility tool" value={node.data.utilityVideoModel} disabled={disabled}
+        onChange={event => onUpdate(node.id, utilityVideoModelSelectionPatch(node.data, event.target.value))}>
+        {tools.map(([key, label]) => <option key={key}>{label}</option>)}
+      </select>
+    </label>
+  </div>;
 }
 
 function UtilityImageToolSwitcher({ node, onUpdate, disabled = false }) {
@@ -12524,14 +12555,15 @@ function isVideoModelUnsupportedCharacterInput(node, portId) {
 function isVideoModelUnsupportedInput(node, portId) {
   if (isVideoModelUnsupportedCharacterInput(node, portId)) return true;
   if (node?.type === "videoModel" && portId === "directorIn" && !videoModelSupportsFilmDirector(node.data?.model)) return true;
-  return node?.type === "videoModel" && isKlingO3Model(node.data?.model) && portId === "referenceAudioIn";
+  return node?.type === "videoModel" && (isKlingO3Model(node.data?.model) || isKling4Model(node.data?.model)) && portId === "referenceAudioIn";
 }
 
 function videoModelUnsupportedInputMessage(model, portId) {
   if (portId === "directorIn" && !videoModelSupportsFilmDirector(model)) {
-    return "Director is available only for Seedance 2.0, Seedance 2.5, Kling O3 Pro, Kling O3 4K, and MiniMax H3.";
+    return "Director is available only for Seedance 2.0, Seedance 2.5, Kling 4, Kling O3 Pro, Kling O3 4K, and MiniMax H3.";
   }
   if (isKlingO3Model(model) && portId === "referenceAudioIn") return `${isKlingO34kModel(model) ? "Kling O3 4K" : "Kling O3 Pro"} generates native audio but does not accept reference audio files.`;
+  if (isKling4Model(model) && portId === "referenceAudioIn") return "Kling 4 does not accept reference audio files.";
   return videoModelUnsupportedCharacterMessage(model);
 }
 
@@ -12540,6 +12572,14 @@ function videoModelUnsupportedCharacterMessage() {
 }
 
 function videoModelSelectionPatch(data = {}, model) {
+  if (isKling4Model(model)) {
+    return {
+      model,
+      duration: isKling4Model(data.model) && kling4DurationOptions.includes(data.duration) ? data.duration : "5 seconds",
+      resolution: isKling4Model(data.model) && kling4ResolutionOptions.includes(data.resolution) ? data.resolution : "1080p",
+      aspectRatio: isKling4Model(data.model) && kling4AspectRatioOptions.includes(data.aspectRatio) ? data.aspectRatio : "16:9"
+    };
+  }
   if (isSeedance25Model(model)) {
     return {
       model,
@@ -12738,6 +12778,7 @@ function utilityMode(node) {
 }
 
 function utilityOutputType(node) {
+  if (isReframeNode(node)) return "image";
   if (utilityMode(node) === "video" && isUtilityExtractFrameVideoModel(node?.data?.utilityVideoModel)) return "image";
   if (utilityMode(node) === "image" && isUtilityModel3DModel(node?.data?.utilityImageModel)) return "model3d";
   return utilityMode(node);
@@ -12757,6 +12798,7 @@ function utilityInputPortIds(mode, imageModel = utilityImageModelNames.dwpose, v
     return isUtilitySam3ImageModel(imageModel) ? ["promptIn", "imageIn"] : ["imageIn"];
   }
 
+  if (isReframeTool(videoModel)) return ["imageIn"];
   if (videoModel === videoOutpaintModelName) return ["promptIn", "referenceImageIn", "referenceVideoIn", "canvasVideoIn"];
   if (isUtilityBirefnetVideoModel(videoModel)) return ["referenceVideoIn"];
   if (isUtilityRifeVideoModel(videoModel)) return ["referenceVideoIn"];
@@ -12788,6 +12830,7 @@ function normalizedUtilityImageModelName(model) {
 
 function normalizedUtilityVideoModelName(model) {
   const normalized = String(model || "").toLowerCase();
+  if (isReframeTool(model)) return utilityVideoModelNames.reframe;
   if (normalized === "video outpaint") return videoOutpaintModelName;
   if (normalized.includes("color") && normalized.includes("matte")) return utilityVideoModelNames.colorIdMatte;
   if (normalized.includes("composite")) return utilityVideoModelNames.compositeVideo;
@@ -12803,7 +12846,7 @@ function normalizedUtilityVideoModelName(model) {
 }
 
 function utilityVideoOutputType(model) {
-  return isUtilityExtractFrameVideoModel(model) ? "image" : "video";
+  return isReframeTool(model) || isUtilityExtractFrameVideoModel(model) ? "image" : "video";
 }
 
 function utilityModelDescription(model) {
@@ -12829,6 +12872,7 @@ function visiblePortIdsForNode(node) {
 
 function inputPortDefinitionsForNode(node) {
   const basePorts = getNodeConfig(node?.type)?.input || [];
+  if (isReframeNode(node)) return basePorts.filter(port => port.id === "imageIn");
   if (isFrameItNode(node)) return [];
   if (isModel3DNode(node)) return basePorts.filter((port) => isModel3DImageInputPort(port.id));
   return node?.type === "composer" ? [...basePorts, ...composerCharacterInputPortsForNode(node)] : basePorts;
@@ -12836,6 +12880,7 @@ function inputPortDefinitionsForNode(node) {
 
 function outputPortDefinitionsForNode(node) {
   const basePorts = getNodeConfig(node?.type)?.output || [];
+  if (isReframeNode(node)) return basePorts.map(port => ({ ...port, color: portColors.image, label: "Selected shot" }));
   if (isFrameItNode(node)) return basePorts.map((port) => ({
     ...port,
     color: portColors.image,
@@ -13085,6 +13130,11 @@ function resetAutoAspectOutputPatch() {
   };
 }
 
+function utilityVideoModelSelectionPatch(data = {}, model) {
+  if (isReframeTool(model)) return reframeToolSelectionPatch(data);
+  return { ...resetAutoAspectOutputPatch(), utilityVideoModel: normalizedUtilityVideoModelName(model), resultType: utilityVideoOutputType(model) };
+}
+
 function utilityImageModelSelectionPatch(data = {}, model) {
   const utilityImageModel = normalizedUtilityImageModelName(model);
   const commonPatch = {
@@ -13179,7 +13229,7 @@ function configTitleFallback(type) {
 }
 
 function nodeResultMediaType(node) {
-  if (["cameraCoverage", "vector"].includes(node?.type)) return "image";
+  if (isReframeNode(node) || node?.type === "vector") return "image";
   if (!node?.data?.resultUrl && !Array.isArray(node?.data?.resultItems)) return "";
   if (node.type === "utility") return utilityResultType(node);
   if (node.type === "image" || node.type === "video" || node.type === "audio" || node.type === "model3d") return node.type;
@@ -13477,9 +13527,9 @@ function connectedOutputItem(source, edge) {
     const data = normalizeVectorData(source.data);
     return edge?.from?.port === "imageOut" ? data.resultItems[data.selectedResultIndex] || null : null;
   }
-  if (source?.type === "cameraCoverage") {
+  if (isReframeNode(source)) {
     const data = normalizeCameraCoverageData(source.data);
-    return edge?.from?.port === "imageOut" ? data.resultItems[data.selectedResultIndex] || null : null;
+    return edge?.from?.port === reframeOutputPort(source) ? data.resultItems[data.selectedResultIndex] || null : null;
   }
   if (source?.type === "explore" && edge?.from?.port !== "imageOut") return null;
   if (source?.type === "editor" && (!source.data?.editorExportTimeline || editorRenderSignature(normalizeEditorTimeline(source.data.editorExportTimeline)) !== editorRenderSignature(normalizeEditorTimeline(source.data?.editorTimeline)))) return null;
@@ -13982,18 +14032,23 @@ function connected3DViewUrls(incoming = {}) {
 }
 
 async function runVideoModelGeneration({ node, prompt, incoming, incomingByNode, projectId, projectName, workflowContext, index }) {
+  const directorSource = videoModelSupportsFilmDirector(node.data.model) ? connectedDirectorPackageSource(incoming.directorIn) : null;
+  const filmDirector = directorPackageForVideo(directorSource, incomingByNode);
+  const effectiveModel = normalizeFilmDirectorVideoModel(filmDirector?.videoModel, node.data.model) || node.data.model;
   const characterConnections = videoModelSupportsCharacterInput(node.data.model) ? incoming.characterIn : [];
   const characterReferences = connectedCharacterReferences(characterConnections, { prompt });
-  const characterVoices = connectedCharacterVoiceUrls(characterConnections);
-  const referenceImageItems = uniqueAssetItems([
+  const characterVoices = isKling4Model(effectiveModel) ? [] : connectedCharacterVoiceUrls(characterConnections);
+  const collectedImageItems = [
     ...connectedAssetItems(incoming.referenceImageIn, { prompt }),
     ...characterReferences.map((item) => ({ url: item.url, label: item.label, type: "image" }))
-  ]);
-  const referenceVideoItems = uniqueAssetItems(connectedAssetItems(incoming.referenceVideoIn, { prompt }));
+  ];
+  const collectedVideoItems = connectedAssetItems(incoming.referenceVideoIn, { prompt });
+  // Kling 4 binds every authored alias before the server deduplicates media.
+  const referenceImageItems = isKling4Model(effectiveModel) ? collectedImageItems : uniqueAssetItems(collectedImageItems);
+  const referenceVideoItems = isKling4Model(effectiveModel) ? collectedVideoItems : uniqueAssetItems(collectedVideoItems);
   const referenceAudioItems = uniqueAssetItems(connectedAssetItems(incoming.referenceAudioIn, { prompt }));
   const characterVoiceItems = characterVoices.map((url, index) => ({ url, label: `Character voice ${index + 1}`, type: "audio" }));
   const audioItems = uniqueAssetItems([...referenceAudioItems, ...characterVoiceItems]);
-  const directorSource = videoModelSupportsFilmDirector(node.data.model) ? connectedDirectorPackageSource(incoming.directorIn) : null;
   const { response, data } = await nodeApi.generateVideo(buildVideoGenerationRequest({
     node,
     prompt,
@@ -14010,7 +14065,7 @@ async function runVideoModelGeneration({ node, prompt, incoming, incomingByNode,
     referenceVideoLabels: referenceVideoItems.map((item) => item.label),
     referenceAudioUrls: audioItems.map((item) => item.url),
     referenceAudioLabels: audioItems.map((item) => item.label),
-    filmDirector: directorPackageForVideo(directorSource, incomingByNode)
+    filmDirector
   }));
   if (!response.ok) throw new Error(`Run ${index + 1}: ${data.error || "Video generation failed."}`);
 
@@ -14075,7 +14130,7 @@ function connectedPreviewSources(items = []) {
         (source.type === "utility" && isUtilityAutoAspectModel(source.data?.utilityImageModel))
       ) && resultItems.length === 1 ? resultItems[0]?.label : "";
       const sourceName = outputSpecificLabel || sourceLabel(source);
-      const selectedResultIndex = source.type === "cameraCoverage" ? normalizeCameraCoverageData(source.data).selectedResultIndex : Math.trunc(Number(source.data.selectedResultIndex));
+      const selectedResultIndex = isReframeNode(source) ? normalizeCameraCoverageData(source.data).selectedResultIndex : Math.trunc(Number(source.data.selectedResultIndex));
       return {
         id: `${source.id}:${edge.from.port}`,
         sourceNodeId: source.id,
@@ -14087,9 +14142,9 @@ function connectedPreviewSources(items = []) {
           ...item,
           sourceNodeId: source.id,
           sourceResultIndex: index,
-          sourceSelectedResult: index === selectedResultIndex || (source.type !== "cameraCoverage" && item.url === source.data.resultUrl),
+          sourceSelectedResult: index === selectedResultIndex || (!isReframeNode(source) && item.url === source.data.resultUrl),
           type: item.type || sourceType,
-          label: ["explore", "cameraCoverage", "vector"].includes(source.type) && item.label ? item.label : allItems.length > 1 ? `${sourceName} ${index + 1}` : sourceName
+          label: (["explore", "vector"].includes(source.type) || isReframeNode(source)) && item.label ? item.label : allItems.length > 1 ? `${sourceName} ${index + 1}` : sourceName
         }))
       };
     })
@@ -14098,7 +14153,7 @@ function connectedPreviewSources(items = []) {
 
 function previewSourceResultItems(source, edge, sourceType = "image") {
   if (!source) return [];
-  if (source.type === "cameraCoverage") return edge?.from?.port === "imageOut" ? normalizeCameraCoverageData(source.data).resultItems : [];
+  if (isReframeNode(source)) return edge?.from?.port === reframeOutputPort(source) ? normalizeCameraCoverageData(source.data).resultItems : [];
   if (source.type === "vector") return edge?.from?.port === "imageOut" ? normalizeVectorData(source.data).resultItems : [];
   if (source.type === "explore" && edge?.from?.port !== "imageOut") return [];
   if (
@@ -14675,7 +14730,7 @@ function isActiveComposerSource(source) {
 }
 
 function promptPiecesForSource(source, { namedCharacterReferences = false } = {}) {
-  if (source.type === "cameraCoverage") return [];
+  if (isReframeNode(source)) return [];
   if (source.type === "vector") return [];
   if (source.type === "explore") return [];
   if (source.type === "camera") {
@@ -14947,14 +15002,22 @@ function colorDistance(first, second) {
   );
 }
 
-function buildEffectiveVideoPrompt(prompt, incoming = {}, incomingByNode = {}) {
+function buildVideoModelPrompt(node, prompt, incoming = {}, incomingByNode = {}) {
+  const directorSource = videoModelSupportsFilmDirector(node.data.model) ? connectedDirectorPackageSource(incoming.directorIn) : null;
+  const filmDirector = directorPackageForVideo(directorSource, incomingByNode);
+  const model = normalizeFilmDirectorVideoModel(filmDirector?.videoModel, node.data.model) || node.data.model;
+  return buildEffectiveVideoPrompt(prompt, incoming, incomingByNode, model);
+}
+
+function buildEffectiveVideoPrompt(prompt, incoming = {}, incomingByNode = {}, model = "") {
   const musicVideo = directorPackageConnections(incoming.directorIn || []).some(({ source }) => filmDirectorUsesMusic(source.data.skillApproach,
     (incomingByNode[source.id]?.musicIn || []).slice(-1).map(({ source }) => ({ url: source?.data?.resultUrl }))));
-  const audioUrls = [...new Set([...connectedAudioUrls(incoming.referenceAudioIn), ...connectedCharacterVoiceUrls(incoming.characterIn)])];
+  const characterVoicesSupported = !isKling4Model(model);
+  const audioUrls = [...new Set([...connectedAudioUrls(incoming.referenceAudioIn), ...(characterVoicesSupported ? connectedCharacterVoiceUrls(incoming.characterIn) : [])])];
   const characterInstructions = (incoming.characterIn || [])
     .flatMap(({ source }) => {
       const voiceUrl = activeCharacterVoice(source)?.localUrl;
-      const audioIndex = voiceUrl && !musicVideo ? audioUrls.indexOf(voiceUrl) + 1 : null;
+      const audioIndex = characterVoicesSupported && voiceUrl && !musicVideo ? audioUrls.indexOf(voiceUrl) + 1 : null;
       return characterVideoPromptPieces(source, audioIndex);
     })
     .filter(Boolean);
@@ -15252,14 +15315,14 @@ function keepLatestSingleImageInputs(edges = [], nodeMap = new Map()) {
   const latestInputIndexes = new Map();
   edges.forEach((edge, index) => {
     const target = nodeMap.get(edge.to.nodeId);
-    if ((isAutoAspectNode(target) || isCoverageNode(target)) && edge.to.port === "imageIn") {
+    if ((isAutoAspectNode(target) || isCoverageNode(target) || isReframeNode(target)) && edge.to.port === "imageIn") {
       latestInputIndexes.set(edge.to.nodeId, index);
     }
   });
   if (!latestInputIndexes.size) return edges;
   return edges.filter((edge, index) => {
     const target = nodeMap.get(edge.to.nodeId);
-    if (!(isAutoAspectNode(target) || isCoverageNode(target)) || edge.to.port !== "imageIn") return true;
+    if (!(isAutoAspectNode(target) || isCoverageNode(target) || isReframeNode(target)) || edge.to.port !== "imageIn") return true;
     return latestInputIndexes.get(edge.to.nodeId) === index;
   });
 }
@@ -15523,7 +15586,7 @@ function normalizeCurrentNode(node) {
 
   if (nextNode.type === "audioModel") return { ...nextNode, data: normalizeAudioModelData(data) };
   if (nextNode.type === "explore") return { ...nextNode, data: normalizeExploreData(data) };
-  if (nextNode.type === "cameraCoverage") return { ...nextNode, data: normalizeCameraCoverageData(data) };
+  if (nextNode.type === "cameraCoverage") return normalizeCurrentNode(migrateRetiredNode(nextNode));
   if (nextNode.type === "vector") return { ...nextNode, data: normalizeVectorData(data, { restore: true }) };
 
   if (nextNode.type === "coverage") {
@@ -16556,6 +16619,8 @@ function textModelTitleFromLegacy(title) {
 }
 
 function normalizeUtilityData(data = {}) {
+  if (isReframeNode({ type: "utility", data })) return normalizeCameraCoverageData({ ...data,
+    utilityMode: "video", utilityVideoModel: utilityVideoModelNames.reframe, resultType: "image" });
   const utilityModeValue = data.utilityMode === "image" ? "image" : "video";
   const utilityVideoModel = normalizedUtilityVideoModelName(data.utilityVideoModel);
   const utilityImageModel = normalizedUtilityImageModelName(data.utilityImageModel);

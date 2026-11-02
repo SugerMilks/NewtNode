@@ -1,11 +1,12 @@
 import { videoDefaultModel, videoModelOptions } from "./modelOptions.js";
+import { isKling4Model } from "./kling4.js";
 
 export function videoModelSupportsFilmDirector(model = "") {
   const normalized = String(model || "").toLowerCase();
   const isSeedance = normalized.includes("seedance");
   const isKlingO3 = normalized.includes("kling") && (normalized.includes("o3") || normalized.includes("03"));
   const isMiniMaxH3 = normalized.includes("minimax") && normalized.includes("h3");
-  return isSeedance || isKlingO3 || isMiniMaxH3;
+  return isSeedance || isKlingO3 || isKling4Model(model) || isMiniMaxH3;
 }
 
 export const filmDirectorVideoModelOptions = videoModelOptions.filter(videoModelSupportsFilmDirector);

@@ -4,11 +4,12 @@ import { readFileSync } from "node:fs";
 import { normalizedResultItems } from "../src/mediaResults.js";
 import { fileNameFromLocalUrl, mimeForOutputItem } from "../src/mediaAssets.js";
 import { isCoverageNode } from "../src/coveragePresets.js";
+import { isReframeNode } from "../src/cameraCoverage.js";
 
 // Exercise the same source collection, deduplication and merge used by Preview's Layout effect.
 const editor = readFileSync(new URL("../src/NodeEditor.jsx", import.meta.url), "utf8");
 const helpers = editor.slice(editor.indexOf("function connectedPreviewSources("), editor.indexOf("async function createEditedPreviewLayoutImageBlob("));
-const dependencies = { normalizedResultItems, fileNameFromLocalUrl, mimeForOutputItem, isCoverageNode,
+const dependencies = { normalizedResultItems, fileNameFromLocalUrl, mimeForOutputItem, isCoverageNode, isReframeNode,
   sourceLabel: source => source.data.title, previewMediaType: () => "image" };
 const { connectedPreviewSources, previewLayoutSourceItems, mergePreviewImagesIntoLayout } = new Function(
   ...Object.keys(dependencies), `${helpers}; return { connectedPreviewSources, previewLayoutSourceItems, mergePreviewImagesIntoLayout };`

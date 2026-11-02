@@ -12,6 +12,7 @@ test("Film Director exposes every supported video model", () => {
   assert.deepEqual(filmDirectorVideoModelOptions, [
     videoModelNames.seedance25,
     videoModelNames.seedance,
+    videoModelNames.kling4,
     videoModelNames.klingO3Pro,
     videoModelNames.klingO34k,
     videoModelNames.minimaxH3

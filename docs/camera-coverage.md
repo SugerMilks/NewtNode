@@ -4,9 +4,9 @@
 
 Turn a master still into a collection of candidate camera views, then select and polish the useful shots. This node is designed for scene blocking and coverage selection, not exact photogrammetry or camera-calibrated reconstruction.
 
-The existing Camera node remains a prompt/control source. Utility Coverage remains independent image-model coverage. ReFrame is a separate, manual node next to Camera.
+The existing Camera node remains a prompt/control source. Utility Image > Coverage remains independent image-model coverage. ReFrame is a manual tool under Utility > Video.
 
-Previously called Camera Coverage. Existing default node titles update to ReFrame, including numbered/copy titles; custom names stay unchanged. Saved node types, connections, API routes, media and pending generation receipts remain compatible. Technical module names retain `cameraCoverage` for compatibility.
+Open **Utility > Video > ReFrame**. ReFrame is no longer a standalone palette entry. Existing ReFrame/Camera Coverage nodes migrate to Utilities with the same titles, settings, media and recoverable jobs; their image output connections move to the blue Utility output. Custom names stay unchanged. API routes and technical module names retain `cameraCoverage` for compatibility. Tool switching is unavailable while work is pending; returning to ReFrame retains saved shots and refinement settings. Image > Coverage is a separate, unchanged tool.
 
 ## Workflow
 

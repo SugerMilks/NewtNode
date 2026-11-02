@@ -4,8 +4,11 @@
 // https://www.atlascloud.ai/docs/more-models/minimax/h3-reference-to-video/generateVideo
 // https://www.atlascloud.ai/docs/more-models/kwaivgi/kling-video-o3-pro-reference-to-video/generateVideo
 // https://www.atlascloud.ai/docs/more-models/kwaivgi/kling-video-o3-4k-image-to-video/generateVideo
+// Kling 4's separate contract was verified 2026-10-31 and is shared in kling4.js.
+// https://www.atlascloud.ai/models/kwaivgi/kling-v4.0/text-to-video
 import { validateSeedance25Task } from "./seedance25.js";
 import { validateSeedanceDraft } from "./seedanceDraft.js";
+import { buildKling4Input, isKling4Model } from "./kling4.js";
 
 const models = new Map([
   ["seedance 2.0", { id: "bytedance/seedance-2.0", family: "seedance", version: "2.0", limits: [9, 3, 3] }],
@@ -21,7 +24,7 @@ const seedance20Resolutions = ["480p", "720p", "720p-SR", "1080p", "1080p-SR", "
 const seedance25Resolutions = ["480p", "720p", "720p-sr", "720p-esr", "1080p", "1080p-sr", "1080p-esr", "1080p-esr & 60fps", "1440p-sr", "1440p-esr", "4k-esr"];
 
 export function supportsAtlasVideoModel(name) {
-  return models.has(modelKey(name));
+  return models.has(modelKey(name)) || isKling4Model(name);
 }
 
 // Pure preflight: no uploads, credentials, network calls, clamping, or truncation.
@@ -35,7 +38,7 @@ export function buildAtlasVideoRequest({
   if (excludedKlingModels.has(modelKey(model))) {
     fail("Atlas Kling O3 is excluded from this integration until direct image/video reference mention syntax is verified. Documented <<<element_N>>> tokens require elements[], not images[]. Kling v3 will not be substituted.");
   }
-  const spec = models.get(modelKey(model));
+  const spec = models.get(modelKey(model)) || (isKling4Model(model) ? { family: "kling4" } : null);
   if (!spec) fail(`Unsupported Atlas video model: ${String(model)}. Kling v3 is not an alias for O3.`);
   const draft = validateSeedanceDraft({ model, seedanceDraft, provider: "atlas" });
   const unsupportedFields = Object.keys(unsupported).filter((field) => unsupported[field] !== undefined);
@@ -51,6 +54,14 @@ export function buildAtlasVideoRequest({
   };
   const editing = validateSeedance25Task({ model, seedanceTask, provider: "atlas", videos: refs.videos,
     startFrames: first ? [first] : [], endFrames: last ? [last] : [] });
+  if (spec.family === "kling4") {
+    if (seed !== undefined) fail(`Atlas ${model} does not document a seed setting.`);
+    // Kling 4 uses aspect_ratio and @image_N/@video_N, not the older
+    // models' ratio/reference contracts. Keep preflight and submission aligned.
+    return buildKling4Input({ provider: "atlas", prompt, duration, resolution, aspectRatio,
+      startFrames: first ? [first] : [], endFrames: last ? [last] : [],
+      images: refs.images, videos: refs.videos, audio: refs.audios, generateAudio }).input;
+  }
   const hasReferences = Object.values(refs).some((items) => items.length);
   if (last && !first) fail("Atlas endImage requires startImage.");
   if (first && hasReferences) fail("Atlas frame inputs and reference inputs cannot be combined by this adapter. Disconnect one set; no inputs will be dropped.");

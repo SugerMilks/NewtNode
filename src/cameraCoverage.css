@@ -1,4 +1,4 @@
-.node-card.cameraCoverage { width: 780px; }
+.node-card.cameraCoverage, .node-card.utility-reframe { width: 780px; }
 .camera-coverage-body { display: flex; flex-direction: column; gap: 12px; container-type: inline-size; }
 .camera-coverage-body:focus { outline: none; }
 .camera-coverage-body button, .camera-coverage-body select, .camera-coverage-body input { font: inherit; }

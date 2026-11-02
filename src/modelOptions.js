@@ -1,6 +1,8 @@
 import { openAiImage25Models, isOpenAiImage25Model } from "./openAiImage25.js";
 import { seedream5ProModelName, isSeedream5ProModel } from "./seedream5Pro.js";
 import { nanoBanana21ModelName, isNanoBanana21Model } from "./nanoBanana21.js";
+import { kling4ModelName } from "./kling4.js";
+export { kling4DurationOptions, kling4ResolutionOptions, kling4AspectRatioOptions } from "./kling4.js";
 import {
   seedance25AspectRatioOptions,
   seedance25DurationOptions,
@@ -172,6 +174,7 @@ export const qwenCameraDefaults = {
 export const videoModelNames = {
   seedance: "Seedance 2.0",
   seedance25: seedance25ModelName,
+  kling4: kling4ModelName,
   klingO3Pro: "Kling O3 Pro",
   klingO34k: "Kling O3 4K",
   minimaxH3: minimaxH3ModelName,
@@ -182,6 +185,7 @@ export const videoDefaultModel = videoModelNames.seedance25;
 export const videoModelOptions = [
   videoModelNames.seedance25,
   videoModelNames.seedance,
+  videoModelNames.kling4,
   videoModelNames.klingO3Pro,
   videoModelNames.klingO34k,
   videoModelNames.minimaxH3
@@ -254,6 +258,7 @@ export const patinaMapOptions = [
   { id: "height", label: "Height" }
 ];
 export const utilityVideoModelNames = {
+  reframe: "ReFrame",
   videoOutpaint: "Video Outpaint",
   wanFunControl: "Wan Fun Control",
   extractFrame: "Extract Frame",
@@ -315,6 +320,7 @@ export const wanVaceSamplerOptions = ["unipc", "dpm++", "euler"];
 export const wanVaceAccelerationOptions = ["regular", "low", "none"];
 
 export const utilityModelDescriptions = {
+  [utilityVideoModelNames.reframe]: "Generate a camera pass from a master image, capture shots, and refine or upscale them.",
   [utilityImageModelNames.coverage]: "Generate nine camera angles from a connected image.",
   [utilityImageModelNames.autoAspect]: "Reframes one connected image into multiple selected aspect ratios while preserving its visual identity.",
   [utilityImageModelNames.frameIt]: "Builds a poseable multi-figure composition and outputs the framed camera view as an image guide.",

@@ -12,6 +12,7 @@ export const kreaPricingModels = [
   ["/generate/video/bytedance/seedance-2", ["resolution", "hasVideoReference", "duration"]],
   ["/generate/video/bytedance/seedance-2-5", ["resolution", "hasVideoReference", "duration"]],
   ["/generate/video/kling/kling-3.0", ["mode", "generateAudio", "duration"]],
+  ["/generate/video/kling/kling-4", ["duration", "resolution"]],
   ["/generate/video/minimax/hailuo-3", ["billableSeconds", "referenceImageCount"]],
   ["/generate/image/openai/gpt-image-2", null],
   ["/generate/image/openai/gpt-image-2.5-sunburst", null],

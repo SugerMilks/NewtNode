@@ -1,6 +1,7 @@
 import { estimateKreaImageCost, estimateKreaKlingCost, estimateKreaMiniMaxH3Cost, kreaEndpointForModel } from "./kreaApi.js";
 import { estimateKreaSeedanceCost } from "./kreaSeedance.js";
 import { estimateMiniMaxH3FalCost } from "./minimaxH3.js";
+import { estimateKling4Cost, isKling4Model } from "./kling4.js";
 import { estimateOpenAiImage2Cost } from "./openAiImage2.js";
 import { isOpenAiImage25Model } from "./openAiImage25.js";
 import { isSeedream5ProModel, seedream5ProCost } from "./seedream5Pro.js";
@@ -115,6 +116,7 @@ export function estimateVideoRunCost({
   if (seedanceTask === "edit" || seedanceDraft) return null;
   const quote = getGenerationQuote({ kind: "video", model, duration, resolution, aspectRatio, generateAudio, hasVideoReference, referenceImageCount, startFrameCount, endFrameCount, audioReferenceCount, batchCount, provider });
   if (quote) return quote.amountUsd;
+  if (isKling4Model(model)) return totalEstimate(estimateKling4Cost({ provider, duration, resolution, hasVideoReference }).amountUsd, batchCount);
   if (provider === "atlas") return totalEstimate(estimateAtlasVideoCost({ model, duration, resolution, aspectRatio, generateAudio, hasVideoReference, referenceImageCount, startFrameCount, ...(audioReferenceCount ? { refers: true } : {}) }).amountUsd, batchCount);
   const normalizedProvider = provider === "krea" ? "krea" : "fal";
   const seconds = durationSeconds(duration, model === "Seedance 2.5" ? 15 : 5);
@@ -163,6 +165,10 @@ export function generationEstimate(raw) {
     pricingStatus: "unavailable", pricingBasis: "Video editing cost depends on the source clip and provider usage." };
   const cached = getGenerationQuote(options);
   if (cached) return cached;
+  if (options.kind === "video" && isKling4Model(options.model)) {
+    const cost = estimateKling4Cost(options);
+    return { ...cost, amountUsd: totalEstimate(cost.amountUsd, options.batchCount) };
+  }
   const amountUsd = (options.kind === "video" ? estimateVideoRunCost : estimateImageRunCost)(options);
   let endpoint = "";
   if (options.provider === "krea") endpoint = kreaEndpointForModel(options.kind, options.model);

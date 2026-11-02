@@ -55,7 +55,7 @@ export function useVectorGeneration({ node, onUpdate, workflowContext, api = ide
     let requests;
     try { requests = buildVectorBatchRequests(dataRef.current, { prompt, images, moodBoards }); }
     catch (error) { update({ error: error.message }); return; }
-    const context = { nodeId: node.id, nodeTitle: node.data.title || "Vector", ...workflowContextPayload(workflowContext) };
+    const context = { nodeId: node.id, nodeTitle: node.data.title || "Vector Model", ...workflowContextPayload(workflowContext) };
     const token = { epoch: epoch.current, scope, controller: new AbortController(), selectedUrl: dataRef.current.resultUrl, followSelection: true };
     operation.current = token; setWorking(true);
     update({ error: "", vectorWarning: "" });

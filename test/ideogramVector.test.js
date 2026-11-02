@@ -6,10 +6,12 @@ import { ideogramVectorApi } from "../src/api/newtApi.js";
 const image = { url: "/uploads/brand/source.png", label: "Source" };
 const output = index => ({ url: `/outputs/design/vector-${index}.png`, svgUrl: `/outputs/design/vector-${index}.svg`, type: "image", label: `Vector ${index}`, cost: { amountUsd: 0.16 } });
 
-test("Vector Node renames only missing and legacy default node titles", () => {
-  for (const [title, expected] of [[undefined, "Vector Node"], ["", "Vector Node"], ["  ", "Vector Node"],
-    ["Vector", "Vector Node"], ["Vector 2", "Vector Node 2"], ["Vector 3 Copy Copy", "Vector Node 3 Copy Copy"],
-    ["Vector Node", "Vector Node"], ["Vector Node 2", "Vector Node 2"], ["Vector Logo", "Vector Logo"], ["Brand artwork", "Brand artwork"]]) {
+test("Vector Model renames only missing and legacy default node titles", () => {
+  for (const [title, expected] of [[undefined, "Vector Model"], ["", "Vector Model"], ["  ", "Vector Model"],
+    ["Vector", "Vector Model"], ["Vector 2", "Vector Model 2"], ["Vector 3 Copy Copy", "Vector Model 3 Copy Copy"],
+    ["Vector Node", "Vector Model"], ["Vector Node 2", "Vector Model 2"], ["Vector Node Copy", "Vector Model Copy"],
+    ["Vector Node 3 Copy Copy", "Vector Model 3 Copy Copy"], ["Vector Model", "Vector Model"], ["Vector Model 2 Copy", "Vector Model 2 Copy"],
+    ["Vector Logo", "Vector Logo"], ["Vector Node Logo", "Vector Node Logo"], ["Brand artwork", "Brand artwork"]]) {
     const original = { title, resultItems: [output(1)], vectorJob: { requestId: "pending", status: "running" } };
     const normalized = normalizeVectorData(original);
     assert.equal(normalized.title, expected);

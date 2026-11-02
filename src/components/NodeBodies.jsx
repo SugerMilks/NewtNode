@@ -5,6 +5,7 @@ import { updateFilmDirectorRevisionVersionSnapshot } from "../filmDirectorRevisi
 import { applyFilmDirectorAudioPolicyToPrompt, filmDirectorAudioModeOptions, normalizeFilmDirectorAudioMode } from "../filmDirectorAudio.js";
 import { filmDirectorAspectRatioOptions, normalizeFilmDirectorAspectRatio } from "../filmDirectorAspectRatios.js";
 import { filmDirectorDurationOptions } from "../filmDirectorDurations.js";
+import { isKling4Model } from "../kling4.js";
 import { filmDirectorApproachChanged, filmDirectorApproachOptions, filmDirectorDefaultCameraDirection, filmDirectorMusicVideoError, filmDirectorSupportsMusic, filmDirectorUsesMusic, normalizeFilmDirectorApproach } from "../filmDirectorApproaches.js";
 import { filmDirectorResolutionOptions, normalizeFilmDirectorResolution } from "../filmDirectorResolutions.js";
 import {
@@ -942,7 +943,7 @@ export function SkillDirectorNodeBody({
               </label>
               <label className="node-row skill-director-audio-row">
                 <span>Audio</span>
-                <select value={usesMusic ? "music" : audioModeValue} disabled={running || locks.setup || usesMusic} onChange={(event) => updateAudioMode(event.target.value)}>
+                <select value={usesMusic ? "music" : audioModeValue} disabled={running || locks.setup || usesMusic} title={isKling4Model(videoModelValue) ? "Kling 4 uses these directions in the scene prompt. Audio behavior varies by provider; Silent does not guarantee a muted output." : undefined} onChange={(event) => updateAudioMode(event.target.value)}>
                   {usesMusic ? <option value="music">Connected Music</option> : filmDirectorAudioModeOptions.map((option) => (
                     <option key={option.value} value={option.value}>
                       {option.label}

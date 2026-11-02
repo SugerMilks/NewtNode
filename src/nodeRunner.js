@@ -1,4 +1,5 @@
 import { appendResultItems } from "./mediaResults.js";
+import { isReframeNode } from "./cameraCoverage.js";
 
 export function nodeBatchCount(node, maxCount = 4) {
   if (node.type === "utility" && node.data.utilityMode === "video" && node.data.utilityVideoModel === "Video Outpaint") return 1;
@@ -58,6 +59,7 @@ export function ensureRunSuccesses(successes, failures, fallbackMessage) {
 }
 
 export function isRunnableNode(node) {
+  if (isReframeNode(node)) return false;
   if (
     node?.type === "utility" &&
     node?.data?.utilityMode === "image" &&

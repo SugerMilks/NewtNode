@@ -1,14 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { normalizeCameraCoverageData, coverageOutputPatch, cameraCoverageDefaults, selectCoverageVersion, applyCoverageVersion } from "../src/cameraCoverage.js";
+import { normalizeCameraCoverageData, coverageOutputPatch, cameraCoverageDefaults, selectCoverageVersion, applyCoverageVersion, isReframeNode, reframeOutputPort } from "../src/cameraCoverage.js";
 import { normalizedResultItems } from "../src/mediaResults.js";
 import { isRunnableNode } from "../src/nodeRunner.js";
 
 const source = await readFile(new URL("../src/NodeEditor.jsx", import.meta.url), "utf8");
 function isolated(name, next, dependencies = {}) {
   const body = source.slice(source.indexOf(`function ${name}(`), source.indexOf(`function ${next}(`));
-  return Function(...Object.keys(dependencies), `${body};return ${name};`)(...Object.values(dependencies));
+  const context = { isReframeNode, reframeOutputPort, ...dependencies };
+  return Function(...Object.keys(context), `${body};return ${name};`)(...Object.values(context));
 }
 const shot = (id, name, url) => ({ id, label: name, originalUrl: url, versionId: "original", versions: [{ id: "original", url, type: "image" }] });
 test("real canvas selected output and Preview collection preserve distinct shot names and images", () => {
@@ -47,7 +48,7 @@ test("ReFrame is manual, image-typed and never leaks fidelity prompts", () => {
   const node = { type: "cameraCoverage", data: cameraCoverageDefaults() };
   assert.equal(isRunnableNode(node), false);
   const mediaType = isolated("nodeResultMediaType", "buildIncomingByNode"); assert.equal(mediaType(node), "image");
-  assert.match(source, /if \(source.type === "cameraCoverage"\) return \[\];/);
+  assert.match(source, /if \(isReframeNode\(source\)\) return \[\];/);
   assert.match(source, /manualOnly: \[[^\]]*"cameraCoverage"/);
-  assert.match(source, /replacesSingleCoverageInput = .*cameraCoverage/);
+  assert.match(source, /replacesSingleCoverageInput = .*isReframeNode/);
 });

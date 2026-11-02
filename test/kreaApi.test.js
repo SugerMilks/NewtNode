@@ -21,6 +21,12 @@ test("Fal remains preferred when Fal and Krea are both enabled", () => {
   assert.equal(resolveFalKreaProvider({ falKey: "", kreaKey: "" }), "");
 });
 
+test("Krea Kling 4 is independently available through its documented endpoint", () => {
+  assert.equal(supportsKreaModel("video", "Kling 4"), true);
+  assert.equal(kreaEndpointForModel("video", "Kling 4"), "/generate/video/kling/kling-4");
+  assert.equal(kreaEndpointForModel("video", "Kling O3 Pro"), "/generate/video/kling/kling-3.0");
+});
+
 test("Krea job lookups briefly retry a not-found response", () => {
   assert.equal(shouldRetryKreaJobLookup({ status: 404, attempt: 0 }), true);
   assert.equal(shouldRetryKreaJobLookup({ status: 404, attempt: 14 }), true);

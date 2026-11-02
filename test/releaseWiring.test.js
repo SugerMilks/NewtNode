@@ -5,6 +5,7 @@ import { parse } from "@babel/parser";
 import traverseModule from "@babel/traverse";
 import { estimateImageRunCost, estimateVideoRunCost } from "../src/generationPricing.js";
 import { isCoverageNode } from "../src/coveragePresets.js";
+import { isKling4Model } from "../src/kling4.js";
 
 const traverse = traverseModule.default;
 const editor = readFileSync(new URL("../src/NodeEditor.jsx", import.meta.url), "utf8");
@@ -34,7 +35,7 @@ test("Newt can review connected image and video prompts without a runtime error"
   const connectedText = evaluate(editor, find(trees[0], "FunctionDeclaration", (node) => node.id.name === "connectedText"), {});
   const incoming = { promptIn: [{ source: { type: "plainText", data: { text: "Keep the connected scene." } } }] };
   const describeRun = evaluate(editor, description, {
-    nodesRef: { current: [] }, edgesRef: { current: [] }, generationProvider: "fal", isCoverageNode,
+    nodesRef: { current: [] }, edgesRef: { current: [] }, generationProvider: "fal", isCoverageNode, isKling4Model,
     buildIncomingByNode: () => ({ test: incoming }), connectedText,
     connectedImagePromptItems: () => [], imageReferenceConnectionsForModel: () => [],
     imageInstructionSourcesForModel: () => [], buildEffectiveImagePrompt: (prompt) => prompt,

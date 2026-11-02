@@ -1,4 +1,4 @@
-import { coverageJobState } from "./cameraCoverage.js";
+import { coverageJobState, isReframeNode } from "./cameraCoverage.js";
 
 export function cloneGraphState(state) {
   return {
@@ -130,7 +130,7 @@ export function remapImportedGraph(graph = {}, offset = {}, stamp = Date.now()) 
     idMap.set(node.id, nextId);
     return {
       ...cloneNode(node),
-      data: node.type === "myNewt" ? { ...node.data, jobId: "", myNewtSummary: null } : ["editor", "output", "cameraCoverage", "vector"].includes(node.type) ? resetCopiedNodeRuntime(cloneNode(node).data) : cloneNode(node).data,
+      data: node.type === "myNewt" ? { ...node.data, jobId: "", myNewtSummary: null } : (["editor", "output", "vector"].includes(node.type) || isReframeNode(node) || node.data?.coveragePoses) ? resetCopiedNodeRuntime(cloneNode(node).data) : cloneNode(node).data,
       id: nextId,
       x: Math.round(node.x + safeOffset.x),
       y: Math.round(node.y + safeOffset.y)

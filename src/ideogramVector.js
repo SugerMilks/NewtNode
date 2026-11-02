@@ -38,8 +38,8 @@ export function normalizeVectorData(value = {}, { restore = false } = {}) {
   let vectorJob = data.vectorJob && typeof data.vectorJob.requestId === "string" ? { ...data.vectorJob } : null;
   if (restore && vectorJob && ["submitting", "running"].includes(vectorJob.status)) vectorJob = { ...vectorJob, status: "uncertain", error: "The request was interrupted. Check its result or History before generating again." };
   return { ...data, resultItems, selectedResultIndex, resultUrl: resultItems[selectedResultIndex]?.url || "", resultType: "image", vectorJob,
-    title: typeof data.title !== "string" || !data.title.trim() ? "Vector Node"
-      : /^Vector(?: \d+)?(?: Copy)*$/.test(data.title) ? data.title.replace(/^Vector/, "Vector Node") : data.title,
+    title: typeof data.title !== "string" || !data.title.trim() ? "Vector Model"
+      : /^Vector(?: Node)?(?: \d+)?(?: Copy)*$/.test(data.title) ? data.title.replace(/^Vector(?: Node)?/, "Vector Model") : data.title,
     fontReference: normalizeVectorGuide(data.fontReference, "font"), layoutReference: normalizeVectorGuide(data.layoutReference, "layout"),
     vectorSavedMoodBoards: (Array.isArray(data.vectorSavedMoodBoards) ? data.vectorSavedMoodBoards : []).slice(0, 5).filter(item => typeof item?.url === "string" && /^\/(uploads|outputs|workflow-assets)\//.test(item.url)).map(item => ({ url: item.url, label: String(item.label || "Mood Board").slice(0, 200) })),
     vectorLayersOpen: data.vectorLayersOpen === true,

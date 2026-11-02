@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { kling4DurationOptions, kling4ResolutionOptions, kling4AspectRatioOptions } from "../src/kling4.js";
 
 import {
   imageModelOptions,
@@ -35,6 +36,42 @@ test("Kling O3 Pro and Kling O3 4K remain separate video models", () => {
   assert.deepEqual(klingO34kResolutionOptions, ["4K"]);
   assert.deepEqual(klingO34kDurationOptions, klingO3ProDurationOptions);
   assert.deepEqual(klingO34kAspectRatioOptions, klingO3ProAspectRatioOptions);
+});
+
+test("Kling 4 exposes native controls and Director timing without changing existing models", () => {
+  assert.ok(videoModelOptions.includes(videoModelNames.kling4));
+  assert.equal(videoModelSupportsFilmDirector("Kling 4"), true);
+  assert.deepEqual(kling4DurationOptions, Array.from({ length: 28 }, (_, index) => `${index + 3} seconds`));
+  assert.deepEqual(kling4ResolutionOptions, ["1080p", "720p"]);
+  assert.deepEqual(kling4AspectRatioOptions, ["16:9", "9:16", "1:1", "21:9"]);
+  assert.equal(filmDirectorVideoDuration("Kling 4", "30"), "30 seconds");
+  assert.equal(filmDirectorVideoDuration("Kling 4", "3"), "3 seconds");
+  assert.equal(filmDirectorVideoResolution("Kling 4", "4K"), "1080p");
+  assert.equal(filmDirectorVideoResolution("Kling 4", "720p"), "720p");
+  assert.equal(filmDirectorVideoAspectRatio("Kling 4", "21:9"), "21:9");
+});
+
+test("Kling 4 Director requests retain the complete scene and omit unsupported generation controls", () => {
+  const filmDirector = { videoModel: "Kling 4", durationSeconds: "30", resolution: "720p", aspectRatio: "21:9", audioMode: "silent", finalPrompt: "Complete narrative including every shot, dialogue and silent direction." };
+  const node = { id: "video", data: { model: "Seedance 2.5", duration: "15 seconds", resolution: "1080p", generateAudio: false, klingCfgScale: 0.8, negativePrompt: "old negative", seed: "42" } };
+  const before = structuredClone({ node, filmDirector });
+  const request = buildVideoGenerationRequest({ node, filmDirector, prompt: filmDirector.finalPrompt, referenceImageUrls: ["/uploads/plate.png"], referenceVideoUrls: ["/uploads/clip.mp4"] });
+  assert.equal(request.model, "Kling 4");
+  assert.equal(request.duration, "30 seconds");
+  assert.equal(request.resolution, "720p");
+  assert.equal(request.aspectRatio, "21:9");
+  assert.equal(request.prompt, filmDirector.finalPrompt);
+  assert.deepEqual(request.filmDirector, filmDirector);
+  for (const field of ["generateAudio", "klingCfgScale", "negativePrompt", "seed", "enableSafetyChecker", "seedanceDraft", "seedanceTask"]) assert.equal(Object.hasOwn(request, field), false, field);
+  assert.deepEqual(request.referenceImageUrls, ["/uploads/plate.png"]);
+  assert.deepEqual(request.referenceVideoUrls, ["/uploads/clip.mp4"]);
+  assert.deepEqual({ node, filmDirector }, before);
+});
+
+test("Kling 4 refuses explicit audio references and Director music before submission", () => {
+  const node = { id: "video", data: { model: "Kling 4" } };
+  assert.throws(() => buildVideoGenerationRequest({ node, referenceAudioUrls: ["/uploads/audio.wav"] }), /does not accept reference audio/);
+  assert.throws(() => buildVideoGenerationRequest({ node, filmDirector: { videoModel: "Kling 4", approach: "music-video", musicReference: { url: "/uploads/music.wav" } } }), /Kling does not accept reference audio/);
 });
 
 test("Film Director support includes the remaining director-capable video models", () => {
@@ -225,6 +262,7 @@ test("removed video models are no longer selectable", () => {
   assert.deepEqual(videoModelOptions, [
     videoModelNames.seedance25,
     videoModelNames.seedance,
+    videoModelNames.kling4,
     videoModelNames.klingO3Pro,
     videoModelNames.klingO34k,
     videoModelNames.minimaxH3

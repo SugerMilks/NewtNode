@@ -89,7 +89,7 @@ export function useVectorLayers({ node, data, update, workflowContext, api = ide
     const body = { editorVersion: vectorEditorVersion, requestId: crypto.randomUUID(), svgUrl: item.svgUrl, sourceHash: currentView.sourceHash, operations, groupsPrepared: item.vectorGroupsPrepared === true,
       backgroundKeys: item.vectorBackgroundKeys || [], lockedKeys: item.vectorLockedKeys || [], isolate,
       label: isolate.length ? selectedNames.join(" + ").slice(0, 120) : `${item.label || "Vector"} - Edited`.slice(0, 120),
-      nodeId: node.id, nodeTitle: data.title || "Vector", ...workflowContextPayload(workflowContext) };
+      nodeId: node.id, nodeTitle: data.title || "Vector Model", ...workflowContextPayload(workflowContext) };
     try {
       const response = await api.saveLayers(body, { signal: token.controller.signal });
       if (saveToken.current !== token || latest.current.rootScope !== rootScope) return;

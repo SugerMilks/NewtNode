@@ -14,7 +14,7 @@ const timeLabel = time => `${Math.floor(time / 60).toString().padStart(2, "0")}:
 
 export function CameraCoverageNodeBody({ node, config, sources = [], connected = false, onUpdate, workflowContext, onPreviewOpen,
   onConnectStart, onDisconnectInput, connectedPortKeys, imageModels = cameraCoverageModels, ratios = ["16:9", "1:1"], resolutions = ["2K"], qualities = [],
-  modelPatch = model => ({ model }), provider = "fal", showApiCosts = false, api, refine }) {
+  modelPatch = model => ({ model }), provider = "fal", showApiCosts = false, api, refine, renderToolSwitcher }) {
   const enabledModels = imageModels.filter(model => cameraCoverageModels.includes(model));
   const { data, update, working, start, check, capture, upload, refineShot, changeLens, release } = useCameraCoverage({ node, onUpdate, workflowContext, api, refine,
     refineOptions: { models: enabledModels, ratios, resolutions } });
@@ -67,6 +67,7 @@ export function CameraCoverageNodeBody({ node, config, sources = [], connected =
       if (event.key === " ") togglePlay(); else seek(time + (event.key === "ArrowRight" ? 1 : -1) / (pass.fps || 24));
     }
   }}>
+    {renderToolSwitcher?.(jobs.length > 0 || Object.values(working).some(Boolean))}
     <div className="coverage-source-row">
       <NodeRow label="Master image" inputPort={config.input[0]} {...ports}>
         <span className="coverage-source-name" title={master?.label}>{master?.label || (connected ? "Waiting for connected image" : "No image")}</span>

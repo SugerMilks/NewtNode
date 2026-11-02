@@ -131,7 +131,7 @@ export function VectorNodeBody({ node, config, prompt = "", promptConnected = fa
       </div>
       <OutputPortRow {...ports} port={config.output[0]} label="Image output" />
     </div>
-    {item?.svgUrl && layerEditor === layerScope && <React.Suspense fallback={<span role="status">Opening Layers...</span>}><VectorLayersDialog key={layerScope} item={item} editor={layers} openingOperations={layerBaseline.current} nodeId={node.id} nodeTitle={data.title || "Vector Node"} workflowContext={workflowContext} api={api} onClose={() => setLayerEditor(null)} /></React.Suspense>}
+    {item?.svgUrl && layerEditor === layerScope && <React.Suspense fallback={<span role="status">Opening Layers...</span>}><VectorLayersDialog key={layerScope} item={item} editor={layers} openingOperations={layerBaseline.current} nodeId={node.id} nodeTitle={data.title || "Vector Model"} workflowContext={workflowContext} api={api} onClose={() => setLayerEditor(null)} /></React.Suspense>}
     {compare && <React.Suspense fallback={null}><VectorCompareDialog items={comparable} currentUrl={item?.url} update={update} onChoose={url => select(data.resultItems.findIndex(result => result.url === url))} onClose={() => setCompare(false)} /></React.Suspense>}
     <div className="vector-controls">
       <section className="vector-compose" aria-label="Brief and connections">

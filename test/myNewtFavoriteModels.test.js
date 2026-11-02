@@ -7,6 +7,7 @@ import * as models from "../src/modelOptions.js";
 import { isCoverageNode } from "../src/coveragePresets.js";
 import { isSeedance25Model } from "../src/seedance25.js";
 import { isMiniMaxH3Model } from "../src/minimaxH3.js";
+import { isKling4Model } from "../src/kling4.js";
 import { myNewtSettings, myNewtDefaults, myNewtSnapshot } from "../src/myNewt/contract.js";
 import { normalizeMyNewtFavoriteModels, myNewtFavoriteCreationPatch } from "../src/myNewt/favoriteModels.js";
 import { buildMyNewtLocalWorkflow, myNewtLocalAction } from "../src/myNewt/localActions.js";
@@ -71,7 +72,7 @@ function editorFunctionSource(name) {
 function createDataFactory(settings = favorites) {
   const start = editor.indexOf("  const newtCreationData ="), end = editor.indexOf("  const myNewtTaskController =", start);
   assert.ok(start >= 0 && end > start);
-  const deps = { ...models, isCoverageNode, isSeedance25Model, isMiniMaxH3Model, myNewtFavoriteCreationPatch,
+  const deps = { ...models, isCoverageNode, isSeedance25Model, isMiniMaxH3Model, isKling4Model, myNewtFavoriteCreationPatch,
     nodesRef: { current: [{ type: "myNewt", data: settings }] }, myNewtCatalog: catalog, generationProvider: "fal",
     validateMyNewtOptions: (type, patch) => { const choices = catalog.find((entry) => entry.type === type)?.options || {}; for (const [key, value] of Object.entries(patch)) if (choices[key]) assert.ok(choices[key].includes(value)); },
     imageModelSelectionPatch: (data, model) => ({ model, resolution: data.resolution || "2K", quality: data.quality || "high" }),
@@ -93,6 +94,17 @@ test("actual Newt creation uses favorite selections and normalizes dependent vid
   const explicit = create("videoModel", data, { model: "MiniMax H3", duration: "8 seconds", resolution: "2K" });
   assert.equal(explicit.model, "MiniMax H3"); assert.equal(explicit.duration, "8 seconds");
   assert.deepEqual(createDataFactory({})("videoModel", data), data);
+});
+
+test("Kling 4 favorites normalize newly created video settings and never enable music workflows", () => {
+  const preference = { favoriteVideoModel: "Kling 4" };
+  assert.equal(normalizeMyNewtFavoriteModels(preference).favoriteVideoModel, "Kling 4");
+  const created = createDataFactory(preference)("videoModel", { model: "Seedance 2.5", duration: "15 seconds", resolution: "4K", aspectRatio: "4:3" });
+  assert.equal(created.model, "Kling 4");
+  assert.equal(created.duration, "5 seconds");
+  assert.equal(created.resolution, "1080p");
+  assert.equal(created.aspectRatio, "16:9");
+  assert.deepEqual(myNewtFavoriteCreationPatch("videoModel", preference, catalog, {}, { musicRequired: true }), {});
 });
 
 test("fresh free workflows use favorites without modifying existing nodes, presets or duplicates", () => {

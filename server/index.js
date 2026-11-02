@@ -33,6 +33,8 @@ import { registerAudioModelRoutes } from "./routes/audioModel.js";
 import { registerExploreRoutes } from "./routes/explore.js";
 import { createCameraCoverageService, registerCameraCoverageRoutes } from "./camera-coverage.js";
 import { createSingleSubmissionFalClient } from "./fal-single-submission.js";
+import { createKling4Generator } from "./kling4.js";
+import { isKling4Model, kling4ModelName, kling4FalEndpoints } from "../src/kling4.js";
 import { createStoryboardFalClient } from "./storyboard-fal.js";
 import { registerStoryboardRoutes } from "./routes/storyboard.js";
 import { registerStoryboardScriptRoutes } from "./routes/storyboardScripts.js";
@@ -249,9 +251,10 @@ let restartRequested = false;
 let clientDiagnosticWriteQueue = Promise.resolve();
 let falDebugWriteQueue = Promise.resolve();
 const localAssetRecoveryJobs = new Map();
+const atlasClient = createAtlasClient({ onProgress: (job) => console.info("Atlas Cloud prediction", job) });
 const atlasMedia = createAtlasMedia({
   quoteInput: (input, key) => providerPricing.atlasInput(input, key),
-  client: createAtlasClient({ onProgress: (job) => console.info("Atlas Cloud prediction", job) }),
+  client: atlasClient,
   readLocalAsset,
   validateVideoAssets: (request) => validateAtlasVideoAssets(request, async (source) => {
     const asset = typeof source === "string" ? await readLocalAsset(source) : source;
@@ -338,6 +341,7 @@ const imageModelOptions = [
 const videoModelNames = {
   seedance: "Seedance 2.0",
   seedance25: seedance25ModelName,
+  kling4: kling4ModelName,
   klingO3Pro: "Kling O3 Pro",
   klingO34k: "Kling O3 4K",
   minimaxH3: minimaxH3ModelName
@@ -345,6 +349,7 @@ const videoModelNames = {
 const videoModelOptions = [
   videoModelNames.seedance,
   videoModelNames.seedance25,
+  videoModelNames.kling4,
   videoModelNames.klingO3Pro,
   videoModelNames.klingO34k,
   videoModelNames.minimaxH3
@@ -878,6 +883,7 @@ function buildHealthPayload() {
       myNewtAutoReview: true,
       myNewtUnpricedGenerations: true,
       seedanceVideoEditing: true,
+      kling4: true,
       seedanceDrafts: true,
       seedanceMultiProviderDrafts: true,
       nanoBanana21: true,
@@ -3904,6 +3910,23 @@ const seedanceDrafts = createSeedanceDraftStore({
 });
 registerSeedanceDraftRoutes(app, { store: seedanceDrafts, sendApiError });
 
+const generateKling4 = createKling4Generator({
+  isLocalAssetUrl,
+  inspectAsset: async (url, kind) => {
+    const { filePath, fileName } = await resolveLocalAssetPath(url);
+    const info = await stat(filePath);
+    const metadata = kind === "image" ? await sharp(filePath).metadata() : await probeVideoFile(filePath);
+    return { ...metadata, bytes: info.size, mimeType: mimeForExtension(path.extname(fileName).toLowerCase()) };
+  },
+  uploadToFal: uploadLocalOutputToFal,
+  uploadToKrea: uploadLocalOutputToKrea,
+  uploadToAtlas: async (url, key) => atlasClient.upload(await readLocalAsset(url), key),
+  subscribeFal,
+  runKreaGeneration,
+  runAtlasGeneration: options => atlasClient.generate(options),
+  quoteAtlasInput: (input, key) => providerPricing.atlasInput(input, key)
+});
+
 app.post("/api/node/generate-video", (req, res) => handleVideoGeneration(req, res));
 async function handleVideoGeneration(req, res, outpaint = null) {
   try {
@@ -3958,6 +3981,10 @@ async function handleVideoGeneration(req, res, outpaint = null) {
       return res.status(400).json({
         error: `${selectedVideoModel.displayName} is not available through Krea and needs an enabled Fal API key in Settings.`
       });
+    }
+
+    if (selectedVideoModel.provider === "fal-kling-4") {
+      return await runKling4Video(req, res, { prompt });
     }
 
     if (selectedVideoModel.provider === "fal-kling-o3-pro") {
@@ -4252,6 +4279,42 @@ async function handleVideoGeneration(req, res, outpaint = null) {
     console.error(error);
     sendApiError(res, error, "Video generation failed.");
   }
+}
+
+async function runKling4Video(req, res, { prompt }) {
+  const result = await generateKling4({
+    ...req.body,
+    prompt,
+    directorReferences: filterFilmDirectorReferencesForOutput(req.body.filmDirector?.references, req.body.filmDirector?.finalPrompt || prompt)
+  }, { falKey: process.env.FAL_KEY, kreaKey: process.env.KREA_API_KEY, atlasKey: process.env.ATLAS_API_KEY });
+  const output = await downloadVideo(req, result.remoteVideo.url, `kling-4-${result.settings.routeKind}`);
+  await appendHistory({
+    id: result.requestId || randomUUID(),
+    createdAt: new Date().toISOString(),
+    mediaType: "video",
+    provider: result.provider,
+    modelName: kling4ModelName,
+    endpoint: result.endpoint,
+    mode: `Kling 4 ${result.settings.routeKind}-to-video${req.body.filmDirector ? " (Director narrative)" : ""}`,
+    prompt,
+    submittedPrompt: result.submittedPrompt,
+    project: projectFromBody(req.body),
+    node: nodeFromBody(req.body),
+    settings: result.settings,
+    cost: result.cost,
+    remoteVideo: result.remoteVideo,
+    localVideo: output.publicPath,
+    outputFileName: output.fileName,
+    outputBytes: output.bytes
+  });
+  return res.json({
+    requestId: result.requestId,
+    endpoint: result.endpoint,
+    modelName: kling4ModelName,
+    submittedPrompt: result.submittedPrompt,
+    cost: result.cost,
+    video: { ...result.remoteVideo, localUrl: output.publicPath, fileName: output.fileName }
+  });
 }
 
 async function runKlingO3Video(req, res, { prompt, selectedVideoModel, variant = "pro" }) {
@@ -12040,6 +12103,9 @@ function resolveUtilityVideoModel(model) {
 
 function resolveVideoModel(model) {
   const normalized = String(model || "").toLowerCase();
+  if (isKling4Model(model)) {
+    return { provider: "fal-kling-4", displayName: kling4ModelName, id: kling4FalEndpoints.text, speed: "kling-4" };
+  }
   if (isSeedance25Model(normalized)) {
     return {
       provider: "fal-seedance",

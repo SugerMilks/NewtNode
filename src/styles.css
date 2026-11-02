@@ -97,12 +97,15 @@ button {
 }
 
 .app-shell.node-app-shell .topbar {
-  width: min(1280px, calc(100vw - 32px));
+  width: 100%;
+  padding-left: max(0px, calc((100% - 1280px) / 2));
+  padding-right: 12px;
 }
 
 .topbar-status {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 10px;
   min-width: 0;
   max-width: min(840px, 52vw);
@@ -111,6 +114,7 @@ button {
   color: rgba(244, 240, 232, 0.48);
   font-size: 11px;
   font-weight: 680;
+  text-align: right;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -118,9 +122,9 @@ button {
 .topbar-status-state {
   flex: 0 0 auto;
   color: rgba(32, 243, 166, 0.86);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 860;
-  letter-spacing: 0.04em;
+  letter-spacing: 0;
   text-transform: uppercase;
 }
 
@@ -1105,11 +1109,13 @@ textarea::placeholder {
 
   .app-shell.node-app-shell .topbar {
     width: 100%;
+    padding: 0;
   }
 
   .topbar-status {
     max-width: 100%;
-    margin-left: 0;
+    margin-left: auto;
+    padding-right: 12px;
   }
 
   .brand-lockup {

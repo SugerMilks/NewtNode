@@ -1,5 +1,6 @@
 import test from "node:test";
 import { isCoverageNode } from "../src/coveragePresets.js";
+import { isReframeNode } from "../src/cameraCoverage.js";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { exploreDefaults, exploreRequest, exploreDirectionRequest, explorePlanningPrompt, normalizeExploreData, normalizeExplorePlan, explorePlanSchema, exploreSelectionPatch, validateExplorePlan, exploreImagePrompt, explorePlanningInstructions, exploreGrades, exploreStyleFamilies, exploreReferenceDescription } from "../src/explore.js";
@@ -367,7 +368,7 @@ test("Preview's actual source helper receives all full-resolution Explore images
   const editor = await readFile(new URL("../src/NodeEditor.jsx", import.meta.url), "utf8");
   const start = editor.indexOf("function connectedPreviewSources(");
   const helpers = editor.slice(start, editor.indexOf("function normalizedPreviewLayoutItems(", start));
-  const preview = new Function("normalizedResultItems", "sourceLabel", "previewMediaType", "isCoverageNode", `${helpers}; return connectedPreviewSources;`)(normalizedResultItems, source => source.data.title, () => "image", isCoverageNode);
+  const preview = new Function("normalizedResultItems", "sourceLabel", "previewMediaType", "isCoverageNode", "isReframeNode", `${helpers}; return connectedPreviewSources;`)(normalizedResultItems, source => source.data.title, () => "image", isCoverageNode, isReframeNode);
   const source = { id: "e", type: "explore", data: { title: "Explore", resultItems: [item(), item("Reflections")], selectedResultIndex: 1, resultUrl: item("Reflections").url } };
   const result = preview([{ source, edge: { from: { port: "imageOut" } } }]);
   assert.deepEqual(result[0].items.map(item => item.url), source.data.resultItems.map(item => item.url));
@@ -554,7 +555,7 @@ test("an uncertain planning POST is never replayed", async t => {
 test("actual canvas output helper rejects removed style ports while keeping image output", async () => {
   const editor = await readFile(new URL("../src/NodeEditor.jsx", import.meta.url), "utf8");
   const start = editor.indexOf("function connectedOutputItem(");
-  const helper = new Function("previewMediaType", "sourceLabel", `${editor.slice(start, editor.indexOf("function connectedOutputUrl(", start))}; return connectedOutputItem;`)(() => "image", source => source.data.title);
+  const helper = new Function("previewMediaType", "sourceLabel", "isReframeNode", `${editor.slice(start, editor.indexOf("function connectedOutputUrl(", start))}; return connectedOutputItem;`)(() => "image", source => source.data.title, isReframeNode);
   const source = { type: "explore", data: { title: "Look", resultUrl: "/outputs/selected.png", resultText: "Graphic light" } };
   assert.equal(helper(source, { from: { port: "imageOut" } }).url, source.data.resultUrl);
   assert.equal(helper(source, { from: { port: "styleOut" } }), null);
@@ -565,7 +566,7 @@ test("actual canvas validator respects reference locks and rejects removed Explo
   const editor = await readFile(new URL("../src/NodeEditor.jsx", import.meta.url), "utf8");
   const start = editor.indexOf("  function getConnectionError(");
   const config = exploreCanvasConfig(editor);
-  const deps = { outputPortIdsForNode: node => node.type === "explore" ? config.output.map(port => port.id) : ["styleOut", "characterOut", "transferOut"], inputPortIdsForNode: node => node.type === "explore" ? config.input.map(port => port.id) : ["styleIn", "characterIn", "transferIn", "promptIn"],
+  const deps = { isReframeNode, outputPortIdsForNode: node => node.type === "explore" ? config.output.map(port => port.id) : ["styleOut", "characterOut", "transferOut"], inputPortIdsForNode: node => node.type === "explore" ? config.input.map(port => port.id) : ["styleIn", "characterIn", "transferIn", "promptIn"],
     isImageModelUnsupportedInput: () => false, isImageModelUnsupportedSource: () => false, isVideoModelUnsupportedInput: () => false, getPortCompatibilityError: () => "" };
   const validatorSource = editor.slice(start, editor.indexOf("  function getPortPoint(", start));
   const validate = new Function(...Object.keys(deps), validatorSource + ";return getConnectionError;")(...Object.values(deps));
@@ -616,7 +617,7 @@ test("legacy Explore style text cannot leak through text or image-reference prom
   const text = new Function(`${editor.slice(textStart, editor.indexOf("function directorPackageConnections(", textStart))};return connectedText;`)();
   const promptStart = editor.indexOf("function promptPiecesForSource(");
   const promptEnd = editor.indexOf("\nfunction ", promptStart + 1);
-  const prompt = new Function(`${editor.slice(promptStart, promptEnd)};return promptPiecesForSource;`)();
+  const prompt = new Function("isReframeNode", `${editor.slice(promptStart, promptEnd)};return promptPiecesForSource;`)(isReframeNode);
   const source = { type: "explore", data: { resultText: "Legacy style description", title: "Explore" } };
   assert.equal(text([{ source }]), "");
   for (const outputPort of ["imageOut", "styleOut", "promptOut"]) assert.deepEqual(prompt(source, { outputPort }), []);

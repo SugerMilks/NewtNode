@@ -1,4 +1,35 @@
 export const cameraCoverageEndpoint = "minimax/h3-max/camera-controls";
+export const reframeToolName = "ReFrame";
+export const isReframeTool = value => String(value || "").trim().toLowerCase() === "reframe";
+export const isReframeNode = node => node?.type === "cameraCoverage" ||
+  (node?.type === "utility" && node.data?.utilityMode !== "image" && isReframeTool(node.data?.utilityVideoModel));
+export const reframeOutputPort = node => node?.type === "utility" ? "utilityOut" : "imageOut";
+
+export function reframeRefinementSettings(data = {}) {
+  const defaults = cameraCoverageDefaults();
+  return Object.fromEntries(["model", "resolution", "quality", "upscaleFactor"].map(key => [key, data[key] ?? defaults[key]]));
+}
+
+export function reframeToolSelectionPatch(data = {}) {
+  return normalizeCameraCoverageData({ ...data,
+    ...reframeRefinementSettings(data.reframeRefinement || (data.coveragePoses ? data : {})),
+    utilityMode: "video", utilityVideoModel: reframeToolName, resultType: "image", status: "ready", error: "" });
+}
+
+export function reframeHasPendingWork(data = {}) {
+  const jobs = coverageJobState(data);
+  return Boolean(jobs.coverageJob || jobs.coverageShotJobs.length);
+}
+
+export function reframeUtilityTransition(data, patch) {
+  const wasReframe = isReframeNode({ type: "utility", data });
+  const next = { ...data, ...patch };
+  const willBeReframe = isReframeNode({ type: "utility", data: next });
+  if (wasReframe && !willBeReframe) {
+    return reframeHasPendingWork(data) ? null : { ...patch, reframeRefinement: reframeRefinementSettings(data) };
+  }
+  return !wasReframe && willBeReframe ? reframeToolSelectionPatch(next) : patch;
+}
 export const cameraCoverageUpscaleEndpoint = "fal-ai/topaz/upscale/image";
 export const cameraCoverageModels = ["Nano Banana Pro", "Nano Banana 2.1", "OpenAI Image 2.5 Sunburst", "OpenAI Image 2.5 Flare", "Seedream 5.0 Pro"];
 export const cameraCoverageFreezePrompt = "The reference image is one frozen instant. Only the camera moves along the supplied camera trajectory. Preserve every person and object in exactly the same world position, orientation, shape and pose. Keep faces, expressions, hands, clothing, liquids and background motionless. Maintain identities, subject count, wardrobe, props, spatial relationships, lighting direction and color treatment. Camera parallax is the only source of apparent movement. No cuts, added objects, subject motion or redesign. Move smoothly between the requested positions and hold where the trajectory holds. Do not return to the original position unless the trajectory requests it. Keep focal length unchanged; distance changes are camera travel, not digital zoom.";

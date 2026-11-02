@@ -1,4 +1,5 @@
 import { applyPricingQuote } from "./pricingCatalog.js";
+import { kling4ModelName, kling4KreaEndpoint } from "./kling4.js";
 import { isNanoBanana21Model, nanoBanana21ModelName, nanoBanana21KreaEndpoint, buildNanoBanana21Input, nanoBanana21Cost } from "./nanoBanana21.js";
 import { isSeedream5ProModel, seedream5ProModelName, seedream5ProKreaEndpoint, validateSeedream5ProRequest, seedream5ProCost } from "./seedream5Pro.js";
 import { isOpenAiImage25Model, normalizeOpenAiImage25Quality, normalizeOpenAiImage25Background, openAiImage25Variant, validateOpenAiImage25KreaRequest } from "./openAiImage25.js";
@@ -15,6 +16,7 @@ export const kreaEndpoints = Object.freeze({
     "OpenAI Image 2.5 Flare": "/generate/image/openai/gpt-image-2.5-flare"
   }),
   video: Object.freeze({
+    [kling4ModelName]: kling4KreaEndpoint,
     "Seedance 2.0": "/generate/video/bytedance/seedance-2",
     "Seedance 2.5": "/generate/video/bytedance/seedance-2-5",
     "MiniMax H3": "/generate/video/minimax/hailuo-3",

@@ -11,7 +11,7 @@ import { videoDefaultModel, videoModelNames, videoModelOptions, enabledVideoMode
 
 const source = readFileSync(new URL("../src/NodeEditor.jsx", import.meta.url), "utf8");
 const compiled = buildSync({
-  stdin: { contents: `${source}\nexport { NodeBody, connectedAssetItems, runVideoModelGeneration, videoModelSelectionPatch, normalizeCurrentNode, createDefaultNodeData };`, resolveDir: fileURLToPath(new URL("../src", import.meta.url)), loader: "jsx" },
+  stdin: { contents: `${source}\nexport { NodeBody, connectedAssetItems, buildVideoModelPrompt, runVideoModelGeneration, videoModelSelectionPatch, normalizeCurrentNode, createDefaultNodeData, isVideoModelUnsupportedInput };`, resolveDir: fileURLToPath(new URL("../src", import.meta.url)), loader: "jsx" },
   bundle: true, write: false, platform: "node", format: "cjs", packages: "external", jsx: "automatic",
   define: { "import.meta.env": "{}" }, external: ["/newt-mark.png"], loader: { ".css": "empty" }
 });
@@ -90,6 +90,98 @@ const hasAttr = (node, name) => attr(node, name) !== undefined;
 const text = (node) => node.nodeName === "#text" ? node.value : (node.childNodes || []).map(text).join("");
 const option = (view, label) => view.elements.find((node) => node.tagName === "option" && text(node) === label);
 const sourceFrame = { startFrameIn: [{ source: { id: "frame", type: "image", data: { resultUrl: "/uploads/frame.png" } } }] };
+
+test("Kling 4 UI offers supported choices and hides unsupported O3 and audio controls", () => {
+  for (const provider of ["fal", "krea", "atlas"]) {
+    const view = renderVideo("Kling 4", { provider, data: { duration: "30 seconds", resolution: "720p", aspectRatio: "21:9" } });
+    for (const label of ["3 seconds", "30 seconds", "720p", "1080p", "21:9"]) assert.ok(option(view, label), label);
+    assert.equal(option(view, "4K"), undefined);
+    assert.equal(hasAttr(option(view, "720p").parentNode, "disabled"), false);
+    assert.doesNotMatch(view.html, /Generate Audio|Prompt Strength|Reference Audio|Optional negative prompt/);
+    assert.match(view.html, /Audio controls unavailable/);
+    assert.doesNotMatch(view.html, /[Nn]ative audio/);
+    assert.match(view.html, /Director uses the complete scene prompt/);
+    const collapsed = renderVideo("Kling 4", { provider, data: { settingsOpen: false } });
+    assert.doesNotMatch(collapsed.html, /referenceAudioIn/);
+  }
+  for (const provider of ["fal", "atlas", "krea"]) assert.equal(hasAttr(option(renderVideo("Kling 4", { provider, incoming: sourceFrame }), "Source frame").parentNode, "disabled"), true);
+  const node = { type: "videoModel", data: { model: "Kling 4" } };
+  assert.equal(module.exports.isVideoModelUnsupportedInput(node, "referenceAudioIn"), true);
+  for (const port of ["directorIn", "characterIn", "startFrameIn", "endFrameIn", "referenceImageIn", "referenceVideoIn"]) assert.equal(module.exports.isVideoModelUnsupportedInput(node, port), false, port);
+});
+
+test("Kling 4 selection and reopening preserve valid settings, results, and existing model defaults", () => {
+  const original = { id: "video", type: "videoModel", data: { model: "Kling 4", duration: "30 seconds", resolution: "720p", aspectRatio: "21:9", generateAudio: false, negativePrompt: "old setting", resultUrl: "/outputs/existing.mp4", resultItems: [{ type: "video", url: "/outputs/existing.mp4" }] } };
+  const restored = module.exports.normalizeCurrentNode(JSON.parse(JSON.stringify(original)));
+  for (const key of Object.keys(original.data)) assert.deepEqual(restored.data[key], original.data[key], key);
+  assert.deepEqual(module.exports.videoModelSelectionPatch({ model: "Kling O3 4K", resolution: "4K", duration: "15 seconds" }, "Kling 4"), { model: "Kling 4", duration: "5 seconds", resolution: "1080p", aspectRatio: "16:9" });
+  assert.equal(module.exports.createDefaultNodeData("videoModel", "Video Model", 1).model, "Seedance 2.5");
+});
+
+test("Kling 4 actual runner keeps Character images while excluding automatic Character voices", async (t) => {
+  const calls = [];
+  t.mock.method(globalThis, "fetch", async (url, options = {}) => {
+    calls.push({ url, body: options.body && JSON.parse(options.body) });
+    return Response.json(String(url).endsWith("/api/health") ? { routes: { kling4: true } } : { video: { localUrl: "/outputs/kling4.mp4" } });
+  });
+  const node = { id: "video", type: "videoModel", data: { model: "Kling 4", duration: "5 seconds", resolution: "1080p", aspectRatio: "16:9", generateAudio: false } };
+  const incoming = { characterIn: [{ source: { id: "actor", type: "character", data: { locked: true, activated: true, characterName: "Actor", resultUrl: "/uploads/actor.png", activeVoiceId: "voice", characterVoices: [{ id: "voice", localUrl: "/uploads/voice.wav" }] } } }] };
+  const before = structuredClone({ node, incoming });
+  const prompt = module.exports.buildVideoModelPrompt(node, "@Actor walks forward.", incoming, {});
+  assert.match(prompt, /visual identity/);
+  assert.doesNotMatch(prompt, /@Audio\d|dialogue reference|voice reference/);
+  const view = renderVideo("Kling 4", { provider: "krea", incoming });
+  assert.match(view.html, /Character identity instructions applied/);
+  assert.doesNotMatch(view.html, /selected voice instructions applied/);
+  const result = await module.exports.runVideoModelGeneration({ node, incoming, incomingByNode: {}, prompt, index: 0 });
+  assert.equal(result.url, "/outputs/kling4.mp4");
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls[1].body.characterReferenceUrls, ["/uploads/actor.png"]);
+  assert.deepEqual(calls[1].body.referenceAudioUrls, []);
+  assert.equal(Object.hasOwn(calls[1].body, "generateAudio"), false);
+  assert.equal(calls[1].body.prompt, prompt);
+  assert.deepEqual({ node, incoming }, before);
+  calls.length = 0;
+  incoming.referenceAudioIn = [{ source: { id: "audio", type: "audio", data: { resultUrl: "/uploads/explicit.wav" } } }];
+  await assert.rejects(module.exports.runVideoModelGeneration({ node, incoming, incomingByNode: {}, prompt: "A scene.", index: 0 }), /does not accept reference audio/);
+  assert.equal(calls.length, 0);
+});
+
+test("full video prompt and runner honor Director model overrides for Character voices", async (t) => {
+  const calls = [];
+  t.mock.method(globalThis, "fetch", async (url, options = {}) => {
+    if (options.body) calls.push(JSON.parse(options.body));
+    return Response.json(String(url).endsWith("/api/health") ? { routes: { kling4: true } } : { video: { localUrl: "/outputs/test.mp4" } });
+  });
+  const character = { source: { id: "actor", type: "character", data: { locked: true, activated: true, characterName: "Actor", resultUrl: "/uploads/actor.png", activeVoiceId: "voice", characterVoices: [{ id: "voice", localUrl: "/uploads/voice.wav" }] } } };
+  for (const [model, directorModel, voiceExpected] of [["Seedance 2.5", "Kling 4", false], ["Kling 4", "Seedance 2.5", true], ["Seedance 2.5", "", true]]) {
+    const node = { id: "video", data: { model, duration: "5 seconds", resolution: "1080p", aspectRatio: "16:9" } };
+    const incoming = { characterIn: [character], directorIn: directorModel ? [{ source: { id: "director", type: "skillDirector", data: { skillDirectorBuilt: true, resultText: "@Actor enters.", skillVideoModel: directorModel, skillApproach: "cinematic" } }, edge: { from: { port: "directorOut" } } }] : [] };
+    const prompt = module.exports.buildVideoModelPrompt(node, "@Actor enters.", incoming, {});
+    assert.equal(prompt.includes("@Audio1"), voiceExpected, `${model} with ${directorModel}`);
+    await module.exports.runVideoModelGeneration({ node, incoming, incomingByNode: {}, prompt, index: 0 });
+    assert.equal(calls.at(-1).model, directorModel || model);
+    assert.equal(calls.at(-1).prompt, prompt);
+    assert.deepEqual(calls.at(-1).referenceAudioUrls, voiceExpected ? ["/uploads/voice.wav"] : []);
+  }
+});
+
+test("Kling 4 preserves every same-media alias for server binding while other models retain deduplication", async (t) => {
+  const calls = [];
+  t.mock.method(globalThis, "fetch", async (url, options = {}) => {
+    if (options.body) calls.push(JSON.parse(options.body));
+    return Response.json(String(url).endsWith("/api/health") ? { routes: { kling4: true } } : { video: { localUrl: "/outputs/test.mp4" } });
+  });
+  const item = (id, type, url) => ({ source: { id, type, data: { title: id, resultUrl: url } } });
+  const incoming = { referenceImageIn: [item("Plate", "image", "/uploads/same.png"), item("Setting", "image", "/uploads/same.png")], referenceVideoIn: [item("Motion", "video", "/uploads/same.mp4"), item("Action", "video", "/uploads/same.mp4")] };
+  for (const model of ["Kling 4", "Seedance 2.5"]) {
+    const node = { id: "video", data: { model, duration: "5 seconds", resolution: "1080p", aspectRatio: "16:9" } };
+    const prompt = module.exports.buildVideoModelPrompt(node, "Use @Plate and @Setting with @Motion and @Action.", incoming, {});
+    await module.exports.runVideoModelGeneration({ node, incoming, incomingByNode: {}, prompt, index: 0 });
+    assert.deepEqual(calls.at(-1).referenceImageLabels, model === "Kling 4" ? ["@Plate", "@Setting"] : ["@Plate"]);
+    assert.deepEqual(calls.at(-1).referenceVideoLabels, model === "Kling 4" ? ["@Motion", "@Action"] : ["@Motion"]);
+  }
+});
 
 test("Draft UI fixes preview resolution, preserves normal resolution and disables unsupported providers", () => {
   const data = { resolution: "1080p", seedanceDraft: true };

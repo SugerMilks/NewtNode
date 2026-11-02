@@ -13,6 +13,7 @@ import { applyFilmDirectorAudioPolicyToPrompt, normalizeFilmDirectorAudioMode } 
 import { runSkillDirectorNode } from "../src/nodeRunners/skillDirector.js";
 import { buildVideoGenerationRequest } from "../src/nodeRunners/videoModels.js";
 import { filmDirectorSetupInputIsLocked } from "../src/filmDirectorScenes.js";
+import { isKling4Model } from "../src/kling4.js";
 
 const music = { url: "/uploads/music.wav", label: "Production track" };
 const director = { approach: "music-video", audioMode: "production", musicReference: music, videoModel: "Seedance 2.5" };
@@ -183,6 +184,7 @@ test("Music Video preserves Character identity but excludes competing Character 
   const end = editor.indexOf("function storyboardVideoReferencePromptPiece(", start);
   const dependencies = {
     filmDirectorUsesMusic,
+    isKling4Model,
     directorPackageConnections: (items) => items,
     connectedAudioUrls: () => [music.url],
     connectedCharacterVoiceUrls: () => ["/uploads/voice.wav"],

@@ -57,7 +57,8 @@ try {
 
   const draft = {
     nodes: [{ id: "qa-text", type: "plainText", x: 80, y: 80, data: { title: "Saved brief", text: "Existing project text" } }],
-    edges: [], groups: [], viewport: { x: 0, y: 0, scale: 1 }, projectName: "Saved navigation test", projectId: "qa"
+    edges: [], groups: [], viewport: { x: 0, y: 0, scale: 1 }, projectName: "Saved navigation test", projectId: "qa",
+    workflowFilePath: "/qa/Saved navigation test.json"
   };
   await page.evaluate(({ key, draft }) => localStorage.setItem(key, JSON.stringify(draft)), { key: nodeDraftStorageKey, draft });
   await page.reload(); await canvas.waitFor();
@@ -79,7 +80,7 @@ try {
   assert.equal(await prompt.inputValue(), "Unsaved edits survive tab changes");
   assert.equal(await button("Projects").getAttribute("aria-current"), "page");
 
-  for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }]) {
+  for (const viewport of [{ width: 1440, height: 1000 }, { width: 1920, height: 1080 }, { width: 390, height: 844 }]) {
     await page.setViewportSize(viewport);
     for (const tab of ["Stats", "Settings", "Projects"]) {
       await button(tab).click(); await page.getByRole("navigation").waitFor();
@@ -90,7 +91,23 @@ try {
         assert.ok(bounds.x >= rect.x && bounds.x + bounds.width <= rect.x + rect.width);
       }
     }
+    const status = page.locator(".topbar-status-state");
+    await status.waitFor();
+    const originalStatus = await status.textContent();
+    for (const label of ["Saved", "Unsaved"]) {
+      await status.evaluate((element, text) => { element.textContent = text; }, label);
+      const bounds = await status.boundingBox();
+      const tools = await page.locator('.project-canvas-tabs .canvas-tab-tool').last().boundingBox();
+      const navBounds = await nav.boundingBox();
+      assert.ok(Math.abs(bounds.x + bounds.width - tools.x - tools.width) < 1, `${label} aligns with canvas tools at ${viewport.width}px`);
+      assert.equal(await status.evaluate(element => getComputedStyle(element).fontSize), "10px");
+      assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= viewport.width);
+      assert.ok(viewport.width <= 760 ? bounds.y >= navBounds.y + navBounds.height : bounds.x >= navBounds.x + navBounds.width,
+        "Save status does not overlap navigation");
+    }
+    await status.evaluate((element, text) => { element.textContent = text; }, originalStatus);
     await page.locator(".topbar").screenshot({ path: path.join(directory, `navigation-${viewport.width}.png`) });
+    await page.screenshot({ path: path.join(directory, `status-alignment-${viewport.width}.png`) });
   }
   assert.deepEqual(errors, []); assert.deepEqual(unexpected, []); assert.deepEqual(writes, []);
   console.log(JSON.stringify({ ok: true, directory, paidCalls: 0, checks: ["Projects default", "three tabs", "image/video nodes retained", "Stats legacy history", "Settings", "saved draft restore", "unsaved edits and mounted editor survive navigation", "reload", "desktop/mobile navigation"] }, null, 2));

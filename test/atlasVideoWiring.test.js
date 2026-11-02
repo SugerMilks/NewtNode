@@ -6,7 +6,8 @@ import { createAtlasMedia } from "../server/atlas-media.js";
 import { validateAtlasVideoAssets } from "../server/atlas-validation.js";
 
 const source = await readFile(new URL("../server/index.js", import.meta.url), "utf8");
-const configuration = source.slice(source.indexOf("const atlasMedia = createAtlasMedia("), source.indexOf("\nfunction atlasMediaEnabled()"));
+// Include the shared transport used by both the existing media adapter and Kling 4.
+const configuration = source.slice(source.indexOf("const atlasClient = createAtlasClient("), source.indexOf("\nfunction atlasMediaEnabled()"));
 
 async function setup(t, width = 600) {
   // Do not let test dependency injection hide a missing server import.

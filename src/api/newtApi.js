@@ -1,6 +1,7 @@
 import { scopedMyNewtRequest } from "../myNewt/requestScope.js";
 import { isVideoGenerationRequest } from "../videoJobPolicy.js";
 import { isNanoBanana21Model } from "../nanoBanana21.js";
+import { isKling4Model } from "../kling4.js";
 const localApiPort = import.meta.env?.VITE_API_PORT || "3336";
 const localApiBaseUrl = `http://127.0.0.1:${localApiPort}`;
 
@@ -520,6 +521,10 @@ export const nodeApi = {
   },
 
   async generateVideo(body, label = "Video generation") {
+    if (isKling4Model(body.model)) {
+      const health = await getJson("/api/health", "Could not verify Kling 4 support.");
+      if (health.routes?.kling4 !== true) throw new Error("Restart the NewtNode backend to activate Kling 4. No generation was submitted.");
+    }
     if (body.seedanceDraft === true) {
       const health = await getJson("/api/health", "Could not verify Draft mode support.");
       if (health.routes?.seedanceDrafts !== true || health.routes?.seedanceMultiProviderDrafts !== true) throw new Error("Restart the NewtNode backend to activate multi-provider Draft mode. No generation was submitted.");

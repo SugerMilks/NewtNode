@@ -1,3 +1,5 @@
+import { isReframeNode } from "../../src/cameraCoverage.js";
+
 // Exercise the actual canvas handlers with isolated state, never a saved project.
 export function createConnectionHarness(source, options = {}) {
   function handler(name, nextName, bindings) {
@@ -32,6 +34,7 @@ export function createConnectionHarness(source, options = {}) {
         getConnectionError: options.getConnectionError || (() => ""),
         isAutoAspectNode: node => node?.type === "autoAspect",
         isCoverageNode: node => node?.type === "coverage",
+        isReframeNode,
         isComposerCharacterInputPort: () => false,
         setEdges: update => { state.edges = update(state.edges); },
         updateNode: (id, patch) => { state.patches.push({ id, patch }); },

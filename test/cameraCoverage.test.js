@@ -8,14 +8,14 @@ import { nodeTypeDefinitions } from "../src/nodeRegistry.js";
 import { estimatedNodeWidth } from "../src/nodeGeometry.js";
 
 const shot = (id = "one") => ({ id, label: `Shot ${id}`, originalUrl: "/outputs/original.png", versionId: "original", versions: [{ id: "original", kind: "original", url: "/outputs/original.png" }] });
-test("ReFrame has isolated defaults and a registered, wide node", () => {
+test("ReFrame has isolated defaults and retains legacy width without a standalone menu entry", () => {
   const first = cameraCoverageDefaults(), second = cameraCoverageDefaults(); first.coveragePoses[1].azimuth = 99;
   assert.equal(second.coveragePoses[1].azimuth, -40);
   assert.equal(normalizeCameraCoverageData().coveragePreset, "Coverage");
   assert.equal(first.coverageResolution, "768P"); assert.equal(first.model, "Nano Banana 2.1"); assert.equal(first.coverageAutoRefine, true);
   assert.equal(normalizeCameraCoverageData({ model: "Nano Banana Pro" }).model, "Nano Banana Pro");
   assert.equal(normalizeCameraCoverageData({ coverageAutoRefine: false }).coverageAutoRefine, false);
-  assert.equal(nodeTypeDefinitions.find(n => n.type === "cameraCoverage").label, "ReFrame");
+  assert.equal(nodeTypeDefinitions.some(n => n.type === "cameraCoverage"), false);
   assert.equal(estimatedNodeWidth("cameraCoverage"), 780);
 });
 test("ReFrame migrates only old default titles, preserving saved media and jobs", () => {

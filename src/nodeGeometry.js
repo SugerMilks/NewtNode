@@ -1,3 +1,5 @@
+import { isReframeNode } from "./cameraCoverage.js";
+
 export const contextMenuSize = { width: 190, height: 420, inset: 8 };
 export const outputDrawerWidthLimits = { default: 116, min: 116, max: 480 };
 
@@ -86,13 +88,14 @@ export function estimatedNodeHeight(type) {
 }
 
 export function estimatedNodeRect(node, padding = 0) {
+  const geometryType = isReframeNode(node) ? "cameraCoverage" : node?.type;
   const plainTextSize = node?.type === "plainText" ? normalizePlainTextNodeSize(node.data) : null;
   const storyboardScale = node?.type === "storyboard" ? Math.max(1, Number(node.data?.storyboardScale) || 1) : 1;
   return {
     left: Number(node?.x || 0) - padding,
     top: Number(node?.y || 0) - padding,
-    right: Number(node?.x || 0) + (node?.type === "editor" ? normalizeEditorNodeWidth(node.data?.editorNodeWidth) : plainTextSize?.width || estimatedNodeWidth(node?.type) * storyboardScale) + padding,
-    bottom: Number(node?.y || 0) + (plainTextSize?.height || estimatedNodeHeight(node?.type)) + padding
+    right: Number(node?.x || 0) + (node?.type === "editor" ? normalizeEditorNodeWidth(node.data?.editorNodeWidth) : plainTextSize?.width || estimatedNodeWidth(geometryType) * storyboardScale) + padding,
+    bottom: Number(node?.y || 0) + (plainTextSize?.height || estimatedNodeHeight(geometryType)) + padding
   };
 }
 
