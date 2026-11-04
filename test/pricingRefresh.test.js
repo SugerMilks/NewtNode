@@ -155,7 +155,7 @@ test("refresh persists verified data, keeps secrets out of status, and updates e
   await service.refresh();
   const status = service.status();
   assert.equal(status.running, false);
-  assert.equal(status.sources.openai.applied, 5);
+  assert.equal(status.sources.openai.applied, Object.keys(myNewtModelRates).length + 1);
   assert.equal(status.sources.krea.status, "partial");
   assert.ok(!JSON.stringify(status).includes("test-account-key"));
   assert.ok(!JSON.stringify(status).includes("falAccount"));

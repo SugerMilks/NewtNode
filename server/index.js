@@ -202,8 +202,9 @@ import {
 } from "../src/kreaApi.js";
 import { storyboardBoardGridForAspect } from "../src/storyboardBoardLayout.js";
 import { resolveSmartTextFalModel, resolveSmartTextOpenAiModel } from "../src/smartTextModel.js";
-import { normalizeSmartTextGenerationContext, smartTextOriginalPrompt } from "../src/smartTextPrompt.js";
+import { normalizeSmartTextRequest } from "../src/smartTextPrompt.js";
 import { processSmartText } from "./smart-text.js";
+import { createSmartTextVideoSampler } from "./smart-text-video.js";
 import {
   storyboardDirectorExpansionInstruction,
   storyboardDirectorFramePlan
@@ -394,10 +395,13 @@ const patinaMapCostPerMegapixel = 0.01;
 const falUtilityImageTimeoutMs = Math.max(30000, Number(process.env.FAL_UTILITY_IMAGE_TIMEOUT_MS) || 180000);
 const klingReferenceMaximumBytes = 9.5 * 1024 * 1024;
 const imageGenerationConcurrency = clampInteger(process.env.NEWTNODE_IMAGE_GENERATION_CONCURRENCY, 1, 6, 3);
-const openAiTextModel = resolveSmartTextOpenAiModel(process.env);
+const openAiTextModel = process.env.OPENAI_TEXT_MODEL || "gpt-5.6-luna";
+const smartTextOpenAiModel = resolveSmartTextOpenAiModel(process.env);
+const smartTextFalModel = resolveSmartTextFalModel(process.env);
+const sampleSmartTextVideos = createSmartTextVideoSampler({ resolveAsset: resolveLocalAssetPathFromUrl, probeVideo: probeVideoFile, runFfmpeg });
 let openAiTextApiKey = process.env.OPENAI_TEXT_API_KEY || process.env.OPENAI_API_KEY;
 const preferredTextLlmProvider = String(process.env.TEXT_LLM_PROVIDER || "fal").toLowerCase();
-const falTextModel = resolveSmartTextFalModel(process.env);
+const falTextModel = process.env.FAL_TEXT_MODEL || "openai/gpt-5.6-luna";
 const skillDirectorLlmEndpoint = "openrouter/router";
 const skillDirectorFalModel = process.env.FILM_DIRECTOR_FAL_MODEL || process.env.SKILL_DIRECTOR_FAL_MODEL || creativeFalModel;
 const skillDirectorVisionFalModel = process.env.FILM_DIRECTOR_VISION_FAL_MODEL || process.env.SKILL_DIRECTOR_VISION_FAL_MODEL || skillDirectorFalModel;
@@ -897,6 +901,8 @@ function buildHealthPayload() {
       weeklyPricing: true,
       providerPricing: true,
       smartTextPromptEditor: true,
+      smartTextImageRevisions: true,
+      smartTextVideoReview: true,
       myNewtVoice: true,
       newtPresets: true,
       systemNewtPresets: true,
@@ -983,6 +989,8 @@ function buildHealthPayload() {
     agentLlmProvider: activeLlmProvider("openai"),
     preferredTextLlmProvider,
     falTextModel,
+    smartTextFalModel,
+    smartTextOpenAiModel,
     skillDirectorFalModel,
     skillDirectorVisionFalModel,
     skillDirectorOpenAiModel,
@@ -2123,19 +2131,18 @@ app.post("/api/node/extract-video-frame", async (req, res) => {
 
 app.post("/api/node/process-text", async (req, res) => {
   try {
-    const textInputs = normalizedTextInputs(req.body.textInputs);
     const imageInputs = normalizedMediaInputs(req.body.imageInputs, "image");
     if (Array.isArray(req.body.imageInputs) && req.body.imageInputs.length !== imageInputs.length) {
       return res.status(400).json({ error: "Smart Text supports up to six available local image references. Reconnect missing images or remove extra references." });
     }
-    const text = smartTextOriginalPrompt(req.body.text, imageInputs.length > 0).trim();
-    const generationContext = normalizeSmartTextGenerationContext(req.body.generationContext);
-    if (!text && !textInputs.length && !imageInputs.length) {
-      return res.status(400).json({ error: "Add original prompt text or connect an image to Smart Text." });
+    const videoInputs = normalizedMediaInputs(req.body.videoInputs, "video");
+    if (req.body.videoInputs != null && (!Array.isArray(req.body.videoInputs) || req.body.videoInputs.length !== videoInputs.length)) {
+      return res.status(400).json({ error: "Smart Text needs available local video references. Reconnect missing videos or remove extra references." });
     }
-
-    const result = await processTextWithLlm({ text, textInputs, imageInputs, generationContext });
-    const cost = estimateTextProcessingCost({ provider: result.provider, usage: result.usage, helperUsages: result.helperUsages, mainMediaType: imageInputs.length ? "image" : "text" });
+    const request = normalizeSmartTextRequest({ ...req.body, imageInputs, videoInputs });
+    const { text, generationContext, action, revisionNote } = request;
+    const result = await processTextWithLlm(request);
+    const cost = estimateTextProcessingCost({ provider: result.provider, usage: result.usage, helperUsages: result.helperUsages, mainMediaType: imageInputs.length || videoInputs.length ? "image" : "text" });
     const usageRecord = result.usage || result.helperUsages?.length ? { request: result.usage || null, helpers: result.helperUsages || [] } : null;
 
     await appendHistory({
@@ -2145,16 +2152,19 @@ app.post("/api/node/process-text", async (req, res) => {
       provider: result.provider,
       modelName: result.model,
       endpoint: result.endpoint,
-      mode: "Text processing",
-      prompt: text || textInputs.map((item) => item.text).join("\n\n"),
+      mode: action === "revise" ? "Smart Text revision" : "Text processing",
+      prompt: text,
       submittedPrompt: result.submittedPrompt || text,
       project: projectFromBody(req.body),
       node: nodeFromBody(req.body),
       settings: {
         model: result.model,
         provider: result.provider,
-        textInputCount: textInputs.length,
+        action,
+        ...(action === "revise" ? { revisionNote } : {}),
         imageInputCount: imageInputs.length,
+        videoInputCount: videoInputs.length,
+        ...(videoInputs.length ? { videoReview: result.videoReview } : {}),
         generationContext
       },
       cost,
@@ -10004,6 +10014,7 @@ async function runTextLlm({
       logs: true
     }, { route, model: falModel }, route.startsWith("storyboard-")
       ? createStoryboardFalClient({ credentials: key, endpoint: skillDirectorLlmEndpoint, model: falModel })
+      : route === "smart-text" ? createSingleSubmissionFalClient({ credentials: key, endpoint: skillDirectorLlmEndpoint, model: falModel })
       : createFalClient({ credentials: key }));
     const text = extractFalText(data).trim();
     return checkedCreativeLlmResult({
@@ -10083,6 +10094,7 @@ async function runMediaDescriptionLlm({
       logs: true
     }, { route, model: falModel }, route.startsWith("storyboard-")
       ? createStoryboardFalClient({ credentials: key, endpoint, model: falModel })
+      : route === "smart-text" ? createSingleSubmissionFalClient({ credentials: key, endpoint, model: falModel })
       : createFalClient({ credentials: key }));
     return checkedCreativeLlmResult({
       text: extractFalText(data).trim(),
@@ -10121,7 +10133,7 @@ async function runMediaDescriptionLlm({
 }
 
 async function processTextWithLlm(request) {
-  return processSmartText(request, { runTextLlm, runMediaDescriptionLlm, falTextModel, falVisionTextModel, openAiTextModel });
+  return processSmartText(request, { runTextLlm, runMediaDescriptionLlm, falTextModel: smartTextFalModel, openAiTextModel: smartTextOpenAiModel, sampleVideos: sampleSmartTextVideos });
 }
 
 const skillDirectorFinalPromptMaxChars = 7000;

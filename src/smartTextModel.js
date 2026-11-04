@@ -1,5 +1,5 @@
-export const smartTextFalDefaultModel = "openai/gpt-5.6-luna";
-export const smartTextOpenAiDefaultModel = "gpt-5.6-luna";
+export const smartTextFalDefaultModel = "openai/gpt-6-sol";
+export const smartTextOpenAiDefaultModel = "gpt-6-sol";
 
 export function resolveSmartTextFalModel(environment = {}) {
   return String(

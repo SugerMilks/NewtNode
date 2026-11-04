@@ -366,8 +366,8 @@ import {
   filmDirectorAudioModeLabel,
   normalizeFilmDirectorAudioMode
 } from "./filmDirectorAudio.js";
-import { runTextNodeProcessing } from "./nodeRunners/textModels.js";
-import { smartTextGenerationContext } from "./smartTextPrompt.js";
+import { runTextNodeProcessing, smartTextCompletionPatch } from "./nodeRunners/textModels.js";
+import { smartTextGenerationContext, migrateSmartTextInputs } from "./smartTextPrompt.js";
 import {
   buildUtilityVideoRequest,
   buildVideoGenerationRequest,
@@ -5333,6 +5333,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
     if (source.type === "utility") {
       if (utilityOutputType(source) === "video") {
+        if (target.type === "text" && to.port === "videoIn") return "";
         if (target.type === "preview" && to.port === "sourceIn") return "";
         if (target.type === "videoModel" && to.port === "referenceVideoIn") return "";
         if (target.type === "skillDirector" && to.port === "referenceVideoIn") return "";
@@ -5438,17 +5439,16 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     }
 
     if (target?.type === "text") {
-      if (to.port === "textIn") {
-        if (["plainText", "text", "skillDirector", "imageModel", "videoModel"].includes(source.type)) return "";
-        return "Smart Text Model input accepts text outputs";
+      if (to.port === "videoIn") {
+        if (["video", "videoModel", "editor"].includes(source.type)) return "";
+        return "Video input accepts video outputs";
       }
-
       if (to.port === "imageIn") {
         if (["image", "imageModel", "transfer"].includes(source.type)) return "";
         return "Image input accepts image outputs";
       }
 
-      return "Smart Text accepts text and image inputs";
+      return "Smart Text accepts image and video inputs";
     }
 
     if (target?.type === "preview") {
@@ -5869,20 +5869,19 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       }
 
       if (currentNode.type === "text") {
+        const textAction = action === "revise-smart-text" ? "revise" : "generate";
         const processed = await runTextNodeProcessing({
           node: currentNode,
           incoming,
           imageInputs: connectedAssetItems(incoming.imageIn).filter((item) => item.type === "image"),
+          videoInputs: connectedAssetItems(incoming.videoIn).filter((item) => item.type === "video"),
           generationContext: smartTextGenerationContext(currentNode.id, nodesRef.current, edgesRef.current),
           workflowContext: requestContext,
-          sourceLabel
+          action: textAction
         });
-        updateNode(currentNode.id, {
-          status: "complete",
-          error: "",
-          resultText: processed.text,
-          lastRunModel: processed.model
-        });
+        updateNode(currentNode.id, smartTextCompletionPatch(currentNode,
+          nodesRef.current.find(item => item.id === currentNode.id), processed, textAction));
+        loadOutputHistory();
         return { status: "complete" };
       }
 
@@ -11900,8 +11899,8 @@ function getNodeConfig(type) {
     text: {
       icon: Type,
       input: [
-        { id: "textIn", label: "Text", color: portColors.prompt },
-        { id: "imageIn", label: "Image", color: portColors.image }
+        { id: "imageIn", label: "Image", color: portColors.image },
+        { id: "videoIn", label: "Video", color: portColors.video }
       ],
       output: [{ id: "promptOut", label: "Prompt", color: portColors.prompt }]
     },
@@ -15283,8 +15282,9 @@ function normalizeEditorGraph(nodes = [], edges = [], groups = []) {
   });
 
   const migrated = migrateStoryboardDirectors(normalizedNodes, edges, { sceneText: directorPackageStoryboardSceneDescription, usesReference: directorSceneUsesConnection });
-  normalizedNodes.splice(0, normalizedNodes.length, ...migrated.nodes);
-  edges = migrated.edges;
+  const smartTextMigration = migrateSmartTextInputs(migrated.nodes, migrated.edges);
+  normalizedNodes.splice(0, normalizedNodes.length, ...smartTextMigration.nodes);
+  edges = smartTextMigration.edges;
   const nodeMap = new Map(normalizedNodes.map((node) => [node.id, node]));
   const normalizedEdges = [];
 

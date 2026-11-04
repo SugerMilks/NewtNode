@@ -19,6 +19,8 @@ const requiredHealthRoutes = [
   "myNewtRemoteRemembered",
   "providerPricing",
   "smartTextPromptEditor",
+  "smartTextImageRevisions",
+  "smartTextVideoReview",
   "creativeReasoningV2",
   "storyboardBalancedQc",
   "storyboardShotList",

@@ -22,6 +22,8 @@ export const myNewtModelRates = Object.freeze({
   "gpt-5.6-luna": { input: 0.2, cached: 0.02, writes: 0.25, output: 1.2 },
   "gpt-5.6-terra": { input: 2, cached: 0.2, writes: 2.5, output: 12 },
   "gpt-5.6-sol": { input: 4, cached: 0.4, writes: 5, output: 20 },
+  // GPT-6 Sol Standard rates verified 2026-11-04; used by Smart Text, not agent model selection.
+  "gpt-6-sol": { input: 2, cached: 0.2, writes: 2.5, output: 10, long: { input: 4, cached: 0.4, writes: 5, output: 15 } },
   "gpt-6-astra": { input: 10, cached: 1, writes: 12.5, output: 50 }
 });
 

@@ -18,9 +18,9 @@ function catalog() {
   })) };
 }
 
-test("weekly Atlas refresh includes both LLMs at standard rates, ignoring promotional prices", () => {
-  const results = parseAtlasPricing(catalog()).filter(item => item.id === "atlas:openai/gpt-6-astra" || item.id === "atlas:openai/gpt-5.6-luna");
-  assert.equal(results.length, 2);
+test("weekly Atlas refresh includes agent and Smart Text LLMs at standard rates, ignoring promotional prices", () => {
+  const results = parseAtlasPricing(catalog()).filter(item => Object.keys(atlasLlmRates).some(id => item.id === `atlas:openai/${id}`));
+  assert.equal(results.length, 3);
   for (const result of results) {
     assert.equal(result.issue, undefined); assert.equal(result.entry.unit, "million tokens");
     assert.equal(result.entry.points.length, 8);
@@ -46,7 +46,7 @@ test("ambiguous, partial or changed Atlas billing contracts do not replace verif
 
 test("Atlas LLM estimates use the existing live catalog and a captured rate snapshot", (t) => {
   const data = catalog();
-  data.data[1].price_rows[0].official_price = "12";
+  data.data.find(item => item.id === "openai/gpt-6-astra").price_rows[0].official_price = "12";
   const entries = Object.fromEntries(parseAtlasLlmPricing(data).map(item => [item.id, item.entry]));
   configurePricingReader(() => ({ version: 1, entries, revision: "atlas-test" }));
   t.after(() => configurePricingReader(() => ({ version: 1, entries: {}, revision: "bundled" })));

@@ -2607,6 +2607,25 @@
   resize: vertical;
 }
 
+.smart-text-revisions {
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding-top: 10px;
+}
+
+.smart-text-revisions summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.smart-text-revisions .text-field-group {
+  margin: 12px 0 10px;
+}
+
+.smart-text-revisions textarea {
+  min-height: 72px;
+}
+
 .text-node-body small {
   color: rgba(244, 240, 232, 0.6);
   font-size: 12px;

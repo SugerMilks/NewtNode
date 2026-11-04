@@ -86,15 +86,16 @@ test("background skills protect revisions, single-take pacing and same-CUT conti
 // Exercise the actual server adapters without importing/starting the application's live server.
 const server = await readFile(new URL("../server/index.js", import.meta.url), "utf8");
 const adapters = server.slice(server.indexOf("async function runTextLlm("), server.indexOf("async function processTextWithLlm("));
-function adapterFixture({ provider = "openai", data, onRequest = () => {} } = {}) {
+function adapterFixture({ provider = "openai", data, onRequest = () => {}, onUpload = () => {} } = {}) {
   const deps = {
     requireActiveLlmProvider: () => provider, preferredTextLlmProvider: provider,
     falTextModel: creativeFalModel, falVisionTextModel: creativeFalModel, openAiTextModel: creativeOpenAiModel,
     skillDirectorLlmEndpoint: "openrouter/router", openAiTextApiKey: "mock-key",
     openAiLlmBody, falLlmInput, creativeFinalOutputText, validateCreativeResponse, myNewtTokenCost,
     llmResponseEndpoints, llmResponseModel, llmUsageCost, currentAtlasLlmRates,
-    activeLlmCredential: () => "mock-key", createFalClient: (options) => options,
+    activeLlmCredential: () => "mock-key", createFalClient: (options) => ({ ...options, storage: { upload: async file => { onUpload(file); return `https://mock.invalid/${file.name}`; } } }),
     createStoryboardFalClient: (options) => ({ ...options, storyboardRecovery: true }),
+    createSingleSubmissionFalClient: (options) => ({ ...options, singleSubmission: true }),
     requestLlmResponse: (body, connection) => requestLlmResponse(body, connection, {
       request: async (url, options) => { onRequest(url, JSON.parse(options.body), options); return { ok: true, json: async () => data }; }
     }),
@@ -245,25 +246,55 @@ test("Smart Text sends images and the user's brief together through Fal, Atlas a
     const calls = [];
     const api = adapterFixture({ provider,
       data: provider === "fal" ? { output: "@Park in soft light", usage: { cost: 0.02 } } : { output_text: "@Park in soft light", usage: { input_tokens: 1000, output_tokens: 100 } },
-      onRequest: (url, body) => calls.push({ url, body }) });
+      onRequest: (url, body, _context, client) => calls.push({ url, body, client }) });
     const result = await processSmartText({ text: "Keep @Park but warm the light", imageInputs: [{ url: "/outputs/full.png", label: "@Park" }], generationContext: { target: "image" } }, {
-      ...api, falTextModel: "openai/gpt-5.6-luna", falVisionTextModel: "openai/gpt-5.6-luna", openAiTextModel: "gpt-5.6-luna"
+      ...api, falTextModel: "openai/gpt-6-sol", openAiTextModel: "gpt-6-sol"
     });
     assert.equal(calls.length, 1);
     const { url, body } = calls[0];
     if (provider === "fal") {
-      assert.equal(url, "openrouter/router/vision"); assert.equal(body.model, "openai/gpt-5.6-luna");
+      assert.equal(url, "openrouter/router/vision"); assert.equal(body.model, "openai/gpt-6-sol");
+      assert.equal(calls[0].client.singleSubmission, true);
       assert.deepEqual(body.image_urls, ["/outputs/full.png"]);
       assert.match(body.prompt, /Keep @Park but warm the light/);
       assert.match(body.system_prompt, /one still composition/);
     } else {
-      assert.equal(body.model, provider === "atlas" ? "openai/gpt-5.6-luna" : "gpt-5.6-luna");
+      assert.equal(body.model, provider === "atlas" ? "openai/gpt-6-sol" : "gpt-6-sol");
       assert.match(body.instructions, /one still composition/);
       assert.match(body.input[0].content[0].text, /Keep @Park but warm the light/);
       assert.equal(Buffer.from(body.input[0].content[2].image_url.split(",")[1], "base64").toString(), "full-resolution-reference");
     }
     assert.equal(result.text, "@Park in soft light"); assert.deepEqual(result.helperUsages, []);
     assert.ok(result.usage.cost > 0);
+  }
+});
+
+test("Smart Text video samples use real image attachments through Fal, Atlas and OpenAI", async () => {
+  const sample = { type: "image", label: "Video 1 (@Clip), sample 1/1, 0.000s of 5.000s", asset: { buffer: Buffer.from("sampled-jpeg"), fileName: "sample.jpg", mimeType: "image/jpeg" } };
+  for (const provider of ["openai", "fal", "atlas"]) {
+    let calls = 0; const uploads = [];
+    const api = adapterFixture({ provider, onUpload: file => uploads.push(file),
+      data: provider === "fal" ? { output: "Still frame prompt", usage: { cost: 0.02 } } : { output_text: "Still frame prompt", usage: { input_tokens: 1000, output_tokens: 100 } },
+      onRequest: (url, body, _context, client) => {
+        calls++;
+        if (provider === "fal") {
+          assert.equal(url, "openrouter/router/vision"); assert.equal(client.singleSubmission, true);
+          assert.deepEqual(body.image_urls, ["https://mock.invalid/sample.jpg"]);
+          assert.equal(body.video_urls, undefined); assert.match(body.prompt, /Video 1 \(@Clip\)/);
+        } else {
+          const content = body.input[0].content;
+          assert.equal(content[1].text, sample.label);
+          assert.match(content[2].image_url, /^data:image\/jpeg;base64,/);
+          assert.equal(Buffer.from(content[2].image_url.split(",")[1], "base64").toString(), "sampled-jpeg");
+        }
+      } });
+    await processSmartText({ videoInputs: [{ url: "/uploads/clip.mp4" }] }, { ...api,
+      falTextModel: "openai/gpt-6-sol", openAiTextModel: "gpt-6-sol",
+      sampleVideos: async () => ({ frames: [sample], videos: [{ frameCount: 1 }] })
+    });
+    assert.equal(calls, 1);
+    assert.equal(uploads.length, provider === "fal" ? 1 : 0);
+    if (uploads.length) { assert.equal(uploads[0].type, "image/jpeg"); assert.equal(await uploads[0].text(), "sampled-jpeg"); }
   }
 });
 

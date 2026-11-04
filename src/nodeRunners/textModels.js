@@ -1,21 +1,21 @@
 import { nodeApi } from "../api/newtApi.js";
 import { workflowContextPayload } from "../workflowContext.js";
-import { smartTextOriginalPrompt, normalizeSmartTextGenerationContext } from "../smartTextPrompt.js";
+import { normalizeSmartTextRequest } from "../smartTextPrompt.js";
 
 export async function runTextNodeProcessing({
   node,
-  incoming,
+  incoming = {},
   imageInputs = [],
+  videoInputs = [],
   generationContext,
   workflowContext,
-  sourceLabel
+  action = "generate"
 }) {
   if ((incoming.imageIn?.length || 0) > imageInputs.length) throw new Error("A connected image is not ready. Generate or upload it before running Smart Text.");
+  if ((incoming.videoIn?.length || 0) > videoInputs.length) throw new Error("A connected video is not ready. Generate, upload or export it before running Smart Text.");
   const { response, data } = await nodeApi.processText({
-    text: smartTextOriginalPrompt(node.data.text, imageInputs.length > 0),
-    textInputs: connectedTextInputItems(incoming.textIn, sourceLabel),
-    imageInputs,
-    generationContext: normalizeSmartTextGenerationContext(generationContext),
+    ...normalizeSmartTextRequest({ text: node.data.text, imageInputs, videoInputs, generationContext, action,
+      currentPrompt: node.data.resultText, revisionNote: node.data.smartTextRevision }),
     ...workflowContextPayload(workflowContext),
     nodeId: node.id,
     nodeTitle: node.data.title
@@ -29,11 +29,9 @@ export async function runTextNodeProcessing({
   };
 }
 
-function connectedTextInputItems(items = [], sourceLabel) {
-  return items
-    .map(({ source }) => ({
-      label: sourceLabel(source),
-      text: source.type === "plainText" ? source.data.text : source.type === "text" ? source.data.resultText || source.data.text : source.data.resultText || source.data.prompt
-    }))
-    .filter((item) => item.text);
+export function smartTextCompletionPatch(submittedNode, liveNode, processed, action) {
+  return {
+    status: "complete", error: "", resultText: processed.text, lastRunModel: processed.model,
+    ...(action === "revise" && liveNode?.data.smartTextRevision === submittedNode.data.smartTextRevision ? { smartTextRevision: "" } : {})
+  };
 }

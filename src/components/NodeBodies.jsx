@@ -38,7 +38,7 @@ import {
 import { MediaPreview, UploadIcon } from "./MediaViews.jsx";
 import { DirectorTaskStatus } from "./DirectorTaskStatus.jsx";
 import { NodeRow, OutputPortRow, PortHandle } from "./NodePorts.jsx";
-import { smartTextImagePrompt } from "../smartTextPrompt.js";
+import { smartTextOriginalPrompt } from "../smartTextPrompt.js";
 import { supportsSeedanceDraft, seedanceDraftHint } from "../seedanceDraft.js";
 
 export function PlainTextNodeBody({ node, outputPort, onUpdate, onConnectStart, onDisconnectInput, connectedPortKeys }) {
@@ -56,25 +56,29 @@ export function PlainTextNodeBody({ node, outputPort, onUpdate, onConnectStart, 
 
 export function TextModelNodeBody({ node, config, outputPort, incoming, onUpdate, onRun, running, onConnectStart, onDisconnectInput, connectedPortKeys }) {
   const hasOutputPanel = Boolean(node.data.resultText) || node.data.status === "running" || node.data.status === "complete";
-  const textPort = config.input.find((port) => port.id === "textIn");
   const imagePort = config.input.find((port) => port.id === "imageIn");
+  const videoPort = config.input.find((port) => port.id === "videoIn");
+  const hasOutput = Boolean(String(node.data.resultText || "").trim());
+  const revisionNote = node.data.smartTextRevision || "";
   const hasImage = Boolean(incoming.imageIn?.length);
-  const previousImageConnection = useRef(null);
+  const hasVideo = Boolean(incoming.videoIn?.length);
+  const previousMediaConnection = useRef(null);
   useEffect(() => {
-    const justConnected = hasImage && (previousImageConnection.current?.id !== node.id || !previousImageConnection.current?.hasImage);
-    previousImageConnection.current = { id: node.id, hasImage };
-    if (justConnected && !String(node.data.text || "").trim()) onUpdate(node.id, { text: smartTextImagePrompt });
-  }, [hasImage, node.id, node.data.text, onUpdate]);
+    const previous = previousMediaConnection.current;
+    const justConnected = (hasImage && (previous?.id !== node.id || !previous.hasImage))
+      || (hasVideo && (previous?.id !== node.id || !previous.hasVideo));
+    previousMediaConnection.current = { id: node.id, hasImage, hasVideo };
+    if (justConnected && !String(node.data.text || "").trim()) onUpdate(node.id, { text: smartTextOriginalPrompt("", hasImage, hasVideo) });
+  }, [hasImage, hasVideo, node.id, node.data.text, onUpdate]);
   const hasRunInput =
     Boolean(String(node.data.text || "").trim()) ||
-    Boolean(incoming.textIn?.length) ||
-    hasImage;
+    hasImage || hasVideo;
 
   return (
     <div className="node-body text-node-body">
       <OutputPortRow node={node} port={outputPort} onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
       <div className="text-input-port-stack" aria-label="Smart Text Model node inputs">
-        {[textPort, imagePort].filter(Boolean).map((port) => (
+        {[imagePort, videoPort].filter(Boolean).map((port) => (
           <PortHandle
             key={port.id}
             node={node}
@@ -95,6 +99,8 @@ export function TextModelNodeBody({ node, config, outputPort, incoming, onUpdate
           <label className="text-field-group">
             <span>Output</span>
             <textarea
+              aria-label="Smart Text output"
+              readOnly={running}
               value={node.data.resultText || ""}
               placeholder={running ? "Running..." : "Output will appear here"}
               onChange={(event) => onUpdate(node.id, { resultText: event.target.value })}
@@ -103,8 +109,22 @@ export function TextModelNodeBody({ node, config, outputPort, incoming, onUpdate
         )}
       </div>
       <button className="run-node-button" onClick={() => onRun(node)} disabled={running || !hasRunInput}>
-        {running ? "Running..." : "Run Smart Text Model"}
+        {running ? "Running..." : "Improve Prompt"}
       </button>
+      {hasOutput && (
+        <details className="smart-text-revisions">
+          <summary>Revisions</summary>
+          <label className="text-field-group">
+            <span>Revision note</span>
+            <textarea aria-label="Smart Text revision note" value={revisionNote}
+              onChange={event => onUpdate(node.id, { smartTextRevision: event.target.value })} />
+          </label>
+          <button type="button" className="run-node-button" disabled={running || !revisionNote.trim()}
+            onClick={() => onRun(node, "revise-smart-text")}>
+            <WandSparkles size={15} /> Apply Revision
+          </button>
+        </details>
+      )}
       {node.data.lastRunModel && <small className="upload-status">Processed with {node.data.lastRunModel}</small>}
       {node.data.error && <small className="upload-error">{node.data.error}</small>}
     </div>

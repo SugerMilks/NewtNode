@@ -69,7 +69,7 @@ export function parseOpenAiPricing(markdown) {
   const table = tokens[heading + 1]?.type === "table" ? tokens[heading + 1] : tokens.slice(heading + 1).find((token) => token.type !== "space");
   const headers = ["Model", ...["Short", "Long"].flatMap((context) => ["input", "cached input", "cache writes", "output"].map((metric) => `${context} context ${metric}`))];
   if (table?.type !== "table" || JSON.stringify(table.header.map((cell) => cell.text)) !== JSON.stringify(headers)) throw new Error("OpenAI pricing columns changed; review required.");
-  const results = ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol", "gpt-6-astra"].map((model) => {
+  const results = ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol", "gpt-6-sol", "gpt-6-astra"].map((model) => {
     const rows = table.rows.filter((row) => row[0].text === model);
     const result = { id: `openai:${model}`, label: model, source: OPENAI_PRICING_URL };
     if (rows.length !== 1) return { ...result, issue: "Model missing from Standard price table." };

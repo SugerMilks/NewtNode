@@ -8,7 +8,9 @@ import {
   smartTextOpenAiDefaultModel
 } from "../src/smartTextModel.js";
 
-test("Smart Text defaults to GPT-5.6 Luna for Fal and direct OpenAI", () => {
+test("Smart Text defaults to the cheaper GPT-6 Sol for Fal and direct OpenAI", () => {
+  assert.equal(smartTextFalDefaultModel, "openai/gpt-6-sol");
+  assert.equal(smartTextOpenAiDefaultModel, "gpt-6-sol");
   assert.equal(resolveSmartTextFalModel(), smartTextFalDefaultModel);
   assert.equal(resolveSmartTextOpenAiModel(), smartTextOpenAiDefaultModel);
 });

@@ -16,6 +16,11 @@ function ensureOk(response, data, fallbackMessage) {
 }
 
 export async function fetchJsonApi(path, options = {}, label = "Request") {
+  if (path === "/api/node/process-text") {
+    const health = await getJson("/api/health", "Could not verify Smart Text support.");
+    if (health.routes?.smartTextImageRevisions !== true) throw new Error("Restart NewtNode to activate the updated Smart Text and revisions. No prompt request was submitted.");
+    if (JSON.parse(options.body || "{}").videoInputs?.length && health.routes?.smartTextVideoReview !== true) throw new Error("Restart NewtNode to activate Smart Text video review. No prompt request was submitted.");
+  }
   if (["/api/output/validate", "/api/output/export"].includes(path) && ["svg", "alpha"].includes(JSON.parse(options.body || "{}").destinations?.image?.format)) {
     const health = await getJson("/api/health", "Could not verify Vector export support.");
     if (health.routes?.vectorArtworkEditor !== true) throw Object.assign(new Error("Restart NewtNode to activate SVG and alpha export. No files were exported."), { status: 409 });
@@ -80,7 +85,7 @@ export async function fetchJsonApi(path, options = {}, label = "Request") {
     }
   }
   const videoRequest = isVideoGenerationRequest(path, options);
-  if (videoRequest || isImageModelRequest(path, options) || path.startsWith("/api/node/camera-coverage") || path === "/api/node/ideogram-vector" || path === "/api/node/explore-plan" || /^\/api\/node\/storyboard-(?:plan|plan-v2|revise|review|qc|script-(?:inspect|page|analyze|build))$/.test(path)) {
+  if (videoRequest || isImageModelRequest(path, options) || path === "/api/node/process-text" || path.startsWith("/api/node/camera-coverage") || path === "/api/node/ideogram-vector" || path === "/api/node/explore-plan" || /^\/api\/node\/storyboard-(?:plan|plan-v2|revise|review|qc|script-(?:inspect|page|analyze|build))$/.test(path)) {
     // Never replay a paid media POST after an uncertain response, including via Newt.
     try {
       const response = await fetch(requestUrl, options);
