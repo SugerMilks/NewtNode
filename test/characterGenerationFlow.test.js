@@ -220,6 +220,18 @@ test("real Character lock preserves an explicitly selected custom sheet without 
   assert.equal(app.requests().length, 0);
 });
 
+test("custom-only lock needs no portrait, wardrobe or generation even with CU and Auto Wardrobe enabled", async (t) => {
+  const app = editor(t, { title: "Character", characterName: "Emma", characterPortrait: null,
+    characterWardrobes: [], characterSheetVariants: [], characterCustomSheets: [{ id: "client", localUrl: "/uploads/custom.png" }],
+    cuVideoGeneration: true, autoWardrobe: true, activeCharacterSheetId: "custom:client" });
+  await app.activate();
+  assert.equal(app.data().locked, true); assert.equal(app.data().activated, true);
+  assert.equal(app.data().resultUrl, "/uploads/custom.png");
+  assert.equal(library.characterOutputReference(app.data(), { video: true }).url, "/uploads/custom.png");
+  assert.equal(app.requests().length, 0); assert.deepEqual(app.data().characterWardrobes, []);
+  assert.equal(app.data().characterBaseSheet, undefined);
+});
+
 for (const cinematic of [false, true]) {
   test(`Non-Human replaces human base, CU and wardrobe prompts with Cinematic ${cinematic}`, async (t) => {
     const before = existingCharacter({ cinematic });

@@ -4,7 +4,7 @@ Explore develops several art directions from one brief, then generates individua
 
 ## First run
 
-Write a brief, optionally connect assets, and click Explore. Defaults are nine directions, one image each, OpenAI Image 2.5 Flare, medium quality, 2K and 16:9. A new node falls back to an enabled model and its supported format if necessary; saved selections are not silently changed. Settings offer task, style family, creative range, reference influence, Grade, image model, format and direction count (one to 25).
+Write a brief, optionally connect assets, and click Explore. Defaults are nine directions, one image each, OpenAI Image 2.6 Flare, medium quality, 2K and 16:9. A new node falls back to an enabled model and its supported format if necessary; saved 2.5 selections upgrade to the matching 2.6 variant while other selections are preserved. Settings offer task, style family, creative range, reference influence, Grade, image model, format and direction count (one to 25).
 
 Grade uses the same named presets as Style, defaulting to None. It guides both planning and image generation without changing product/character identity or explicit brand colors. The selected image's direction details include the grade used for that image. Style Family and Grade in Settings replace the former Style input; describe custom palette requirements in the brief. Changing future settings does not modify old images or their saved prompts.
 

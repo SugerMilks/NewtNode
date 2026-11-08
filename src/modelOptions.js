@@ -1,4 +1,4 @@
-import { openAiImage25Models, isOpenAiImage25Model } from "./openAiImage25.js";
+import { openAiImage26Models, isOpenAiImage26Model, migrateOpenAiImagePreferences } from "./openAiImage26.js";
 import { seedream5ProModelName, isSeedream5ProModel } from "./seedream5Pro.js";
 import { nanoBanana21ModelName, isNanoBanana21Model } from "./nanoBanana21.js";
 import { kling4ModelName } from "./kling4.js";
@@ -35,19 +35,19 @@ export const imageModelNames = {
   nanoBanana21: nanoBanana21ModelName,
   nanoBananaPro: "Nano Banana Pro",
   openAiImage2: "OpenAI Image 2",
-  openAiImage25Sunburst: openAiImage25Models.sunburst,
-  openAiImage25Flare: openAiImage25Models.flare
+  openAiImage26Sunburst: openAiImage26Models.sunburst,
+  openAiImage26Flare: openAiImage26Models.flare
 };
 export const imageModelOptions = [
   imageModelNames.nanoBanana21,
   imageModelNames.nanoBananaPro,
   imageModelNames.openAiImage2,
-  imageModelNames.openAiImage25Sunburst,
-  imageModelNames.openAiImage25Flare,
+  imageModelNames.openAiImage26Sunburst,
+  imageModelNames.openAiImage26Flare,
   imageModelNames.seedream5Pro
 ];
-export const creativeImageDefaultModel = imageModelNames.openAiImage25Sunburst;
-export const storyboardImageDefaultModel = imageModelNames.openAiImage25Flare;
+export const creativeImageDefaultModel = imageModelNames.openAiImage26Sunburst;
+export const storyboardImageDefaultModel = imageModelNames.openAiImage26Flare;
 export const coverageModelOptions = [
   creativeImageDefaultModel,
   imageModelNames.openAiImage2,
@@ -95,7 +95,7 @@ export const stylePresetPrompts = {
   "Photography Film":
     "High-end color photography image with refurbished vintage lens, shot on real analog camera with real photography film, fine film grain, realistic lens softness, slight atmospheric haze, imperfect real-camera texture, natural and authentic artistic image with unique compositions and style.",
   "Painterly 3D":
-    "Cinematic painterly 3D animation with expressive hand-painted textures, graphic 2D accents layered over dimensional animation, sculpted features, slightly exaggerated proportions, visible brushwork, dramatic chiaroscuro lighting, rich jewel tones contrasted with smoky shadows, atmospheric haze, elegant steampunk-fantasy design, emotionally intense, dynamic asymmetrical composition, concept-art finish, sophisticated prestige-animation aesthetic, no text, no watermark.",
+    "Cinematic painterly 3D animation blending dimensional realism with expressive hand-painted artistry. Sculpted forms, visible brushwork, intentional painted color transitions, and stylized edges integrated into the surfaces.\n\nIlluminate these painted surfaces with believable cinematic 3D lighting: directional light that wraps around forms, soft bounced light, grounded contact shadows, material-sensitive highlights, and atmospheric depth. Maintain coherent light direction and spatial relationships across subjects and surroundings. Shapes should feel solid and physically present, while textures and shading retain an artist's hand. A balanced hybrid of painted illustration and dimensional rendering, neither a flat painting nor a glossy, plastic CG image.\n\nRich color depth, controlled chiaroscuro, and sophisticated animated-feature finish. Preserve brushwork in both illuminated and shadowed areas.\n\nApply this treatment only to the subjects and scene specified in the prompt and references. This preset controls rendering and visual treatment, not subject matter, setting, wardrobe, props, architecture, or historical era. Do not introduce unrelated objects or decorative motifs. Preserve specified identities, objects, and scene relationships. Explicit camera, framing, lighting, and color-grade instructions take precedence. Do not add text or watermarks.",
   "80s Animation":
     "Hand-drawn 2D animation inspired by 1980s Saturday-morning cartoons, bold black outlines, simplified features, airbrushed cel shading, saturated color palette, painted background, very subtle film grain, very subtle analog VHS softness, retro-futuristic atmosphere, dynamic composition, authentic animation-cel appearance, no text, no watermark.",
   "90s Animation":
@@ -191,11 +191,11 @@ export const videoModelOptions = [
   videoModelNames.minimaxH3
 ];
 export const defaultModelPreferences = {
-  image: Object.fromEntries(imageModelOptions.map((model) => [model, model === imageModelNames.openAiImage2 || isOpenAiImage25Model(model) || isSeedream5ProModel(model) || isNanoBanana21Model(model)])),
+  image: Object.fromEntries(imageModelOptions.map((model) => [model, model === imageModelNames.openAiImage2 || isOpenAiImage26Model(model) || isSeedream5ProModel(model) || isNanoBanana21Model(model)])),
   video: Object.fromEntries(videoModelOptions.map((model) => [model, true]))
 };
 export function normalizeModelPreferences(value = {}) {
-  const incomingImage = value?.image && typeof value.image === "object" ? value.image : {};
+  const incomingImage = migrateOpenAiImagePreferences(value?.image && typeof value.image === "object" ? value.image : {});
   const incomingVideo = value?.video && typeof value.video === "object" ? value.video : {};
   const image = Object.fromEntries(imageModelOptions.map((model) => [model, Boolean(incomingImage[model] ?? defaultModelPreferences.image[model])]));
   const video = Object.fromEntries(videoModelOptions.map((model) => [model, Boolean(incomingVideo[model] ?? defaultModelPreferences.video[model])]));

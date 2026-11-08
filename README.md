@@ -31,9 +31,9 @@ Current release: `v3.0.0-beta.0`
 - **Director and Storyboard**: Build structured shot direction, continuity-aware boards, editable layouts, compiled board references, frame exports, and client-ready PDFs.
 - **Frame It**: Pose and frame multiple 3D figures, save complete compositions, and capture guide images for downstream generation.
 - **Preview editing**: Assemble mixed-aspect layouts and apply crop, rotate, curves, color, text, and masked inpainting edits while keeping full-resolution source assets.
-- **Current image models**: Work with GPT Image 2, GPT Image 2.5 Sunburst and Flare, Nano Banana Pro, and Nano Banana 2 from the same reference-aware image workflow.
-- **GPT Image 2.5**: Sunburst and Flare are separate Image Model choices, using enabled providers in Fal > Krea > Atlas order. Both offer Low through Maximum quality. Fal supports 1K/2K/4K output, reference edits (up to 16 images), masks, and transparent PNGs. Krea supports 1K/2K/4K at nine ratios, including 16:9, with up to 10 references; only Flare exposes background controls there. Controls adapt to the active provider; Atlas uses its own size/reference limits. Pricing is variable and remains unpriced until a reliable estimate is available, so budget-limited Newt generation will not auto-run these models. Existing saved model choices and Utility defaults are unchanged.
-- **Creative model defaults**: New Character nodes default to Nano Banana Pro at 4K. Coverage and Storyboard default to GPT Image 2.5 Sunburst at High quality; Flare is not offered in these three nodes. Character retains 4K regular/CU bases and masked wardrobe edits, supported through Fal or Atlas for Sunburst. Coverage retains nine separate outputs. Storyboard's Advanced tab offers Sunburst or Image 2, keeping 1K frames, continuity and QC; its internal character preparation uses the selected model. Coverage and Storyboard adapt to Krea's supported sizes and also support Atlas. Existing projects retain their models and generated media until the user requests a change or generation.
+- **Current image models**: GPT Image 2.6 Sunburst and Flare replace their 2.5 counterparts alongside GPT Image 2, Nano Banana Pro, Nano Banana 2.1 and Seedream 5.0 Pro.
+- **GPT Image 2.6**: Sunburst and Flare use the enabled Fal or Krea provider. Fal offers Low/Medium/High quality, up to 16 references, masked edits and transparent PNGs. Krea offers Low through Maximum quality, nine aspect ratios, 1K/2K/4K and up to 10 references; only Flare exposes background controls there. Atlas has no verified 2.6 endpoint as of November 4, 2026. Costs remain variable until a reliable provider quote/charge is available. Saved 2.5 selections migrate to the matching 2.6 variant without changing saved images or History.
+- **Creative model defaults**: Character keeps Nano Banana Pro at 4K; Coverage uses GPT Image 2.6 Sunburst at High quality; Storyboard uses 2.6 Flare at High quality and Explore uses Flare at Medium quality. Protected Sunburst Character edits and Draw and Edit require Fal. Storyboard and Coverage can use Fal or Krea for 2.6. Existing generated media, prompts and connections are preserved.
 - **Composer**: Pose maquettes, save pose presets, bind Character nodes, add primitives and image planes, then capture a guide frame for downstream image models.
 - **Preview rail**: Recent project outputs lazy-load, support full-size lightbox preview, and can be dragged back into the graph.
 - **3D preview**: GLB results render in-node with the shared lazy Three.js viewer.
@@ -44,7 +44,7 @@ Current release: `v3.0.0-beta.0`
 
 Add an **Atlas Cloud API V1** key in **Settings > API Providers**. Additional versions use the existing key-version controls with one active version at a time; disabled versions remain saved. `ATLAS_API_KEY` is the optional environment alternative. Keys stay local, outside workflows and exports.
 
-Atlas supports **GPT Image 2, Image 2.5 Sunburst/Flare, and Nano Banana 2/Pro**, including compatible Character, Coverage, Storyboard, and Sunburst Image Edit workflows. Video support covers **Seedance 2.0, Seedance 2.5, and MiniMax H3**. Kling is excluded from Atlas routing until its reference contract is verified. This does not change LLM/OpenAI or direct ElevenLabs routing.
+Atlas supports **GPT Image 2, Nano Banana Pro and Seedream 5.0 Pro**, including compatible Character, Coverage and Storyboard workflows. GPT Image 2.6 requires Fal or Krea; masked Sunburst editing requires Fal. Video support covers **Seedance 2.0, Seedance 2.5, and MiniMax H3**. Kling is excluded from Atlas routing until its reference contract is verified. This does not change LLM/OpenAI or direct ElevenLabs routing.
 
 Provider-specific reference, duration, resolution, mask, and audio limits are validated before upload/submission. Unsupported settings fail clearly instead of dropping inputs or silently switching providers. Atlas Seedance 2.5 does **not** expose a `1920p` or native `4k` output option; explicitly supported super-resolution tiers are distinct. Paid submissions are never automatically retried or moved to another provider after failure. Video jobs have no NewtNode job-duration cutoff; read-only status checks keep polling the submitted job with bounded backoff.
 
@@ -239,13 +239,13 @@ Add **Vector** from the Nodes palette to create graphic artwork as editable SVGs
 
 **Font Reference** accepts a sample image or renders a local font file into a specimen. **Draw Layout** opens a popup sketch canvas with pen, eraser, shapes, arrows, text labels, undo/redo and optional reference underlays. Saved sketches remain editable; guidance images and backgrounds stay with the project. Both are optional Text-to-vector references, share the five-image limit with subjects/Mood Boards, and never start generation when applied. Exact font matching and composition remain model-dependent.
 
-Inspect the SVG against light, dark or checker backgrounds. Settings and input connections are always visible, while Layers can be collapsed. Editable SVG and PNG files stay in the project's output storage; layer saves also retain an alpha matte. The image output connects to Preview and other image nodes using its PNG companion. All assets stay with saved workflow packages. SVG is validated as passive artwork before preview or export. Existing Ideogram 4.5 Image Edit and Image 2.5 workflows remain intact.
+Inspect the SVG against light, dark or checker backgrounds. Settings and input connections are always visible, while Layers can be collapsed. Editable SVG and PNG files stay in the project's output storage; layer saves also retain an alpha matte. The image output connects to Preview and other image nodes using its PNG companion. All assets stay with saved workflow packages. SVG is validated as passive artwork before preview or export. Existing image workflows and generated media remain intact; 2.5 selections upgrade to the matching 2.6 variant.
 
 Published estimates range from $0.13–$0.32 per generated SVG, or $0.10 per converted image, depending on the selected operation and references. Tests use mocks and local fixtures; live account access and output quality have not been tested with credits. See [the Vector guide](docs/ideogram-vector.md).
 
 ## Ideogram 4.5 compatibility
 
-Ideogram 4.5 is currently available in **Image Edit**, while the new **Vector** node handles editable SVG artwork. Previously saved Ideogram Image Model nodes use the existing Nano Banana Pro migration and preserve their prompts, connections, results and History. Image 2.5 Sunburst and Flare generation, and the Image Edit default, remain unchanged.
+Ideogram 4.5 is currently available in **Image Edit**, while the new **Vector** node handles editable SVG artwork. Previously saved Ideogram Image Model nodes use the existing Nano Banana Pro migration and preserve their prompts, connections, results and History. GPT Image 2.6 Sunburst and Flare replace the 2.5 generation choices; Ideogram remains the Image Edit default.
 
 ## Image Editing
 
@@ -253,7 +253,7 @@ Double-click an image thumbnail, then choose the pencil icon for **Image Edit**.
 
 Choose the model inside Image Edit:
 
-- **Image 2.5 Sunburst** remains the default, through Fal or Atlas, with High, Extra High and Maximum quality. Enable the intended provider in Settings; Krea does not currently expose the mask/custom-size features used here.
+- **Image 2.6 Sunburst** is selectable through Fal, with Low/Medium/High quality. Ideogram 4.5 remains the editor default. Krea does not expose edit masks; Atlas has no verified 2.6 route. Existing 2.5 selections upgrade without altering saved edits.
 - **Ideogram 4.5** uses the existing enabled Fal credential. Choose Very Low, Low, Medium or High quality (High by default), and Regular or High precision (Regular by default). High precision asks the provider to restore unchanged pixels. These editing controls are separate from the Image Model node’s text-to-image controls.
 
 API cost remains variable because no reliable Ideogram edit quote has been verified. No request is sent until **Generate Edit** is clicked, and failed requests are not automatically retried or moved to another provider. Ideogram accepts up to 10,000 characters for the complete request, including the editor's added instructions; an oversized request is rejected before submission.

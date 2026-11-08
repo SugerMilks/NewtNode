@@ -121,8 +121,9 @@ try {
   await page.getByRole("button", { name: "Add Image to Canvas", exact: true }).click();
   assert.match(await page.getByLabel("QA report").textContent(), /Accepted: copy 1536x864/);
   await open(true);
-  await page.getByLabel("Edit model", { exact: true }).selectOption("OpenAI Image 2.5 Sunburst");
-  await page.getByLabel("Edit quality", { exact: true }).selectOption("max");
+  await page.getByLabel("Edit model", { exact: true }).selectOption("OpenAI Image 2.6 Sunburst");
+  await page.getByLabel("Edit quality", { exact: true }).selectOption("high");
+  assert.deepEqual(await page.getByLabel("Edit quality", { exact: true }).locator("option").evaluateAll(options => options.map(option => option.value)), ["low", "medium", "high"]);
   await page.getByLabel("Edit model", { exact: true }).selectOption("Nano Banana 2.1");
   await page.getByLabel("Edit method", { exact: true }).selectOption("sketch");
   await page.getByLabel("Blank canvas", { exact: true }).check();
@@ -154,8 +155,8 @@ try {
   await open(false, "atlas");
   await page.getByLabel("Edit prompt", { exact: true }).fill("Warm the scene");
   assert.ok(await page.getByRole("button", { name: "Generate Edit", exact: true }).isDisabled());
-  await page.getByLabel("Edit model", { exact: true }).selectOption("OpenAI Image 2.5 Sunburst");
-  assert.ok(await page.getByRole("button", { name: "Generate Edit", exact: true }).isEnabled());
+  await page.getByLabel("Edit model", { exact: true }).selectOption("OpenAI Image 2.6 Sunburst");
+  assert.ok(await page.getByRole("button", { name: "Generate Edit", exact: true }).isDisabled());
   await page.getByLabel("Edit model", { exact: true }).selectOption("Nano Banana 2.1");
   assert.ok(await page.getByRole("button", { name: "Generate Edit", exact: true }).isDisabled());
   assert.deepEqual(errors, []); assert.deepEqual(apiCalls, []);

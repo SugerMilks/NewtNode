@@ -41,7 +41,7 @@ test("display estimates never fabricate reference uploads or fixed token-image p
   const f = fixture(t);
   for (const options of [
     { kind: "image", model: "Nano Banana Pro", referenceCount: 1 },
-    { kind: "image", model: "OpenAI Image 2.5 Flare" },
+    { kind: "image", model: "OpenAI Image 2.6 Flare" },
     { kind: "video", model: "Seedance 2.5", hasVideoReference: true },
     { kind: "video", model: "Seedance 2.5", startFrameCount: 1 },
     { kind: "video", model: "Seedance 2.5", audioReferenceCount: 1 },
@@ -73,7 +73,7 @@ test("quote failures fall back without canceling, replaying or changing provider
 });
 
 test("Atlas payload quote preserves submitted references and token billing is still estimated", async t => {
-  const f = fixture(t), input = { model: "openai/gpt-image-2.5-flare/edit", images: ["https://example.com/image.png"], prompt: "A change", quality: "high" };
+  const f = fixture(t), input = { model: "openai/gpt-image-2/edit", images: ["https://example.com/image.png"], prompt: "A change", quality: "high" };
   const quote = await f.service.atlasInput(input, "key");
   assert.deepEqual(JSON.parse(f.calls[0].init.body), input);
   assert.equal(quote.estimated, true);

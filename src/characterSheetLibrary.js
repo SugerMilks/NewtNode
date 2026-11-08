@@ -40,6 +40,31 @@ export function normalizeCharacterCustomSheets(data = {}) {
     });
 }
 
+export function repairCustomCharacterSheetBases(data = {}) {
+  const sheets = normalizeCharacterCustomSheets(data);
+  const customUrls = new Set(sheets.flatMap(sheet => [sheet.localUrl, sheet.url].filter(Boolean)));
+  const variants = Array.isArray(data.characterSheetVariants) ? data.characterSheetVariants : [];
+  // Older restoration wrapped a custom result in this exact legacy variant, then
+  // copied it into the base slot. Only undo that synthetic, unsigned classification.
+  const mistaken = variants.filter(variant => variant?.wardrobeId === characterDefaultWardrobeId
+    && variant.wardrobeFileName === "Existing wardrobe" && !variant.wardrobeUrl
+    && !variant.isBase && !variant.baseSignature && !data.characterBaseSignature
+    && [variant.generated?.url, variant.generated?.localUrl].some(url => customUrls.has(url)));
+  if (!mistaken.length) return data;
+  const aliases = key => new Set(mistaken.flatMap(variant => [variant[key]?.url, variant[key]?.localUrl].filter(Boolean)));
+  const matches = (item, urls) => [item?.url, item?.localUrl].some(url => urls.has(url));
+  const imageUrls = aliases("generated"), videoUrls = aliases("videoGenerated");
+  const selectedCustom = sheets.find(sheet => matches(sheet, imageUrls));
+  return { ...data,
+    characterSheetVariants: variants.filter(variant => !mistaken.includes(variant)),
+    characterCustomSheets: sheets,
+    ...(matches(data.characterBaseSheet, imageUrls) ? { characterBaseSheet: null } : {}),
+    ...(!data.characterBaseVideoSignature && matches(data.characterBaseVideoSheet, videoUrls) ? { characterBaseVideoSheet: null } : {}),
+    ...(data.activeCharacterSheetId === generatedCharacterSheetId(characterDefaultWardrobeId) && selectedCustom
+      ? { activeCharacterSheetId: customCharacterSheetId(selectedCustom.id) } : {})
+  };
+}
+
 export function customCharacterSheetVariant(sheet) {
   if (!sheet) return null;
   const url = sheet.url || sheet.localUrl || "";

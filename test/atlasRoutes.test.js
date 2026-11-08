@@ -26,7 +26,7 @@ function imageApi({ failure } = {}) {
     normalizeCharacterWardrobeRequest, isNanoBanana21Model,
     app: { post: (_path, _limiter, run) => { handler = run; } }, imageGenerationRequestLimiter: null,
     process: { env: { ATLAS_API_KEY: "test-atlas-original" } }, atlasMediaEnabled: () => true, supportsAtlasImageModel,
-    resolveImageModel: (displayName) => ({ displayName, provider: "fal-openai-image-25" }),
+    resolveImageModel: (displayName) => ({ displayName, provider: "fal-openai-image-26" }),
     isLocalAssetUrl: (url) => url.startsWith("/uploads/"), cleanImagePromptLabel: (value) => value || "",
     resolveImageGenerationAspectRatio: async ({ value }) => value || "16:9",
     readLocalAsset: async (url) => { reads.push(url); return { buffer: Buffer.from(url), mimeType: "image/png", fileName: "source.png" }; },
@@ -51,14 +51,14 @@ function imageApi({ failure } = {}) {
   } };
 }
 
-test("Atlas image route preserves ordered labeled references, masks, project history and native outputs", async () => {
+test("Atlas image route preserves supported references, project history and native outputs", async () => {
   const api = imageApi();
-  const result = await api.run({ imagePromptUrls: ["/uploads/base.png", "/uploads/outfit.png"], imagePromptLabels: ["BASE", "WARDROBE"], editMaskDataUrl: "mask-test" });
+  const result = await api.run({ model: "OpenAI Image 2", imagePromptUrls: ["/uploads/base.png", "/uploads/outfit.png"], imagePromptLabels: ["BASE", "WARDROBE"] });
   assert.equal(result.status, 200);
   assert.equal(api.calls.length, 1);
   assert.equal(api.calls[0].key, "test-atlas-original");
   assert.deepEqual(api.calls[0].request.imageInputs.map((item) => item.label), ["BASE", "WARDROBE"]);
-  assert.equal(api.calls[0].request.editMaskInput.buffer.toString(), "mask-test");
+  assert.equal(api.calls[0].request.editMaskInput, null);
   assert.equal(api.calls[0].request.resolution, "4K");
   assert.equal(result.data.image.localUrl, "/outputs/full.png");
   assert.equal(result.data.image.thumbnailUrl, "/outputs/thumb.jpg");
@@ -72,8 +72,10 @@ test("unsupported Atlas models stop before reading references or paying; adapter
   assert.equal((await api.run({ model: "Krea 2 Large", imagePromptUrls: ["/uploads/private.png"] })).status, 400);
   assert.equal(api.reads.length, 0);
   assert.equal(api.calls.length, 0);
+  assert.equal((await api.run({ model: creativeImageDefaultModel })).status, 400);
+  assert.equal(api.calls.length, 0);
   const failed = imageApi({ failure: Object.assign(new Error("Unsupported Atlas dimensions"), { status: 400 }) });
-  assert.deepEqual(await failed.run(), { status: 400, data: { error: "Unsupported Atlas dimensions" } });
+  assert.deepEqual(await failed.run({ model: "OpenAI Image 2" }), { status: 400, data: { error: "Unsupported Atlas dimensions" } });
   assert.equal(failed.calls.length, 1);
   assert.equal(failed.history.length, 0);
 });

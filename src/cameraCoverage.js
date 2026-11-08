@@ -1,3 +1,5 @@
+import { migrateOpenAiImageSettings } from "./openAiImage26.js";
+
 export const cameraCoverageEndpoint = "minimax/h3-max/camera-controls";
 export const reframeToolName = "ReFrame";
 export const isReframeTool = value => String(value || "").trim().toLowerCase() === "reframe";
@@ -6,6 +8,7 @@ export const isReframeNode = node => node?.type === "cameraCoverage" ||
 export const reframeOutputPort = node => node?.type === "utility" ? "utilityOut" : "imageOut";
 
 export function reframeRefinementSettings(data = {}) {
+  data = migrateOpenAiImageSettings(data);
   const defaults = cameraCoverageDefaults();
   return Object.fromEntries(["model", "resolution", "quality", "upscaleFactor"].map(key => [key, data[key] ?? defaults[key]]));
 }
@@ -31,7 +34,7 @@ export function reframeUtilityTransition(data, patch) {
   return !wasReframe && willBeReframe ? reframeToolSelectionPatch(next) : patch;
 }
 export const cameraCoverageUpscaleEndpoint = "fal-ai/topaz/upscale/image";
-export const cameraCoverageModels = ["Nano Banana Pro", "Nano Banana 2.1", "OpenAI Image 2.5 Sunburst", "OpenAI Image 2.5 Flare", "Seedream 5.0 Pro"];
+export const cameraCoverageModels = ["Nano Banana Pro", "Nano Banana 2.1", "OpenAI Image 2.6 Sunburst", "OpenAI Image 2.6 Flare", "Seedream 5.0 Pro"];
 export const cameraCoverageFreezePrompt = "The reference image is one frozen instant. Only the camera moves along the supplied camera trajectory. Preserve every person and object in exactly the same world position, orientation, shape and pose. Keep faces, expressions, hands, clothing, liquids and background motionless. Maintain identities, subject count, wardrobe, props, spatial relationships, lighting direction and color treatment. Camera parallax is the only source of apparent movement. No cuts, added objects, subject motion or redesign. Move smoothly between the requested positions and hold where the trajectory holds. Do not return to the original position unless the trajectory requests it. Keep focal length unchanged; distance changes are camera travel, not digital zoom.";
 export const cameraCoverageRefinePrompt = "Improve the realism, quality, and fidelity of this image. Treat this exact image as the composition authority. Preserve the exact camera viewpoint, perspective, lens distortion, framing, crop and aspect ratio. Preserve every person's identity, expression, pose, wardrobe and screen position. Preserve all objects, text, logos, environment geometry, spatial relationships, lighting direction, shadows and color treatment. Refine natural textures, believable fine detail and image clarity only. Do not restage, beautify faces, change anatomy, alter the grade, add or remove anything, or reveal a new area. This is a fidelity pass on an approved shot, not a new composition.";
 export const coverageLensOptions = ["8", "18", "24", "35", "50", "85"];
@@ -165,6 +168,7 @@ export function coverageRefineRatio(shot, ratios, item = coverageShotItem(shot))
 }
 
 export function normalizeCameraCoverageData(raw = {}) {
+  raw = migrateOpenAiImageSettings(raw);
   const defaults = cameraCoverageDefaults();
   const pathMode = raw.coveragePathMode === "travel" || (!raw.coveragePathMode && coveragePresetPathMode(raw.coveragePreset) === "travel") ? "travel" : "orbit";
   let poses = Array.isArray(raw.coveragePoses) && raw.coveragePoses.length >= 2 ? raw.coveragePoses.slice(0, pathMode === "travel" ? 4 : 8).map(p => ({

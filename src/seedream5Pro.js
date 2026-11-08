@@ -25,7 +25,7 @@ export function seedream5ProSize({ resolution = "2K", aspectRatio = "16:9" } = {
 export function validateSeedream5ProRequest({ prompt, images = [], resolution, aspectRatio, maskUrl = "", background = "auto" } = {}) {
   if (typeof prompt !== "string" || !prompt.trim()) fail("a prompt is required.");
   if (!Array.isArray(images) || images.length > 10 || images.some(image => typeof image !== "string" || !image.trim())) fail("use at most 10 reference images. Remove extra references before running.");
-  if (maskUrl) fail("pixel edit masks are not supported. Use an Image 2.5 model for masked editing.");
+  if (maskUrl) fail("pixel edit masks are not supported. Use Image 2.6 Sunburst with Fal for masked editing.");
   if (!["auto", "opaque"].includes(background)) fail("transparent output is not supported by this integration.");
   return seedream5ProSize({ resolution, aspectRatio });
 }

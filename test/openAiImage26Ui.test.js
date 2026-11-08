@@ -7,7 +7,7 @@ import { buildSync } from "esbuild";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { imageModelOptions, coverageModelOptions } from "../src/modelOptions.js";
-import { openAiImage25Models, openAiImage25KreaAspectRatios, openAiImage25KreaResolutionOptions } from "../src/openAiImage25.js";
+import { openAiImage26Models, openAiImage26KreaAspectRatios, openAiImage26KreaResolutionOptions } from "../src/openAiImage26.js";
 
 const source = await readFile(new URL("../src/NodeEditor.jsx", import.meta.url), "utf8");
 const compiled = buildSync({ stdin: { contents: `${source}\nexport { NodeBody, normalizeImageModelData, imageModelSelectionPatch, createDefaultNodeData, normalizeCurrentNode, storyboardAspectRatioForNode };`, resolveDir: fileURLToPath(new URL("../src", import.meta.url)), loader: "jsx" }, bundle: true, write: false, platform: "node", format: "cjs", packages: "external", jsx: "automatic", define: { "import.meta.env": "{}" }, external: ["/newt-mark.png"], loader: { ".css": "empty" } });
@@ -21,6 +21,27 @@ function renderModel(model, provider = "fal") {
     onUpdate: () => {}, onRun: () => {}
   }));
 }
+
+test("2.5 saved selections migrate across creative nodes without rewriting saved media", () => {
+  for (const [type, fields] of [
+    ["imageModel", ["model"]], ["storyboard", ["model"]], ["explore", ["model"]],
+    ["character", ["characterSheetModel"]], ["coverage", ["model"]], ["cameraCoverage", ["model"]],
+    ["utility", ["model"]], ["myNewt", ["favoriteImageModel"]]
+  ]) {
+    for (const field of fields) {
+      const old = "OpenAI Image 2.5 Sunburst";
+      const saved = { ...createDefaultNodeData(type, type, 1), ...(type === "utility" ? { utilityMode: "image", utilityImageModel: "Coverage" } : {}), [field]: old,
+        resultUrl: "/outputs/saved.png", resultItems: [{ url: "/outputs/saved.png", model: old, cost: { amountUsd: 0.3 } }] };
+      const before = structuredClone(saved);
+      const restored = normalizeCurrentNode({ id: "saved", type, data: saved }).data;
+      assert.equal(restored[field], openAiImage26Models.sunburst, `${type}.${field}`);
+      assert.deepEqual(saved, before, "normalization does not mutate source data");
+      const baseline = normalizeCurrentNode({ id: "saved", type, data: { ...before, [field]: openAiImage26Models.sunburst } }).data;
+      assert.deepEqual(restored.resultItems, baseline.resultItems, `${type} preserves normal output restoration`);
+      if (type === "imageModel") assert.equal(restored.resultItems[0].model, old);
+    }
+  }
+});
 
 test("Storyboard QC defaults to Balanced while saved Deep and explicit Off survive reopening", () => {
   assert.equal(createDefaultNodeData("storyboard", "Board", 1).storyboardQcMode, "balanced");
@@ -47,7 +68,7 @@ test("Seedream Pro controls keep defaults, formats and saved content consistent 
     assert.match(html, />16:9</);
     assert.match(html, />21:9</);
     assert.doesNotMatch(html, />4K<|>Maximum<|>Transparent</);
-    const patch = imageModelSelectionPatch({ model: "OpenAI Image 2.5 Flare", resolution: "4K", aspectRatio: "21:9", background: "transparent" }, model, provider);
+    const patch = imageModelSelectionPatch({ model: "OpenAI Image 2.6 Flare", resolution: "4K", aspectRatio: "21:9", background: "transparent" }, model, provider);
     assert.equal(patch.resolution, "2K");
     assert.equal(patch.background, "auto");
     assert.equal(patch.aspectRatio, "21:9");
@@ -66,22 +87,22 @@ test("Seedream Pro controls keep defaults, formats and saved content consistent 
   }
 });
 
-test("2.5 image controls display new quality levels, provider sizes and variable cost", () => {
-  for (const model of Object.values(openAiImage25Models)) {
+test("2.6 image controls display new quality levels, provider sizes and variable cost", () => {
+  for (const model of Object.values(openAiImage26Models)) {
     const fal = renderModel(model);
-    assert.match(fal, />Extra High</);
-    assert.match(fal, />Maximum</);
+    assert.doesNotMatch(fal, />Extra High<|>Maximum</);
+    assert.match(fal, /High \(Professional\)/);
     assert.match(fal, />Transparent</);
     assert.match(fal, />4K</);
     assert.match(fal, />21:9</);
     assert.match(fal, /Run Image \(Variable cost\)/);
     const krea = renderModel(model, "krea");
     assert.match(krea, />Maximum</);
-    for (const option of [...openAiImage25KreaAspectRatios, ...openAiImage25KreaResolutionOptions]) {
+    for (const option of [...openAiImage26KreaAspectRatios, ...openAiImage26KreaResolutionOptions]) {
       assert.ok(krea.includes(`>${option}<`), `Krea ${model} includes ${option}`);
     }
     assert.doesNotMatch(krea, />21:9</);
-    assert.equal(krea.includes(">Transparent<"), model === openAiImage25Models.flare);
+    assert.equal(krea.includes(">Transparent<"), model === openAiImage26Models.flare);
   }
   const legacy = renderModel("OpenAI Image 2");
   assert.doesNotMatch(legacy, />Maximum<|>Extra High<|>Transparent<|Variable cost/);
@@ -92,7 +113,7 @@ test("new Storyboard defaults to Flare while Character keeps Nano Banana Pro and
   for (const type of ["character", "coverage", "storyboard"]) {
     const data = createDefaultNodeData(type, type, 1);
     const field = type === "character" ? "characterSheetModel" : "model";
-    const expectedModel = type === "character" ? "Nano Banana Pro" : type === "storyboard" ? openAiImage25Models.flare : openAiImage25Models.sunburst;
+    const expectedModel = type === "character" ? "Nano Banana Pro" : type === "storyboard" ? openAiImage26Models.flare : openAiImage26Models.sunburst;
     assert.equal(data[field], expectedModel);
     const html = renderToStaticMarkup(React.createElement(NodeBody, {
       node: { id: "creative", type, data: { ...data, storyboardTab: "advanced" } },
@@ -101,7 +122,7 @@ test("new Storyboard defaults to Flare while Character keeps Nano Banana Pro and
     }));
     assert.ok(html.includes(`selected="">${expectedModel}`));
     if (type === "storyboard") {
-      assert.match(html, /OpenAI Image 2\.5 Sunburst/);
+      assert.match(html, /OpenAI Image 2\.6 Sunburst/);
       assert.equal(data.quality, "high");
       assert.equal(data.resolution, "1K");
       assert.equal(data.storyboardAutoQc, true);
@@ -166,7 +187,7 @@ test("Image Model default changes do not replace saved selections or legacy miss
 test("saved creative models and full-resolution results survive restoration; legacy defaults stay put", () => {
   for (const type of ["character", "coverage", "storyboard"]) {
     const field = type === "character" ? "characterSheetModel" : "model";
-    const models = [openAiImage25Models.sunburst, "OpenAI Image 2", ...(type === "storyboard" ? [openAiImage25Models.flare] : [])];
+    const models = [openAiImage26Models.sunburst, "OpenAI Image 2", ...(type === "storyboard" ? [openAiImage26Models.flare] : [])];
     for (const model of models) {
       const node = { id: type, type, data: { ...createDefaultNodeData(type, type, 1), [field]: model, resultUrl: "/outputs/saved.png", characterBaseSheet: { url: "/outputs/base.png" }, characterBaseVideoSheet: { url: "/outputs/cu-base.png" }, storyboardFrames: [{ id: "frame", prompt: "Saved direction", resultUrl: "/outputs/saved.png" }], coverageResults: [{ url: "/outputs/saved.png", shotId: "standard-1" }] } };
       const restored = normalizeCurrentNode(JSON.parse(JSON.stringify(node))).data;
@@ -185,13 +206,13 @@ test("saved creative models and full-resolution results survive restoration; leg
     assert.equal(legacy[field], type === "character" ? "Nano Banana Pro" : "OpenAI Image 2");
   }
   for (const aspectRatio of ["3:2", "2:3"]) {
-    const restored = normalizeCurrentNode({ id: "board", type: "storyboard", data: { model: openAiImage25Models.sunburst, aspectRatio } });
+    const restored = normalizeCurrentNode({ id: "board", type: "storyboard", data: { model: openAiImage26Models.sunburst, aspectRatio } });
     assert.equal(storyboardAspectRatioForNode(restored), aspectRatio);
   }
 });
 
-test("saved 2.5 selections retain maximum quality, alpha and prior full-resolution results", () => {
-  for (const model of Object.values(openAiImage25Models)) {
+test("saved 2.6 selections retain maximum quality, alpha and prior full-resolution results", () => {
+  for (const model of Object.values(openAiImage26Models)) {
     const data = { model, quality: "max", background: "transparent", resolution: "4K", aspectRatio: "21:9", resultUrl: "/outputs/old.png", resultItems: [{ url: "/outputs/old.png" }] };
     const restored = normalizeImageModelData(JSON.parse(JSON.stringify(data)));
     for (const key of Object.keys(data)) assert.deepEqual(restored[key], data[key]);

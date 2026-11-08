@@ -49,7 +49,7 @@ test("legacy hasFal routes retain native output, workflow context and unknown Fa
   const { status, body } = await state.post();
   assert.equal(status, 200);
   assert.equal(state.calls[0].provider, "fal");
-  assert.equal(state.calls[0].model, "OpenAI Image 2.5 Sunburst");
+  assert.equal(state.calls[0].model, "OpenAI Image 2.6 Sunburst");
   assert.equal(body.item.width, 64); assert.equal(body.item.height, 96);
   assert.equal(body.item.cost.amountUsd, null);
   assert.equal(body.item.cost.provider, "fal.ai");
@@ -59,34 +59,34 @@ test("legacy hasFal routes retain native output, workflow context and unknown Fa
   assert.equal(state.saves[0].body.workflowPackagePath, "/fixture/project");
 });
 
-test("getProvider is captured once before source preparation and passed to masked Atlas generation", async () => {
-  let provider = "atlas", reads = 0, submitted;
-  const cost = { amountUsd: 0.12, currency: "USD", provider: "Atlas Cloud", pricingSource: "test-reported" };
+test("getProvider is captured once before source preparation and passed to masked Fal generation", async () => {
+  let provider = "fal", reads = 0, submitted;
+  const cost = { amountUsd: 0.12, currency: "USD", provider: "fal.ai", pricingSource: "test-reported" };
   const state = await editor({
     hasFal: () => { throw new Error("Legacy provider lookup must not run"); },
     getProvider: () => { reads++; return provider; },
-    readSource: async () => { provider = "fal"; return { buffer: state.source }; },
-    generate: async (request) => { submitted = request; return { provider: "Atlas Cloud", cost, endpoint: "test/atlas/edit", remoteImage: { url: "mock-result" } }; }
+    readSource: async () => { provider = "atlas"; return { buffer: state.source }; },
+    generate: async (request) => { submitted = request; return { provider: "fal.ai", cost, endpoint: "test/atlas/edit", remoteImage: { url: "mock-result" } }; }
   });
   const response = await state.post({ mode: "remove", prompt: "", provider: "krea" }, { selection: state.source });
   assert.equal(response.status, 200);
-  assert.equal(reads, 1); assert.equal(submitted.provider, "atlas"); assert.ok(submitted.mask);
+  assert.equal(reads, 1); assert.equal(submitted.provider, "fal"); assert.ok(submitted.mask);
   assert.equal(submitted.images.length, 1);
-  assert.equal(response.body.item.provider, "Atlas Cloud");
+  assert.equal(response.body.item.provider, "fal.ai");
   assert.deepEqual(response.body.item.cost, cost);
-  assert.equal(state.histories[0].provider, "Atlas Cloud");
+  assert.equal(state.histories[0].provider, "fal.ai");
   assert.equal(state.histories[0].endpoint, "test/atlas/edit");
   assert.equal(state.histories[0].settings.maskedEdit, true);
   assert.deepEqual(state.histories[0].cost, cost);
 });
 
 test("an explicit unavailable or unsupported provider never falls back to hasFal", async () => {
-  for (const provider of ["", "krea", "unknown", undefined]) {
+  for (const provider of ["", "krea", "atlas", "unknown", undefined]) {
     const state = await editor({ getProvider: () => provider, hasFal: () => { throw new Error("Unexpected fallback"); },
       readSource: () => { throw new Error("Source should not be read"); } });
     const response = await state.post();
     assert.equal(response.status, 400);
-    assert.match(response.body.error, /Enable Fal.*disable Krea.*Atlas Cloud/);
+    assert.match(response.body.error, /Enable Fal.*Atlas Cloud/);
     assert.equal(state.calls.length, 0);
   }
   for (const hasFal of [() => false, undefined]) {
@@ -103,30 +103,30 @@ test("getProvider can select Fal without a legacy hasFal callback", async () => 
 });
 
 test("duplicate requests retain their original provider and never generate again after settings change", async () => {
-  let provider = "atlas";
+  let provider = "fal";
   const state = await editor({ getProvider: () => provider });
   const requestId = randomUUID();
   const [first, duplicate] = await Promise.all([state.post({ requestId }), state.post({ requestId })]);
   assert.equal(first.status, 200); assert.deepEqual(first, duplicate);
   provider = "fal";
   assert.deepEqual(await state.post({ requestId }), first);
-  assert.equal(first.body.item.provider, "Atlas Cloud");
+  assert.equal(first.body.item.provider, "fal.ai");
   assert.equal(state.calls.length, 1); assert.equal(state.saves.length, 1);
-  assert.equal(state.calls[0].provider, "atlas");
+  assert.equal(state.calls[0].provider, "fal");
   assert.equal((await state.post({ requestId, prompt: "Different edit" })).status, 409);
   assert.equal(state.calls.length, 1);
 });
 
-test("Atlas provider failures stay cached and never retry or fall back", async () => {
+test("Fal provider failures stay cached and never retry or fall back", async () => {
   let runs = 0;
-  const state = await editor({ getProvider: () => "atlas", generate: async ({ provider }) => {
-    assert.equal(provider, "atlas"); runs++;
-    throw Object.assign(new Error("Atlas content policy rejection"), { status: 422 });
+  const state = await editor({ getProvider: () => "fal", generate: async ({ provider }) => {
+    assert.equal(provider, "fal"); runs++;
+    throw Object.assign(new Error("Fal content policy rejection"), { status: 422 });
   } });
   const requestId = randomUUID();
   for (let i = 0; i < 2; i++) {
     const response = await state.post({ requestId });
-    assert.equal(response.status, 422); assert.match(response.body.error, /Atlas content policy/);
+    assert.equal(response.status, 422); assert.match(response.body.error, /Fal content policy/);
   }
   assert.equal(runs, 1); assert.equal(state.saves.length, 0);
 });
@@ -134,16 +134,16 @@ test("Atlas provider failures stay cached and never retry or fall back", async (
 test("save and download failures name the returned provider, preserving the legacy Fal warning", async () => {
   for (const stage of ["readGenerated", "save"]) {
     let runs = 0;
-    const state = await editor({ getProvider: () => "atlas",
-      generate: async () => { runs++; return { provider: "Atlas Cloud (test account)", remoteImage: { url: "mock-result" } }; },
+    const state = await editor({ getProvider: () => "fal",
+      generate: async () => { runs++; return { provider: "Fal Test Account", remoteImage: { url: "mock-result" } }; },
       [stage]: async () => { throw new Error(`${stage} failed`); }
     });
     const requestId = randomUUID();
     for (let i = 0; i < 2; i++) {
       const response = await state.post({ requestId });
       assert.equal(response.status, 502);
-      assert.match(response.body.error, /completed.*Check Atlas Cloud \(test account\) history/);
-      assert.doesNotMatch(response.body.error, /Fal/);
+      assert.match(response.body.error, /completed.*Check Fal Test Account history/);
+      assert.doesNotMatch(response.body.error, /Atlas/);
     }
     assert.equal(runs, 1);
   }
@@ -154,27 +154,27 @@ test("save and download failures name the returned provider, preserving the lega
 test("returned cost and provider remain authoritative, including zero and unknown costs", async () => {
   for (const amountUsd of [0, null]) {
     const cost = { amountUsd, currency: "USD", pricingSource: "test-reported" };
-    const state = await editor({ getProvider: () => "atlas", generate: async () => ({ provider: "Atlas Cloud (test account)", cost, remoteImage: { url: "mock-result" } }) });
+    const state = await editor({ getProvider: () => "fal", generate: async () => ({ provider: "Fal Test Account", cost, remoteImage: { url: "mock-result" } }) });
     const response = await state.post();
     assert.equal(response.status, 200);
     assert.deepEqual(response.body.item.cost, cost);
     assert.deepEqual(state.histories[0].cost, cost);
-    assert.equal(state.histories[0].provider, "Atlas Cloud (test account)");
+    assert.equal(state.histories[0].provider, "Fal Test Account");
   }
-  const state = await editor({ getProvider: () => "atlas" });
+  const state = await editor({ getProvider: () => "fal" });
   const response = await state.post();
   assert.equal(response.body.item.cost.amountUsd, null);
-  assert.equal(response.body.item.cost.provider, "Atlas Cloud");
+  assert.equal(response.body.item.cost.provider, "fal.ai");
 });
 
-test("invalid edits do not reach Atlas and history failures still retain saved outputs", async () => {
-  const state = await editor({ getProvider: () => "atlas" });
+test("invalid edits do not reach Fal and history failures still retain saved outputs", async () => {
+  const state = await editor({ getProvider: () => "fal" });
   for (const changes of [{ quality: "invented" }, { requestId: "bad" }, { prompt: "" }, { mode: "remove" }, { mode: "sketch", blank: "true" }]) {
     assert.equal((await state.post(changes)).status, 400);
   }
   assert.equal((await state.post({}, { selection: Buffer.from("bad-png") })).status, 400);
   assert.equal(state.calls.length, 0);
-  const historyFailure = await editor({ getProvider: () => "atlas", recordHistory: async () => { throw new Error("History unavailable"); } });
+  const historyFailure = await editor({ getProvider: () => "fal", recordHistory: async () => { throw new Error("History unavailable"); } });
   const response = await historyFailure.post();
   assert.equal(response.status, 200); assert.ok(response.body.item.url); assert.match(response.body.warning, /History/);
   assert.equal(historyFailure.saves.length, 1);
@@ -224,20 +224,20 @@ test("Studio cost hint defaults hidden and follows API Cost without clearing the
   assert.equal(elements(hidden).find((element) => element.props["aria-label"] === "Edit prompt").props.value, "Make the jacket blue");
 });
 
-test("Studio follows provider changes, enables Fal and Atlas, and blocks Krea or unavailable providers", async (t) => {
+test("Studio follows provider changes and blocks unverified 2.6 providers", async (t) => {
   const state = studio(t, { provider: "atlas", falAvailable: false });
-  elements(state.render()).find(element => element.props["aria-label"] === "Edit model").props.onChange({ target: { value: "OpenAI Image 2.5 Sunburst" } });
+  elements(state.render()).find(element => element.props["aria-label"] === "Edit model").props.onChange({ target: { value: "OpenAI Image 2.6 Sunburst" } });
   const network = t.mock.method(globalThis, "fetch", () => { throw new Error("No network in UI tests"); });
-  for (const [provider, label, available] of [["atlas", "Atlas Cloud", true], ["fal", "Fal", true], ["krea", "Krea", false], ["", "Unavailable", false]]) {
+  for (const [provider, label, available] of [["atlas", "Atlas Cloud", false], ["fal", "Fal", true], ["krea", "Krea", false], ["", "Unavailable", false]]) {
     const tree = state.render({ provider });
     const button = elements(tree).find((element) => element.type === "button" && element.props.className === "ies-primary");
     assert.equal(button.props.disabled, !available);
     const html = renderToStaticMarkup(tree);
-    assert.ok(html.includes(`Image 2.5 Sunburst <span>${label}</span>`));
+    assert.ok(html.includes(`Image 2.6 Sunburst <span>${label}</span>`));
     if (available) assert.doesNotMatch(html, /Enable Fal,/);
     else {
-      assert.match(html, /disable Krea and enable Atlas Cloud/);
-      assert.match(html, /Krea does not support masked edits/);
+      assert.match(html, /Enable Fal in Settings/);
+      assert.match(html, /Atlas Cloud and Krea are not supported/);
       await button.props.onClick();
       assert.doesNotMatch(renderToStaticMarkup(state.render()), /role="alert"/);
     }
@@ -247,13 +247,13 @@ test("Studio follows provider changes, enables Fal and Atlas, and blocks Krea or
 
 test("Studio keeps falAvailable compatibility but explicit provider availability wins", (t) => {
   const state = studio(t, { falAvailable: true });
-  elements(state.render()).find(element => element.props["aria-label"] === "Edit model").props.onChange({ target: { value: "OpenAI Image 2.5 Sunburst" } });
+  elements(state.render()).find(element => element.props["aria-label"] === "Edit model").props.onChange({ target: { value: "OpenAI Image 2.6 Sunburst" } });
   const enabled = (tree) => !elements(tree).find((element) => element.type === "button" && element.props.className === "ies-primary").props.disabled;
   assert.equal(enabled(state.render()), true);
   assert.match(renderToStaticMarkup(state.render()), /Sunburst <span>Fal<\/span>/);
   assert.equal(enabled(state.render({ falAvailable: false })), false);
   assert.equal(enabled(state.render({ falAvailable: true, provider: "" })), false);
-  assert.equal(enabled(state.render({ falAvailable: false, provider: "atlas" })), true);
+  assert.equal(enabled(state.render({ falAvailable: false, provider: "atlas" })), false);
 });
 
 test("NodeEditor Studio wiring preserves Fal > Krea > Atlas precedence and requires a real enabled key", () => {

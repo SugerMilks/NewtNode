@@ -5,14 +5,18 @@ import { EditorNodeBody } from "../../src/components/EditorNodeBody.jsx";
 import { EditorMonitor } from "../../src/components/EditorMonitor.jsx";
 import { createEditorTimeline, normalizeEditorTimeline, normalizeEditorZoom, editorZoomStep } from "../../src/editorTimeline.js";
 import { normalizeEditorNodeWidth } from "../../src/nodeGeometry.js";
-import { focusCanvasSelection, editorTimelineZoomDirection } from "../../src/nodeKeyboardRouting.js";
+import { focusCanvasSelection, editorTimelineZoomDirection, editorShuttleKey } from "../../src/nodeKeyboardRouting.js";
+import { editorPlayback } from "../../src/editorPlayback.js";
 import { postJson } from "../../src/api/newtApi.js";
 import "../../src/styles.css";
 import "../../src/nodeEditor.css";
+import { transitionTimeline, fadeTimeline } from "../fixtures/editorTransitions.js";
+const fadeTest = new URLSearchParams(window.location.search).has("fades");
+const transitionTest = new URLSearchParams(window.location.search).has("transitions") || fadeTest;
 
 function Harness() {
-  const [node, setNode] = React.useState({ id: "editor-qa-node", type: "editor", data: { title: "Editor", editorTimeline: createEditorTimeline() } });
-  const [attached, setAttached] = React.useState(["scene-a.mp4"]), [preview, setPreview] = React.useState(true), [revision, setRevision] = React.useState(0), [narrow, setNarrow] = React.useState(false);
+  const [node, setNode] = React.useState({ id: "editor-qa-node", type: "editor", data: { title: "Editor", editorTimeline: fadeTest ? fadeTimeline() : transitionTest ? transitionTimeline() : createEditorTimeline() } });
+  const [attached, setAttached] = React.useState(transitionTest ? [] : ["scene-a.mp4"]), [preview, setPreview] = React.useState(true), [revision, setRevision] = React.useState(0), [narrow, setNarrow] = React.useState(false);
   const [opened, setOpened] = React.useState(null);
   const canvas = React.useRef(null), drag = React.useRef(null);
   const [position, setPosition] = React.useState({ x: 0, y: 0 }), [scale, setScale] = React.useState(1), [selected, setSelected] = React.useState(false);
@@ -26,6 +30,13 @@ function Harness() {
     if (drag.current) setPosition({ x: drag.current.position.x + (event.clientX - drag.current.x) / scale, y: drag.current.position.y + (event.clientY - drag.current.y) / scale });
   }
   function zoomSelectedEditor(event) {
+    const key = editorShuttleKey(event);
+    if (key && event.target === canvas.current && !drag.current && selected) {
+      event.preventDefault(); event.stopPropagation();
+      const player = editorPlayback(node.id);
+      if (key === "k") player.pause(); else player.shuttle(key === "j" ? -1 : 1);
+      return;
+    }
     const direction = editorTimelineZoomDirection(event);
     if (!direction || event.target !== canvas.current || drag.current || !selected) return;
     event.preventDefault();
@@ -68,7 +79,7 @@ function Harness() {
       <button onClick={async () => { const result = await postJson("/api/editor-qa/save-path", { fileName: saveName }, "QA save path"); saveDialog.resolve(result.path); setSaveDialog(null); }}>Save sequence</button>
     </section></div>}
     <output aria-label="QA node position">{JSON.stringify({ ...position, scale, selected, width: normalizeEditorNodeWidth(node.data.editorNodeWidth) })}</output>
-    <output aria-label="QA timeline state" style={{ display: "block", marginTop: 12, maxWidth: 1100, overflowWrap: "anywhere", fontSize: 11 }}>{JSON.stringify({ clips: node.data.editorTimeline.clips, inFrame: node.data.editorTimeline.inFrame, outFrame: node.data.editorTimeline.outFrame, status: node.data.status, resultUrl: node.data.resultUrl, exports: node.data.resultItems?.length || 0, stills: node.data.editorStills?.length || 0 })}</output>
+    <output aria-label="QA timeline state" style={{ display: "block", marginTop: 12, maxWidth: 1100, overflowWrap: "anywhere", fontSize: 11 }}>{JSON.stringify({ clips: node.data.editorTimeline.clips, transitions: node.data.editorTimeline.transitions, inFrame: node.data.editorTimeline.inFrame, outFrame: node.data.editorTimeline.outFrame, status: node.data.status, resultUrl: node.data.resultUrl, exports: node.data.resultItems?.length || 0, stills: node.data.editorStills?.length || 0 })}</output>
   </main>;
 }
 createRoot(document.getElementById("root")).render(<Harness />);

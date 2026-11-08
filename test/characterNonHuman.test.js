@@ -44,9 +44,11 @@ test("non-human wardrobe prompts preserve source order, accessories and species 
     assert.match(prompt, /first image as the locked master/);
     assert.match(prompt, /sole authority for identity, anatomy, composition/);
     assert.match(prompt, /exact canvas dimensions, panel layout/);
-    assert.match(prompt, /glasses, sunglasses/);
+    assert.match(prompt, /Transfer an accessory only when it is clearly visible in that image/);
     assert.match(prompt, /lens tint\/opacity/);
-    assert.match(prompt, /helmet-mounted goggles separate from sunglasses/);
+    assert.match(prompt, /If the reference shows headwear-mounted eyewear and separate eyewear, preserve their separate placements/);
+    assert.match(prompt, /If no eyewear is visible in the reference, add no eyewear/);
+    assert.match(prompt, /Apply referenced accessories only when the existing anatomy supports them/);
     assert.match(prompt, /Do not invent a torso, hands, feet, eyes, ears/);
     assert.match(prompt, /Keep existing head crops unchanged/);
     assert.match(prompt, new RegExp(`all ${video ? "three" : "six"} views`));

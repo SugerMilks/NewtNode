@@ -53,7 +53,7 @@ import { generateFalImageEdit, createIdeogramImageEditClient } from "./image-edi
 import { ideogramImageEditModel } from "../src/ideogramImageEdit.js";
 import { isNanoBanana21Model, nanoBanana21ModelName, nanoBanana21FalTextEndpoint, nanoBanana21FalEditEndpoint, nanoBanana21Ratios, validateNanoBanana21Request, nanoBanana21Cost } from "../src/nanoBanana21.js";
 import { createNanoBanana21Generator } from "./nano-banana-21.js";
-import { normalizeOpenAiEditMask, finishOpenAiMaskedEdit } from "./openai-edit-mask.js";
+import { normalizeOpenAiEditMask, openAiImage26Mask, finishOpenAiMaskedEdit } from "./openai-edit-mask.js";
 import { normalizeCharacterWardrobeRequest } from "./character-wardrobe.js";
 import { elevenLabsRates } from "./elevenlabs.js";
 import { createAtlasClient } from "./atlas.js";
@@ -96,7 +96,7 @@ import {
   normalizeApiKeyVersions
 } from "../src/apiKeyVersions.js";
 import { estimateOpenAiImage2Cost as estimateOpenAiImage2OutputCost, normalizeOpenAiImage2Quality, openAiImage2Costs, openAiImage2HighCosts, openAiImage2Quality } from "../src/openAiImage2.js";
-import { openAiImage25Models, openAiImage25Variant, isOpenAiImage25Model, normalizeOpenAiImage25Quality, buildOpenAiImage25FalRequest, validateOpenAiImage25KreaRequest, openAiImage25KreaSelection, openAiImage25Cost } from "../src/openAiImage25.js";
+import { migrateOpenAiImageModel, migrateOpenAiImagePreferences, openAiImage26Models, openAiImage26Variant, isOpenAiImage26Model, normalizeOpenAiImage26Quality, buildOpenAiImage26FalRequest, validateOpenAiImage26KreaRequest, openAiImage26KreaSelection, openAiImage26Cost } from "../src/openAiImage26.js";
 import { nanoBananaProFalThinkingMode, nanoBananaProThinkingConfig } from "../src/nanoBananaPro.js";
 import { seedream5ProModelName, isSeedream5ProModel, seedream5ProFalEndpoint, seedream5ProAspectRatios, validateSeedream5ProRequest, seedream5ProCost } from "../src/seedream5Pro.js";
 import { createSeedream5ProGenerator } from "./seedream5-pro.js";
@@ -328,15 +328,15 @@ const imageModelNames = {
   seedream5Pro: seedream5ProModelName,
   nanoBananaPro: "Nano Banana Pro",
   openAiImage2: "OpenAI Image 2",
-  openAiImage25Sunburst: openAiImage25Models.sunburst,
-  openAiImage25Flare: openAiImage25Models.flare
+  openAiImage26Sunburst: openAiImage26Models.sunburst,
+  openAiImage26Flare: openAiImage26Models.flare
 };
 const imageModelOptions = [
   imageModelNames.nanoBanana21,
   imageModelNames.nanoBananaPro,
   imageModelNames.openAiImage2,
-  imageModelNames.openAiImage25Sunburst,
-  imageModelNames.openAiImage25Flare,
+  imageModelNames.openAiImage26Sunburst,
+  imageModelNames.openAiImage26Flare,
   imageModelNames.seedream5Pro
 ];
 const videoModelNames = {
@@ -356,7 +356,7 @@ const videoModelOptions = [
   videoModelNames.minimaxH3
 ];
 const defaultModelPreferences = {
-  image: Object.fromEntries(imageModelOptions.map((model) => [model, isNanoBanana21Model(model) || model === imageModelNames.openAiImage2 || isOpenAiImage25Model(model) || isSeedream5ProModel(model)])),
+  image: Object.fromEntries(imageModelOptions.map((model) => [model, isNanoBanana21Model(model) || model === imageModelNames.openAiImage2 || isOpenAiImage26Model(model) || isSeedream5ProModel(model)])),
   video: Object.fromEntries(videoModelOptions.map((model) => [model, true]))
 };
 const falNanoBananaProEndpoint = process.env.FAL_NANO_BANANA_PRO_ENDPOINT || "fal-ai/nano-banana-pro";
@@ -714,12 +714,7 @@ registerImageEditRoutes(app, {
     return { buffer: await readFile(filePath) };
   },
   generate: async ({ provider, model, prompt, quality, editPrecision, resolution, size, images, mask }) => {
-    if (provider === "atlas") {
-      const key = String(process.env.ATLAS_API_KEY || "").trim();
-      return atlasMedia.image({ model, prompt, quality, size,
-        imageInputs: images.map((buffer, index) => ({ buffer, mimeType: "image/png", fileName: `edit-reference-${index + 1}.png` })),
-        editMaskInput: mask ? { buffer: mask, mimeType: "image/png", fileName: "edit-mask.png" } : undefined }, key);
-    }
+    if (provider !== "fal") throw httpError(400, "Enable Fal for Draw and Edit.");
     const falKey = String(process.env.FAL_KEY || "").trim();
     if (model === ideogramImageEditModel && !falKey) throw httpError(400, "Enable Fal in Settings for Ideogram 4.5 image editing.");
     const nano = model === nanoBanana21ModelName;
@@ -924,7 +919,7 @@ function buildHealthPayload() {
       cameraCoverageTravel: true,
       cameraCoverageFraming: true,
       generate3d: true,
-      gptImage25: true,
+      gptImage26: true,
       atlasCloud: true,
       apiCostVisibility: true,
       imageEditing: true,
@@ -939,6 +934,9 @@ function buildHealthPayload() {
       vectorSelectionGrouping: true,
       generateAudio: true,
       editorTimeline: true,
+      editorTransitions: true,
+      editorClipPosition: true,
+      editorClipFades: true,
       outputExport: true,
       elevenLabsVoices: true,
       elevenLabsV4: true,
@@ -1403,7 +1401,7 @@ function preferredApiKeySource(versions = []) {
 }
 
 function normalizeModelPreferences(value = {}) {
-  const incomingImage = value?.image && typeof value.image === "object" ? value.image : {};
+  const incomingImage = migrateOpenAiImagePreferences(value?.image && typeof value.image === "object" ? value.image : {});
   const incomingVideo = value?.video && typeof value.video === "object" ? value.video : {};
   const image = Object.fromEntries(imageModelOptions.map((model) => [model, Boolean(incomingImage[model] ?? defaultModelPreferences.image[model])]));
   const video = Object.fromEntries(videoModelOptions.map((model) => [model, Boolean(incomingVideo[model] ?? defaultModelPreferences.video[model])]));
@@ -1703,9 +1701,9 @@ app.get("/api/stats", async (_req, res) => {
         highCosts: openAiImage2HighCosts,
         currency: "USD"
       },
-      openAiImage25: {
-        models: Object.values(openAiImage25Models),
-        ...openAiImage25Cost()
+      openAiImage26: {
+        models: Object.values(openAiImage26Models),
+        ...openAiImage26Cost()
       },
       hunyuan3DPro: {
         baseCost: hunyuan3DProBaseCost,
@@ -2450,7 +2448,7 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
       });
     }
 
-    if (["fal-openai-image-2", "fal-openai-image-25"].includes(selectedModel.provider)) {
+    if (["fal-openai-image-2", "fal-openai-image-26"].includes(selectedModel.provider)) {
       if (!process.env.FAL_KEY) {
         return res.status(400).json({ error: `${selectedModel.displayName} needs an enabled Fal or Krea API key in Settings.` });
       }
@@ -2466,9 +2464,9 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
         quality: req.body.quality,
         editMaskDataUrl: req.body.editMaskDataUrl
       });
-      const output = await downloadImage(req, openAiImage.remoteImage.url, isOpenAiImage25Model(selectedModel.displayName) ? `openai-image-2.5-${openAiImage25Variant(selectedModel.displayName)}` : "openai-image-2", openAiImage.remoteImage.content_type || openAiImage.remoteImage.mimeType, openAiImage.maskedEdit);
+      const output = await downloadImage(req, openAiImage.remoteImage.url, isOpenAiImage26Model(selectedModel.displayName) ? `openai-image-2.6-${openAiImage26Variant(selectedModel.displayName)}` : "openai-image-2", openAiImage.remoteImage.content_type || openAiImage.remoteImage.mimeType, openAiImage.maskedEdit);
 
-      const cost = isOpenAiImage25Model(selectedModel.displayName) ? openAiImage25Cost({ model: selectedModel.displayName, provider: "fal.ai", endpoint: openAiImage.endpoint, resolution: req.body.resolution, size: openAiImage.size, quality: openAiImage.quality }) : estimateOpenAiImage2Cost({
+      const cost = isOpenAiImage26Model(selectedModel.displayName) ? openAiImage26Cost({ model: selectedModel.displayName, provider: "fal.ai", endpoint: openAiImage.endpoint, resolution: req.body.resolution, size: openAiImage.size, quality: openAiImage.quality }) : estimateOpenAiImage2Cost({
         resolution: req.body.resolution,
         size: openAiImage.size,
         quality: openAiImage.quality,
@@ -2493,7 +2491,7 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
           resolution: req.body.resolution || "2K",
           imageSize: openAiImage.size,
           quality: openAiImage.quality,
-          ...(isOpenAiImage25Model(selectedModel.displayName) ? { background: req.body.background || "auto" } : {}),
+          ...(isOpenAiImage26Model(selectedModel.displayName) ? { background: req.body.background || "auto" } : {}),
           imagePromptCount: imagePromptUrls.length,
           imagePromptLabels: cleanReferenceLabels,
           maskedEdit: Boolean(req.body.editMaskDataUrl),
@@ -2782,11 +2780,11 @@ async function runKreaImageModel(
     return res.status(400).json({ error: `${selectedModel.displayName} is not available through Krea.` });
   }
 
-  if (isOpenAiImage25Model(selectedModel.displayName)) {
+  if (isOpenAiImage26Model(selectedModel.displayName)) {
     if (String(requestedAspectRatio || "").toLowerCase() === "auto") {
-      aspectRatio = openAiImage25KreaSelection({ aspectRatio }).aspectRatio;
+      aspectRatio = openAiImage26KreaSelection({ aspectRatio }).aspectRatio;
     }
-    validateOpenAiImage25KreaRequest({ model: selectedModel.displayName, resolution: req.body.resolution,
+    validateOpenAiImage26KreaRequest({ model: selectedModel.displayName, resolution: req.body.resolution,
       aspectRatio, referenceCount: imagePromptUrls.length, background: req.body.background, editMaskDataUrl: req.body.editMaskDataUrl });
   }
   if (isSeedream5ProModel(selectedModel.displayName)) validateSeedream5ProRequest({ prompt, images: imagePromptUrls,
@@ -2843,7 +2841,7 @@ async function runKreaImageModel(
     safePathSegment(selectedModel.displayName).toLowerCase(),
     remoteImage.content_type
   );
-  const cost = isOpenAiImage25Model(selectedModel.displayName) ? openAiImage25Cost({ model: selectedModel.displayName, provider: "Krea", endpoint, resolution, quality: input.quality }) : estimateKreaImageCost({
+  const cost = isOpenAiImage26Model(selectedModel.displayName) ? openAiImage26Cost({ model: selectedModel.displayName, provider: "Krea", endpoint, resolution, quality: input.quality }) : estimateKreaImageCost({
     modelName: selectedModel.displayName,
     resolution,
     aspectRatio,
@@ -2870,10 +2868,10 @@ async function runKreaImageModel(
       aspectRatio,
       requestedAspectRatio: requestedAspectRatio || aspectRatio,
       resolution,
-      quality: isOpenAiImage25Model(selectedModel.displayName) ? input.quality : selectedModel.displayName === imageModelNames.openAiImage2
+      quality: isOpenAiImage26Model(selectedModel.displayName) ? input.quality : selectedModel.displayName === imageModelNames.openAiImage2
         ? normalizeOpenAiImage2Quality(req.body.quality)
         : undefined,
-      ...(isOpenAiImage25Model(selectedModel.displayName) ? { background: input.background || "auto" } : {}),
+      ...(isOpenAiImage26Model(selectedModel.displayName) ? { background: input.background || "auto" } : {}),
       imagePromptCount: referenceUrls.length,
       imagePromptLabels: cleanReferenceLabels,
       runtimeProvider: "krea",
@@ -11906,6 +11904,7 @@ async function removeLegacyNodeProject(projectId) {
 }
 
 function resolveImageModel(model) {
+  model = migrateOpenAiImageModel(model);
   if (isRetiredNanoBanana2Model(model)) throw httpError(400, "Nano Banana 2 has been retired. Choose Nano Banana 2.1 with Fal or Krea, or Nano Banana Pro.");
   if (/ideogram/i.test(String(model || ""))) throw httpError(400, "Ideogram 4.5 is available only in Image Edit. Open an image preview and choose the pencil to edit it, or select another generation model.");
   if (isNanoBanana21Model(model)) return { provider: "fal-nano-banana-21", displayName: nanoBanana21ModelName, id: nanoBanana21FalTextEndpoint };
@@ -11927,12 +11926,12 @@ function resolveImageModel(model) {
     };
   }
 
-  if (isOpenAiImage25Model(model)) {
-    const variant = openAiImage25Variant(model);
-    return { provider: "fal-openai-image-25", displayName: openAiImage25Models[variant], id: `openai/gpt-image-2.5/${variant}/text-to-image` };
+  if (isOpenAiImage26Model(model)) {
+    const variant = openAiImage26Variant(model);
+    return { provider: "fal-openai-image-26", displayName: openAiImage26Models[variant], id: `openai/gpt-image-2.6/${variant}/text-to-image` };
   }
-  if (normalized.includes("image-2.5") || normalized.includes("image 2.5")) {
-    throw httpError(400, "Choose OpenAI Image 2.5 Sunburst or Flare.");
+  if (/image[ -]2\.[56]/.test(normalized)) {
+    throw httpError(400, "Choose OpenAI Image 2.6 Sunburst or Flare.");
   }
   if (normalized.includes("openai") || normalized.includes("gpt-image-2") || normalized.includes("image 2")) {
     return {
@@ -12206,7 +12205,7 @@ function normalizeImageAspectRatioForProvider(value, provider) {
 function imageAspectRatiosForProvider(provider) {
   if (provider === "fal-nano-banana-21") return nanoBanana21Ratios();
   if (provider === "fal-seedream-5-pro") return seedream5ProAspectRatios;
-  return ["fal-openai-image-2", "fal-openai-image-25"].includes(provider) ? openAiImageAspectRatios : nanoImageAspectRatios;
+  return ["fal-openai-image-2", "fal-openai-image-26"].includes(provider) ? openAiImageAspectRatios : nanoImageAspectRatios;
 }
 
 function isAutoImageAspectRatio(value) {
@@ -13619,12 +13618,13 @@ async function generateKreaOpenAiImage2FromInputs({
 
 async function generateFalOpenAiImage2FromInputs({ model = imageModelNames.openAiImage2, background, prompt, imageInputs = [], aspectRatio, resolution, quality: requestedQuality, editMaskInput = null }) {
   const size = normalizeOpenAiImageSize({ aspectRatio, resolution });
-  const isImage25 = isOpenAiImage25Model(model);
+  const isImage26 = isOpenAiImage26Model(model);
   if (editMaskInput && !imageInputs.length) throw httpError(400, "An edit mask needs a reference image.");
   if (editMaskInput) editMaskInput = await normalizeOpenAiEditMask(editMaskInput, imageInputs[0]);
-  const quality = isImage25 ? normalizeOpenAiImage25Quality(requestedQuality) : normalizeOpenAiImage2Quality(requestedQuality);
+  const quality = isImage26 ? normalizeOpenAiImage26Quality(requestedQuality, "fal") : normalizeOpenAiImage2Quality(requestedQuality);
   const submittedPrompt = promptWithReferenceLabels(prompt, imageInputs);
-  if (isImage25 && imageInputs.length > 16) throw httpError(400, "Fal GPT Image 2.5 accepts up to 16 reference images.");
+  if (isImage26) buildOpenAiImage26FalRequest({ model, prompt: submittedPrompt, size, quality, background,
+    imageUrls: imageInputs.map(() => "reference"), maskUrl: editMaskInput ? "mask" : undefined });
   let endpoint = imageInputs.length ? "openai/gpt-image-2/edit" : "openai/gpt-image-2";
   let input = {
     prompt: submittedPrompt,
@@ -13637,11 +13637,11 @@ async function generateFalOpenAiImage2FromInputs({ model = imageModelNames.openA
 
   if (imageInputs.length) {
     input.image_urls = await Promise.all(imageInputs.slice(0, 16).map((image, index) => uploadImageInputToFal(image, index)));
-    if (editMaskInput) input.mask_url = await uploadImageInputToFal(editMaskInput, imageInputs.length);
+    if (editMaskInput) input.mask_url = await uploadImageInputToFal(isImage26 ? await openAiImage26Mask(editMaskInput) : editMaskInput, imageInputs.length);
   }
 
-  if (isImage25) {
-    ({ endpoint, input } = buildOpenAiImage25FalRequest({ model, prompt: submittedPrompt, size, quality,
+  if (isImage26) {
+    ({ endpoint, input } = buildOpenAiImage26FalRequest({ model, prompt: submittedPrompt, size, quality,
       imageUrls: input.image_urls || [], maskUrl: input.mask_url, background }));
   }
   const result = await subscribeFal(endpoint, { input, logs: true }, { route: "generate-image", model });

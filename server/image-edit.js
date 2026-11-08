@@ -1,13 +1,13 @@
 import sharp from "sharp";
 import { createSingleSubmissionFalClient } from "./fal-single-submission.js";
-import { buildOpenAiImage25FalRequest, openAiImage25Models } from "../src/openAiImage25.js";
+import { buildOpenAiImage26FalRequest, openAiImage26Models } from "../src/openAiImage26.js";
 import { ideogramImageEditModel, validateIdeogramImageEditRequest, buildIdeogramImageEditFalRequest } from "../src/ideogramImageEdit.js";
 import { buildImageEditPrompt, imageEditMaxPixels, imageEditSize } from "../src/imageEdit.js";
 import { nanoBanana21ModelName, nanoBanana21FalEditEndpoint, buildNanoBanana21Input, validateNanoBanana21Request } from "../src/nanoBanana21.js";
 
 const decode = (buffer) => sharp(buffer, { limitInputPixels: imageEditMaxPixels, animated: false, failOn: "error" });
 
-export async function prepareImageEdit({ source, drawing, selection, prompt, mode, blank = false, model = openAiImage25Models.sunburst }) {
+export async function prepareImageEdit({ source, drawing, selection, prompt, mode, blank = false, model = openAiImage26Models.sunburst }) {
   const original = await decode(source).rotate().ensureAlpha().png().toBuffer();
   const { width, height } = await decode(original).metadata();
   const size = imageEditSize(width, height, model);
@@ -45,8 +45,7 @@ export async function prepareImageEdit({ source, drawing, selection, prompt, mod
       if (!edited || !protectedPixels) throw new Error("Ideogram 4.5 masks need both selected and protected areas. Paint a selection covering part of the image, or clear it for a full-image edit.");
       mask = await sharp(pixels, { raw: { width, height, channels: 1 } }).png().toBuffer();
     } else {
-      const alpha = await decode(selection).extractChannel(3).negate().toBuffer();
-      mask = await sharp({ create: { width, height, channels: 3, background: "#ffffff" } }).joinChannel(alpha).png().toBuffer();
+      mask = await decode(selection).extractChannel(3).png().toBuffer();
     }
   }
   return { original, width, height, size, selection, mask, submittedPrompt,
@@ -76,6 +75,8 @@ export async function finishImageEdit(prepared, generated) {
 export async function generateFalImageEdit({ model, prompt, quality, editPrecision, resolution = "2K", size, images, mask }, { uploadImage, subscribe, firstImage }) {
   const ideogram = model === ideogramImageEditModel;
   const nano = model === nanoBanana21ModelName;
+  if (!ideogram && !nano) buildOpenAiImage26FalRequest({ model, prompt, quality, size,
+    imageUrls: images.map(() => "reference"), maskUrl: mask ? "mask" : undefined });
   if (nano) {
     if (!Array.isArray(images) || !images[0]) throw Object.assign(new Error("Nano Banana 2.1 needs a source image."), { status: 400 });
     validateNanoBanana21Request({ prompt, images: images.map((_, index) => `reference-${index}`), resolution, aspectRatio: "auto", maskUrl: mask });
@@ -92,7 +93,7 @@ export async function generateFalImageEdit({ model, prompt, quality, editPrecisi
     ? { endpoint: nanoBanana21FalEditEndpoint, input: buildNanoBanana21Input({ prompt, images: imageUrls, resolution, aspectRatio: "auto" }) }
     : ideogram
     ? buildIdeogramImageEditFalRequest({ prompt, quality, editPrecision, imageUrls, maskUrl })
-    : buildOpenAiImage25FalRequest({ model, prompt, quality, size, imageUrls, maskUrl });
+    : buildOpenAiImage26FalRequest({ model, prompt, quality, size, imageUrls, maskUrl });
   const result = await subscribe(endpoint, { input, logs: true }, { route: "edit-image", model });
   const remoteImage = firstImage(result?.data);
   if (!remoteImage?.url) throw Object.assign(new Error("The model returned no edited image. Check Fal history before rerunning."), { status: 502 });

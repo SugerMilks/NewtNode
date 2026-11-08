@@ -1,5 +1,6 @@
 import { imageModelNames, imageModelOptions, stylePresetNames, stylePresetPrompts } from "./modelOptions.js";
 import { normalizedResultItems } from "./mediaResults.js";
+import { migrateOpenAiImageSettings } from "./openAiImage26.js";
 import { gradePresetNames, gradePresetPrompts } from "./colorLook.js";
 import { exploreMediumGuidance, exploreContrastBriefs, describeExploreContrast } from "./exploreArtDirection.js";
 
@@ -16,13 +17,14 @@ const clean = (value, limit = 8000) => typeof value === "string" ? value.trim().
 
 export function exploreDefaults() {
   return { prompt: "", creativeTask: "Auto", creativeRange: 55, directionCount: 9, variations: 1,
-    styleFamily: "Auto", exploreMode: true, referenceInfluence: "Reinterpret", model: imageModelNames.openAiImage25Flare,
+    styleFamily: "Auto", exploreMode: true, referenceInfluence: "Reinterpret", model: imageModelNames.openAiImage26Flare,
     aspectRatio: "16:9", resolution: "2K", quality: "medium", background: "auto",
     settingsOpen: false, gradePreset: "None", resultItems: [], selectedResultIndex: 0, resultUrl: "", resultText: "",
     exploreDirections: [], exploreQueue: [], exploreStopRequested: false, exploreProgress: "" };
 }
 
 export function normalizeExploreData(data = {}) {
+  data = migrateOpenAiImageSettings(data);
   const defaults = exploreDefaults();
   const savedData = { ...data };
   delete savedData.advancedOutputsOpen;

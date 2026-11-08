@@ -10,7 +10,7 @@ assert.ok(handler.trim().startsWith("function handleBodyPointerDown("));
 function pointerDown({ closest = "", scrollbar = false, button = 0 } = {}) {
   const result = { stopped: false, prevented: false, menuClosed: false };
   const target = { closest: selectors => selectors.split(",").includes(closest) ? {} : null };
-  const route = new Function("scroller", "setGapMenu", `return (${handler});`)(
+  const route = new Function("scroller", "setContextMenu", `return (${handler});`)(
     { current: scrollbar ? target : {} }, () => { result.menuClosed = true; }
   );
   route({ target, button, stopPropagation: () => { result.stopped = true; }, preventDefault: () => { result.prevented = true; } });
@@ -26,8 +26,8 @@ test("unused Editor body surfaces bubble to canvas selection/drag without steali
 });
 
 test("controls, their labels and timeline interaction surfaces never start a node drag", () => {
-  for (const closest of ["input", "textarea", "select", "button", "a", "label", "[contenteditable]", ".editor-ruler", ".editor-track-lane", ".editor-gap-menu", ".editor-scrollbar"]) {
-    assert.deepEqual(pointerDown({ closest }), { stopped: true, prevented: false, menuClosed: closest !== ".editor-gap-menu" }, closest);
+  for (const closest of ["input", "textarea", "select", "button", "a", "label", "[contenteditable]", ".editor-ruler", ".editor-track-lane", ".editor-context-menu", ".editor-scrollbar"]) {
+    assert.deepEqual(pointerDown({ closest }), { stopped: true, prevented: false, menuClosed: closest !== ".editor-context-menu" }, closest);
   }
   assert.deepEqual(pointerDown({ scrollbar: true }), { stopped: true, prevented: false, menuClosed: true });
 });
@@ -37,9 +37,10 @@ test("non-primary clicks preserve the Editor's existing context-menu and selecti
 });
 
 test("read-only timecode and inline monitor opt into dragging without changing Preview monitors", () => {
-  assert.match(source, /<div className="editor-timecode"><span>Timecode<\/span><output aria-label="Timeline timecode">/);
+  assert.match(source, /<div className="editor-timecode"><span className="editor-timecode-label">Timecode/);
+  assert.match(source, /<output aria-label="Timeline timecode">/);
   assert.match(source, /<EditorMonitor nodeId=\{node\.id\} timeline=\{timeline\} allowNodeDrag \/>/);
   const monitor = readFileSync(new URL("../src/components/EditorMonitor.jsx", import.meta.url), "utf8");
   assert.match(monitor, /allowNodeDrag = false/);
-  assert.match(monitor, /if \(!allowNodeDrag\) event\.stopPropagation\(\)/);
+  assert.match(monitor, /if \(!allowNodeDrag\) \{ event\.stopPropagation\(\)/);
 });

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { editorTimelineZoomDirection } from "../src/nodeKeyboardRouting.js";
+import { editorTimelineZoomDirection, editorShuttleKey } from "../src/nodeKeyboardRouting.js";
 import { normalizeEditorZoom, editorZoomStep } from "../src/editorTimeline.js";
 
 function element(match = "", properties = {}) {
@@ -67,7 +67,7 @@ test("focused timeline consumes zoom once, while fields and active editing gestu
   const source = readFileSync(new URL("../src/components/EditorNodeBody.jsx", import.meta.url), "utf8");
   const handler = source.slice(source.indexOf("  function keyDown(event)"), source.indexOf("  function handleBodyPointerDown(event)"));
   const zooms = [], gesture = { current: null };
-  const route = new Function("editorTimelineZoomDirection", "editorZoomStep", "zoom", "gesture", "changeZoom", `return (${handler});`)(editorTimelineZoomDirection, editorZoomStep, 48, gesture, value => zooms.push(value));
+  const route = new Function("editorTimelineZoomDirection", "editorZoomStep", "zoom", "gesture", "changeZoom", "contextMenu", "editorShuttleKey", `return (${handler});`)(editorTimelineZoomDirection, editorZoomStep, 48, gesture, value => zooms.push(value), null, editorShuttleKey);
   const event = keyEvent("+"); route(event);
   assert.deepEqual(zooms, [48 * 1.4]); assert.equal(event.defaultPrevented, true); assert.equal(event.stopped, true);
   route(keyEvent("-", { target: element("input") }));

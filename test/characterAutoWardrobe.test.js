@@ -55,6 +55,19 @@ test("Auto Wardrobe CU transfers the completed outfit instead of analyzing the p
   assert.doesNotMatch(prompt, /Visually analyze|otherwise infer footwear/);
 });
 
+test("Auto Wardrobe can complete missing clothing but cannot infer unseen accessories", () => {
+  for (const video of [false, true]) {
+    for (const nonHuman of [false, true]) {
+      const prompt = characterAutoWardrobePrompt({ video, nonHuman });
+      assert.match(prompt, /The second image is the sole wardrobe-accessory reference/);
+      assert.match(prompt, /If no eyewear is visible in the reference, add no eyewear/);
+      assert.match(prompt, /If no headwear is visible, add none/);
+      assert.match(prompt, /inferring missing garments and footwear only, never unseen accessories/);
+      assert.match(prompt, /Do not infer accessories from the outfit's style, era, mood, or these instructions/);
+    }
+  }
+});
+
 test("Non-Human Auto Wardrobe respects species, stylization and clothing-compatible anatomy", () => {
   for (const video of [false, true]) {
     const prompt = characterAutoWardrobePrompt({ video, nonHuman: true });

@@ -2,9 +2,6 @@ import { buildAtlasImageRequest } from "../src/atlasImages.js";
 import { buildAtlasVideoRequest } from "../src/atlasVideos.js";
 import { estimateAtlasImageCost, estimateAtlasVideoCost } from "../src/atlasPricing.js";
 import { imageModelNames } from "../src/modelOptions.js";
-import { isOpenAiImage25Model } from "../src/openAiImage25.js";
-import sharp from "sharp";
-import { normalizeOpenAiEditMask } from "./openai-edit-mask.js";
 import { seedanceDraftCost } from "../src/seedanceDraft.js";
 
 export function createAtlasMedia({ client, readLocalAsset, imageSize, labelPrompt, validateVideoAssets = async () => {}, quoteInput = async () => null }) {
@@ -13,32 +10,23 @@ export function createAtlasMedia({ client, readLocalAsset, imageSize, labelPromp
     catch { return cost; }
   }
   async function image({ model, prompt, imageInputs = [], aspectRatio, resolution = "2K", quality = "high", background = "auto", editMaskInput, size: explicitSize }, key) {
-    const openAi = model === imageModelNames.openAiImage2 || isOpenAiImage25Model(model);
+    const openAi = model === imageModelNames.openAiImage2;
     const size = openAi ? explicitSize === undefined ? imageSize({ aspectRatio, resolution }) : explicitSize : undefined;
     if (!openAi) quality = "high";
-    if (!isOpenAiImage25Model(model)) background = "auto";
+    background = "auto";
     const submittedPrompt = labelPrompt(prompt, imageInputs);
     const options = { model, prompt: submittedPrompt, aspectRatio, resolution, quality, size, background };
     // Validate the complete request before sending even reference files to the provider.
     buildAtlasImageRequest({ ...options, images: imageInputs.map(() => "https://reference.invalid/image.png"), maskUrl: editMaskInput ? "https://reference.invalid/mask.png" : "" });
-    if (editMaskInput) {
-      const source = await sharp(imageInputs[0].buffer).metadata();
-      const mask = await sharp(editMaskInput.buffer).metadata();
-      if (mask.format !== "png" || mask.width !== source.width || mask.height !== source.height) {
-        throw Object.assign(new Error("Atlas Cloud needs a PNG mask with the same dimensions as the first reference image."), { status: 400 });
-      }
-      editMaskInput = await normalizeOpenAiEditMask(editMaskInput, imageInputs[0]);
-    }
     let cost = estimateAtlasImageCost({ ...options, referenceCount: imageInputs.length });
     const images = [];
     for (const asset of imageInputs) images.push(await client.upload(asset, key));
-    const maskUrl = editMaskInput ? await client.upload(editMaskInput, key) : "";
-    const input = buildAtlasImageRequest({ ...options, images, maskUrl });
+    const input = buildAtlasImageRequest({ ...options, images });
     cost = await quotedCost(cost, input, key);
     const result = await client.generate({ mediaType: "image", input, key });
     return { ...result, endpoint: input.model, provider: "Atlas Cloud", cost,
       remoteImage: { url: result.url, content_type: "image/png" },
-      maskedEdit: editMaskInput ? { source: imageInputs[0].buffer, mask: editMaskInput.buffer } : null,
+      maskedEdit: null,
       size: input.size || size, quality: input.quality || quality, resolution, submittedPrompt, resultText: "" };
   }
 

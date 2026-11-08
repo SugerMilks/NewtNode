@@ -38,11 +38,11 @@ function buttonLabel(node, showApiCosts, generationProvider = "fal") {
 test("API Cost gates exact and variable button prices without changing models or batches", () => {
   for (const [type, model, provider, label] of [
     ["imageModel", "Nano Banana Pro", "fal", "Run Image"],
-    ["imageModel", "OpenAI Image 2.5 Sunburst", "fal", "Run Image"],
+    ["imageModel", "OpenAI Image 2.6 Sunburst", "fal", "Run Image"],
     ["videoModel", "Seedance 2.0", "fal", "Run Video"],
     ["videoModel", "Seedance 2.5", "atlas", "Run Video"],
     ["audioModel", undefined, "fal", "Run Audio"],
-    ["coverage", "OpenAI Image 2.5 Sunburst", "fal", "Generate Coverage"]
+    ["coverage", "OpenAI Image 2.6 Sunburst", "fal", "Generate Coverage"]
   ]) {
     const node = { id: "test", type, data: { ...createDefaultNodeData(type, type, 1), ...(model ? { model } : {}), prompt: "A quiet room", batchCount: "4", duration: "8 seconds", resolution: "720p" } };
     if (type === "imageModel") node.data.resolution = "2K";

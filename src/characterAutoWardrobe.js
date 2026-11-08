@@ -1,4 +1,5 @@
 import { nonHumanCharacterIdentityPrompt } from "./characterNonHuman.js";
+import { characterWardrobeAccessoryPrompt } from "./characterWardrobeAccessories.js";
 
 export const characterAutoWardrobeId = "__auto-wardrobe__";
 
@@ -20,7 +21,8 @@ export function characterAutoWardrobePrompt({ video = false, nonHuman = false } 
     video
       ? "The second image is the completed Auto Wardrobe character sheet. Use it ONLY as the finished outfit reference, not as a source of identity, pose, layout, or face crops. Copy the same garments, layering, colors, materials, fit, shoes, and accessories exactly wherever visible. Do not invent another outfit, redesign the inferred shoes, or import its panel arrangement. Ignore every face, facial expression, camera view and composition in the second image. Its full-body views with heads are NOT a template for the CU sheet."
       : "The second image is the original uploaded portrait. Visually analyze only its worn wardrobe: garments, layers, neckline, fabric, color palette, patterns, silhouette, fit, era, level of formality, and visible accessories. Preserve all clearly visible outfit details rather than replacing them with a generic look. Complete just the unseen portions into one coherent head-to-toe outfit, including coordinated lower-body clothing and a suitable matching pair of shoes when the anatomy supports footwear. If shoes are visible, reproduce them; otherwise infer footwear consistent with the shown outfit's style, materials, palette, era, setting, and practicality. Do not merely copy the portrait's crop. When little clothing is visible, infer one restrained, cohesive outfit from the available cues; do not claim unseen details were present in the portrait. Ignore the portrait's background, props, pose, crop, and lighting.",
-    "Preserve visible hats, caps, glasses, sunglasses, jewelry and other worn accessories, including their placement, shape, colors and lens tint/opacity. Keep separate headwear and eyewear distinct. Do not remove accessories just to expose the face or eyes, and do not invent extra logos, text, hats, eyewear, jewelry, or unrelated props. Accessory occlusion may change visible pixels but not underlying identity. Never zoom or reposition a panel to reveal an accessory outside its crop.",
+    characterWardrobeAccessoryPrompt,
+    "Outfit completion permits inferring missing garments and footwear only, never unseen accessories. Do not add logos, text, or unrelated props.",
     nonHuman
       ? `${nonHumanCharacterIdentityPrompt} Fit the outfit to the existing species and body plan, never the body to clothing. Preserve natural coverings and integral armor. Include footwear only where compatible with the existing feet; never invent human feet, hands, legs, or a torso to dress the character. Retain a naturally unclothed design when no clothing is shown and clothing would contradict its design.`
       : "Keep the master's underlying facial features, hair, skin detail, body shape, and age unchanged. Use appropriate opaque coverage. No nudity.",

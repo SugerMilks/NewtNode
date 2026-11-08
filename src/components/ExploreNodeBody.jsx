@@ -5,6 +5,8 @@ import { exploreTasks, exploreInfluences, exploreModels, exploreGrades, exploreS
 import { estimateImageRunCost, formatPricedRunLabel } from "../generationPricing.js";
 import "../explore.css";
 
+const creativeRangeHelp = "Lower: restrained variations. 55 (default): distinct looks grounded in your brief. Higher: bolder camera angles, framing, lighting, palettes and art direction. Guides creative planning, not image quality or resolution. Image / Product references keep their content and composition unless your brief requests changes. Turn Explore Mode on for broader exploration.";
+
 export function handleExploreGalleryWheel(event, gallery) {
   if (event.ctrlKey || event.metaKey || event.altKey || !gallery) return;
   // A native listener consumes the gesture before the canvas's native pan listener.
@@ -85,7 +87,7 @@ export function ExploreNodeBody({ node, config, incoming, prompt, onUpdate, onRu
   const toggleCombine = index => setCombineIndexes(current => current.includes(index) ? current.filter(value => value !== index) : [...current.slice(-1), index]);
   const pending = data.exploreQueue.filter(item => ["pending", "failed"].includes(item.status)).length;
   const uncertain = data.exploreQueue.some(item => item.status === "uncertain" || item.status === "running");
-  const row = (label, control) => <label className="explore-setting"><span>{label}</span>{control}</label>;
+  const row = (label, control, title) => <label className="explore-setting" title={title}><span>{label}</span>{control}</label>;
   const select = (field, options) => <select aria-label={{ creativeTask: "Creative task", styleFamily: "Style family", referenceInfluence: "Reference influence", gradePreset: "Grade" }[field]} value={data[field]} onChange={event => update({ [field]: event.target.value })}>{options.map(option => <option key={option}>{option}</option>)}</select>;
   const referencePorts = config.input.filter(port => port.id !== "promptIn");
   const imageOutput = config.output.find(port => port.id === "imageOut");
@@ -157,14 +159,14 @@ export function ExploreNodeBody({ node, config, incoming, prompt, onUpdate, onRu
       <fieldset className="explore-settings" disabled={busy}>
         {row("Creative Task", select("creativeTask", exploreTasks))}
         {row("Style Family", select("styleFamily", exploreStyleFamilies))}
-        {row("Creative Range", <div className="explore-range"><input aria-label="Creative range" type="range" min="0" max="100" step="5" value={data.creativeRange} onChange={event => update({ creativeRange: Number(event.target.value) })} /><output>{data.creativeRange}</output></div>)}
+        {row("Creative Range", <div className="explore-range"><input aria-label="Creative range" aria-description={creativeRangeHelp} type="range" min="0" max="100" step="5" value={data.creativeRange} onChange={event => update({ creativeRange: Number(event.target.value) })} /><output>{data.creativeRange}</output></div>, creativeRangeHelp)}
         {row("Reference Influence", select("referenceInfluence", exploreInfluences))}
         {row("Directions", <input aria-label="Directions" type="number" min="1" max={exploreMaxDirections} value={data.directionCount} onChange={event => update({ directionCount: Number(event.target.value) })} />)}
         {row("Grade", select("gradePreset", exploreGrades))}
         {row("Image Model", <select aria-label="Explore image model" value={data.model} onChange={event => update(modelPatch(event.target.value))}>{!enabledModels.includes(data.model) && <option disabled>{data.model}</option>}{enabledModels.map(model => <option key={model}>{model}</option>)}</select>)}
         {row("Aspect Ratio", <select aria-label="Aspect ratio" value={data.aspectRatio} onChange={event => update({ aspectRatio: event.target.value })}>{!ratios.includes(data.aspectRatio) && <option disabled>{data.aspectRatio}</option>}{ratios.map(ratio => <option key={ratio}>{ratio}</option>)}</select>)}
         {row("Resolution", <select aria-label="Resolution" value={data.resolution} onChange={event => update({ resolution: event.target.value })}>{!resolutions.includes(data.resolution) && <option disabled>{data.resolution}</option>}{resolutions.map(value => <option key={value}>{value}</option>)}</select>)}
-        {qualities?.length > 0 && row("Quality", <select aria-label="Quality" value={data.quality} onChange={event => update({ quality: event.target.value })}>{qualities.map(value => <option key={value}>{value}</option>)}</select>)}
+        {qualities?.length > 0 && row("Quality", <select aria-label="Quality" value={qualities.includes(data.quality) ? data.quality : "high"} onChange={event => update({ quality: event.target.value })}>{qualities.map(value => <option key={value}>{value}</option>)}</select>)}
       </fieldset>}
     <section className="explore-references" aria-label="References">
       <div className="explore-settings-heading explore-reference-heading">

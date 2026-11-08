@@ -19,7 +19,7 @@ const favorites = { favoriteImageModel: "Nano Banana Pro", favoriteVideoModel: "
 const catalog = [
   { type: "imageModel", options: { model: models.imageModelOptions }, ports: { input: [{ id: "promptIn" }], output: [{ id: "imageOut" }] } },
   { type: "videoModel", options: { model: models.videoModelOptions }, ports: { input: [{ id: "promptIn" }, { id: "directorIn" }], output: [{ id: "videoOut" }] } },
-  { type: "coverage", options: { model: ["OpenAI Image 2", "Nano Banana Pro", "OpenAI Image 2.5 Flare"] } },
+  { type: "coverage", options: { model: ["OpenAI Image 2", "Nano Banana Pro", "OpenAI Image 2.6 Flare"] } },
   { type: "character", options: { characterSheetModel: ["Nano Banana Pro", "Nano Banana Pro", "OpenAI Image 2"] } },
   { type: "skillDirector", options: { skillVideoModel: models.videoModelOptions }, ports: { input: [], output: [{ id: "directorOut" }] } },
   { type: "plainText", ports: { input: [], output: [{ id: "promptOut" }] } },
@@ -46,8 +46,8 @@ test("favorites apply only to supported fresh node choices and explicit models w
     assert.deepEqual(myNewtFavoriteCreationPatch(type, favorites, catalog, { [field]: "Explicit model" }), {});
   }
   for (const type of ["storyboard", "text", "utility", "composer", "myNewt", "preview"]) assert.deepEqual(myNewtFavoriteCreationPatch(type, favorites, catalog), {});
-  assert.deepEqual(myNewtFavoriteCreationPatch("character", { favoriteImageModel: "OpenAI Image 2.5 Flare" }, catalog), {});
-  assert.deepEqual(myNewtFavoriteCreationPatch("coverage", { favoriteImageModel: "OpenAI Image 2.5 Sunburst" }, catalog), {});
+  assert.deepEqual(myNewtFavoriteCreationPatch("character", { favoriteImageModel: "OpenAI Image 2.6 Flare" }, catalog), {});
+  assert.deepEqual(myNewtFavoriteCreationPatch("coverage", { favoriteImageModel: "OpenAI Image 2.6 Sunburst" }, catalog), {});
   assert.deepEqual(myNewtFavoriteCreationPatch("imageModel", {}, catalog), {});
 });
 
@@ -116,10 +116,10 @@ test("fresh free workflows use favorites without modifying existing nodes, prese
     assert.equal(modelNode.data.model, id === "image" ? favorites.favoriteImageModel : favorites.favoriteVideoModel);
     if (id === "director") assert.equal(graph.nodes[0].data.skillVideoModel, favorites.favoriteVideoModel);
   }
-  const graph = { nodes: [{ id: "image", type: "imageModel", x: 0, y: 0, data: { title: "Saved image", model: "OpenAI Image 2.5 Flare", resolution: "2K" } }], edges: [], groups: [] };
+  const graph = { nodes: [{ id: "image", type: "imageModel", x: 0, y: 0, data: { title: "Saved image", model: "OpenAI Image 2.6 Flare", resolution: "2K" } }], edges: [], groups: [] };
   const original = structuredClone(graph);
-  const copy = instantiateNewtPreset(graph, { x: 10, y: 10 }); assert.equal(copy.nodes[0].data.model, "OpenAI Image 2.5 Flare");
-  const duplicate = buildMyNewtDuplicateGraph(graph, ["image"], 1); assert.equal(duplicate.nodes[0].data.model, "OpenAI Image 2.5 Flare");
+  const copy = instantiateNewtPreset(graph, { x: 10, y: 10 }); assert.equal(copy.nodes[0].data.model, "OpenAI Image 2.6 Flare");
+  const duplicate = buildMyNewtDuplicateGraph(graph, ["image"], 1); assert.equal(duplicate.nodes[0].data.model, "OpenAI Image 2.6 Flare");
   assert.deepEqual(graph, original);
   const action = myNewtLocalAction('Set "Saved image" model to OpenAI Image 2', { ...graph, catalog }, { ...favorites, allowExisting: true });
   assert.equal(action.route, "local"); assert.equal(action.action.payload.patch.model, "OpenAI Image 2");
@@ -149,7 +149,7 @@ test("the planner receives saved favorites and the strict existing-model/preset 
   assert.match(request.instructions, /including presets inserted during this task/);
   const stored = JSON.parse(await readFile(path.join(directory, `${started.id}.json`), "utf8"));
   assert.equal(stored.settings.favoriteVideoModel, favorites.favoriteVideoModel);
-  await service.control(started.id, { ...owner, action: "settings", settings: { ...stored.settings, favoriteImageModel: "OpenAI Image 2.5 Flare" } });
-  assert.equal(service.jobs.get(started.id).settings.favoriteImageModel, "OpenAI Image 2.5 Flare");
+  await service.control(started.id, { ...owner, action: "settings", settings: { ...stored.settings, favoriteImageModel: "OpenAI Image 2.6 Flare" } });
+  assert.equal(service.jobs.get(started.id).settings.favoriteImageModel, "OpenAI Image 2.6 Flare");
   assert.deepEqual(service.jobs.get(started.id).snapshot, graph);
 });

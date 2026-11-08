@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import sharp from "sharp";
 import { imageEditSize, imageEditPoint, buildImageEditPrompt } from "../src/imageEdit.js";
-import { buildOpenAiImage25FalRequest, openAiImage25Models } from "../src/openAiImage25.js";
+import { buildOpenAiImage26FalRequest, openAiImage26Models } from "../src/openAiImage26.js";
 import { prepareImageEdit, finishImageEdit } from "../server/image-edit.js";
 
 const solid = (width, height, background) => sharp({ create: { width, height, channels: 4, background } }).png().toBuffer();
@@ -15,12 +15,12 @@ test("edit sizes satisfy the actual Sunburst payload limits across portrait, lan
   for (const [width, height] of [[1,1], [3,1], [1,3], [1920,1080], [1080,1920], [11162,3072], [4000,6000], [6000,4000], [3840,2160], [5000,1667], [1667,5000], [703,514]]) {
     if (width * height > 24000000) { assert.throws(() => imageEditSize(width, height)); continue; }
     const size = imageEditSize(width, height);
-    const request = buildOpenAiImage25FalRequest({ model: openAiImage25Models.sunburst, prompt: "Edit this image", size: `${size.width}x${size.height}`, imageUrls: ["source"] });
+    const request = buildOpenAiImage26FalRequest({ model: openAiImage26Models.sunburst, prompt: "Edit this image", size: `${size.width}x${size.height}`, imageUrls: ["source"] });
     assert.deepEqual(request.input.image_size, size);
   }
   for (let w = 17; w < 3800; w += 117) for (let h = Math.ceil(w / 3); h <= Math.min(w * 3, 6000); h += 133) {
     const size = imageEditSize(w, h);
-    assert.doesNotThrow(() => buildOpenAiImage25FalRequest({ model: openAiImage25Models.sunburst, prompt: "Edit this image", size: `${size.width}x${size.height}` }));
+    assert.doesNotThrow(() => buildOpenAiImage26FalRequest({ model: openAiImage26Models.sunburst, prompt: "Edit this image", size: `${size.width}x${size.height}` }));
   }
   assert.throws(() => imageEditSize(4000, 1000), /aspect ratios/);
   assert.throws(() => imageEditSize(5000, 5000), /24 megapixels/);
@@ -58,13 +58,13 @@ test("blank sketch sends only the sketch on white, never the original subject", 
   assert.ok((await pixel(prepared.images[0], 10, 10))[1] > 100);
 });
 
-test("mask is transparent inside selection and opaque outside; only selected pixels change", async () => {
+test("Sunburst mask is white inside selection and black outside; only selected pixels change", async () => {
   const source = await solid(60, 90, { r: 20, g: 60, b: 120, alpha: .8 });
   const selection = await sharp({ create: { width: 60, height: 90, channels: 4, background: "#00000000" } })
     .composite([{ input: await solid(10, 20, "#ffffff"), left: 20, top: 30 }]).png().toBuffer();
   const prepared = await prepareImageEdit({ source, selection, mode: "remove" });
-  assert.equal((await pixel(prepared.mask, 0, 0))[3], 255);
-  assert.equal((await pixel(prepared.mask, 25, 35))[3], 0);
+  assert.deepEqual(await pixel(prepared.mask, 0, 0), [0, 0, 0, 255]);
+  assert.deepEqual(await pixel(prepared.mask, 25, 35), [255, 255, 255, 255]);
   const result = await finishImageEdit(prepared, await solid(64, 96, "#fa1414"));
   const metadata = await sharp(result).metadata();
   assert.equal(metadata.width, 60); assert.equal(metadata.height, 90);

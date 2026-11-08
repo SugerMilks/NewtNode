@@ -1,9 +1,9 @@
-import { openAiImage25Models } from "./openAiImage25.js";
+import { openAiImage26Models } from "./openAiImage26.js";
 import { ideogramImageEditModel, validateIdeogramImageEditRequest } from "./ideogramImageEdit.js";
 import { nanoBanana21ModelName } from "./nanoBanana21.js";
 
 export const imageEditDefaultModel = ideogramImageEditModel;
-export const imageEditModels = [ideogramImageEditModel, nanoBanana21ModelName, openAiImage25Models.sunburst];
+export const imageEditModels = [ideogramImageEditModel, nanoBanana21ModelName, openAiImage26Models.sunburst];
 export const imageEditColors = ["#f4f4f4", "#191919", "#ed5959", "#f4a340", "#e4cf37", "#57bd83", "#42b9d0", "#648cf5"];
 export const imageEditModes = ["edit", "sketch", "remove"];
 export const imageEditMaxPixels = 24000000;
@@ -12,7 +12,7 @@ export function imageEditPoint(clientX, clientY, rect) {
   return { x: Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)), y: Math.max(0, Math.min(1, (clientY - rect.top) / rect.height)) };
 }
 
-export function imageEditSize(width, height, model = openAiImage25Models.sunburst) {
+export function imageEditSize(width, height, model = openAiImage26Models.sunburst) {
   if (![width, height].every((value) => Number.isInteger(value) && value > 0) || width * height > imageEditMaxPixels)
     throw new Error("This image is too large for the editor. Use an image up to 24 megapixels.");
   if (model === nanoBanana21ModelName) {
@@ -24,7 +24,7 @@ export function imageEditSize(width, height, model = openAiImage25Models.sunburs
     // Auto sizing keeps source geometry; the provider may render oversized sources smaller.
     return { width, height };
   }
-  if (Math.max(width / height, height / width) > 3) throw new Error("Image 2.5 supports aspect ratios between 1:3 and 3:1. Crop this image before generating an edit.");
+  if (Math.max(width / height, height / width) > 3) throw new Error("Image 2.6 supports aspect ratios between 1:3 and 3:1. Crop this image before generating an edit.");
   let scale = Math.min(1, 3840 / Math.max(width, height), Math.sqrt(8294400 / (width * height)));
   scale = Math.max(scale, Math.sqrt(655360 / (width * height)));
   let w = Math.min(3840, Math.round(width * scale / 16) * 16);
@@ -36,7 +36,7 @@ export function imageEditSize(width, height, model = openAiImage25Models.sunburs
   return { width: w, height: h };
 }
 
-export function buildImageEditPrompt({ prompt = "", mode = "edit", hasDrawing = false, hasSelection = false, blank = false, model = openAiImage25Models.sunburst }) {
+export function buildImageEditPrompt({ prompt = "", mode = "edit", hasDrawing = false, hasSelection = false, blank = false, model = openAiImage26Models.sunburst }) {
   if (!imageEditModes.includes(mode)) throw new Error("Choose an image editing method.");
   const brief = String(prompt).trim();
   const ideogram = model === ideogramImageEditModel;
@@ -56,7 +56,7 @@ export function buildImageEditPrompt({ prompt = "", mode = "edit", hasDrawing = 
       ? `Image ${hasDrawing ? 3 : 2} is a black-and-white selection guide aligned exactly with image 1. White indicates the area to edit; black indicates protected content. Use this guide only to locate the requested change in image 1. Keep the framing and geometry aligned with the original. Do not include the guide or its colors in the finished image.`
       : ideogram
       ? "The black area of the provided edit mask is the selected region; white pixels are protected. Change only the black region. Preserve everything else. Do not reproduce the selection overlay."
-      : "The transparent area of the provided edit mask is the selected region. Change only that region. Preserve everything else. Do not reproduce the selection overlay." : "",
+      : "The white area of the provided edit mask is the selected region; black pixels are protected. Change only the white region. Preserve everything else. Do not reproduce the selection overlay." : "",
     mode === "remove" ? "Remove the selected content and reconstruct the exposed area naturally from its surroundings. Do not add replacement objects unless requested." : "",
     brief ? `USER EDIT BRIEF:\n${brief}` : mode === "sketch" ? "Render a polished finished version of the sketch." : "",
     "Return one image only. Do not add comparison panels, interface controls, borders, or annotation marks."

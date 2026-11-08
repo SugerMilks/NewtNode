@@ -54,7 +54,7 @@ function render(scroll = { left: 0, maximum: 1400 }, count = 12, busy = false, d
   const updates = [];
   const tree = ExploreNodeBody({ node: { id: "explore", data: { status: busy ? "running" : "complete", model: "Nano Banana Pro", aspectRatio: "16:9", resolution: "1K", ...data,
     resultItems: Array.from({ length: count }, (_, index) => ({ url: `/result-${index}.png`, label: `Direction ${index + 1}` })) } },
-    config: { input: [{ id: "promptIn" }], output: [] }, incoming: {}, imageModels: ["Nano Banana Pro", "OpenAI Image 2.5 Flare"], ratios: ["16:9"], resolutions: ["1K", "2K"], qualities: ["low", "medium", "high"], prompt: "A perfume bottle",
+    config: { input: [{ id: "promptIn" }], output: [] }, incoming: {}, imageModels: ["Nano Banana Pro", "OpenAI Image 2.6 Flare"], ratios: ["16:9"], resolutions: ["1K", "2K"], qualities: ["low", "medium", "high"], prompt: "A perfume bottle",
     onUpdate: (...args) => updates.push(args), modelPatch: model => ({ model }) });
   const find = (predicate, value = tree) => {
     if (!value || typeof value !== "object") return null;
@@ -66,11 +66,30 @@ function render(scroll = { left: 0, maximum: 1400 }, count = 12, busy = false, d
 
 test("Explore controls show Flare medium with nine directions and an enabled run button", () => {
   const fixture = render(undefined, 0, false, { ...exploreDefaults(), settingsOpen: true });
-  assert.equal(fixture.label("Explore image model").props.value, "OpenAI Image 2.5 Flare");
+  assert.equal(fixture.label("Explore image model").props.value, "OpenAI Image 2.6 Flare");
   assert.equal(fixture.label("Quality").props.value, "medium");
   assert.equal(fixture.label("Directions").props.value, 9);
   assert.equal(fixture.label("Directions").props.max, 25);
   assert.equal(fixture.find(item => item.props?.className === "primary-button explore-run").props.disabled, false);
+});
+
+test("Creative Range explains its effect on hover and to assistive technology without changing slider behavior", () => {
+  const fixture = render(undefined, 0, false, { ...exploreDefaults(), settingsOpen: true });
+  const control = fixture.label("Creative range");
+  const setting = fixture.find(item => item.type === "label" && item.props.children?.[0]?.props.children === "Creative Range");
+  const help = setting.props.title;
+  assert.match(help, /Lower: restrained variations/);
+  assert.match(help, /55 \(default\): distinct looks/);
+  assert.match(help, /Higher: bolder camera angles, framing, lighting, palettes and art direction/);
+  assert.match(help, /not image quality or resolution/);
+  assert.match(help, /references keep their content and composition unless your brief requests changes/);
+  assert.match(help, /Explore Mode on/);
+  assert.equal(control.props["aria-description"], help);
+  assert.equal(control.props.value, 55);
+  assert.equal(control.props.min, "0");
+  assert.equal(control.props.max, "100");
+  control.props.onChange({ target: { value: "80" } });
+  assert.deepEqual(fixture.updates, [["explore", { creativeRange: 80 }]]);
 });
 
 test("Explore accepts a saved 25-direction selection and enables its run button", () => {

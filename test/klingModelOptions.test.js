@@ -271,8 +271,8 @@ test("removed video models are no longer selectable", () => {
     imageModelNames.nanoBanana21,
     imageModelNames.nanoBananaPro,
     imageModelNames.openAiImage2,
-    imageModelNames.openAiImage25Sunburst,
-    imageModelNames.openAiImage25Flare,
+    imageModelNames.openAiImage26Sunburst,
+    imageModelNames.openAiImage26Flare,
     imageModelNames.seedream5Pro
   ]);
 });

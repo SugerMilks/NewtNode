@@ -39,7 +39,7 @@ test("Newt can review connected image and video prompts without a runtime error"
     buildIncomingByNode: () => ({ test: incoming }), connectedText,
     connectedImagePromptItems: () => [], imageReferenceConnectionsForModel: () => [],
     imageInstructionSourcesForModel: () => [], buildEffectiveImagePrompt: (prompt) => prompt,
-    isOpenAiImage25Model: () => false, isSeedance25Model: (model) => model === "Seedance 2.5", estimateImageRunCost, estimateVideoRunCost,
+    isOpenAiImage26Model: () => false, isSeedance25Model: (model) => model === "Seedance 2.5", estimateImageRunCost, estimateVideoRunCost,
     connectedDirectorPackageSource: () => null, connectedDirectorPackageText: () => "",
     expandVideoDirectorPackageIncoming: (value) => value, videoModelSupportsCharacterInput: () => true,
     uniqueAssetItems: (value) => value, connectedAssetItems: () => [], connectedCharacterReferences: () => [],

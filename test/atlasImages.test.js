@@ -6,16 +6,14 @@ import { imageModelNames, imageModelOptions, nanoImageAspectRatios } from "../sr
 const prompt = "Preserve the product and change the lighting.";
 const maskUrl = "https://example.com/mask.png";
 const references = (count) => Array.from({ length: count }, (_, index) => `https://example.com/full-${index}.png`);
-const variants = [imageModelNames.openAiImage25Sunburst, imageModelNames.openAiImage25Flare];
-const openAiModels = [imageModelNames.openAiImage2, ...variants];
+const variants = [imageModelNames.openAiImage26Sunburst, imageModelNames.openAiImage26Flare];
+const openAiModels = [imageModelNames.openAiImage2];
 const nanoModels = [imageModelNames.nanoBananaPro];
 
 // Contract snapshots from the public Atlas schemas, not live generation calls or local cache dependencies.
 // https://static.atlascloud.ai/model/schema/<model-id-with-dashes>.json (2026-09-10)
 const contracts = [
   [imageModelNames.openAiImage2, "openai/gpt-image-2", 10],
-  [imageModelNames.openAiImage25Sunburst, "openai/gpt-image-2.5-sunburst", 16],
-  [imageModelNames.openAiImage25Flare, "openai/gpt-image-2.5-flare", 16],
   [imageModelNames.nanoBananaPro, "google/nano-banana-pro", 10],
 ];
 const settings = (model, overrides = {}) => ({ model, prompt, ...overrides });
@@ -28,10 +26,10 @@ function rejects(options, pattern) {
 }
 
 test("only exact canonical image models are supported, with no substitutions or LLMs", () => {
-  assert.deepEqual(new Set(atlasImageModels), new Set(imageModelOptions.filter((model) => model !== imageModelNames.nanoBanana21)));
+  assert.deepEqual(new Set(atlasImageModels), new Set(imageModelOptions.filter((model) => model !== imageModelNames.nanoBanana21 && !variants.includes(model))));
   assert.ok(Object.isFrozen(atlasImageModels));
   for (const model of atlasImageModels) assert.equal(supportsAtlasImageModel(model), true);
-  for (const model of ["Ideogram 4.5", imageModelNames.nanoBanana21, undefined, null, {}, 2, "", "toString", "__proto__", "OpenAI Image 2.5", "OpenAI Image 2.5 Sunburst Developer",
+  for (const model of ["Ideogram 4.5", imageModelNames.nanoBanana21, undefined, null, {}, 2, "", "toString", "__proto__", "OpenAI Image 2.6", "OpenAI Image 2.6 Sunburst Developer",
     "openai/gpt-image-2-developer/edit", "OpenAI Image 2 Developer", "google/nano-banana-2/text-to-image-developer",
     "Nano Banana 2 Lite", "Nano Banana Pro Ultra", "Gemini 3.1 Pro", "gemini-3.1-flash", "google/gemini-3-pro",
     "REVE", "REVE 2", "Krea 2 Large", "Krea 2 Turbo", "nano banana 2", " OpenAI Image 2 "]) {
@@ -95,23 +93,10 @@ test("Image 2 defaults are high-quality 2K landscape, PNG and async", () => {
   });
 });
 
-test("Sunburst and Flare retain high/xhigh/max, full size, transparency and the exact mask field", () => {
-  for (const [model, variant] of variants.map((model, index) => [model, ["sunburst", "flare"][index]])) {
-    assert.equal(buildAtlasImageRequest({ model, prompt }).quality, "high");
-    for (const quality of ["high", "xhigh", "max"]) {
-      const images = references(16);
-      assert.deepEqual(buildAtlasImageRequest({ model, prompt, images, size: "3840x2160", quality, maskUrl, background: "transparent" }), {
-        model: `openai/gpt-image-2.5-${variant}/edit`, prompt, images, size: "3840x2160", quality,
-        mask: maskUrl, background: "transparent", n: 1, output_format: "png", enable_sync_mode: false
-      });
-    }
-    for (const quality of ["auto", "low", "medium", "high", "xhigh", "max"]) {
-      assert.equal(buildAtlasImageRequest({ model, prompt, quality }).quality, quality);
-    }
-    for (const background of ["auto", "opaque", "transparent"]) {
-      assert.equal(buildAtlasImageRequest({ model, prompt, background }).background, background);
-    }
-    rejects({ model, prompt, maskUrl }, /mask needs a reference image/);
+test("unpublished 2.6 variants cannot use Atlas or silently substitute 2.5", () => {
+  for (const model of variants) for (const images of [[], references(1)]) {
+    assert.equal(supportsAtlasImageModel(model), false);
+    rejects({ model, prompt, images }, /Unsupported Atlas image model/);
   }
 });
 
@@ -169,10 +154,6 @@ test("OpenAI sizes derived from Newt controls respect dimensions and pixel budge
 });
 
 test("automatic sizing is only sent to models that explicitly support it", () => {
-  for (const model of variants) {
-    assert.equal(buildAtlasImageRequest({ model, prompt, size: "auto" }).size, "auto");
-    assert.equal(buildAtlasImageRequest({ model, prompt, aspectRatio: "Auto" }).size, "auto");
-  }
   rejects({ model: imageModelNames.openAiImage2, prompt, size: "auto" }, /size/);
   rejects({ model: imageModelNames.openAiImage2, prompt, aspectRatio: "Auto" }, /aspectRatio/);
   for (const model of nanoModels) rejects({ model, prompt, aspectRatio: "Auto" }, /aspectRatio/);
@@ -217,22 +198,13 @@ test("shared OpenAI size is ignored for Nano Banana without overriding native se
   }
 });
 
-test("Sunburst Character 4K landscape preserves base/wardrobe order and mask across preflight and native requests", (t) => {
-  const options = { model: imageModelNames.openAiImage25Sunburst, prompt, aspectRatio: "16:9", resolution: "4K",
+test("Sunburst Character 4K rejects Atlas before masked uploads", (t) => {
+  const options = { model: imageModelNames.openAiImage26Sunburst, prompt, aspectRatio: "16:9", resolution: "4K",
     size: "3840x2160", quality: "high" };
-  const placeholder = "https://reference.invalid/image.png";
-  const preflight = buildAtlasImageRequest({ ...options, images: [placeholder, placeholder], maskUrl: "https://reference.invalid/mask.png" });
   const images = ["https://example.com/native-cu-base.png", "https://example.com/native-wardrobe.png"];
   const submit = t.mock.fn();
-  const native = buildAtlasImageRequest({ ...options, images, maskUrl });
-  submit(native);
-  assert.deepEqual(native, { ...preflight, images, mask: maskUrl });
-  assert.equal(native.model, "openai/gpt-image-2.5-sunburst/edit");
-  assert.equal(native.size, "3840x2160");
-  assert.equal(native.quality, "high");
-  assert.equal(native.output_format, "png");
-  assert.equal(native.enable_sync_mode, false);
-  assert.equal(submit.mock.callCount(), 1);
+  assert.throws(() => submit(buildAtlasImageRequest({ ...options, images, maskUrl })), /Unsupported Atlas image model/);
+  assert.equal(submit.mock.callCount(), 0);
 });
 
 test("invalid preflight settings reject before mocked uploads or submission", (t) => {
@@ -247,15 +219,6 @@ test("invalid preflight settings reject before mocked uploads or submission", (t
   }
   assert.equal(upload.mock.callCount(), 0);
   assert.equal(submit.mock.callCount(), 0);
-});
-
-test("OpenAI 2.5 prompt limits apply to generation and edits", () => {
-  for (const [model, images, limit] of [
-    ...variants.flatMap((model) => [[model, [], 32000], [model, references(1), 32000]]),
-  ]) {
-    assert.equal(buildAtlasImageRequest(settings(model, { images, prompt: "a".repeat(limit) })).prompt.length, limit);
-    rejects(settings(model, { images, prompt: "a".repeat(limit + 1) }), new RegExp(`prompt.*${limit}`));
-  }
 });
 
 test("the builder is synchronous, deterministic, does not mutate inputs and never calls fetch", (t) => {
@@ -275,15 +238,14 @@ test("the builder is synchronous, deterministic, does not mutate inputs and neve
 
 test("image strings retain order, duplicates and documented asset/base64 representations", () => {
   const images = ["asset://source", "data:image/png;base64,aGVsbG8=", "https://example.com/a.png", "asset://source"];
-  const result = buildAtlasImageRequest({ model: variants[0], prompt, images, maskUrl: "asset://mask" });
+  const result = buildAtlasImageRequest({ model: imageModelNames.openAiImage2, prompt, images });
   assert.deepEqual(result.images, images);
-  assert.equal(result.mask, "asset://mask");
 });
 
 test("unknown fields cannot override async, PNG, model tiers or batch size", () => {
   for (const extra of [{ enable_sync_mode: true }, { output_format: "jpeg" }, { n: 10 }, { tier: "developer" },
     { thinking_level: "minimal" }, { media_resolution: "low" }, { imageUrls: references(1) }, { mask: maskUrl }]) {
-    rejects({ model: variants[0], prompt, ...extra }, /unsupported setting/);
+    rejects({ model: imageModelNames.openAiImage2, prompt, ...extra }, /unsupported setting/);
   }
   rejects(undefined, /Unsupported Atlas image model/);
   for (const options of [null, [], "model"]) rejects(options, /settings must be an object/);

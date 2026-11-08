@@ -2,6 +2,7 @@ import { scopedMyNewtRequest } from "../myNewt/requestScope.js";
 import { isVideoGenerationRequest } from "../videoJobPolicy.js";
 import { isNanoBanana21Model } from "../nanoBanana21.js";
 import { isKling4Model } from "../kling4.js";
+import { isOpenAiImage26Model } from "../openAiImage26.js";
 const localApiPort = import.meta.env?.VITE_API_PORT || "3336";
 const localApiBaseUrl = `http://127.0.0.1:${localApiPort}`;
 
@@ -16,6 +17,17 @@ function ensureOk(response, data, fallbackMessage) {
 }
 
 export async function fetchJsonApi(path, options = {}, label = "Request") {
+  if (path === "/api/editor/render") {
+    const timeline = JSON.parse(options.body || "{}").timeline;
+    const positioned = timeline?.clips?.some(c => c.positionX || c.positionY);
+    const faded = timeline?.clips?.some(c => c.fadeIn || c.fadeOut);
+    if (timeline?.transitions?.length || positioned || faded) {
+      const health = await getJson("/api/health", "Could not verify Editor export support.");
+      if (timeline?.transitions?.length && health.routes?.editorTransitions !== true) throw new Error("Restart NewtNode to export Editor transitions. Your timeline is preserved; no export was started.");
+      if (positioned && health.routes?.editorClipPosition !== true) throw new Error("Restart NewtNode to export clip positions. Your timeline is preserved; no export was started.");
+      if (faded && health.routes?.editorClipFades !== true) throw new Error("Restart NewtNode to export clip fades. Your timeline is preserved; no export was started.");
+    }
+  }
   if (path === "/api/node/process-text") {
     const health = await getJson("/api/health", "Could not verify Smart Text support.");
     if (health.routes?.smartTextImageRevisions !== true) throw new Error("Restart NewtNode to activate the updated Smart Text and revisions. No prompt request was submitted.");
@@ -68,6 +80,10 @@ export async function fetchJsonApi(path, options = {}, label = "Request") {
   }
   if (path === "/api/node/generate-image") {
     const body = JSON.parse(options.body || "{}");
+    if (isOpenAiImage26Model(body.model)) {
+      const health = await getJson("/api/health", "Could not verify GPT Image 2.6 support.");
+      if (health.routes?.gptImage26 !== true) throw new Error("Restart NewtNode to activate GPT Image 2.6. No generation was submitted.");
+    }
     if (isNanoBanana21Model(body.model)) {
       const health = await getJson("/api/health", "Could not verify Nano Banana 2.1 support.");
       if (health.routes?.nanoBanana21 !== true) throw new Error("Restart the NewtNode backend to activate Nano Banana 2.1. No generation was submitted.");
@@ -437,6 +453,10 @@ export const nodeApi = {
     return postJson("/api/node/explore-plan", body, "Explore planning");
   },
   async editImage(form) {
+    if (isOpenAiImage26Model(form.get("model"))) {
+      const health = await getJson("/api/health", "Could not verify GPT Image 2.6 editing support.");
+      if (health.routes?.gptImage26 !== true) throw new Error("Restart NewtNode to activate GPT Image 2.6 masked edits. No generation was submitted.");
+    }
     if (isNanoBanana21Model(form.get("model"))) {
       const health = await getJson("/api/health", "Could not verify Nano Banana 2.1 editing support.");
       if (health.routes?.imageEditingNanoBanana21 !== true) throw new Error("Restart NewtNode to activate Nano Banana 2.1 in Draw and Edit. No generation was submitted.");

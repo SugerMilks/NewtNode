@@ -1,7 +1,7 @@
 import { nodeApi } from "../api/newtApi.js";
 import { characterSheetGenerationSettings } from "../characterSheetModels.js";
 import { storyboardCharacterImageSettings } from "../storyboardImageModels.js";
-import { isOpenAiImage25Model, openAiImage25KreaSelection } from "../openAiImage25.js";
+import { isOpenAiImage26Model, openAiImage26KreaSelection } from "../openAiImage26.js";
 import { characterVideoBaseReferences } from "../characterVideoSheets.js";
 import { isAutoCharacterWardrobe } from "../characterAutoWardrobe.js";
 import { workflowContextPayload } from "../workflowContext.js";
@@ -49,8 +49,8 @@ export async function runCoverageGeneration({
   index,
   provider = "fal"
 }) {
-  const settings = provider === "krea" && isOpenAiImage25Model(node.data.model)
-    ? openAiImage25KreaSelection({ ...node.data, aspectRatio })
+  const settings = provider === "krea" && isOpenAiImage26Model(node.data.model)
+    ? openAiImage26KreaSelection({ ...node.data, aspectRatio })
     : { aspectRatio, resolution: node.data.resolution, quality: node.data.quality };
   const { response, data } = await nodeApi.generateImage({
     prompt: shot.prompt,
@@ -256,7 +256,7 @@ export async function runCharacterWardrobeEdit({
     { url: baseUrl, label: isVideoSheet ? "Locked Base Identity CU Video Sheet" : "Locked Base Identity Character Sheet" },
     { url: wardrobeUrl, label: isAutoCharacterWardrobe(wardrobe)
       ? isVideoSheet ? "Completed Auto Wardrobe sheet - outfit only, not identity or layout" : "Original portrait - visible wardrobe and style for outfit completion, not layout"
-      : "Wardrobe clothing footwear accessories hats glasses sunglasses not identity" }
+      : "Wardrobe reference - clothing, footwear, visible accessories only; not identity" }
   ];
   const { response, data } = await nodeApi.generateImage({
     prompt,

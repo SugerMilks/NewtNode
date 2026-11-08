@@ -2,12 +2,10 @@ import { imageModelNames, nanoImageAspectRatios } from "./modelOptions.js";
 import { seedream5ProAtlasBase, validateSeedream5ProRequest } from "./seedream5Pro.js";
 
 // Verified 2026-09-10 against https://static.atlascloud.ai/model/schema/<model-id-with-dashes>.json.
-// The 2.5 schemas also appear in https://www.atlascloud.ai/models/openai/gpt-image-2.5-sunburst/edit.
+// GPT Image 2.6 is not published on Atlas (catalog checked 2026-11-04).
 const models = {
   [imageModelNames.seedream5Pro]: { id: seedream5ProAtlasBase, family: "seedream", maxReferences: 10 },
   [imageModelNames.openAiImage2]: { id: "openai/gpt-image-2", family: "openai", maxReferences: 10 },
-  [imageModelNames.openAiImage25Sunburst]: { id: "openai/gpt-image-2.5-sunburst", family: "openai25", maxReferences: 16 },
-  [imageModelNames.openAiImage25Flare]: { id: "openai/gpt-image-2.5-flare", family: "openai25", maxReferences: 16 },
   [imageModelNames.nanoBananaPro]: { id: "google/nano-banana-pro", family: "nano", maxReferences: 10 }
 };
 
@@ -72,8 +70,6 @@ function validateOpenAiSize(size, allowAuto, model) {
 
 function openAiSize({ size, ratio, aspectRatio, resolution, allowAuto, model }) {
   // Explicit full-size input is authoritative. Do not snap it to a preset or silently resize it.
-  // Atlas's size enum lists UI presets, but its description and 2.5 README explicitly allow custom sizes:
-  // https://static.atlascloud.ai/model/readme/openai-gpt-image-2.5-sunburst-edit.md
   if (size !== undefined) return validateOpenAiSize(size, allowAuto, model);
   if (ratio === "auto") return "auto";
 
@@ -114,37 +110,27 @@ export function buildAtlasImageRequest(options = {}) {
       size: `${dimensions.width}*${dimensions.height}`, output_format: "png", thinking: "enabled", prompt_optimization_mode: "standard",
       ...(images.length ? { images: [...images] } : {}) };
   }
-  const image25 = config.family === "openai25";
-  const openAi = image25 || config.family === "openai";
+  const openAi = config.family === "openai";
   validateReferences(images, config.maxReferences, model);
-  validatePrompt(prompt, image25 ? 32000 : null, model);
+  validatePrompt(prompt, null, model);
   if (typeof maskUrl !== "string" || (maskUrl && !maskUrl.trim())) fail(`Atlas ${model}: maskUrl must be an image string or empty.`);
-  if (maskUrl && !image25) fail(`Atlas ${model} does not support masks.`);
-  if (maskUrl && !images.length) fail("An Atlas edit mask needs a reference image.");
+  if (maskUrl) fail(`Atlas ${model} does not support masks.`);
 
   const selectedResolution = option(resolution === undefined ? "2K" : resolution, ["1k", "2k", "4k"], "resolution", model);
-  const selectedQuality = option(quality, image25 ? ["auto", "low", "medium", "high", "xhigh", "max"]
-    : openAi ? ["low", "medium", "high"] : ["high"], "quality", model);
-  const selectedBackground = option(background, image25 ? ["auto", "opaque", "transparent"]
-    : ["auto"], "background", model);
+  const selectedQuality = option(quality, openAi ? ["low", "medium", "high"] : ["high"], "quality", model);
+  option(background, ["auto"], "background", model);
   const mode = images.length ? "edit" : "text-to-image";
   const request = {
     model: `${config.id}/${mode}`,
     prompt,
     output_format: "png",
-    // Atlas's common async envelope; 2.5 is asynchronous even though its model schema omits this flag.
     enable_sync_mode: false
   };
 
   if (openAi) {
-    const ratio = openAiAspectRatio(aspectRatio, image25, model);
-    request.size = openAiSize({ size, ratio, aspectRatio, resolution: selectedResolution, allowAuto: image25, model });
+    const ratio = openAiAspectRatio(aspectRatio, false, model);
+    request.size = openAiSize({ size, ratio, aspectRatio, resolution: selectedResolution, allowAuto: false, model });
     request.quality = selectedQuality;
-    if (image25) {
-      request.background = selectedBackground;
-      request.n = 1;
-      if (maskUrl) request.mask = maskUrl;
-    }
   } else {
     // The shared adapter supplies OpenAI dimensions for every model; these models use only their native controls.
     request.aspect_ratio = option(aspectRatio, nanoImageAspectRatios, "aspectRatio", model);

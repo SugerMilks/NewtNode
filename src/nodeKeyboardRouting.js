@@ -12,6 +12,16 @@ export function editorTimelineZoomDirection(event) {
   return event.key === "-" ? -1 : 0;
 }
 
+export function editorShuttleKey(event) {
+  if (event.defaultPrevented || event.isComposing || event.repeat || event.metaKey || event.ctrlKey || event.altKey) return null;
+  const key = event.key?.toLowerCase();
+  if (!["j", "k", "l"].includes(key)) return null;
+  const target = event.target;
+  if (target?.isContentEditable || target?.closest?.("input, textarea, select, [contenteditable], [role='textbox'], [role='searchbox'], [role='combobox'], [role='spinbutton'], [role='dialog'], [aria-modal='true'], .editor-context-menu")) return null;
+  if (target?.ownerDocument?.querySelector("[aria-modal='true']")) return null;
+  return key;
+}
+
 export function canDeleteCanvasSelection(event, canvas) {
   if (!canvas || event.defaultPrevented || event.isComposing) return false;
   if (event.key !== "Backspace" && event.key !== "Delete") return false;

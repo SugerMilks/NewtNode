@@ -52,7 +52,7 @@ test("2.1 offers exact provider formats; retired choices and generation controls
 });
 
 test("changing models preserves creative work and resets unsupported transparent output", t => {
-  const saved = { model: "OpenAI Image 2.5 Sunburst", quality: "max", background: "transparent", resolution: "4K", aspectRatio: "Auto", prompt: "Keep my prompt",
+  const saved = { model: "OpenAI Image 2.6 Sunburst", quality: "max", background: "transparent", resolution: "4K", aspectRatio: "Auto", prompt: "Keep my prompt",
     resultUrl: "/outputs/old.png", resultItems: [{ url: "/outputs/old.png", type: "image" }], batchCount: "3" };
   const state = editor(t, saved);
   control(state.render(), "Image model").props.onChange({ target: { value: model } });
@@ -84,12 +84,12 @@ test("saved 2.1 and retired generation nodes reload without losing media, edges 
 
 test("defaults remain unchanged and Character retirement preserves saved sheets", () => {
   for (const [type, field, expected] of [["imageModel", "model", "Nano Banana Pro"], ["character", "characterSheetModel", "Nano Banana Pro"],
-    ["storyboard", "model", "OpenAI Image 2.5 Flare"], ["explore", "model", "OpenAI Image 2.5 Flare"]]) assert.equal(createDefaultNodeData(type, type, 1)[field], expected);
+    ["storyboard", "model", "OpenAI Image 2.6 Flare"], ["explore", "model", "OpenAI Image 2.6 Flare"]]) assert.equal(createDefaultNodeData(type, type, 1)[field], expected);
   const sheets = [{ id: "wardrobe", url: "/outputs/sheet.png" }];
   const restored = normalizeCurrentNode({ id: "char", type: "character", data: { characterSheetModel: "Nano Banana 2", characterWardrobeSheets: sheets } });
   assert.equal(restored.data.characterSheetModel, model);
   assert.deepEqual(restored.data.characterWardrobeSheets, sheets);
-  for (const currentModel of ["OpenAI Image 2.5 Sunburst", "OpenAI Image 2.5 Flare"]) {
+  for (const currentModel of ["OpenAI Image 2.6 Sunburst", "OpenAI Image 2.6 Flare"]) {
     const data = normalizeImageModelData({ model: currentModel, quality: "max", resolution: "4K", aspectRatio: "21:9" });
     assert.equal(data.quality, "max"); assert.equal(data.resolution, "4K"); assert.equal(data.aspectRatio, "21:9");
   }

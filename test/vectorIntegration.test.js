@@ -9,12 +9,13 @@ import { myNewtFields } from "../src/myNewt/contract.js";
 import { estimatedNodeWidth, estimatedNodeHeight, estimatedNodeRect } from "../src/nodeGeometry.js";
 import { normalizedResultItems } from "../src/mediaResults.js";
 import { isReframeNode } from "../src/cameraCoverage.js";
+import { migrateOpenAiImageSettings } from "../src/openAiImage26.js";
 
 const editor = await readFile(new URL("../src/NodeEditor.jsx", import.meta.url), "utf8");
 function isolated(name, next, dependencies = {}) {
   const start = editor.indexOf(`function ${name}(`), end = next ? editor.indexOf(`function ${next}(`, start) : editor.indexOf("\nfunction ", start + 1);
   assert.ok(start >= 0 && end > start, `${name} exists in the real editor`);
-  const context = { isReframeNode, ...dependencies };
+  const context = { isReframeNode, migrateOpenAiImageSettings, ...dependencies };
   return Function(...Object.keys(context), `${editor.slice(start, end)};return ${name};`)(...Object.values(context));
 }
 const vectorConfigText = editor.match(/    vector: (\{.*\}),\n    cameraCoverage:/)?.[1];

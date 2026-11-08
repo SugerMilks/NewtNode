@@ -1,6 +1,6 @@
 import React from "react";
 import { Slice, Play, Pause, Camera, Undo2, Redo2, Magnet, Link2, Unlink2, Lock, Unlock, Eye, EyeOff, Volume2, VolumeX,
-  Plus, Trash2, Copy, ZoomIn, ZoomOut, Scan, MonitorPlay, Settings2, Download, Loader2, X, ChevronFirst, ChevronLast, Brackets } from "lucide-react";
+  Plus, Trash2, Copy, ZoomIn, ZoomOut, Scan, MonitorPlay, Settings2, Download, Loader2, X, ChevronFirst, ChevronLast, Brackets, Blend, Eclipse, AudioLines, RotateCcw } from "lucide-react";
 import { PortHandle } from "./NodePorts.jsx";
 import { EditorMonitor } from "./EditorMonitor.jsx";
 import { EditorTimelineScrollbar, useEditorTimelineViewport } from "./EditorTimelineViewport.jsx";
@@ -12,12 +12,14 @@ import { appendResultItems } from "../mediaResults.js";
 import { setOutputItemDragData, outputItemFromDataTransfer, hasOutputItemDragData, finishOutputItemDragData } from "../mediaAssets.js";
 import { notifyGenerationTaskComplete } from "../generationChime.js";
 import { normalizeEditorNodeWidth } from "../nodeGeometry.js";
-import { editorTimelineZoomDirection } from "../nodeKeyboardRouting.js";
+import { editorTimelineZoomDirection, editorShuttleKey } from "../nodeKeyboardRouting.js";
 import { createEditorTimeline, normalizeEditorTimeline, editorEnd, editorRange, editorTimecode, editorImportMedia, editorAddTrack,
   editorSelection, editorMove, editorTrim, editorSplit, editorDelete, editorDuplicate, editorUnlink, editorSnap, editorSetFrameRate,
   editorFrameRates, editorId, clampEditor, editorRenderSignature, editorClipboardMime, editorCopyClips, editorPasteClips,
-  editorEditPoint, editorGapAt, editorRippleDeleteGap, normalizeEditorZoom, editorZoomStep } from "../editorTimeline.js";
+  editorEditPoint, editorGapAt, editorRippleDeleteGap, normalizeEditorZoom, editorZoomStep, editorSetClipPosition, editorMarqueeSelection } from "../editorTimeline.js";
 import "../editorTimeline.css";
+import { editorCuts, editorSetTransition, editorResizeTransition, editorTransitionTypes, editorTransitionWindows } from "../editorTransitions.js";
+import { editorFadeKey, editorSetFade, editorResizeFade } from "../editorFades.js";
 
 function Tool({ icon: Icon, label, active = false, ...props }) {
   return <button type="button" className={`editor-tool ${active ? "active" : ""}`} title={label} aria-label={label} {...props}><Icon size={17} /></button>;
@@ -43,11 +45,13 @@ function Waveform({ asset, clip, fps }) {
   return <canvas ref={ref} className="editor-waveform" aria-hidden="true" />;
 }
 
-export function EditorNodeBody({ node, config, sources = [], workflowContext = {}, onUpdate, onUndoSnapshot, onPreviewOpen,
+export function EditorNodeBody({ node, config, sources = [], workflowContext = {}, onUpdate, onUndoSnapshot, onPreviewOpen, onEditorStillCaptured,
   onConnectStart, onDisconnectInput, connectedPortKeys = new Set(), api = editorApi, chooseExportPath = chooseEditorExportPath }) {
   const saved = React.useMemo(() => normalizeEditorTimeline(node.data.editorTimeline || createEditorTimeline()), [node.data.editorTimeline]);
   const [draft, setDraft] = React.useState(null), [selection, setSelection] = React.useState([]), [error, setError] = React.useState("");
-  const [gap, setGap] = React.useState(null), [gapMenu, setGapMenu] = React.useState(null);
+  const [gap, setGap] = React.useState(null), [contextMenu, setContextMenu] = React.useState(null);
+  const [selectedTransition, setSelectedTransition] = React.useState(null);
+  const [selectedFade, setSelectedFade] = React.useState(null), [marquee, setMarquee] = React.useState(null);
   const [importing, setImporting] = React.useState(false), [retry, setRetry] = React.useState(0), [, setHistoryRevision] = React.useState(0);
   const [settings, setSettings] = React.useState(false), [monitor, setMonitor] = React.useState(false), [snap, setSnap] = React.useState(true), [linked, setLinked] = React.useState(true);
   const [progress, setProgress] = React.useState(0);
@@ -56,15 +60,20 @@ export function EditorNodeBody({ node, config, sources = [], workflowContext = {
   const root = React.useRef(null), scroller = React.useRef(null), gesture = React.useRef(null), undo = React.useRef([]), redo = React.useRef([]);
   const importingRef = React.useRef(false), exportStarting = React.useRef(false), attempted = React.useRef(new Set()), mounted = React.useRef(false);
   const volumeEdit = React.useRef(null);
+  const positionCanceled = React.useRef(false);
   const player = React.useMemo(() => editorPlayback(node.id), [node.id]);
   const transport = React.useSyncExternalStore(player.subscribe, player.getSnapshot, player.getSnapshot);
   const timeline = draft || saved, latest = React.useRef({});
-  latest.current = { node, saved, sources, workflowContext, onUpdate, onUndoSnapshot, onPreviewOpen };
+  const transitions = React.useMemo(() => editorTransitionWindows(timeline), [timeline]);
+  const currentTransition = transitions.find(t => t.leftId === selectedTransition?.leftId && t.rightId === selectedTransition?.rightId);
+  latest.current = { node, saved, sources, workflowContext, onUpdate, onUndoSnapshot, onPreviewOpen, onEditorStillCaptured };
   const range = editorRange(timeline), end = editorEnd(timeline), px = zoom / timeline.fps;
   const job = node.data.editorExportJob, exporting = Boolean(job);
   const selected = editorSelection(timeline, selection, linked), selectedLocked = selected.some(c => timeline.tracks.find(t => t.id === c.trackId)?.locked);
   const linkedLocked = editorSelection(timeline, selection, true).some(c => timeline.tracks.find(t => t.id === c.trackId)?.locked);
   const currentClip = timeline.clips.find(c => c.id === selection[0]), currentAsset = timeline.assets.find(a => a.id === currentClip?.assetId);
+  const positionClip = timeline.tracks.find(t => t.id === currentClip?.trackId)?.kind === "video" ? currentClip : null;
+  const positionLocked = !positionClip || timeline.tracks.find(t => t.id === positionClip.trackId)?.locked;
   const canUndo = undo.current.length > 0, canRedo = redo.current.length > 0;
   const step = [1, 2, 5, 10, 15, 30, 60, 120, 300].find(s => s * zoom >= 85) || 600;
   const scrollId = React.useId();
@@ -79,6 +88,10 @@ export function EditorNodeBody({ node, config, sources = [], workflowContext = {
   }, [player]);
   React.useEffect(() => { player.setTimeline(timeline); }, [player, timeline]);
   React.useEffect(() => {
+    window.addEventListener("blur", cancelTransitionResize);
+    return () => window.removeEventListener("blur", cancelTransitionResize);
+  }, []);
+  React.useEffect(() => {
     if (!transport.playing && !transport.buffering && transport.frame !== (node.data.editorPlayhead || 0)) onUpdate(node.id, { editorPlayhead: transport.frame });
   }, [transport.playing, transport.buffering, transport.frame]);
 
@@ -92,13 +105,13 @@ export function EditorNodeBody({ node, config, sources = [], workflowContext = {
     const data = latest.current.node.data;
     const matchingExport = data.editorExportTimeline && editorRenderSignature(normalizeEditorTimeline(data.editorExportTimeline)) === editorRenderSignature(next);
     latest.current.onUpdate(node.id, { editorTimeline: next, ...(changed ? { resultUrl: matchingExport ? data.resultItems?.at(-1)?.url || "" : "", error: "" } : {}) });
-    setDraft(null); setGap(null); setGapMenu(null); setError(""); setHistoryRevision(v => v + 1);
+    setDraft(null); setGap(null); setContextMenu(null); setError(""); setHistoryRevision(v => v + 1);
   }
   function perform(action) { try { player.pause(); commit(action(latest.current.saved)); } catch (failure) { setError(failure.message); } }
   function history(back = true) {
     const from = back ? undo.current : redo.current, to = back ? redo.current : undo.current;
     if (!from.length || gesture.current) return;
-    to.push(latest.current.saved); commit(from.pop(), false); setSelection([]);
+    to.push(latest.current.saved); commit(from.pop(), false); setSelection([]); setSelectedFade(null); setSelectedTransition(null);
   }
   async function importSource(item, key) {
     const context = latest.current.workflowContext;
@@ -147,6 +160,8 @@ export function EditorNodeBody({ node, config, sources = [], workflowContext = {
             resultType: "video", selectedResultIndex: items.length - 1,
             resultUrl: editorRenderSignature(latest.current.saved) === editorRenderSignature(job.timeline) ? result.url : "",
             editorExportTimeline: job.timeline });
+        } else if (latest.current.onEditorStillCaptured) {
+          latest.current.onEditorStillCaptured(node.id, job.id, result);
         } else {
           const stills = appendResultItems(data.editorStills || [], [result], "image");
           onUpdate(node.id, { editorExportJob: null, status: "complete", error: "", editorStills: stills });
@@ -191,9 +206,17 @@ export function EditorNodeBody({ node, config, sources = [], workflowContext = {
     perform(() => which === "in" ? { ...state, inFrame: f, outFrame: state.outFrame != null && state.outFrame <= f ? null : state.outFrame }
       : { ...state, inFrame: state.inFrame > f ? f : state.inFrame, outFrame: f + 1 });
   }
+  function clearRange() {
+    perform(t => ({ ...t, inFrame: 0, outFrame: null }));
+    setContextMenu(null); root.current.focus({ preventScroll: true });
+  }
   function togglePlayback() { player.getSnapshot().playing ? player.pause() : player.play(); }
   function split() { perform(t => editorSplit(t, player.getSnapshot().frame, selection, linked)); }
-  function remove() { perform(t => editorDelete(t, selection, linked)); setSelection([]); }
+  function remove() {
+    if (selectedFade) { perform(t => editorSetFade(t, selectedFade.clipId, selectedFade.edge, 0)); setSelectedFade(null); }
+    else if (currentTransition) { perform(t => editorSetTransition(t, currentTransition.leftId, currentTransition.rightId, null)); setSelectedTransition(null); }
+    else { perform(t => editorDelete(t, selection, linked)); setSelection([]); }
+  }
   function changeZoom(next) { onUpdate(node.id, { editorZoom: normalizeEditorZoom(next) }); }
   function fit() {
     const next = (scroller.current?.clientWidth - 148 || 700) / Math.max(5, end / timeline.fps + 1);
@@ -229,24 +252,54 @@ export function EditorNodeBody({ node, config, sources = [], workflowContext = {
       player.setTimeline(next); player.seek(Math.max(...pasted.map(c => c.start + c.duration)));
     } catch (failure) { setError(failure.message); }
   }
-  function selectGap(event, track, contextMenu = false) {
+  function openTimelineMenu(event, menu) {
+    event.preventDefault(); event.stopPropagation();
+    root.current.focus({ preventScroll: true });
+    const bounds = root.current.getBoundingClientRect(), scale = bounds.width / root.current.offsetWidth;
+    setContextMenu({ ...menu, x: clampEditor((event.clientX - bounds.left) / scale, 4, root.current.clientWidth - (menu.kind === "transition" ? 224 : 184)),
+      y: clampEditor((event.clientY - bounds.top) / scale, 4, root.current.clientHeight - (menu.kind === "transition" ? 190 : menu.kind === "fade" ? 82 : 48)) });
+  }
+  function openTrackMenu(event, track) {
+    const rect = event.currentTarget.getBoundingClientRect(), frame = (event.clientX - rect.left) / (rect.width / contentFrames);
+    const cut = editorCuts(latest.current.saved, track.id).sort((a, b) => Math.abs(a.frame - frame) - Math.abs(b.frame - frame))[0];
+    const clipId = event.target.closest("[data-editor-clip]")?.dataset.editorClip;
+    const clip = latest.current.saved.clips.find(c => c.id === clipId);
+    const edge = clip && (Math.abs(frame - clip.start) < Math.abs(frame - clip.start - clip.duration) ? "left" : "right");
+    const nearEdge = clip && Math.abs(frame - clip.start - (edge === "right" ? clip.duration : 0)) * px <= 9;
+    const fade = nearEdge ? { clipId, edge } : null;
+    if (cut && Math.abs(cut.frame - frame) * px <= 9) openTimelineMenu(event, { kind: "transition", cut, fade });
+    else if (fade) openTimelineMenu(event, { kind: "fade", fade });
+    else selectGap(event, track, true);
+  }
+  function changeFade(duration) {
+    const fade = contextMenu?.fade;
+    if (!fade) return;
+    perform(t => editorSetFade(t, fade.clipId, fade.edge, duration));
+    setSelection([]); setSelectedTransition(null); setSelectedFade(duration === 0 ? null : fade);
+    setContextMenu(null); root.current.focus({ preventScroll: true });
+  }
+  function changeTransition(type, duration) {
+    const cut = contextMenu?.cut;
+    if (!cut) return;
+    perform(t => editorSetTransition(t, cut.leftId, cut.rightId, type, duration));
+    setSelection([]); setSelectedFade(null); setSelectedTransition(type ? cut : null);
+    setContextMenu(null); root.current.focus({ preventScroll: true });
+  }
+  function selectGap(event, track, showMenu = false) {
     if (event.target.closest("[data-editor-clip]")) return;
-    if (!contextMenu && event.button !== 0) return;
+    if (!showMenu && event.button !== 0) return;
+    if (!showMenu && event.shiftKey) { beginMarquee(event); return; }
     event.preventDefault(); event.stopPropagation(); root.current.focus({ preventScroll: true });
     const rect = event.currentTarget.getBoundingClientRect();
     const selectedGap = editorGapAt(latest.current.saved, track.id, Math.floor((event.clientX - rect.left) / (rect.width / contentFrames)));
-    setSelection([]); setGap(selectedGap); setGapMenu(null); setError("");
-    if (contextMenu && selectedGap) {
-      const bounds = root.current.getBoundingClientRect(), scale = bounds.width / root.current.offsetWidth;
-      setGapMenu({ gap: selectedGap, x: clampEditor((event.clientX - bounds.left) / scale, 4, root.current.clientWidth - 184),
-        y: clampEditor((event.clientY - bounds.top) / scale, 4, root.current.clientHeight - 48) });
-    }
+    setSelection([]); setSelectedFade(null); setSelectedTransition(null); setGap(selectedGap); setContextMenu(null); setError("");
+    if (showMenu && selectedGap) openTimelineMenu(event, { kind: "gap", gap: selectedGap });
   }
   function rippleDelete() {
     try {
-      const selectedGap = gapMenu?.gap || gap, next = editorRippleDeleteGap(latest.current.saved, selectedGap);
+      const selectedGap = contextMenu?.gap || gap, next = editorRippleDeleteGap(latest.current.saved, selectedGap);
       player.pause(); commit(next); player.setTimeline(next); player.seek(selectedGap.start);
-    } catch (failure) { setError(failure.message); setGapMenu(null); }
+    } catch (failure) { setError(failure.message); setContextMenu(null); }
   }
   function beginResize(event) {
     if (event.button !== 0) return;
@@ -257,10 +310,22 @@ export function EditorNodeBody({ node, config, sources = [], workflowContext = {
       width: normalizeEditorNodeWidth(latest.current.node.data.editorNodeWidth), changed: false };
   }
   function keyDown(event) {
-    if (event.defaultPrevented || event.isComposing || event.target.closest("input,textarea,select,[contenteditable='true']")) return;
+    if (event.defaultPrevented || event.isComposing) return;
     const key = event.key.toLowerCase(), command = event.metaKey || event.ctrlKey;
+    if (contextMenu && event.target.closest(".editor-context-menu")) {
+      event.stopPropagation();
+      if (key === "escape") { event.preventDefault(); setContextMenu(null); root.current.focus({ preventScroll: true }); }
+      return;
+    }
+    if (event.target.closest("input,textarea,select,[contenteditable='true']")) return;
     if (command && ["c", "x", "v"].includes(key)) { event.stopPropagation(); return; }
     if (gesture.current && key !== "escape") { event.preventDefault(); event.stopPropagation(); return; }
+    const shuttleKey = editorShuttleKey(event);
+    if (shuttleKey) {
+      event.preventDefault(); event.stopPropagation();
+      if (shuttleKey === "k") player.pause(); else player.shuttle(shuttleKey === "j" ? -1 : 1);
+      return;
+    }
     const zoomDirection = editorTimelineZoomDirection(event);
     let action;
     if (zoomDirection) action = () => changeZoom(editorZoomStep(zoom, zoomDirection));
@@ -278,14 +343,16 @@ export function EditorNodeBody({ node, config, sources = [], workflowContext = {
     else if (key === "home") action = () => player.seek(0);
     else if (key === "end") action = () => player.seek(end);
     else if (key === "escape") action = () => {
+      if (gesture.current?.kind === "marquee") { cancelTransitionResize(); return; }
       if (gesture.current?.kind === "resize") onUpdate(node.id, { editorNodeWidth: gesture.current.width });
-      player.pause(); gesture.current = null; setSelection([]); setGap(null); setGapMenu(null); setDraft(null);
+      cancelTransitionResize();
+      player.pause(); gesture.current = null; setSelection([]); setSelectedFade(null); setSelectedTransition(null); setGap(null); setContextMenu(null); setDraft(null);
     };
     if (action) { event.preventDefault(); event.stopPropagation(); action(); }
   }
   function handleBodyPointerDown(event) {
-    if (!event.target.closest(".editor-gap-menu")) setGapMenu(null);
-    if (event.button !== 0 || event.target === scroller.current || event.target.closest("input,textarea,select,button,a,label,[contenteditable],.editor-ruler,.editor-track-lane,.editor-gap-menu,.editor-scrollbar")) {
+    if (!event.target.closest(".editor-context-menu")) setContextMenu(null);
+    if (event.button !== 0 || event.target === scroller.current || event.target.closest("input,textarea,select,button,a,label,[contenteditable],.editor-ruler,.editor-track-lane,.editor-context-menu,.editor-scrollbar")) {
       event.stopPropagation();
       return;
     }
@@ -294,6 +361,9 @@ export function EditorNodeBody({ node, config, sources = [], workflowContext = {
   }
   function beginScrub(event) {
     if (event.button !== 0) return;
+    setSelectedFade(null);
+    setSelectedTransition(null);
+    setContextMenu(null);
     event.preventDefault(); event.stopPropagation(); root.current.focus({ preventScroll: true });
     event.currentTarget.setPointerCapture(event.pointerId);
     gesture.current = { kind: "scrub", ruler: event.currentTarget, pointerId: event.pointerId };
@@ -301,18 +371,91 @@ export function EditorNodeBody({ node, config, sources = [], workflowContext = {
   }
   function beginClip(event, clip, mode = "move") {
     if (event.button !== 0) return;
+    if (event.shiftKey && mode === "move") { beginMarquee(event, clip); return; }
     event.preventDefault(); event.stopPropagation(); root.current.focus({ preventScroll: true }); player.pause();
     const ids = event.shiftKey ? selection.includes(clip.id) ? selection.filter(id => id !== clip.id) : [...selection, clip.id] : selection.includes(clip.id) ? selection : [clip.id];
-    setSelection(ids); setGap(null); setGapMenu(null); setError("");
+    setSelection(ids); setSelectedFade(null); setSelectedTransition(null); setGap(null); setContextMenu(null); setError("");
     const picked = editorSelection(timeline, mode === "move" ? ids : [clip.id], linked);
     if (picked.some(c => timeline.tracks.find(t => t.id === c.trackId)?.locked)) { setError("This clip or its linked track is locked."); return; }
-    event.currentTarget.setPointerCapture(event.pointerId);
+    // Track changes remount clip elements; keep capture on the stable timeline root.
+    root.current.setPointerCapture(event.pointerId);
     const rect = scroller.current.getBoundingClientRect(), scale = rect.width / scroller.current.offsetWidth;
-    gesture.current = { kind: "clip", mode, base: saved, clip, ids, x: event.clientX, scale, initialScroll: scroller.current.scrollLeft, pointerId: event.pointerId, next: null };
+    gesture.current = { kind: "clip", mode, base: saved, clip, ids, x: event.clientX, scale, initialScroll: scroller.current.scrollLeft, pointerId: event.pointerId, target: root.current, next: null };
+  }
+  function timelinePoint(event) {
+    const table = scroller.current.querySelector(".editor-track-table"), rect = table.getBoundingClientRect(), scale = rect.width / table.offsetWidth;
+    return { x: clampEditor((event.clientX - rect.left) / scale, 148, table.offsetWidth),
+      y: clampEditor((event.clientY - rect.top) / scale, 44, table.offsetHeight) };
+  }
+  function beginMarquee(event, clip = null) {
+    event.preventDefault(); event.stopPropagation(); root.current.focus({ preventScroll: true }); player.pause();
+    setContextMenu(null); setSelectedTransition(null); setSelectedFade(null); setGap(null);
+    root.current.setPointerCapture(event.pointerId);
+    gesture.current = { kind: "marquee", base: latest.current.saved, initial: selection, clip, origin: timelinePoint(event),
+      x: event.clientX, y: event.clientY, pointerId: event.pointerId, target: root.current, linked, moved: false };
+  }
+  function selectFade(event, clip, edge) {
+    event.preventDefault(); event.stopPropagation(); root.current.focus({ preventScroll: true }); player.pause();
+    setSelection([]); setSelectedTransition(null); setGap(null); setContextMenu(null); setError("");
+    setSelectedFade({ clipId: clip.id, edge });
+  }
+  function beginFadeResize(event, clip, edge) {
+    if (event.button !== 0) return;
+    selectFade(event, clip, edge);
+    if (latest.current.saved.tracks.find(t => t.id === clip.trackId)?.locked) return;
+    const rect = scroller.current.getBoundingClientRect();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    gesture.current = { kind: "fade", base: latest.current.saved, clip, edge, x: event.clientX,
+      scale: rect.width / scroller.current.offsetWidth, px, initialScroll: scroller.current.scrollLeft,
+      pointerId: event.pointerId, target: event.currentTarget, next: null };
+  }
+  function selectTransition(event, transition) {
+    event.stopPropagation();
+    if (event.button != null && event.button !== 0) return;
+    event.preventDefault(); root.current.focus({ preventScroll: true }); player.pause();
+    setSelection([]); setSelectedFade(null); setGap(null); setContextMenu(null); setError("");
+    setSelectedTransition({ leftId: transition.leftId, rightId: transition.rightId });
+  }
+  function beginTransitionResize(event, transition, edge) {
+    if (event.button !== 0) return;
+    selectTransition(event, transition);
+    if (latest.current.saved.tracks.find(t => t.id === transition.trackId)?.locked) return;
+    const rect = scroller.current.getBoundingClientRect();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    gesture.current = { kind: "transition", base: latest.current.saved, transition, edge, x: event.clientX,
+      scale: rect.width / scroller.current.offsetWidth, px, initialScroll: scroller.current.scrollLeft,
+      pointerId: event.pointerId, target: event.currentTarget, next: null };
+  }
+  function cancelTransitionResize(event) {
+    const g = gesture.current;
+    if (!["transition", "position", "fade", "clip", "marquee"].includes(g?.kind)) return;
+    if (event?.type === "lostpointercapture" && event.target !== g.target) return;
+    if (g.kind === "position") positionCanceled.current = true;
+    if (g.kind === "marquee") { setSelection(g.initial); setMarquee(null); }
+    gesture.current = null; setDraft(null);
+    if (g.target.hasPointerCapture(g.pointerId)) g.target.releasePointerCapture(g.pointerId);
+  }
+  function transitionEdgeKey(event, transition, edge) {
+    if (!["ArrowLeft", "ArrowRight"].includes(event.key) || event.metaKey || event.ctrlKey || event.altKey || gesture.current) return;
+    event.preventDefault(); event.stopPropagation();
+    perform(t => editorResizeTransition(t, transition.leftId, transition.rightId, edge, (event.key === "ArrowLeft" ? -1 : 1) * (event.shiftKey ? 10 : 1)));
   }
   function pointerMove(event) {
     const g = gesture.current;
     if (!g || g.pointerId !== event.pointerId) return;
+    if (g.kind === "marquee") {
+      if (!g.moved && Math.hypot(event.clientX - g.x, event.clientY - g.y) < 4) return;
+      g.moved = true;
+      const point = timelinePoint(event), box = { left: Math.min(g.origin.x, point.x), top: Math.min(g.origin.y, point.y),
+        width: Math.abs(point.x - g.origin.x), height: Math.abs(point.y - g.origin.y) };
+      const table = scroller.current.querySelector(".editor-track-table"), rect = table.getBoundingClientRect(), scale = rect.width / table.offsetWidth;
+      const hits = [...table.querySelectorAll("[data-editor-clip]")].filter(el => {
+        const r = el.getBoundingClientRect(), left = (r.left - rect.left) / scale, top = (r.top - rect.top) / scale;
+        return left < box.left + box.width && left + r.width / scale > box.left && top < box.top + box.height && top + r.height / scale > box.top;
+      }).map(el => el.dataset.editorClip);
+      setMarquee(box); setSelection(editorMarqueeSelection(g.base, g.initial, hits, g.linked)); return;
+    }
+    if (g.kind === "position") return;
     if (g.kind === "resize") {
       const width = normalizeEditorNodeWidth(g.width + (event.clientX - g.x) / g.scale);
       if (!g.changed && width !== g.width) { latest.current.onUndoSnapshot?.(); g.changed = true; }
@@ -321,6 +464,15 @@ export function EditorNodeBody({ node, config, sources = [], workflowContext = {
     }
     if (g.kind === "scrub") {
       const rect = g.ruler.getBoundingClientRect(); player.seek((event.clientX - rect.left) / (rect.width / contentFrames)); return;
+    }
+    if (g.kind === "transition" || g.kind === "fade") {
+      const delta = ((event.clientX - g.x) / g.scale + scroller.current.scrollLeft - g.initialScroll) / g.px;
+      try {
+        g.next = g.kind === "fade" ? editorResizeFade(g.base, g.clip.id, g.edge, delta)
+          : editorResizeTransition(g.base, g.transition.leftId, g.transition.rightId, g.edge, delta);
+        setDraft(g.next); setError("");
+      } catch (failure) { g.next = null; setDraft(null); setError(failure.message); }
+      return;
     }
     let delta = Math.round(((event.clientX - g.x) / g.scale + scroller.current.scrollLeft - g.initialScroll) / px);
     const picked = editorSelection(g.base, g.mode === "move" ? g.ids : [g.clip.id], linked);
@@ -336,11 +488,17 @@ export function EditorNodeBody({ node, config, sources = [], workflowContext = {
   function pointerEnd(event) {
     const g = gesture.current; if (!g || g.pointerId !== event.pointerId) return;
     gesture.current = null;
+    if (g.kind === "marquee") {
+      setMarquee(null);
+      if (event.type === "pointercancel" || JSON.stringify(g.base) !== JSON.stringify(latest.current.saved)) setSelection(g.initial);
+      else if (!g.moved && g.clip) setSelection(g.initial.includes(g.clip.id) ? g.initial.filter(id => id !== g.clip.id) : [...g.initial, g.clip.id]);
+      return;
+    }
     if (g.kind === "resize") { if (event.type === "pointercancel") onUpdate(node.id, { editorNodeWidth: g.width }); return; }
     if (event.type === "pointercancel") { setDraft(null); return; }
-    if (g.kind === "clip" && g.next && JSON.stringify(g.base) !== JSON.stringify(latest.current.saved)) {
+    if (["clip", "transition", "position", "fade"].includes(g.kind) && g.next && JSON.stringify(g.base) !== JSON.stringify(latest.current.saved)) {
       setDraft(null); setError("New media arrived during this edit. Try the edit again.");
-    } else if (g.kind === "clip" && g.next) commit(g.next);
+    } else if (["clip", "transition", "position", "fade"].includes(g.kind) && g.next) commit(g.next);
     else setDraft(null);
   }
   function changeTrack(track, patch) { perform(t => ({ ...t, tracks: t.tracks.map(item => item.id === track.id ? { ...item, ...patch } : item) })); }
@@ -354,6 +512,27 @@ export function EditorNodeBody({ node, config, sources = [], workflowContext = {
     volumeEdit.current = currentClip.id;
     commit({ ...latest.current.saved, clips: latest.current.saved.clips.map(c => c.id === currentClip.id ? { ...c, volume: value } : c) }, remember);
   }
+  function beginPosition(event) {
+    if (event.button !== 0 || positionLocked || gesture.current) return;
+    event.stopPropagation(); player.pause(); positionCanceled.current = false;
+    setContextMenu(null); setSelectedTransition(null); setError("");
+    event.currentTarget.setPointerCapture(event.pointerId);
+    gesture.current = { kind: "position", base: latest.current.saved, clipId: positionClip.id,
+      pointerId: event.pointerId, target: event.currentTarget, next: null };
+  }
+  function changePosition(axis, value) {
+    if (positionLocked || positionCanceled.current) return;
+    const g = gesture.current;
+    if (g?.kind === "position") {
+      g.next = editorSetClipPosition(g.base, g.clipId, { [axis]: value });
+      setDraft(g.next);
+    } else if (!g) perform(t => editorSetClipPosition(t, positionClip.id, { [axis]: value }));
+  }
+  function positionKeyDown(event) {
+    if (event.key === "Escape" && gesture.current?.kind === "position") {
+      event.preventDefault(); event.stopPropagation(); cancelTransitionResize();
+    } else if (!gesture.current) positionCanceled.current = false;
+  }
   async function dropMedia(event) {
     const item = outputItemFromDataTransfer(event.dataTransfer);
     if (!item || !["video", "audio"].includes(item.type)) return;
@@ -366,22 +545,22 @@ export function EditorNodeBody({ node, config, sources = [], workflowContext = {
   }
   const portProps = { node, onConnectStart, onDisconnectInput, connectedPortKeys };
   return <div ref={root} className="node-body editor-node-body" tabIndex={0} data-editor-timeline="true" aria-label="Editor timeline"
-    onPointerDown={handleBodyPointerDown} onKeyDown={keyDown} onPointerMove={pointerMove} onPointerUp={pointerEnd} onPointerCancel={pointerEnd}
+    onPointerDown={handleBodyPointerDown} onKeyDown={keyDown} onPointerMove={pointerMove} onPointerUp={pointerEnd} onPointerCancel={pointerEnd} onLostPointerCapture={cancelTransitionResize}
     onCopy={event => copyClips(event)} onCut={event => copyClips(event, true)} onPaste={pasteClips}
     onContextMenu={event => { event.preventDefault(); event.stopPropagation(); }}
-    onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setGapMenu(null); }}
+    onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setContextMenu(null); }}
     onWheel={event => event.stopPropagation()} onDragOver={event => { if (hasOutputItemDragData(event.dataTransfer)) { event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = "copy"; } }} onDrop={dropMedia}>
     <div className="editor-topbar">
       <div className="editor-inputs">{config.input.map(port => <div key={port.id}><PortHandle {...portProps} port={port} side="input" /><span>{port.label}</span></div>)}</div>
       <div className="editor-transport">
         <div className="editor-tool-group">
           <Tool icon={Slice} label="Split at playhead (Cmd/Ctrl+B)" onClick={split} disabled={!end || selectedLocked} />
-          <Tool icon={Play} label="Play (Space)" onClick={() => player.play()} active={transport.playing} disabled={!end} />
-          <Tool icon={Pause} label="Pause (Space)" onClick={() => player.pause()} disabled={!transport.playing} />
+          <Tool icon={Play} label="Play (Space)" title="Play (Space / L)" onClick={() => player.play()} active={transport.playing} disabled={!end} />
+          <Tool icon={Pause} label="Pause (Space)" title="Pause (Space / K)" onClick={() => player.pause()} disabled={!transport.playing} />
           <Tool icon={Camera} label="Grab current frame as PNG" onClick={() => render(transport.frame)} disabled={!end || transport.frame >= end || exporting || choosingExport || importing} />
         </div>
         <div className="editor-readouts"><label>Frame<input aria-label="Timeline frame" type="number" min="0" max={end} value={transport.frame} onChange={event => player.seek(Number(event.target.value))} /></label>
-          <div className="editor-timecode"><span>Timecode</span><output aria-label="Timeline timecode">{editorTimecode(transport.frame, timeline.fps)}</output></div></div>
+          <div className="editor-timecode"><span className="editor-timecode-label">Timecode<span className="editor-playback-rate" aria-label="Playback speed">{transport.playing && transport.rate !== 1 ? `${transport.rate}x` : ""}</span></span><output aria-label="Timeline timecode">{editorTimecode(transport.frame, timeline.fps)}</output></div></div>
       </div>
       <div className="editor-output"><div><span>Output</span><PortHandle {...portProps} port={config.output[0]} side="output" /></div>
         <button className="editor-export" onClick={() => render()} disabled={!end || exporting || choosingExport || importing} aria-busy={exporting || choosingExport}>{exporting || choosingExport ? <Loader2 size={15} className="spin" /> : <Download size={15} />}<span>{choosingExport ? "Save..." : exporting ? `${Math.round(progress * 100)}%` : "Export"}</span></button></div>
@@ -392,27 +571,39 @@ export function EditorNodeBody({ node, config, sources = [], workflowContext = {
         <Tool icon={Link2} label="Select and edit linked audio/video" active={linked} aria-pressed={linked} onClick={() => setLinked(v => !v)} /></div>
       <div className="editor-tool-group editor-range-controls"><Tool icon={ChevronFirst} label="Set In (I)" onClick={() => mark("in")} disabled={!end} /><output title="In point">{editorTimecode(range.start, timeline.fps)}</output>
         <Tool icon={ChevronLast} label="Set Out (O)" onClick={() => mark("out")} disabled={!end} /><output title="Out point (last included frame)">{editorTimecode(Math.max(0, range.end - 1), timeline.fps)}</output>
-        <Tool icon={Brackets} label="Clear In and Out" onClick={() => perform(t => ({ ...t, inFrame: 0, outFrame: null }))} /></div>
+        <Tool icon={Brackets} label="Clear In and Out" onClick={clearRange} /></div>
       <div className="editor-tool-group editor-view-tools"><Tool icon={ZoomOut} label="Zoom out timeline (-)" onClick={() => changeZoom(editorZoomStep(zoom, -1))} /><Tool icon={Scan} label="Fit sequence" onClick={fit} /><Tool icon={ZoomIn} label="Zoom in timeline (+ / =)" onClick={() => changeZoom(editorZoomStep(zoom, 1))} />
         <Tool icon={MonitorPlay} label="Show sequence monitor" active={monitor} onClick={() => setMonitor(v => !v)} /><Tool icon={Settings2} label="Sequence settings" active={settings} onClick={() => setSettings(v => !v)} /></div>
     </div>
     {settings && <div className="editor-settings"><label>Frame Rate<select aria-label="Sequence frame rate" value={timeline.fps} disabled={exporting} onChange={event => perform(t => editorSetFrameRate(t, Number(event.target.value)))}>{editorFrameRates.map(fps => <option key={fps} value={fps}>{fps} fps</option>)}</select></label>
       <label>Width<input aria-label="Sequence width" type="number" min="2" max="4096" step="2" value={timeline.width} onChange={event => perform(t => ({ ...t, width: Number(event.target.value) }))} /></label>
       <label>Height<input aria-label="Sequence height" type="number" min="2" max="4096" step="2" value={timeline.height} onChange={event => perform(t => ({ ...t, height: Number(event.target.value) }))} /></label>
-      <span>MP4 / H.264 + AAC</span></div>}
+      <span>MP4 / H.264 + AAC</span>
+      <div className="editor-clip-position" role="group" aria-label="Clip position">
+        <div className="editor-position-title"><span>Clip Position</span><span title={positionClip ? currentAsset?.label : "Select a video clip"}>{positionClip ? currentAsset?.label : ""}</span></div>
+        {[["positionX", "Horizontal"], ["positionY", "Vertical"]].map(([axis, label]) => <label key={axis} className="editor-position-slider">
+          <span>{label}<output>{positionClip?.[axis] || 0}%</output></span>
+          <input aria-label={`Clip ${label.toLowerCase()} position`} title={`${label} offset from center (%)`} type="range" min="-100" max="100" step="0.1"
+            value={positionClip?.[axis] || 0} disabled={positionLocked} onPointerDown={beginPosition} onLostPointerCapture={cancelTransitionResize}
+            onKeyDown={positionKeyDown} onChange={event => changePosition(axis, Number(event.target.value))} />
+        </label>)}
+        <Tool icon={RotateCcw} label="Reset clip position" disabled={positionLocked || (!positionClip?.positionX && !positionClip?.positionY)}
+          onClick={() => perform(t => editorSetClipPosition(t, positionClip.id, { positionX: 0, positionY: 0 }))} />
+      </div></div>}
     {monitor && <EditorMonitor nodeId={node.id} timeline={timeline} allowNodeDrag />}
     <div className="editor-scroll" ref={scroller} id={scrollId}>
       <div className="editor-track-table" style={{ width: contentWidth + 148 }}>
         <div className="editor-ruler-row"><div className="editor-track-head editor-ruler-head"><span>{timeline.fps} fps</span></div>
           <div className="editor-ruler" style={{ width: contentWidth }} role="slider" aria-label="Timeline playhead" aria-valuemin={0} aria-valuemax={end} aria-valuenow={transport.frame} tabIndex={0} onPointerDown={beginScrub}>
             {Array.from({ length: Math.ceil(contentFrames / timeline.fps / step) + 1 }, (_, i) => <span key={i} className="editor-tick" style={{ left: i * step * zoom }}><span>{editorTimecode(i * step * timeline.fps, timeline.fps).slice(0, 8)}</span></span>)}
-            {end > 0 && <div className="editor-export-range" style={{ left: range.start * px, width: (range.end - range.start) * px }}><span>I</span><span>O</span></div>}
+            {end > 0 && <div className="editor-export-range" style={{ left: range.start * px, width: (range.end - range.start) * px }}
+              onContextMenu={event => openTimelineMenu(event, { kind: "range" })}><span>I</span><span>O</span></div>}
           </div></div>
         {timeline.tracks.map(track => <div className={`editor-track-row ${track.kind} ${track.locked ? "locked" : ""} ${track.muted ? "muted" : ""}`} key={track.id}>
           <div className="editor-track-head"><strong>{track.name}</strong><Tool icon={track.locked ? Lock : Unlock} label={`${track.locked ? "Unlock" : "Lock"} ${track.name}`} active={track.locked} onClick={() => changeTrack(track, { locked: !track.locked })} />
             <Tool icon={track.kind === "video" ? track.muted ? EyeOff : Eye : track.muted ? VolumeX : Volume2} label={`${track.muted ? "Enable" : "Disable"} ${track.name}`} active={track.muted} disabled={track.locked} onClick={() => changeTrack(track, { muted: !track.muted })} />
             <Tool icon={Trash2} label={`Remove empty ${track.name} track`} disabled={track.locked || timeline.clips.some(c => c.trackId === track.id) || timeline.tracks.filter(t => t.kind === track.kind).length <= 1} onClick={() => perform(t => ({ ...t, tracks: t.tracks.filter(item => item.id !== track.id) }))} /></div>
-          <div className="editor-track-lane" data-editor-track={track.id} style={{ width: contentWidth, backgroundSize: `${step * zoom}px 100%` }} onPointerDown={event => selectGap(event, track)} onContextMenu={event => selectGap(event, track, true)}>
+          <div className="editor-track-lane" data-editor-track={track.id} style={{ width: contentWidth, backgroundSize: `${step * zoom}px 100%` }} onPointerDown={event => selectGap(event, track)} onContextMenu={event => openTrackMenu(event, track)}>
             {gap?.trackId === track.id && <div className="editor-gap" aria-label={`Selected gap in ${track.name}`} style={{ left: gap.start * px, width: (gap.end - gap.start) * px }} />}
             {timeline.clips.filter(c => c.trackId === track.id).map(clip => {
               const asset = timeline.assets.find(a => a.id === clip.assetId), isSelected = selected.some(c => c.id === clip.id);
@@ -420,12 +611,51 @@ export function EditorNodeBody({ node, config, sources = [], workflowContext = {
                 {track.kind === "video" && asset.thumbnailUrl && <img className="editor-clip-thumbnail" src={asset.thumbnailUrl} alt="" draggable={false} />}
                 <span className="editor-clip-label">{clip.linkGroup && <Link2 size={11} />}{asset.label}</span>
                 {track.kind === "audio" && asset.waveform?.length > 0 && <Waveform asset={asset} clip={clip} fps={timeline.fps} />}
+                {["left", "right"].filter(edge => clip[editorFadeKey(edge)]).map(edge => {
+                  const duration = clip[editorFadeKey(edge)], label = edge === "left" ? "Fade In" : "Fade Out";
+                  const active = selectedFade?.clipId === clip.id && selectedFade?.edge === edge;
+                  return <div key={edge} className={`editor-fade ${edge} ${active ? "selected" : ""}`} data-editor-fade={`${clip.id}:${edge}`}
+                    style={{ width: Math.max(14, duration * px) }} title={`${label}: ${duration} frames (${(duration / timeline.fps).toFixed(2)}s)`}
+                    onPointerDown={event => { if (event.button === 0) event.shiftKey ? beginMarquee(event, clip) : selectFade(event, clip, edge); }}
+                    onContextMenu={event => openTimelineMenu(event, { kind: "fade", fade: { clipId: clip.id, edge } })}>
+                    <button className="editor-fade-handle" aria-label={`Resize ${label} on ${asset.label}`} disabled={track.locked}
+                      title={`Drag to resize ${label}`} onPointerDown={event => beginFadeResize(event, clip, edge)}
+                      onFocus={() => { setSelectedTransition(null); setSelection([]); setSelectedFade({ clipId: clip.id, edge }); }}
+                      onKeyDown={event => {
+                        if (!["ArrowLeft", "ArrowRight"].includes(event.key) || event.metaKey || event.ctrlKey || event.altKey || gesture.current) return;
+                        event.preventDefault(); event.stopPropagation();
+                        perform(t => editorResizeFade(t, clip.id, edge, (event.key === "ArrowLeft" ? -1 : 1) * (event.shiftKey ? 10 : 1)));
+                      }} />
+                    {active && duration * px > 35 && <output className="editor-fade-readout">{duration}f</output>}
+                  </div>;
+                })}
                 <button className="editor-trim left" aria-label={`Trim start of ${asset.label}`} title="Trim start" onPointerDown={event => beginClip(event, clip, "left")} disabled={track.locked} />
                 <button className="editor-trim right" aria-label={`Trim end of ${asset.label}`} title="Trim end" onPointerDown={event => beginClip(event, clip, "right")} disabled={track.locked} />
               </div>;
             })}
+            {transitions.filter(t => t.trackId === track.id).map(t => {
+              const isSelected = currentTransition?.leftId === t.leftId && currentTransition?.rightId === t.rightId;
+              const width = Math.max(28, t.duration * px), label = editorTransitionTypes[t.type].label;
+              return <div key={`${t.leftId}:${t.rightId}`} className={`editor-transition ${t.type} ${isSelected ? "selected" : ""}`}
+                data-editor-transition={`${t.leftId}:${t.rightId}`} data-duration={t.duration} role="group" aria-label={`${label} at ${editorTimecode(t.cut, timeline.fps)}`}
+                style={{ left: t.cut * px - width / 2, width }} title={`${label} | ${t.duration} frames (${(t.duration / timeline.fps).toFixed(2)}s)`}
+                onPointerDown={event => selectTransition(event, t)}
+                onContextMenu={event => openTimelineMenu(event, { kind: "transition", cut: { leftId: t.leftId, rightId: t.rightId, trackId: track.id, frame: t.cut } })}>
+                <button className="editor-transition-select" aria-label={`Select ${label}`} aria-pressed={isSelected} onClick={event => selectTransition(event, t)}>
+                  {t.type === "dipToBlack" ? <Eclipse size={12} /> : t.type === "crossFade" ? <AudioLines size={12} /> : <Blend size={12} />}
+                  {width > 100 && <span>{label}</span>}
+                </button>
+                {["left", "right"].map(edge => <button key={edge} className={`editor-transition-handle ${edge}`} disabled={track.locked}
+                  aria-label={`Resize ${edge === "left" ? "start" : "end"} of ${label}`} title={`Resize ${edge === "left" ? "start" : "end"} of ${label}`}
+                  onPointerDown={event => beginTransitionResize(event, t, edge)} onLostPointerCapture={cancelTransitionResize}
+                  onFocus={() => { setSelection([]); setSelectedTransition({ leftId: t.leftId, rightId: t.rightId }); }}
+                  onKeyDown={event => transitionEdgeKey(event, t, edge)} />)}
+                {isSelected && <output className="editor-transition-readout" aria-label="Transition duration">{t.duration}f / {(t.duration / timeline.fps).toFixed(2)}s</output>}
+              </div>;
+            })}
           </div></div>)}
         <div className="editor-playhead" style={{ left: 148 + transport.frame * px, height: 44 + timeline.tracks.length * 68 }} aria-hidden="true"><span /></div>
+        {marquee && <div className="editor-marquee" style={marquee} aria-hidden="true" />}
       </div>
     </div>
     <EditorTimelineScrollbar viewport={viewport} scrollTo={scrollTo} controls={scrollId} />
@@ -442,8 +672,31 @@ export function EditorNodeBody({ node, config, sources = [], workflowContext = {
       {node.data.resultItems?.length > 0 && <a href={node.data.resultItems.at(-1).url} download={node.data.resultItems.at(-1).fileName} title="Download last exported sequence"><Download size={14} />Last export</a>}
       {(node.data.editorStills || []).slice(-8).map(item => <button key={item.url} draggable onClick={() => onPreviewOpen?.(item)} onDragStart={event => setOutputItemDragData(event.dataTransfer, item)} onDragEnd={event => finishOutputItemDragData(item, event)} title={`${item.label}: open or drag to canvas`}><img src={item.url} alt={item.label} draggable={false} /></button>)}
     </div>}
-    {gapMenu && <div className="editor-gap-menu" role="menu" aria-label="Timeline gap actions" style={{ left: gapMenu.x, top: gapMenu.y }} onPointerDown={event => event.stopPropagation()}>
-      <button role="menuitem" autoFocus onClick={rippleDelete}><Trash2 size={15} />Ripple Delete</button>
+    {contextMenu && <div className={`editor-context-menu ${contextMenu.kind === "transition" ? "editor-transition-menu" : ""}`} role="menu" aria-label={contextMenu.kind === "transition" ? "Clip transitions" : contextMenu.kind === "fade" ? "Clip fades" : contextMenu.kind === "range" ? "Timeline range actions" : "Timeline gap actions"} style={{ left: contextMenu.x, top: contextMenu.y }} onPointerDown={event => event.stopPropagation()}>
+      {contextMenu.kind === "range"
+        ? <button role="menuitem" autoFocus onClick={clearRange}><Brackets size={15} />Clear In and Out</button>
+        : contextMenu.kind === "transition" ? (() => {
+          const cut = contextMenu.cut, track = timeline.tracks.find(t => t.id === cut.trackId);
+          const current = transitions.find(t => t.leftId === cut.leftId && t.rightId === cut.rightId);
+          return <>
+            {Object.entries(editorTransitionTypes).filter(([, option]) => option.kind === track?.kind).map(([type, option], i) => <button key={type} role="menuitem" autoFocus={i === 0} disabled={track?.locked}
+              title={type === "crossFade" ? "Crossfade using spare audio beyond the trim points" : type === "crossDissolve" ? "Dissolve between clips; hold edge frames when extra footage is unavailable" : "Fade the outgoing picture to black, then fade in the next"}
+              onClick={() => changeTransition(type, current?.duration)}>{type === "dipToBlack" ? <Eclipse size={15} /> : type === "crossFade" ? <AudioLines size={15} /> : <Blend size={15} />}{option.label}</button>)}
+            {current && <button role="menuitem" disabled={track?.locked} onClick={() => changeTransition(null)}><Trash2 size={15} />Remove Transition</button>}
+          </>;
+        })()
+        : contextMenu.kind === "gap" ? <button role="menuitem" autoFocus onClick={rippleDelete}><Trash2 size={15} />Ripple Delete</button> : null}
+      {contextMenu.fade && (() => {
+        const { clipId, edge } = contextMenu.fade, clip = timeline.clips.find(c => c.id === clipId);
+        const track = timeline.tracks.find(t => t.id === clip?.trackId), duration = clip?.[editorFadeKey(edge)];
+        const label = edge === "left" ? "Fade In" : "Fade Out";
+        return <>
+          <button role="menuitem" autoFocus={contextMenu.kind === "fade"} disabled={!clip || track?.locked}
+            title={track?.kind === "audio" ? "Fade the clip's audio level to or from silence" : "Fade the clip to or from the video below, or black when no video is below"}
+            onClick={() => changeFade(duration || timeline.fps)}><Blend size={15} />{label}</button>
+          {duration > 0 && <button role="menuitem" disabled={track?.locked} onClick={() => changeFade(0)}><Trash2 size={15} />Remove {label}</button>}
+        </>;
+      })()}
     </div>}
     <button className="preview-resize-handle editor-resize-handle" aria-label="Resize Editor width" title="Resize Editor width" onPointerDown={beginResize} />
   </div>;

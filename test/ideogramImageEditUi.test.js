@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { buildSync } from "esbuild";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { openAiImage25Models } from "../src/openAiImage25.js";
+import { openAiImage26Models } from "../src/openAiImage26.js";
 import { ideogramImageEditModel, ideogramImageEditQualityOptions } from "../src/ideogramImageEdit.js";
 import { nanoBanana21ModelName, nanoBanana21ResolutionOptions } from "../src/nanoBanana21.js";
 
@@ -78,7 +78,7 @@ test("Image Edit defaults to Ideogram, High quality and Regular precision, with 
   const state = studio(t);
   const tree = state.render();
   assert.equal(find(tree, "Edit model").props.value, ideogramImageEditModel);
-  assert.deepEqual(options(find(tree, "Edit model")), [ideogramImageEditModel, nanoBanana21ModelName, openAiImage25Models.sunburst]);
+  assert.deepEqual(options(find(tree, "Edit model")), [ideogramImageEditModel, nanoBanana21ModelName, openAiImage26Models.sunburst]);
   assert.equal(find(tree, "Edit quality").props.value, "high");
   assert.deepEqual(options(find(tree, "Edit quality")), ideogramImageEditQualityOptions);
   assert.equal(find(tree, "Edit precision").props.value, "regular");
@@ -91,7 +91,7 @@ test("Image Edit defaults to Ideogram, High quality and Regular precision, with 
 test("model switching updates controls without discarding the prompt, drawing or undo history", (t) => {
   const state = studio(t);
   state.paint();
-  state.change("Edit model", openAiImage25Models.sunburst);
+  state.change("Edit model", openAiImage26Models.sunburst);
   state.change("Edit quality", "max");
   state.change("Edit model", ideogramImageEditModel);
   let tree = state.render();
@@ -102,7 +102,7 @@ test("model switching updates controls without discarding the prompt, drawing or
   assert.equal(find(tree, "Edit prompt").props.maxLength, 10000);
   assert.equal(find(tree, "Undo stroke").props.disabled, false);
   state.change("Edit quality", "very_low");
-  state.change("Edit model", openAiImage25Models.sunburst);
+  state.change("Edit model", openAiImage26Models.sunburst);
   tree = state.render();
   assert.equal(find(tree, "Edit quality").props.value, "high");
   assert.equal(find(tree, "Edit precision"), undefined);
@@ -112,9 +112,9 @@ test("model switching updates controls without discarding the prompt, drawing or
 
 test("both models submit explicit model and quality, while precision is Ideogram-only", async (t) => {
   const state = studio(t);
-  state.change("Edit model", openAiImage25Models.sunburst);
+  state.change("Edit model", openAiImage26Models.sunburst);
   await state.generate();
-  assert.equal(state.requests[0].get("model"), openAiImage25Models.sunburst);
+  assert.equal(state.requests[0].get("model"), openAiImage26Models.sunburst);
   assert.equal(state.requests[0].get("quality"), "high");
   assert.equal(state.requests[0].get("editPrecision"), null);
   state.change("Edit version", "-1");
@@ -134,7 +134,7 @@ test("both models submit explicit model and quality, while precision is Ideogram
   assert.notEqual(form.get("requestId"), state.requests[0].get("requestId"));
   assert.match(renderToStaticMarkup(state.render()), /Ideogram 4.5 <span>Fal<\/span>/);
   state.change("Edit version", "0");
-  assert.match(renderToStaticMarkup(state.render()), /Image 2.5 Sunburst <span>Fal<\/span>/);
+  assert.match(renderToStaticMarkup(state.render()), /Image 2.6 Sunburst <span>Fal<\/span>/);
   state.change("Edit version", "-1");
   assert.equal(find(state.render(), "Edit model").props.value, ideogramImageEditModel);
   assert.equal(find(state.render(), "Undo stroke").props.disabled, false);
@@ -153,13 +153,13 @@ test("Ideogram needs Fal and never submits through Atlas, Krea or an unavailable
   }
   assert.equal(state.requests.length, 0);
   assert.equal(generateButton(state.render({ provider: "fal" })).props.disabled, false);
-  state.change("Edit model", openAiImage25Models.sunburst);
-  assert.equal(generateButton(state.render({ provider: "atlas" })).props.disabled, false);
+  state.change("Edit model", openAiImage26Models.sunburst);
+  assert.equal(generateButton(state.render({ provider: "atlas" })).props.disabled, true);
 });
 
 test("Ideogram permits its wider edit aspect ratios while Sunburst validation is preserved", async (t) => {
   const state = studio(t);
-  state.change("Edit model", openAiImage25Models.sunburst);
+  state.change("Edit model", openAiImage26Models.sunburst);
   state.resize(4000, 1000);
   await state.generate();
   assert.equal(state.requests.length, 0);

@@ -8,6 +8,7 @@ import path from "node:path";
 import express from "express";
 import { registerEditorRoutes } from "../server/routes/editor.js";
 import { createEditorTimeline, editorImportMedia } from "../src/editorTimeline.js";
+import { editorSetTransition } from "../src/editorTransitions.js";
 
 async function harness(t, options = {}) {
   const dir = await mkdtemp(path.join(os.tmpdir(), "editor-routes-")), sourceFile = path.join(dir, "source.mp4"), history = [], outputs = [];
@@ -77,6 +78,20 @@ test("Editor exposes clear validation and restart errors", async t => {
   assert.equal((await h.request("render", "POST", { requestId: "bad", timeline: h.timeline })).status, 400);
   assert.equal((await h.request("render", "POST", { requestId: randomUUID(), timeline: h.timeline, frame: 10000 })).status, 400);
   const missing = await h.request(`jobs/${randomUUID()}`); assert.equal(missing.status, 404); assert.match(missing.body.error, /server may have restarted/);
+});
+
+test("Editor verifies crossfade handles against actual source duration before rendering", async t => {
+  const h = await harness(t), requestId = randomUUID();
+  const assetId = h.timeline.assets[0].id;
+  const timeline = editorSetTransition({ ...h.timeline,
+    assets: h.timeline.assets.map(a => ({ ...a, duration: 4 })),
+    clips: [{ id: "left", assetId, trackId: "a1", start: 0, sourceIn: 24, duration: 24, volume: 1 },
+      { id: "right", assetId, trackId: "a1", start: 24, sourceIn: 12, duration: 24, volume: 1 }]
+  }, "left", "right", "crossFade", 12);
+  assert.equal((await h.request("render", "POST", { requestId, timeline })).status, 202);
+  const job = await h.finish(requestId);
+  assert.equal(job.status, "failed"); assert.match(job.error, /no longer have enough spare media/);
+  assert.equal(h.outputs.length, 0); assert.equal(h.history.length, 0);
 });
 
 test("Editor limits concurrency and cancels local exports without keeping partial files", async t => {

@@ -190,7 +190,7 @@ export function CameraCoverageNodeBody({ node, config, sources = [], connected =
       <div className="coverage-setting-grid coverage-refine-settings">
         <label>Refinement model<select aria-label="Refinement model" value={data.model} onChange={e => update(modelPatch(e.target.value))}>{!enabledModels.includes(data.model) && <option value={data.model}>{data.model} (disabled)</option>}{enabledModels.map(m => <option key={m}>{m}</option>)}</select></label>
         <label>Refinement size<select aria-label="Refinement size" value={data.resolution} onChange={e => update({ resolution: e.target.value })}>{resolutions.map(r => <option key={r}>{r}</option>)}</select></label>
-        {qualities.length > 0 && <label>Quality<select value={data.quality} onChange={e => update({ quality: e.target.value })}>{qualities.map(q => <option key={q}>{q}</option>)}</select></label>}
+        {qualities.length > 0 && <label>Quality<select value={qualities.includes(data.quality) ? data.quality : "high"} onChange={e => update({ quality: e.target.value })}>{qualities.map(q => <option key={q}>{q}</option>)}</select></label>}
       </div>
     </div>}
     {jobs.map(job => <div key={job.id} className="coverage-job-entry" data-job-id={job.id}>

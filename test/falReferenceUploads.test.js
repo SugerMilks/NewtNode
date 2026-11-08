@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import path from "node:path";
 import { readFile } from "node:fs/promises";
-import * as image25 from "../src/openAiImage25.js";
+import * as image25 from "../src/openAiImage26.js";
 import { normalizeOpenAiImage2Quality } from "../src/openAiImage2.js";
 import { createSeedream5ProGenerator } from "../server/seedream5-pro.js";
 
@@ -37,6 +37,7 @@ function harness({ failUpload = false } = {}) {
     normalizeGeminiImageSize: resolution => resolution,
     normalizeOpenAiImageSize: () => "1280x720",
     normalizeOpenAiEditMask: async mask => mask,
+    openAiImage26Mask: async mask => mask,
     httpError: (status, message) => Object.assign(new Error(message), { status }),
     firstFalImageResult: data => data.images[0],
     subscribeFal: async (endpoint, options) => {
@@ -50,7 +51,7 @@ function harness({ failUpload = false } = {}) {
 
 const variants = [
   ["Nano Banana Pro", (h, args) => h.generateFalNanoBananaPro(args)],
-  ...["OpenAI Image 2", ...Object.values(image25.openAiImage25Models)].map(model =>
+  ...["OpenAI Image 2", ...Object.values(image25.openAiImage26Models)].map(model =>
     [model, (h, args) => h.generateFalOpenAiImage2FromInputs({ ...args, model })]),
   ["Seedream 5.0 Pro", (h, args) => h.seedream(args)]
 ];
@@ -98,7 +99,7 @@ test("explicit edit clients stay separate from the default Fal client", async ()
 
 test("OpenAI masked edits upload references and the mask through the default client", async () => {
   const h = harness();
-  await h.generateFalOpenAiImage2FromInputs({ ...inputs(references), model: image25.openAiImage25Models.sunburst,
+  await h.generateFalOpenAiImage2FromInputs({ ...inputs(references), model: image25.openAiImage26Models.sunburst,
     editMaskInput: { fileName: "edit-mask.png", mimeType: "image/png", buffer: Buffer.from("mask fixture") } });
   assert.equal(h.uploads.length, 3);
   assert.equal(h.submissions.length, 1);

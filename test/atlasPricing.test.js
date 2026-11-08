@@ -55,7 +55,7 @@ test("unsupported, ambiguous, promotional and token-billed image requests stay u
     { videoClipCount: 1 }, { hasVideoReference: true }, { enableWebSearch: "false" }, { enableWebSearch: false, enable_web_search: true },
     { images: ["reference"], referenceCount: 0 }, { modelName: "OpenAI Image 2" }, { routeKind: "reference-to-image" },
     { model: "google/nano-banana-2/text-to-image-developer" }, { model: "google/nano-banana-pro/edit-ultra" },
-    { model: "REVE 2.1" }, { model: "OpenAI Image 2" }, { model: "OpenAI Image 2.5 Sunburst" }, { model: "OpenAI Image 2.5 Flare" }]) {
+    { model: "REVE 2.1" }, { model: "OpenAI Image 2" }, { model: "OpenAI Image 2.6 Sunburst" }, { model: "OpenAI Image 2.6 Flare" }]) {
     const cost = estimateAtlasImageCost({ ...base, ...change });
     assert.equal(cost.amountUsd, null, JSON.stringify(change));
     assert.equal(cost.pricingSource, ATLAS_PRICING_URL);

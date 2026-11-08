@@ -15,8 +15,8 @@ export const kreaPricingModels = [
   ["/generate/video/kling/kling-4", ["duration", "resolution"]],
   ["/generate/video/minimax/hailuo-3", ["billableSeconds", "referenceImageCount"]],
   ["/generate/image/openai/gpt-image-2", null],
-  ["/generate/image/openai/gpt-image-2.5-sunburst", null],
-  ["/generate/image/openai/gpt-image-2.5-flare", null],
+  ["/generate/image/openai/gpt-image-2.6-sunburst", null],
+  ["/generate/image/openai/gpt-image-2.6-flare", null],
   ["/generate/3d/tencent/hunyuan3d-3.1-pro", null]
 ];
 

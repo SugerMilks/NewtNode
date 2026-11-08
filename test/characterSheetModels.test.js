@@ -15,7 +15,7 @@ test("character sheets default to Nano Banana Pro at 4K, without Flare", () => {
     model: imageModelNames.nanoBananaPro,
     resolution: "4K"
   });
-  assert.ok(!characterSheetModelOptions.includes(imageModelNames.openAiImage25Flare));
+  assert.ok(!characterSheetModelOptions.includes(imageModelNames.openAiImage26Flare));
   assert.ok(characterSheetModelOptions.includes(imageModelNames.nanoBanana21));
   assert.ok(characterSheetModelOptions.includes(imageModelNames.openAiImage2));
 });
@@ -23,15 +23,15 @@ test("character sheets default to Nano Banana Pro at 4K, without Flare", () => {
 test("explicit saved Character models are preserved", () => {
   for (const model of characterSheetModelOptions) {
     assert.equal(normalizeCharacterSheetModel(model), model);
-    if (model !== imageModelNames.openAiImage25Sunburst) assert.equal(characterSheetGenerationSettings(model).model, model);
+    if (model !== imageModelNames.openAiImage26Sunburst) assert.equal(characterSheetGenerationSettings(model).model, model);
   }
-  assert.deepEqual(characterSheetGenerationSettings(imageModelNames.openAiImage25Sunburst), {
-    model: imageModelNames.openAiImage25Sunburst, resolution: "4K", quality: "high"
+  assert.deepEqual(characterSheetGenerationSettings(imageModelNames.openAiImage26Sunburst), {
+    model: imageModelNames.openAiImage26Sunburst, resolution: "4K", quality: "high"
   });
 });
 
 test("Krea Character sheets reject unsupported Sunburst fidelity before generation", () => {
-  assert.throws(() => characterSheetGenerationSettings(imageModelNames.openAiImage25Sunburst, "krea"), /require Fal/);
+  assert.throws(() => characterSheetGenerationSettings(imageModelNames.openAiImage26Sunburst, "krea"), /require Fal/);
   assert.deepEqual(characterSheetGenerationSettings(imageModelNames.nanoBanana21, "krea"), { model: imageModelNames.nanoBanana21, resolution: "4K" });
 });
 

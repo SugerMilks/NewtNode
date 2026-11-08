@@ -9,9 +9,7 @@ const imageRatios = ["1:1", "3:2", "2:3", "3:4", "4:3", "4:5", "5:4", "9:16", "1
 const imageModels = {
   [seedream5ProModelName]: seedream5ProAtlasBase,
   "Nano Banana Pro": "google/nano-banana-pro",
-  "OpenAI Image 2": "openai/gpt-image-2",
-  "OpenAI Image 2.5 Sunburst": "openai/gpt-image-2.5-sunburst",
-  "OpenAI Image 2.5 Flare": "openai/gpt-image-2.5-flare"
+  "OpenAI Image 2": "openai/gpt-image-2"
 };
 const videoModels = { "Seedance 2.0": "bytedance/seedance-2.0", "Seedance 2.5": "bytedance/seedance-2.5", "MiniMax H3": "minimax/h3" };
 const routeAliases = { t2i: "text-to-image", i2i: "edit", t2v: "text-to-video", i2v: "image-to-video", r2v: "reference-to-video" };

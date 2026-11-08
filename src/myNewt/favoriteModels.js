@@ -1,7 +1,9 @@
 import { imageModelOptions, videoModelOptions } from "../modelOptions.js";
 import { filmDirectorVideoModelSupportsMusic } from "../filmDirectorApproaches.js";
+import { migrateOpenAiImageSettings } from "../openAiImage26.js";
 
 export function normalizeMyNewtFavoriteModels(data = {}) {
+  data = migrateOpenAiImageSettings(data);
   return {
     favoriteImageModel: imageModelOptions.includes(data.favoriteImageModel) ? data.favoriteImageModel : "",
     favoriteVideoModel: videoModelOptions.includes(data.favoriteVideoModel) ? data.favoriteVideoModel : ""

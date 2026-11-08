@@ -2,6 +2,7 @@ import { randomUUID, createHash } from "node:crypto";
 import { stat, rm } from "node:fs/promises";
 import path from "node:path";
 import { editorEnd } from "../../src/editorTimeline.js";
+import { normalizeEditorTransitions } from "../../src/editorTransitions.js";
 import { probeEditorMedia, validateEditorRequest, buildEditorRenderArgs, executeEditorFfmpeg, editorWaveform } from "../editor-render.js";
 import { normalizeEditorExportPath, prepareEditorExport, saveEditorExport } from "../editor-export.js";
 
@@ -91,6 +92,8 @@ export function registerEditorRoutes(app, { resolveAsset, createTarget, recordHi
         if (asset.type !== file.type || asset.hasAudio !== file.hasAudio) throw new Error(`The source for ${asset.label} changed. Reconnect the current media.`);
         for (const clip of timeline.clips.filter(c => c.assetId === asset.id)) if ((clip.sourceIn + clip.duration) / timeline.fps > file.duration + 1 / timeline.fps) throw new Error(`The source for ${asset.label} is shorter than its timeline clip.`);
       }
+      const actual = { ...timeline, assets: timeline.assets.map(a => ({ ...a, duration: files.get(a.id)?.duration ?? a.duration })) };
+      if (JSON.stringify(normalizeEditorTransitions(actual)) !== JSON.stringify(timeline.transitions)) throw new Error("The audio sources no longer have enough spare media for a crossfade. Reconnect the current media.");
       const destination = exportFilePath ? await prepareEditorExport(exportFilePath, files.values()) : null;
       job.controller.signal.throwIfAborted();
       target = await createTarget(req, frame == null ? "editor-sequence" : "editor-still", frame == null ? ".mp4" : ".png");

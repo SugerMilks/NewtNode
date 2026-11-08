@@ -28,7 +28,7 @@ test("Explore defaults, normalization, selection and port-independent style surv
   assert.equal(data.custom, "keep");
   assert.deepEqual(normalizeExploreData(JSON.parse(JSON.stringify(data))), data);
   assert.equal(exploreSelectionPatch(data, 0).resultUrl, item().url);
-  assert.equal(exploreDefaults().model, "OpenAI Image 2.5 Flare");
+  assert.equal(exploreDefaults().model, "OpenAI Image 2.6 Flare");
   assert.equal(exploreDefaults().quality, "medium");
   assert.equal(exploreDefaults().directionCount, 9);
   assert.ok(nodeTypeDefinitions.some(node => node.type === "explore"));
@@ -36,7 +36,7 @@ test("Explore defaults, normalization, selection and port-independent style surv
 
 test("new Explore defaults survive normalization without changing saved model, quality or direction choices", () => {
   const data = normalizeExploreData();
-  assert.equal(data.model, "OpenAI Image 2.5 Flare");
+  assert.equal(data.model, "OpenAI Image 2.6 Flare");
   assert.equal(data.quality, "medium");
   assert.equal(data.directionCount, 9);
   assert.equal(exploreRequest(input()).count, 9);
@@ -296,7 +296,7 @@ test("the default run plans and generates all nine images with Flare medium qual
   assert.equal(fixture.generations.length, 9);
   assert.equal(fixture.data().resultItems.length, 9);
   for (const generation of fixture.generations) {
-    assert.equal(generation.node.data.model, "OpenAI Image 2.5 Flare");
+    assert.equal(generation.node.data.model, "OpenAI Image 2.6 Flare");
     assert.equal(generation.node.data.quality, "medium");
   }
 });
@@ -387,7 +387,7 @@ test("a failed candidate preserves successful siblings; resume never replans or 
   assert.equal((await fixture.run()).status, "complete");
   assert.equal(fixture.plans(), 1);
   assert.equal(fixture.generations.length, 3);
-  assert.equal(fixture.generations.at(-1).node.data.model, "OpenAI Image 2.5 Flare", "resume uses original settings");
+  assert.equal(fixture.generations.at(-1).node.data.model, "OpenAI Image 2.6 Flare", "resume uses original settings");
 });
 
 test("stop waits for the current request and leaves the rest unsubmitted", async () => {

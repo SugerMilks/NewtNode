@@ -3,7 +3,7 @@ import { estimateKreaSeedanceCost } from "./kreaSeedance.js";
 import { estimateMiniMaxH3FalCost } from "./minimaxH3.js";
 import { estimateKling4Cost, isKling4Model } from "./kling4.js";
 import { estimateOpenAiImage2Cost } from "./openAiImage2.js";
-import { isOpenAiImage25Model } from "./openAiImage25.js";
+import { isOpenAiImage26Model } from "./openAiImage26.js";
 import { isSeedream5ProModel, seedream5ProCost } from "./seedream5Pro.js";
 import { isNanoBanana21Model, nanoBanana21Cost } from "./nanoBanana21.js";
 import { estimateSeedance25FalCost } from "./seedance25.js";
@@ -71,7 +71,7 @@ export function estimateImageRunCost({
   const references = Math.max(0, Number(referenceCount) || 0);
   let unitCost = null;
 
-  if (isOpenAiImage25Model(model)) return null;
+  if (isOpenAiImage26Model(model)) return null;
 
   if (isSeedream5ProModel(model)) {
     unitCost = normalizedProvider === "krea"

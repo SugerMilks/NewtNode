@@ -8,7 +8,7 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import sharp from "sharp";
 import { finishOpenAiMaskedEdit } from "../server/openai-edit-mask.js";
-import { isOpenAiImage25Model, openAiImage25Variant } from "../src/openAiImage25.js";
+import { isOpenAiImage26Model, openAiImage26Variant } from "../src/openAiImage26.js";
 import { normalizeCharacterWardrobeRequest } from "../server/character-wardrobe.js";
 import { isNanoBanana21Model } from "../src/nanoBanana21.js";
 
@@ -55,12 +55,12 @@ async function harness(t, provider, model, masked = true, requestOverrides = {})
     app: { post: (_url, _limiter, callback) => { handler = callback; } }, imageGenerationRequestLimiter: null,
     process: { env: { FAL_KEY: provider === "fal" ? "mock" : "", ATLAS_API_KEY: "mock" } },
     atlasMediaEnabled: () => provider === "atlas", supportsAtlasImageModel: () => true,
-    resolveImageModel: () => ({ displayName: model, provider: isOpenAiImage25Model(model) ? "fal-openai-image-25" : "fal-openai-image-2" }),
+    resolveImageModel: () => ({ displayName: model, provider: isOpenAiImage26Model(model) ? "fal-openai-image-26" : "fal-openai-image-2" }),
     isLocalAssetUrl: () => true, cleanImagePromptLabel: value => value,
     resolveImageGenerationAspectRatio: async () => "16:9", generateFalOpenAiImage2: generate,
     atlasMedia: { image: generate }, readLocalAsset: async () => ({ buffer: base, mimeType: "image/png" }),
-    imageDataUrlAsset: () => ({ buffer: mask }), downloadImage, isOpenAiImage25Model, openAiImage25Variant,
-    safePathSegment: value => value, randomUUID: () => "test-id", openAiImage25Cost: () => cost, estimateOpenAiImage2Cost: () => cost,
+    imageDataUrlAsset: () => ({ buffer: mask }), downloadImage, isOpenAiImage26Model, openAiImage26Variant,
+    safePathSegment: value => value, randomUUID: () => "test-id", openAiImage26Cost: () => cost, estimateOpenAiImage2Cost: () => cost,
     appendHistory: async row => { events.push("history"); history.push(row); assert.equal(row.outputBytes, (await stat(output.filePath)).size); },
     projectFromBody: body => ({ id: body.projectId }), nodeFromBody: body => ({ id: body.nodeId }),
     sendApiError: (_res, error) => { throw error; }
@@ -73,7 +73,7 @@ async function harness(t, provider, model, masked = true, requestOverrides = {})
   return { events, history, result, output, base, generated, requests };
 }
 
-for (const [provider, model] of [["fal", "OpenAI Image 2"], ["fal", "OpenAI Image 2.5 Sunburst"], ["atlas", "OpenAI Image 2.5 Sunburst"]]) {
+for (const [provider, model] of [["fal", "OpenAI Image 2"], ["fal", "OpenAI Image 2.6 Sunburst"], ["atlas", "OpenAI Image 2.6 Sunburst"]]) {
   test(`${provider} ${model} preserves ordinary masked edits before thumbnails, History and the node response`, async t => {
     const state = await harness(t, provider, model);
     assert.deepEqual(state.events, ["generate", "download", "thumbnail", "history", "response"]);
@@ -108,7 +108,7 @@ for (const [provider, model] of [["fal", "OpenAI Image 2"], ["fal", "OpenAI Imag
 }
 
 test("unmasked image edits retain the provider bytes without base compositing", async t => {
-  const state = await harness(t, "fal", "OpenAI Image 2.5 Sunburst", false);
+  const state = await harness(t, "fal", "OpenAI Image 2.6 Sunburst", false);
   assert.deepEqual(await readFile(state.output.filePath), state.generated);
   assert.equal(state.history[0].settings.protectedPixelsRestored, false);
 });

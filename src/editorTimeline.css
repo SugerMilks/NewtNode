@@ -7,7 +7,7 @@
 .editor-topbar { display: grid; grid-template-columns: 148px minmax(0, 1fr) 132px; align-items: stretch; border-bottom: 1px solid #383936; }
 .editor-inputs { display: flex; flex-direction: column; justify-content: center; gap: 14px; padding: 14px; border-right: 1px solid #383936; }
 .editor-inputs > div, .editor-output > div { display: flex; align-items: center; gap: 10px; }
-.editor-inputs .inline-port, .editor-output .inline-port { flex: 0 0 14px; padding: 0; border-radius: 50%; }
+.editor-inputs .inline-port, .editor-output .inline-port { flex: 0 0 auto; padding: 0; border-radius: 50%; }
 .editor-transport { display: flex; justify-content: center; align-items: center; gap: 24px; padding: 14px; flex-wrap: wrap; }
 .editor-tool-group { display: flex; gap: 3px; align-items: center; }
 .editor-node-body .editor-tool, .editor-monitor button { width: 30px; height: 30px; padding: 5px; background: transparent; color: #aaa9a2; border: 1px solid transparent; flex: 0 0 30px; }
@@ -18,6 +18,8 @@
 .editor-readouts input, .editor-readouts output { display: block; height: 31px; background: #111310; border: 1px solid #3b3d36; border-radius: 4px; font: 14px ui-monospace, SFMono-Regular, monospace; color: #e5e6dc; padding: 6px 9px; font-variant-numeric: tabular-nums; }
 .editor-readouts input { width: 84px; }
 .editor-readouts output { width: 131px; }
+.editor-timecode-label { display: flex; align-items: center; justify-content: space-between; }
+.editor-playback-rate { display: inline-block; min-width: 28px; text-align: right; color: #dfcd2c; font: 10px ui-monospace, monospace; }
 .editor-output { padding: 10px 14px; display: flex; flex-direction: column; justify-content: center; gap: 10px; }
 .editor-output > div { justify-content: flex-end; }
 .editor-node-body .editor-export { background: #dfcd2c; color: #111; font-weight: 700; height: 32px; padding: 6px 10px; width: 100%; }
@@ -46,7 +48,7 @@
 .editor-ruler { position: relative; flex-shrink: 0; cursor: col-resize; touch-action: none; }
 .editor-tick { position: absolute; top: 0; height: 26px; border-left: 1px solid #525649; pointer-events: none; }
 .editor-tick span { display: inline-block; padding: 5px 6px; color: #909886; white-space: nowrap; font: 10px ui-monospace, SFMono-Regular, monospace; }
-.editor-export-range { position: absolute; bottom: 0; height: 14px; border-left: 2px solid #d5c642; border-right: 2px solid #d5c642; border-top: 2px solid #b9b058; background: #aaa04c25; display: flex; justify-content: space-between; pointer-events: none; overflow: hidden; }
+.editor-export-range { position: absolute; bottom: 0; height: 14px; border-left: 2px solid #d5c642; border-right: 2px solid #d5c642; border-top: 2px solid #b9b058; background: #aaa04c25; display: flex; justify-content: space-between; overflow: hidden; }
 .editor-export-range span { font: 9px ui-monospace, monospace; padding: 0 3px; color: #dfd489; }
 .editor-track-row { display: flex; height: 68px; border-bottom: 1px solid #34382f; }
 .editor-track-row.audio .editor-track-head { background: #28241d; }
@@ -55,9 +57,20 @@
 .editor-track-row.muted .editor-clip { opacity: .35; }
 .editor-track-lane { position: relative; flex-shrink: 0; background-color: #1b1e18; background-image: linear-gradient(to right, #464a393a 1px, transparent 1px); }
 .editor-gap { position: absolute; top: 5px; bottom: 5px; border: 1px solid #dfcd2c; background: #dfcd2c18; pointer-events: none; }
-.editor-gap-menu { position: absolute; z-index: 30; width: 180px; padding: 4px; border: 1px solid #4c4d44; border-radius: 5px; background: #282923; box-shadow: 0 6px 16px #0008; }
-.editor-gap-menu button { width: 100%; height: 34px; justify-content: flex-start; padding: 6px 10px; color: #eeeee7; background: transparent; }
-.editor-gap-menu button:hover, .editor-gap-menu button:focus-visible { background: #434437; outline: 1px solid #dfcd2c; }
+.editor-context-menu { position: absolute; z-index: 30; width: 180px; padding: 4px; border: 1px solid #4c4d44; border-radius: 5px; background: #282923; box-shadow: 0 6px 16px #0008; }
+.editor-context-menu button { width: 100%; height: 34px; justify-content: flex-start; padding: 6px 10px; color: #eeeee7; background: transparent; }
+.editor-context-menu button:hover, .editor-context-menu button:focus-visible { background: #434437; outline: 1px solid #dfcd2c; }
+.editor-context-menu.editor-transition-menu { width: 220px; }
+.editor-node-body .editor-transition { position: absolute; top: 40px; height: 21px; min-height: 0; padding: 0; border: 1px solid #d0bd55; border-radius: 3px; background: #353122ed; color: #f1df83; z-index: 2; font-size: 10px; touch-action: none; user-select: none; }
+.editor-node-body .editor-transition svg { flex-shrink: 0; }
+.editor-node-body .editor-transition.crossFade { background: #453027ed; border-color: #d8a06f; color: #ffd7ae; }
+.editor-node-body .editor-transition.selected { outline: 1px solid #f1df83; }
+.editor-node-body .editor-transition-select { display: flex; gap: 4px; justify-content: center; align-items: center; width: 100%; height: 100%; min-height: 0; padding: 2px 6px; overflow: hidden; white-space: nowrap; border: 0; border-radius: 2px; background: transparent; color: inherit; font-size: 10px; }
+.editor-node-body .editor-transition-handle { position: absolute; top: 0; bottom: 0; width: 6px; height: 100%; min-height: 0; padding: 0; border: 0; border-radius: 1px; background: transparent; cursor: ew-resize; touch-action: none; }
+.editor-transition-handle.left { left: 0; } .editor-transition-handle.right { right: 0; }
+.editor-transition:hover .editor-transition-handle, .editor-transition.selected .editor-transition-handle, .editor-transition:focus-within .editor-transition-handle { background: #f1df8380; }
+.editor-node-body .editor-transition-handle:disabled { cursor: not-allowed; opacity: .3; }
+.editor-transition-readout { position: absolute; bottom: calc(100% + 1px); left: 50%; transform: translateX(-50%); height: 12px; padding: 0 4px; background: #171812; color: #f4eaa8; border: 1px solid #6e6945; border-radius: 2px; white-space: nowrap; pointer-events: none; font: 9px/10px ui-monospace, SFMono-Regular, monospace; }
 .editor-node-body .editor-resize-handle { right: 6px; bottom: 6px; width: 18px; height: 18px; min-height: 18px; padding: 0; border: 0; border-right: 2px solid #dfcd2c; border-bottom: 2px solid #dfcd2c; border-radius: 0 0 4px 0; background: transparent; cursor: ew-resize; touch-action: none; z-index: 6; }
 .editor-clip { position: absolute; height: 54px; top: 6px; background: #405940; border: 1px solid #718167; border-radius: 3px; overflow: hidden; cursor: grab; touch-action: none; user-select: none; }
 .editor-track-row.audio .editor-clip { background: #59462e; border-color: #8f7250; }
@@ -68,6 +81,14 @@
 .editor-node-body .editor-trim { position: absolute; top: 0; bottom: 0; height: 100%; width: 7px; padding: 0; border: 0; border-radius: 0; cursor: ew-resize; background: transparent; touch-action: none; }
 .editor-node-body .editor-trim:hover, .editor-clip.selected .editor-trim { background: #ebdf6c80; }
 .editor-trim.left { left: 0; } .editor-trim.right { right: 0; }
+.editor-fade { position: absolute; top: 0; bottom: 0; pointer-events: auto; cursor: pointer; border-top: 2px solid #e4d46e; background: linear-gradient(to bottom right, #111a 49%, #e4d46e 50%, transparent 52%); }
+.editor-fade.left { left: 0; }
+.editor-fade.right { right: 0; background: linear-gradient(to bottom left, #111a 49%, #e4d46e 50%, transparent 52%); }
+.editor-fade.selected { border-top-color: #fff2a0; }
+.editor-node-body .editor-fade-handle { position: absolute; top: 0; width: 9px; height: 12px; padding: 0; background: #e4d46e; border: 1px solid #191b13; border-radius: 2px; cursor: ew-resize; touch-action: none; }
+.editor-fade.left .editor-fade-handle { right: 0; } .editor-fade.right .editor-fade-handle { left: 0; }
+.editor-fade-readout { position: absolute; bottom: 2px; left: 50%; transform: translateX(-50%); padding: 1px 3px; background: #171812; color: #f4eaa8; white-space: nowrap; pointer-events: none; font: 9px ui-monospace, monospace; }
+.editor-marquee { position: absolute; z-index: 6; pointer-events: none; border: 1px solid #e6d641; background: #e6d64122; }
 .editor-playhead { position: absolute; top: 0; width: 1px; background: #efdf5a; z-index: 5; pointer-events: none; box-shadow: 0 0 0 1px #0005; }
 .editor-playhead > span { position: absolute; top: 0; left: -5px; width: 11px; height: 9px; background: #efdf5a; clip-path: polygon(0 0,100% 0,100% 50%,50% 100%,0 50%); }
 .editor-bottom-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 15px; padding: 8px 36px 8px 12px; background: #23251e; }
@@ -79,6 +100,12 @@
 .editor-settings label { display: flex; flex-direction: column; gap: 6px; color: #adb1a4; }
 .editor-settings input, .editor-settings select { width: 105px; height: 32px; font-size: 12px; padding: 5px 9px; border-radius: 4px; }
 .editor-settings > span { color: #929886; padding-bottom: 8px; }
+.editor-clip-position { flex: 1 0 100%; min-width: 0; display: grid; grid-template-columns: minmax(110px, .6fr) minmax(160px, 1fr) minmax(160px, 1fr) 30px; gap: 16px; align-items: center; border-top: 1px solid #383936; padding-top: 12px; }
+.editor-position-title { display: flex; flex-direction: column; gap: 5px; min-width: 0; color: #d2d5ca; }
+.editor-position-title > span:last-child { color: #989c92; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.editor-position-slider > span { display: flex; justify-content: space-between; gap: 10px; }
+.editor-position-slider output { min-width: 52px; text-align: right; font: 11px ui-monospace, monospace; color: #c5c7bd; }
+.editor-settings .editor-position-slider input { width: 100%; min-width: 0; height: 20px; padding: 0; margin: 0; accent-color: #dfcd2c; }
 .editor-selection-info { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 8px 12px; border-top: 1px solid #383936; min-width: 0; }
 .editor-selection-info > span { max-width: 330px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .editor-selection-info label { display: flex; align-items: center; gap: 8px; margin-left: auto; }
@@ -108,5 +135,9 @@
   .editor-toolbar { gap: 6px; }
   .editor-view-tools { margin-left: 0; }
   .editor-readouts { flex-wrap: wrap; gap: 6px; }
+  .editor-clip-position { grid-template-columns: minmax(0, 1fr) 30px; gap: 10px; }
+  .editor-position-title { grid-column: 1; grid-row: 1; }
+  .editor-clip-position > .editor-tool { grid-column: 2; grid-row: 1; }
+  .editor-settings .editor-position-slider { grid-column: 1 / -1; min-width: 0; }
 }
 .editor-save-status { color: #9bcea7; font-size: 11px; overflow-wrap: anywhere; padding: 6px 0; }

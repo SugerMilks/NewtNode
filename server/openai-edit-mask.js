@@ -29,6 +29,11 @@ export async function normalizeOpenAiEditMask(mask, source) {
   return { ...mask, buffer, mimeType: "image/png", fileName: "edit-mask.png" };
 }
 
+export async function openAiImage26Mask(mask) {
+  // Fal 2.6 uses white=edit, black=keep. Keep the alpha mask for local restoration.
+  return { ...mask, buffer: await decode(mask.buffer).extractChannel(3).negate().png().toBuffer() };
+}
+
 export async function finishOpenAiMaskedEdit({ source, mask }, generated) {
   const { width, height } = await decode(source).metadata();
   const selectionImage = decode(mask).extractChannel(3).negate();

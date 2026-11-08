@@ -76,7 +76,7 @@ test("legitimate layout edits and duplicate suppression remain intact", () => {
 test("source repair is limited to legacy Ideogram generation metadata, not normal editing lineage", () => {
   const cases = [
     { url: output(1), sourceUrl: reference, type: "image", model: "Ideogram 4.5", editPrecision: "regular", label: "Image Edit" },
-    { ...legacy(1), model: "OpenAI Image 2.5 Sunburst" },
+    { ...legacy(1), model: "OpenAI Image 2.6 Sunburst" },
     { ...legacy(1), referenceSourceUrl: "/uploads/guide.png" },
     { ...legacy(1), sourceUrl: output(1) },
     { ...legacy(1), type: "video" }

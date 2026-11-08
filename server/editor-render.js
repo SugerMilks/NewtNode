@@ -1,6 +1,8 @@
 import { spawn, execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
 import { normalizeEditorTimeline, validateEditorTimeline, editorRange, editorLimits } from "../src/editorTimeline.js";
+import { buildEditorTransitionRenderArgs } from "./editor-transition-render.js";
+import { editorPositionFilter } from "./editor-position-render.js";
 
 const execFile = promisify(execFileCallback);
 const seconds = value => Number(value.toFixed(8));
@@ -22,10 +24,23 @@ export function validateEditorRequest(raw) {
   if (!raw || typeof raw !== "object" || !Array.isArray(raw.clips) || !Array.isArray(raw.assets) || !Array.isArray(raw.tracks)) throw new Error("Provide a valid Editor timeline.");
   if (raw.clips.length > editorLimits.clips || raw.assets.length > editorLimits.assets || raw.tracks.length > editorLimits.tracks) throw new Error("The timeline exceeds the Editor's track, clip or media limit.");
   const timeline = normalizeEditorTimeline(raw);
+  if (raw.transitions != null && (!Array.isArray(raw.transitions) || raw.transitions.length > 200
+    || raw.transitions.length !== timeline.transitions.length || raw.transitions.some((t, i) => !t || ["leftId", "rightId", "type", "duration"].some(k => t[k] !== timeline.transitions[i]?.[k])))) {
+    throw new Error("The timeline contains an invalid transition. Check its clips and available source handles.");
+  }
   if (timeline.clips.length !== raw.clips.length || timeline.assets.length !== raw.assets.length || timeline.tracks.length !== raw.tracks.length) throw new Error("The timeline contains invalid or duplicate media, clips or tracks.");
   for (const c of raw.clips) {
     const normalized = timeline.clips.find(n => n.id === c.id);
     if (["start", "sourceIn", "duration"].some(k => !Number.isInteger(c[k]) || normalized[k] !== c[k])) throw new Error("A clip extends beyond its source or sequence bounds.");
+    for (const key of ["positionX", "positionY"]) if (Object.hasOwn(c, key)
+      && (typeof c[key] !== "number" || !Number.isFinite(c[key]) || Math.abs(c[key]) > 100
+        || (c[key] !== 0 && timeline.tracks.find(t => t.id === c.trackId)?.kind !== "video"))) {
+      throw new Error("Video clip positions must be between -100% and 100%.");
+    }
+    for (const key of ["fadeIn", "fadeOut"]) if (Object.hasOwn(c, key)
+      && (!Number.isInteger(c[key]) || c[key] < 0 || (normalized[key] || 0) !== c[key])) {
+      throw new Error("Clip fades must fit within the clip and use whole frames (at least two frames per fade).");
+    }
   }
   for (const a of timeline.assets) if (!/^\/(?:uploads|outputs|workflow-assets)\//.test(a.url) || /[\0\r\n]/.test(a.url)) throw new Error("Editor media must be uploaded or generated in NewtNode first.");
   if (!timeline.clips.length) throw new Error("Connect media before exporting.");
@@ -36,6 +51,7 @@ export function validateEditorRequest(raw) {
 }
 
 export function buildEditorRenderArgs(timeline, files, outputPath, { frame = null } = {}) {
+  if (timeline.transitions?.length || timeline.clips.some(c => c.fadeIn || c.fadeOut)) return buildEditorTransitionRenderArgs(timeline, files, outputPath, { frame });
   const range = frame == null ? editorRange(timeline) : { start: frame, end: frame + 1 };
   const fps = timeline.fps, duration = seconds((range.end - range.start) / fps), tracks = timeline.tracks;
   const clips = timeline.clips.filter(c => !tracks.find(t => t.id === c.trackId)?.muted && c.start < range.end && c.start + c.duration > range.start
@@ -58,7 +74,7 @@ export function buildEditorRenderArgs(timeline, files, outputPath, { frame = nul
   let picture = "base";
   const video = segments.filter(s => s.kind === "video").sort((a, b) => tracks.findIndex(t => t.id === b.clip.trackId) - tracks.findIndex(t => t.id === a.clip.trackId) || a.clip.start - b.clip.start);
   for (const s of video) {
-    filters.push(`[${s.index}:v:0]setpts=PTS-STARTPTS,fps=${fps}:start_time=0,trim=start_frame=${s.sourceFrame}:end_frame=${s.sourceFrame + s.frameCount},tpad=stop_mode=clone:stop=1,trim=end_frame=${s.frameCount},settb=expr=1/${fps},setpts=N+${s.offsetFrame},scale=${timeline.width}:${timeline.height}:force_original_aspect_ratio=decrease,pad=${timeline.width}:${timeline.height}:(ow-iw)/2:(oh-ih)/2:black,setsar=1[v${s.index}]`);
+    filters.push(`[${s.index}:v:0]setpts=PTS-STARTPTS,fps=${fps}:start_time=0,trim=start_frame=${s.sourceFrame}:end_frame=${s.sourceFrame + s.frameCount},tpad=stop_mode=clone:stop=1,trim=end_frame=${s.frameCount},settb=expr=1/${fps},setpts=N+${s.offsetFrame},scale=${timeline.width}:${timeline.height}:force_original_aspect_ratio=decrease,pad=${timeline.width}:${timeline.height}:(ow-iw)/2:(oh-ih)/2:black,setsar=1${editorPositionFilter(s.clip, timeline.width, timeline.height)}[v${s.index}]`);
     filters.push(`[${picture}][v${s.index}]overlay=eof_action=repeat:repeatlast=1:enable='gte(round(t*${fps}),${s.offsetFrame})*lt(round(t*${fps}),${s.offsetFrame + s.frameCount})'[mix${s.index}]`);
     picture = `mix${s.index}`;
   }

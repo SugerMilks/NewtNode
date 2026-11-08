@@ -10,7 +10,7 @@ function Harness() {
   const [revision, setRevision] = useState(0), [unknown, setUnknown] = useState(false), [narrow, setNarrow] = useState(false);
   const [action, setAction] = useState("None");
   const job = unknown ? { id: "mock-job", nodeId: node.id, status: "paused", unpricedCount: 2,
-    pending: { preview: { model: "OpenAI Image 2.5 Sunburst", provider: "atlas", estimatedCost: null } } } : null;
+    pending: { preview: { model: "OpenAI Image 2.6 Sunburst", provider: "atlas", estimatedCost: null } } } : null;
   return <main style={{ padding: 20, overflow: "auto", maxHeight: "100dvh", boxSizing: "border-box" }}>
     <h1 style={{ fontSize: 18 }}>Newt settings QA (no provider requests)</h1>
     <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>

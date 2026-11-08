@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import sharp from "sharp";
 import { ideogramImageEditModel as model, ideogramImageEditEndpoint, buildIdeogramImageEditFalRequest, ideogramImageEditCost,
   ideogramImageEditQualityOptions, ideogramImageEditPrecisionOptions } from "../src/ideogramImageEdit.js";
-import { openAiImage25Models } from "../src/openAiImage25.js";
+import { openAiImage26Models } from "../src/openAiImage26.js";
 import { nanoBanana21ModelName, nanoBanana21FalEditEndpoint } from "../src/nanoBanana21.js";
 import { imageEditSize, buildImageEditPrompt } from "../src/imageEdit.js";
 import { prepareImageEdit, finishImageEdit, generateFalImageEdit, createIdeogramImageEditClient } from "../server/image-edit.js";
@@ -84,7 +84,7 @@ test("Ideogram auto geometry retains native sizes while Sunburst still uses its 
   assert.throws(() => imageEditSize(7, 1, model), /1:6/);
   assert.throws(() => imageEditSize(6001, 4000, model), /24 megapixels/);
   assert.throws(() => imageEditSize(6000, 1000), /1:3/);
-  assert.deepEqual(imageEditSize(701, 519), imageEditSize(701, 519, openAiImage25Models.sunburst));
+  assert.deepEqual(imageEditSize(701, 519), imageEditSize(701, 519, openAiImage26Models.sunburst));
 });
 
 test("Ideogram masks are opaque black/edit and white/protect with the documented alpha rounding", async () => {
@@ -147,9 +147,9 @@ test("Fal transport rejects invalid Ideogram requests before any upload and pres
     assert.equal(state.uploads.length, 0); assert.equal(state.submissions.length, 0);
   }
   const state = transport();
-  await generateFalImageEdit({ model: openAiImage25Models.sunburst, prompt: "Change", quality: "max", size: "1024x1024", images: [Buffer.from("source")], mask: Buffer.from("mask") }, state.dependencies);
-  assert.equal(state.submissions[0].endpoint, "openai/gpt-image-2.5/sunburst/edit");
-  assert.equal(state.submissions[0].options.input.quality, "max");
+  await generateFalImageEdit({ model: openAiImage26Models.sunburst, prompt: "Change", quality: "max", size: "1024x1024", images: [Buffer.from("source")], mask: Buffer.from("mask") }, state.dependencies);
+  assert.equal(state.submissions[0].endpoint, "openai/gpt-image-2.6/sunburst/edit");
+  assert.equal(state.submissions[0].options.input.quality, "high");
   assert.deepEqual(state.submissions[0].options.input.image_size, { width: 1024, height: 1024 });
   assert.deepEqual(state.submissions[0].options.input.image_urls, ["https://fixture.invalid/0.png"]);
 });
@@ -214,7 +214,7 @@ test("Ideogram duplicate requests share one generation and changed model, qualit
   const state = await editor(), requestId = randomUUID();
   const [first, duplicate] = await Promise.all([state.post({ requestId }), state.post({ requestId })]);
   assert.equal(first.status, 200); assert.deepEqual(first, duplicate); assert.equal(state.calls.length, 1); assert.equal(state.saves.length, 1);
-  for (const change of [{ model: openAiImage25Models.sunburst }, { quality: "low" }, { editPrecision: "high" }])
+  for (const change of [{ model: openAiImage26Models.sunburst }, { quality: "low" }, { editPrecision: "high" }])
     assert.equal((await state.post({ requestId, ...change })).status, 409);
   assert.equal(state.calls.length, 1);
 });

@@ -7,7 +7,9 @@ import {
   characterSheetChoices,
   customCharacterSheetId,
   generatedCharacterSheetId,
-  normalizeCharacterCustomSheets
+  normalizeCharacterCustomSheets,
+  repairCustomCharacterSheetBases,
+  characterOutputReference
 } from "../src/characterSheetLibrary.js";
 
 function libraryData(patch = {}) {
@@ -99,4 +101,23 @@ test("a locally restored Base Identity remains selectable", () => {
   });
   assert.equal(choices.length, 1);
   assert.equal(choices[0].item.url, "/outputs/restored-base.png");
+});
+
+test("custom migration repair retains its CU image and selection while preserving unrelated real masters", () => {
+  const data = {
+    activeCharacterSheetId: generatedCharacterSheetId(), cuVideoGeneration: true,
+    characterCustomSheets: [{ id: "client", localUrl: "/uploads/client.png" }],
+    characterSheetVariants: [{ wardrobeId: "__default-wardrobe__", wardrobeFileName: "Existing wardrobe", wardrobeUrl: "",
+      generated: { url: "/uploads/client.png" }, videoGenerated: { url: "/uploads/client-cu.png" } }],
+    characterBaseSheet: { url: "/uploads/client.png" }, characterBaseVideoSheet: { url: "/uploads/client-cu.png" }
+  };
+  const before = structuredClone(data), repaired = repairCustomCharacterSheetBases(data);
+  assert.equal(repaired.activeCharacterSheetId, "custom:client");
+  assert.equal(repaired.characterBaseSheet, null); assert.equal(repaired.characterBaseVideoSheet, null);
+  assert.equal(characterOutputReference(repaired, { video: true }).url, "/uploads/client-cu.png");
+  assert.equal(repairCustomCharacterSheetBases(repaired), repaired);
+  assert.deepEqual(data, before);
+  const unrelated = repairCustomCharacterSheetBases({ ...data, characterBaseSheet: { url: "/outputs/real-base.png" }, characterBaseVideoSheet: { url: "/outputs/real-cu.png" } });
+  assert.equal(unrelated.characterBaseSheet.url, "/outputs/real-base.png");
+  assert.equal(unrelated.characterBaseVideoSheet.url, "/outputs/real-cu.png");
 });

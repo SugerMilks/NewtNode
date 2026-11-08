@@ -84,9 +84,6 @@ async function raster(fileName, width = 64, height = 32, format = "png") {
 test("all supported image models preserve exact routes, ordered native references and result metadata", async (t) => {
   const contracts = [
     ["OpenAI Image 2", "openai/gpt-image-2"],
-    ["OpenAI Image 2.5 Sunburst", "openai/gpt-image-2.5-sunburst"],
-    ["OpenAI Image 2.5 Flare", "openai/gpt-image-2.5-flare"],
-    ["Nano Banana Pro", "google/nano-banana-pro"],
     ["Nano Banana Pro", "google/nano-banana-pro"],
   ];
   for (const [model, id] of contracts) for (const count of [0, 1, 2]) {
@@ -116,31 +113,16 @@ test("all supported image models preserve exact routes, ordered native reference
   }
 });
 
-test("Sunburst/Flare preserve 4K, quality, alpha settings and base/wardrobe/mask upload order", async (t) => {
+test("unpublished Sunburst/Flare routes stop before any reference or mask upload", async (t) => {
   const base = await raster("cu-base.png");
   const wardrobe = await raster("wardrobe.png", 32, 64);
   const mask = await raster("mask.png");
-  for (const model of ["OpenAI Image 2.5 Sunburst", "OpenAI Image 2.5 Flare"]) {
+  for (const model of ["OpenAI Image 2.6 Sunburst", "OpenAI Image 2.6 Flare"]) {
     for (const quality of ["high", "xhigh", "max"]) {
       const h = setup(t);
-      const result = await h.media.image({ model, prompt, imageInputs: [base, wardrobe], editMaskInput: mask,
-        resolution: "4K", aspectRatio: "16:9", quality, background: "transparent" }, key);
-      const body = submitted(h);
-      assert.equal(body.size, "3840x2160");
-      assert.equal(body.quality, quality);
-      assert.equal(body.background, "transparent");
-      assert.equal(body.mask, url("edit-mask.png"));
-      assert.deepEqual(body.images, [url("cu-base.png"), url("wardrobe.png")]);
-      assert.equal(body.n, 1);
-      assert.equal(result.size, "3840x2160");
-      assert.equal(result.quality, quality);
-      assert.deepEqual(h.events, [["upload", "cu-base.png"], ["upload", "wardrobe.png"], ["upload", "edit-mask.png"], ["generate", "image"]]);
-      for (const [index, original] of [base, wardrobe].entries()) {
-        assert.equal(h.client.upload.mock.calls[index].arguments[0].buffer, original.buffer);
-      }
-      assert.equal(result.maskedEdit.source, base.buffer);
-      assert.equal(result.maskedEdit.mask, h.client.upload.mock.calls[2].arguments[0].buffer);
-      assert.deepEqual(await sharp(result.maskedEdit.mask).raw().toBuffer(), await sharp(mask.buffer).raw().toBuffer());
+      await assert.rejects(h.media.image({ model, prompt, imageInputs: [base, wardrobe], editMaskInput: mask,
+        resolution: "4K", aspectRatio: "16:9", quality, background: "transparent" }, key), /Unsupported Atlas image model/);
+      noTransfers(h);
     }
   }
 });
@@ -153,25 +135,25 @@ test("invalid mask geometry, non-PNG masks and corrupt bytes fail before any upl
   ];
   for (const editMaskInput of invalidMasks) {
     const h = setup(t);
-    await assert.rejects(h.media.image({ model: "OpenAI Image 2.5 Sunburst", prompt, imageInputs: [base], editMaskInput }, key),
-      /PNG mask.*same dimensions|unsupported image format/i);
+    await assert.rejects(h.media.image({ model: "OpenAI Image 2.6 Sunburst", prompt, imageInputs: [base], editMaskInput }, key),
+      /Unsupported Atlas image model/i);
     noTransfers(h);
   }
   const h = setup(t);
-  await assert.rejects(h.media.image({ model: "OpenAI Image 2.5 Sunburst", prompt,
-    imageInputs: [asset("corrupt-base.png")], editMaskInput: await raster("mask.png") }, key), /unsupported image format/i);
+  await assert.rejects(h.media.image({ model: "OpenAI Image 2.6 Sunburst", prompt,
+    imageInputs: [asset("corrupt-base.png")], editMaskInput: await raster("mask.png") }, key), /Unsupported Atlas image model/i);
   noTransfers(h);
 });
 
 test("explicit OpenAI size is preserved and invalid explicit size is never defaulted", async (t) => {
   const h = setup(t);
-  const result = await h.media.image({ model: "OpenAI Image 2.5 Sunburst", prompt, size: "1536x864" }, key);
+  const result = await h.media.image({ model: "OpenAI Image 2", prompt, size: "1536x864" }, key);
   assert.equal(submitted(h).size, "1536x864");
   assert.equal(result.size, "1536x864");
   assert.equal(h.imageSize.mock.callCount(), 0);
   for (const size of ["", null, "4096x4096"]) {
     const bad = setup(t);
-    await assert.rejects(bad.media.image({ model: "OpenAI Image 2.5 Sunburst", prompt, size }, key), /size/);
+    await assert.rejects(bad.media.image({ model: "OpenAI Image 2", prompt, size }, key), /size/);
     noTransfers(bad);
   }
 });
@@ -203,8 +185,7 @@ test("Nano Banana remove shared OpenAI fields before requests and pricing", asyn
 });
 
 test("image reference caps and unsupported native settings reject before transfers", async (t) => {
-  for (const [model, cap] of [["OpenAI Image 2", 10], ["OpenAI Image 2.5 Sunburst", 16],
-    ["OpenAI Image 2.5 Flare", 16], ["Nano Banana Pro", 10]]) {
+  for (const [model, cap] of [["OpenAI Image 2", 10], ["Nano Banana Pro", 10]]) {
     const h = setup(t);
     await assert.rejects(h.media.image({ model, prompt, imageInputs: refs(cap + 1) }, key), new RegExp(`${cap} reference images`));
     noTransfers(h);
@@ -213,7 +194,7 @@ test("image reference caps and unsupported native settings reject before transfe
     { model: "REVE 2.1", resolution: "8K" }, { model: "REVE 2.1", resolution: "1K" },
     { model: "Nano Banana Pro", resolution: "0.5K" }, { model: "OpenAI Image 2", quality: "max" },
     { model: "Nano Banana Pro", editMaskInput: asset("mask.png") },
-    { model: "OpenAI Image 2.5 Sunburst", editMaskInput: asset("mask.png") }, { model: "Krea 2 Large" }
+    { model: "OpenAI Image 2.6 Sunburst", editMaskInput: asset("mask.png") }, { model: "Krea 2 Large" }
   ]) {
     const h = setup(t);
     await assert.rejects(h.media.image({ prompt, ...options }, key), { status: 400 });
@@ -224,10 +205,10 @@ test("image reference caps and unsupported native settings reject before transfe
 test("image maximum references are retained, including duplicates", async (t) => {
   const h = setup(t);
   const original = asset("repeat.png");
-  const imageInputs = Object.freeze(Array(16).fill(original));
-  await h.media.image({ model: "OpenAI Image 2.5 Sunburst", prompt, imageInputs }, key);
-  assert.deepEqual(submitted(h).images, Array(16).fill(url("repeat.png")));
-  assert.equal(h.client.upload.mock.callCount(), 16);
+  const imageInputs = Object.freeze(Array(10).fill(original));
+  await h.media.image({ model: "OpenAI Image 2", prompt, imageInputs }, key);
+  assert.deepEqual(submitted(h).images, Array(10).fill(url("repeat.png")));
+  assert.equal(h.client.upload.mock.callCount(), 10);
 });
 
 test("video frame preprocessing preserves source aspect for 2.5/H3 and requested aspect for 2.0", async (t) => {

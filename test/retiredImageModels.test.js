@@ -13,8 +13,9 @@ import { estimateImageRunCost } from "../src/generationPricing.js";
 import { PricingRefresh } from "../server/pricing-refresh.js";
 import { isRetiredNanoBanana2Model } from "../src/retiredImageModels.js";
 import * as nanoBanana21 from "../src/nanoBanana21.js";
+import { migrateOpenAiImageModel } from "../src/openAiImage26.js";
 import { isSeedream5ProModel, seedream5ProModelName, seedream5ProFalEndpoint } from "../src/seedream5Pro.js";
-import { isOpenAiImage25Model, openAiImage25Variant, openAiImage25Models } from "../src/openAiImage25.js";
+import { isOpenAiImage26Model, openAiImage26Variant, openAiImage26Models } from "../src/openAiImage26.js";
 
 const retired = ["Krea 2 Large", "REVE 2.1", "Nano Banana 2", "Ideogram 4.5"];
 
@@ -33,15 +34,15 @@ test("backend rejects retired names and endpoints instead of silently generating
   const source = await readFile(new URL("../server/index.js", import.meta.url), "utf8");
   const start = source.indexOf("function resolveImageModel(");
   const end = source.indexOf("function resolveUtilityImageModel(", start);
-  const deps = { ...nanoBanana21, isSeedream5ProModel, seedream5ProModelName, seedream5ProFalEndpoint, isRetiredNanoBanana2Model, isOpenAiImage25Model, openAiImage25Variant, openAiImage25Models,
-    imageModelNames, falNanoBananaProEndpoint: "fal-ai/nano-banana-pro",
+  const deps = { ...nanoBanana21, isSeedream5ProModel, seedream5ProModelName, seedream5ProFalEndpoint, isRetiredNanoBanana2Model, isOpenAiImage26Model, openAiImage26Variant, openAiImage26Models,
+    migrateOpenAiImageModel, imageModelNames, falNanoBananaProEndpoint: "fal-ai/nano-banana-pro",
     httpError: (status, message) => Object.assign(new Error(message), { status }) };
   const resolve = new Function(...Object.keys(deps), source.slice(start, end) + "\nreturn resolveImageModel;")(...Object.values(deps));
   for (const model of [...retired, "fal-ai/nano-banana-2", "fal-ai/nano-banana-2/edit", "google/nano-banana-2/edit", "gemini-3.1-flash-image", "ideogram/v4.5", "ideogram/v4.5/edit", "reve/2.1/edit", "reve-ai/reve-2.1/remix", "krea/v2/large/text-to-image", "unknown"]) {
     assert.throws(() => resolve(model), { status: 400 });
   }
   assert.equal(resolve("Nano Banana Pro").displayName, "Nano Banana Pro");
-  assert.equal(resolve("OpenAI Image 2.5 Flare").displayName, "OpenAI Image 2.5 Flare");
+  assert.equal(resolve("OpenAI Image 2.6 Flare").displayName, "OpenAI Image 2.6 Flare");
 });
 
 test("retired cached prices and reviews are pruned without changing history records", async t => {

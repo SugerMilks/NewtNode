@@ -32,7 +32,7 @@ function imageRoute(error) {
     imageGenerationRequestLimiter: null,
     process: { env: { FAL_KEY: "test-only" } },
     atlasMediaEnabled: () => false,
-    resolveImageModel: () => ({ provider: "fal-openai-image-25", displayName: creativeImageDefaultModel }),
+    resolveImageModel: () => ({ provider: "fal-openai-image-26", displayName: creativeImageDefaultModel }),
     isLocalAssetUrl: (url) => url.startsWith("/uploads/"),
     cleanImagePromptLabel: (value) => value || "",
     resolveImageGenerationAspectRatio: async ({ value }) => value || "16:9",
@@ -75,6 +75,7 @@ test("image route preserves validation details, status codes and body-less error
 test("all Character sheet stages display the upstream rejection without resubmitting", async (t) => {
   const api = imageRoute(rejectedContent());
   const fetch = t.mock.method(globalThis, "fetch", async (_url, options) => {
+    if (_url.endsWith("/api/health")) return Response.json({ routes: { gptImage26: true } });
     const { status, data } = await api.run(JSON.parse(options.body));
     return new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
   });
@@ -92,7 +93,7 @@ test("all Character sheet stages display the upstream rejection without resubmit
   ]) {
     const before = fetch.mock.callCount();
     await assert.rejects(run({ ...request, sheetKind }), { message: `${prefix}: prompt: ${rejectionMessage}` });
-    assert.equal(fetch.mock.callCount(), before + 1);
+    assert.equal(fetch.mock.callCount(), before + 2);
     assert.equal(api.requests.at(-1).model, creativeImageDefaultModel);
     assert.equal(api.requests.at(-1).resolution, "4K");
     assert.equal(api.requests.at(-1).quality, "high");

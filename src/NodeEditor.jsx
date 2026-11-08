@@ -23,6 +23,7 @@ const CameraCoverageNodeBody = React.lazy(() => import("./components/CameraCover
 import { runExploreGeneration } from "./nodeRunners/explore.js";
 const ExploreNodeBody = React.lazy(() => import("./components/ExploreNodeBody.jsx").then(module => ({ default: module.ExploreNodeBody })));
 import { createEditorTimeline, normalizeEditorTimeline, editorRenderSignature, editorZoomStep } from "./editorTimeline.js";
+import { completeEditorStillCapture } from "./editorStillCapture.js";
 const EditorNodeBody = React.lazy(() => import("./components/EditorNodeBody.jsx").then(module => ({ default: module.EditorNodeBody })));
 const EditorMonitor = React.lazy(() => import("./components/EditorMonitor.jsx").then(module => ({ default: module.EditorMonitor })));
 import { normalizeOutputData, connectedOutputSources } from "./outputNode.js";
@@ -49,7 +50,7 @@ import { PresetWorkflowPicker } from "./components/PresetWorkflowPicker.jsx";
 import { SidebarMenu } from "./components/SidebarMenu.jsx";
 import { CanvasTabs } from "./components/CanvasTabs.jsx";
 import { normalizeProjectCanvases, canvasGraph, replaceCanvasGraph, snapshotCanvases, copyCanvasGraph, transferCanvasNodes, nodeIsWorking, canvasName, defaultCanvasViewport } from "./projectCanvases.js";
-import { pauseEditorPlayback } from "./editorPlayback.js";
+import { pauseEditorPlayback, editorPlayback } from "./editorPlayback.js";
 import { keepSingleMyNewt, myNewtDefaults, myNewtFields, myNewtRunStages, validateMyNewtPatch } from "./myNewt/contract.js";
 import {
   Aperture,
@@ -125,7 +126,7 @@ import { MediaAssetNodeBody, PlainTextNodeBody, SkillDirectorNodeBody, TextModel
 import { NodeRow, OutputPortRow, PortHandle } from "./components/NodePorts.jsx";
 import { StyleCollage } from "./components/StyleCollage.jsx";
 import { canvasToBlob, createTransferCollageBlob, drawImageCover, loadCanvasImage } from "./canvasMedia.js";
-import { canDeleteCanvasSelection, focusCanvasSelection, editorTimelineZoomDirection } from "./nodeKeyboardRouting.js";
+import { canDeleteCanvasSelection, focusCanvasSelection, editorTimelineZoomDirection, editorShuttleKey } from "./nodeKeyboardRouting.js";
 import { cleanReferenceTag, promptHasReferenceTag, resolveTaggedImageReferences, taggedReferenceLabel } from "./referenceTags.js";
 import { defaultComposerScene, normalizedComposerScene } from "./composerState.js";
 import {
@@ -187,7 +188,8 @@ import {
   assertCharacterOutputReferences,
   customCharacterSheetId,
   generatedCharacterSheetId,
-  normalizeCharacterCustomSheets
+  normalizeCharacterCustomSheets,
+  repairCustomCharacterSheetBases
 } from "./characterSheetLibrary.js";
 import { characterSheetDefaultModel, characterSheetModelOptions, normalizeCharacterSheetModel } from "./characterSheetModels.js";
 import { normalizeStoryboardImageModel, storyboardImageSettings } from "./storyboardImageModels.js";
@@ -207,7 +209,7 @@ import {
 import { nonHumanCharacterBasePrompt, nonHumanCharacterIdentityPrompt, nonHumanCharacterWardrobePrompt } from "./characterNonHuman.js";
 import { characterAutoWardrobeId, characterAutoWardrobePrompt, characterWardrobesForGeneration, isAutoCharacterWardrobe } from "./characterAutoWardrobe.js";
 import { normalizeOpenAiImage2Quality, openAiImage2Quality, openAiImage2QualityOptions } from "./openAiImage2.js";
-import { isOpenAiImage25Model, openAiImage25Variant, normalizeOpenAiImage25Quality, normalizeOpenAiImage25Background, openAiImage25QualityOptions, openAiImage25BackgroundOptions, openAiImage25KreaAspectRatios, openAiImage25KreaResolutionOptions, openAiImage25KreaSelection } from "./openAiImage25.js";
+import { isOpenAiImage26Model, openAiImage26Variant, normalizeOpenAiImage26Quality, normalizeOpenAiImage26Background, openAiImage26Qualities, openAiImage26BackgroundOptions, openAiImage26KreaAspectRatios, openAiImage26KreaResolutionOptions, openAiImage26KreaSelection, migrateOpenAiImageModel, migrateOpenAiImageSettings } from "./openAiImage26.js";
 import { isCoverageNode, isUtilityCoverageModel, coverageMethods, coveragePreviewItems, coverageShotsForMethod, normalizeCoverageMethod } from "./coveragePresets.js";
 import { migrateRetiredNode } from "./retiredNodes.js";
 import {
@@ -854,7 +856,7 @@ const storyboardDefaultMoodBoardUrl = "/storyboard/MOOD_BOARD.png";
 const storyboardMaxCharacters = 6;
 const storyboardCharacterSheetVersion = 2;
 const storyboardDefaultAspectRatio = "16:9";
-const storyboardAspectRatioOptions = [...new Set(["16:9", "21:9", "9:16", "1:1", "3:2", "2:3", ...openAiImage25KreaAspectRatios])];
+const storyboardAspectRatioOptions = [...new Set(["16:9", "21:9", "9:16", "1:1", "3:2", "2:3", ...openAiImage26KreaAspectRatios])];
 const storyboardDefaultResolution = "1K";
 const storyboardHighResolution = "4K";
 const storyboardPreviousFrameLabel = "PREVIOUS_FRAME.png";
@@ -1058,8 +1060,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     setNodes((current) => {
       let changed = false;
       const next = current.map((node) => {
-        if ((!["imageModel", "storyboard"].includes(node.type) && !isCoverageNode(node)) || ["running", "planning", "exporting", "compiling-board", "compiling-characters"].includes(node.data.status) || !isOpenAiImage25Model(node.data.model)) return node;
-        const patch = openAiImage25KreaSelection(node.data);
+        if ((!["imageModel", "storyboard"].includes(node.type) && !isCoverageNode(node)) || ["running", "planning", "exporting", "compiling-board", "compiling-characters"].includes(node.data.status) || !isOpenAiImage26Model(node.data.model)) return node;
+        const patch = openAiImage26KreaSelection(node.data);
         if (Object.entries(patch).every(([key, value]) => node.data[key] === value)) return node;
         changed = true;
         return { ...node, data: { ...node.data, ...patch } };
@@ -1357,6 +1359,17 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     function handleKeyDown(event) {
       const commandKey = event.metaKey || event.ctrlKey;
       const key = event.key.toLowerCase();
+
+      const shuttleKey = editorShuttleKey(event);
+      if (shuttleKey && event.target === canvasRef.current && !dragState && selectedNodeIds.length === 1) {
+        const editor = nodes.find(node => node.id === selectedNodeIds[0] && node.type === "editor");
+        if (editor) {
+          event.preventDefault(); event.stopPropagation();
+          const player = editorPlayback(editor.id);
+          if (shuttleKey === "k") player.pause(); else player.shuttle(shuttleKey === "j" ? -1 : 1);
+          return;
+        }
+      }
 
       const editorZoomDirection = editorTimelineZoomDirection(event);
       if (editorZoomDirection && event.target === canvasRef.current && !dragState && selectedNodeIds.length === 1) {
@@ -1716,7 +1729,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
         ...data,
         model,
         resolution: normalizeImageModelResolutionForModel(data.resolution, model),
-        ...(isOpenAiImage25Model(model) && generationProvider === "krea" ? openAiImage25KreaSelection({ ...data, model }) : {})
+        ...(isOpenAiImage26Model(model) && generationProvider === "krea" ? openAiImage26KreaSelection({ ...data, model }) : {})
       };
     }
     if (type === "storyboard") return { ...data, ...storyboardImageSettings(data, generationProvider) };
@@ -2333,6 +2346,25 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     });
   }
 
+
+  function captureEditorStill(nodeId, jobId, result) {
+    const editor = nodesRef.current.find(node => node.id === nodeId && node.type === "editor");
+    if (!editor) return;
+    const completed = completeEditorStillCapture(nodesRef.current, nodeId, jobId, result, {
+      editorRect: placementRect(editor), occupied: occupiedPlacementRects(new Set(), editor.canvasId),
+      imageData: createDefaultNodeData("image", "Image", 1)
+    });
+    if (!completed) return;
+    // Undo removes the new node, not the saved still, and must not resume its finished job.
+    nodesRef.current = completed.completedNodes;
+    if (completed.imageNode) pushUndoSnapshot(editor.canvasId);
+    nodesRef.current = completed.nodes;
+    setNodes(completed.nodes);
+    if (completed.imageNode && editor.canvasId === activeCanvasRef.current) {
+      void settleNewNodePlacement(completed.imageNode.id).catch(() => {});
+      setPreviewLightboxItem({ ...completed.still, editContext: { type: "nodeResult", nodeId: completed.imageNode.id, itemIndex: 0 } });
+    }
+  }
 
   async function captureFrameItFrame(node, imageDataUrl) {
     pushUndoSnapshot();
@@ -6474,8 +6506,8 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     skillDirector: { skillVideoModel: enabledVideoModels.filter(videoModelSupportsFilmDirector), skillApproach: filmDirectorApproachOptions.map((option) => option.value) }
   }), [enabledImageModels, enabledVideoModels, enabledCoverageModels]);
   const myNewtModelControls = (type, model) => {
-    if (type === "storyboard") return { resolution: imageModelResolutionOptions(model, generationProvider), aspectRatio: isNanoBanana21Model(model) ? storyboardAspectRatioOptions.filter(ratio => nanoBanana21Ratios(generationProvider).includes(ratio)) : generationProvider === "krea" && isOpenAiImage25Model(model) ? openAiImage25KreaAspectRatios : storyboardAspectRatioOptions };
-    if (["imageModel", "coverage", "utility"].includes(type)) return { resolution: imageModelResolutionOptions(model, generationProvider), aspectRatio: imageModelAspectRatioOptions(model, generationProvider), quality: isSeedream5ProModel(model) ? ["high"] : isOpenAiImage25Model(model) ? openAiImage25QualityOptions : openAiImage2QualityOptions };
+    if (type === "storyboard") return { resolution: imageModelResolutionOptions(model, generationProvider), aspectRatio: isNanoBanana21Model(model) ? storyboardAspectRatioOptions.filter(ratio => nanoBanana21Ratios(generationProvider).includes(ratio)) : generationProvider === "krea" && isOpenAiImage26Model(model) ? openAiImage26KreaAspectRatios : storyboardAspectRatioOptions };
+    if (["imageModel", "coverage", "utility"].includes(type)) return { resolution: imageModelResolutionOptions(model, generationProvider), aspectRatio: imageModelAspectRatioOptions(model, generationProvider), quality: isSeedream5ProModel(model) ? ["high"] : isOpenAiImage26Model(model) ? openAiImage26Qualities(generationProvider) : openAiImage2QualityOptions };
     if (type !== "videoModel") return {};
     if (isKling4Model(model)) return { duration: kling4DurationOptions, resolution: kling4ResolutionOptions, aspectRatio: kling4AspectRatioOptions };
     if (isMiniMaxH3Model(model)) return { duration: minimaxH3DurationOptions, resolution: minimaxH3ResolutionOptions, aspectRatio: minimaxH3AspectRatioOptions };
@@ -6648,7 +6680,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
       if (node.type === "imageModel" || isCoverageNode(node)) {
         const prompt = connectedText(incoming.promptIn) || data.prompt || "";
         const references = connectedImagePromptItems(isCoverageNode(node) ? incoming.imageIn || [] : imageReferenceConnectionsForModel(data.model, incoming), byNode, { includeComposerCharacterBindings: true, prompt });
-        const settings = { model: data.model, resolution: data.resolution, aspectRatio: data.aspectRatio, quality: data.quality || "high", ...(isOpenAiImage25Model(data.model) ? { background: normalizeOpenAiImage25Background(data.background) } : {}), batchCount: isCoverageNode(node) ? 9 : count, referenceCount: references.length, provider: generationProvider };
+        const settings = { model: data.model, resolution: data.resolution, aspectRatio: data.aspectRatio, quality: data.quality || "high", ...(isOpenAiImage26Model(data.model) ? { background: normalizeOpenAiImage26Background(data.background) } : {}), batchCount: isCoverageNode(node) ? 9 : count, referenceCount: references.length, provider: generationProvider };
         return { ...base, ...settings, count: settings.batchCount, references, prompt: isCoverageNode(node) ? `Nine ${data.coverageMethod || "Standard"} camera-angle generations` : buildEffectiveImagePrompt(prompt, imageInstructionSourcesForModel(data.model, incoming), data.aspectRatio, byNode), estimatedCost: estimateImageRunCost(settings) };
       }
       if (node.type === "videoModel") {
@@ -6952,6 +6984,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
               onPreviewOpen={setPreviewLightboxItem}
               onPreviewLayoutExport={exportPreviewLayoutBoard}
               onFrameItCapture={captureFrameItFrame}
+              onEditorStillCaptured={captureEditorStill}
               onFrameItGenerate={generateFrameItMedia}
               onCanvasPanStart={beginCanvasPan}
               running={node.data.status === "running"}
@@ -7240,6 +7273,7 @@ function NodeCard({
   onPreviewOpen,
   onPreviewLayoutExport,
   onFrameItCapture,
+  onEditorStillCaptured,
   onFrameItGenerate,
   onCanvasPanStart,
   running,
@@ -7456,6 +7490,7 @@ function NodeCard({
         onPreviewOpen={onPreviewOpen}
         onPreviewLayoutExport={onPreviewLayoutExport}
         onFrameItCapture={onFrameItCapture}
+        onEditorStillCaptured={onEditorStillCaptured}
         onFrameItGenerate={onFrameItGenerate}
         onCanvasPanStart={onCanvasPanStart}
         transferCompiling={transferCompiling}
@@ -7661,6 +7696,7 @@ function NodeBody({
   onPreviewOpen,
   onPreviewLayoutExport,
   onFrameItCapture,
+  onEditorStillCaptured,
   onFrameItGenerate,
   onCanvasPanStart,
   incomingByNode,
@@ -7695,7 +7731,7 @@ function NodeBody({
       imageModels={imageModelOptions} provider={generationProvider} showApiCosts={showApiCosts}
       ratios={imageModelAspectRatioOptions(node.data.model, generationProvider).filter(ratio => ratio !== "Auto")}
       resolutions={imageModelResolutionOptions(node.data.model, generationProvider)}
-      qualities={isOpenAiImage25Model(node.data.model) ? openAiImage25QualityOptions : node.data.model === imageModelNames.openAiImage2 ? openAiImage2QualityOptions : []}
+      qualities={isOpenAiImage26Model(node.data.model) ? openAiImage26Qualities(generationProvider) : node.data.model === imageModelNames.openAiImage2 ? openAiImage2QualityOptions : []}
       modelPatch={model => imageModelSelectionPatch(node.data, model, generationProvider)} /></React.Suspense>;
   }
   if (node.type === "vector") {
@@ -7717,7 +7753,7 @@ function NodeBody({
       onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys}
       imageModels={imageModelOptions} provider={generationProvider} showApiCosts={showApiCosts}
       ratios={imageModelAspectRatioOptions(node.data.model, generationProvider)} resolutions={imageModelResolutionOptions(node.data.model, generationProvider)}
-      qualities={isOpenAiImage25Model(node.data.model) ? openAiImage25QualityOptions : []}
+      qualities={isOpenAiImage26Model(node.data.model) ? openAiImage26Qualities(generationProvider) : []}
       modelPatch={model => imageModelSelectionPatch(node.data, model, generationProvider)} /></React.Suspense>;
   }
   if (node.type === "editor") {
@@ -7727,6 +7763,7 @@ function NodeBody({
     }));
     return <React.Suspense fallback={<div className="node-body">Loading Editor...</div>}><EditorNodeBody node={node} config={config} sources={sources}
       workflowContext={workflowContext} onUpdate={onUpdate} onUndoSnapshot={onUndoSnapshot} onPreviewOpen={onPreviewOpen}
+      onEditorStillCaptured={onEditorStillCaptured}
       onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} /></React.Suspense>;
   }
   if (node.type === "output") {
@@ -7862,6 +7899,7 @@ function NodeBody({
       Math.max(characterResultItems.length - 1, 0)
     );
     const activeCharacterVariant = activeCharacterSheetVariant(node.data);
+    const selectedCustomSheet = activeCharacterVariant?.source === "custom";
     const characterBaseSheet = node.data.characterBaseSheet || characterSheetVariantForWardrobeId(node.data, characterDefaultWardrobeId)?.generated || null;
     const hasGeneratedBase = Boolean(characterBaseSheet?.url || characterBaseSheet?.localUrl);
     const canRegenerateBase = Boolean(
@@ -8084,7 +8122,7 @@ function NodeBody({
                   <span className="character-section-label">Sheet Model</span>
                   <select
                     value={normalizeCharacterSheetModel(node.data.characterSheetModel)}
-                    title={generationProvider === "krea" && isOpenAiImage25Model(node.data.characterSheetModel) ? "GPT Image 2.5 Character sheets require Fal or Atlas for protected wardrobe edits; Krea does not accept edit masks." : "Character sheet model"}
+                    title={generationProvider !== "fal" && isOpenAiImage26Model(node.data.characterSheetModel) ? "GPT Image 2.6 Character sheets require Fal for protected wardrobe edits." : "Character sheet model"}
                     disabled={compiling || locked}
                     onChange={(event) => onUpdate(node.id, { characterSheetModel: normalizeCharacterSheetModel(event.target.value) })}
                   >
@@ -8242,6 +8280,8 @@ function NodeBody({
                   ? `Building character sheets ${batchProgress.completed} / ${batchProgress.total}`
                   : node.data.characterVariantNotice
                     ? node.data.characterVariantNotice
+                    : selectedCustomSheet
+                      ? "Custom sheet ready."
                     : locked
                       ? node.data.cuVideoGeneration
                         ? `Base Identity plus ${Math.max(0, variantCount - 1)} wardrobe sheet${variantCount === 2 ? "" : "s"}; ${cuVideoVariantCount} CU video sheet${cuVideoVariantCount === 1 ? "" : "s"} ready.`
@@ -8266,7 +8306,7 @@ function NodeBody({
                   type="button"
                   disabled={compiling || (!locked && (!(portrait?.localUrl || portrait?.url || customSheets.length) || !String(node.data.characterName || "").trim()))}
                   onClick={() => (locked ? onCharacterUnlock(node.id) : onCharacterActivate(node))}
-                  title={locked ? "Unlock character" : portrait?.localUrl || portrait?.url ? "Generate the Base Identity sheet and required wardrobe edits" : "Lock the selected custom character sheet"}
+                  title={locked ? "Unlock character" : selectedCustomSheet ? "Lock the selected custom character sheet" : "Generate the Base Identity sheet and required wardrobe edits"}
                 >
                   {compiling ? "Generating..." : locked ? <Lock size={15} /> : <Unlock size={15} />}
                 </button>
@@ -8694,7 +8734,7 @@ function NodeBody({
                   <small>Disable Storyboard Style to use custom style and mood references.</small>
                 </div>
                 <NodeRow label="Image Model">
-                  <select className={isOpenAiImage25Model(node.data.model) ? "image-model-long-name" : undefined} title="Storyboard image model" value={normalizeStoryboardImageModel(node.data.model)} disabled={storyboardLocked} onChange={(event) => onUpdate(node.id, storyboardImageSettings({ ...node.data, model: event.target.value }, generationProvider))}>
+                  <select className={isOpenAiImage26Model(node.data.model) ? "image-model-long-name" : undefined} title="Storyboard image model" value={normalizeStoryboardImageModel(node.data.model)} disabled={storyboardLocked} onChange={(event) => onUpdate(node.id, storyboardImageSettings({ ...node.data, model: event.target.value }, generationProvider))}>
                     {storyboardImageModelOptions.map((model) => <option key={model} value={model}>{model}</option>)}
                   </select>
                 </NodeRow>
@@ -8707,7 +8747,7 @@ function NodeBody({
                 </NodeRow>
                 <NodeRow label="Aspect Ratio">
                   <select value={storyboardAspectRatioForNode(node)} disabled={storyboardLocked} onChange={(event) => onUpdate(node.id, { aspectRatio: event.target.value })}>
-                    {(isNanoBanana21Model(node.data.model) ? storyboardAspectRatioOptions.filter(ratio => nanoBanana21Ratios(generationProvider).includes(ratio)) : generationProvider === "krea" && isOpenAiImage25Model(node.data.model) ? openAiImage25KreaAspectRatios : storyboardAspectRatioOptions).map((ratio) => (
+                    {(isNanoBanana21Model(node.data.model) ? storyboardAspectRatioOptions.filter(ratio => nanoBanana21Ratios(generationProvider).includes(ratio)) : generationProvider === "krea" && isOpenAiImage26Model(node.data.model) ? openAiImage26KreaAspectRatios : storyboardAspectRatioOptions).map((ratio) => (
                       <option key={ratio}>{ratio}</option>
                     ))}
                   </select>
@@ -9782,7 +9822,7 @@ function NodeBody({
           <NodeRow label="Model">
             <select
               value={model}
-              className={isOpenAiImage25Model(model) ? "image-model-long-name" : undefined}
+              className={isOpenAiImage26Model(model) ? "image-model-long-name" : undefined}
               title={model}
               disabled={running}
               onChange={(event) => {
@@ -9791,7 +9831,7 @@ function NodeBody({
                   model: nextModel,
                   resolution: normalizeImageModelResolutionForModel("2K", nextModel),
                   quality: "high",
-                  ...(isOpenAiImage25Model(nextModel) && generationProvider === "krea" ? openAiImage25KreaSelection({ model: nextModel }) : {})
+                  ...(isOpenAiImage26Model(nextModel) && generationProvider === "krea" ? openAiImage26KreaSelection({ model: nextModel }) : {})
                 });
               }}
             >
@@ -9814,7 +9854,7 @@ function NodeBody({
         </div>
         <OutputPortRow node={node} port={coverageOutputPort} label="Coverage output" onConnectStart={onConnectStart} onDisconnectInput={onDisconnectInput} connectedPortKeys={connectedPortKeys} />
         <button className="run-node-button" onClick={() => onRun(node)} disabled={running || !sourceConnected}>
-          {running ? "Generating 9 angles..." : showApiCosts && isOpenAiImage25Model(model) ? "Generate Coverage (Variable cost)" : "Generate Coverage"}
+          {running ? "Generating 9 angles..." : showApiCosts && isOpenAiImage26Model(model) ? "Generate Coverage (Variable cost)" : "Generate Coverage"}
         </button>
       </div>
     );
@@ -10777,9 +10817,9 @@ function NodeBody({
     const promptConnected = Boolean(resolvedPromptText(incoming.promptIn));
     const isSam3Image = isSam3ImageModel(node.data.model);
     const modelIssue = imageModelRunIssue(node.data.model, incoming, generationProvider, node.data);
-    const isImage25 = isOpenAiImage25Model(node.data.model);
-    const isOpenAiImage2 = node.data.model === imageModelNames.openAiImage2 || isImage25;
-    const normalizeQuality = isImage25 ? normalizeOpenAiImage25Quality : normalizeOpenAiImage2Quality;
+    const isImage26 = isOpenAiImage26Model(node.data.model);
+    const isOpenAiImage2 = node.data.model === imageModelNames.openAiImage2 || isImage26;
+    const normalizeQuality = isImage26 ? (value) => normalizeOpenAiImage26Quality(value, generationProvider) : normalizeOpenAiImage2Quality;
     const imageInstructionSources = imageInstructionSourcesForModel(node.data.model, incoming);
     const imagePromptConnections = imagePromptInputConnectionsForModel(node.data.model, incoming);
     const effectivePromptValue = isSam3Image
@@ -10893,7 +10933,7 @@ function NodeBody({
             </div>
           )}
           <NodeRow label="Model">
-            <select aria-label="Image model" className={isImage25 ? "image-model-long-name" : undefined} title={node.data.model} value={node.data.model} onChange={(event) => onUpdate(node.id, imageModelSelectionPatch(node.data, event.target.value, generationProvider))}>
+            <select aria-label="Image model" className={isImage26 ? "image-model-long-name" : undefined} title={node.data.model} value={node.data.model} onChange={(event) => onUpdate(node.id, imageModelSelectionPatch(node.data, event.target.value, generationProvider))}>
               {imageModelOptions.map((model) => (
                 <option key={model}>{model}</option>
               ))}
@@ -10903,16 +10943,16 @@ function NodeBody({
           {isOpenAiImage2 && (
             <NodeRow label="Quality">
               <select aria-label="Image quality" value={normalizeQuality(node.data.quality)} onChange={(event) => onUpdate(node.id, { quality: normalizeQuality(event.target.value) })}>
-                {(isImage25 ? openAiImage25QualityOptions : openAiImage2QualityOptions).map((option) => (
+                {(isImage26 ? openAiImage26Qualities(generationProvider) : openAiImage2QualityOptions).map((option) => (
                   <option key={option} value={option}>{formatOpenAiImage2Quality(option)}</option>
                 ))}
               </select>
             </NodeRow>
           )}
-          {isImage25 && !(generationProvider === "krea" && openAiImage25Variant(node.data.model) === "sunburst") && (
+          {isImage26 && !(generationProvider === "krea" && openAiImage26Variant(node.data.model) === "sunburst") && (
             <NodeRow label="Background">
-              <select value={normalizeOpenAiImage25Background(node.data.background)} onChange={(event) => onUpdate(node.id, { background: event.target.value })}>
-                {openAiImage25BackgroundOptions.map((option) => <option key={option} value={option}>{option.charAt(0).toUpperCase() + option.slice(1)}</option>)}
+              <select value={normalizeOpenAiImage26Background(node.data.background)} onChange={(event) => onUpdate(node.id, { background: event.target.value })}>
+                {openAiImage26BackgroundOptions.map((option) => <option key={option} value={option}>{option.charAt(0).toUpperCase() + option.slice(1)}</option>)}
               </select>
             </NodeRow>
           )}
@@ -12433,20 +12473,22 @@ function createDefaultNodeData(type, label, count) {
 }
 
 function imageModelRunIssue(model, incoming = {}, provider = "fal", data = {}) {
+  if (isOpenAiImage26Model(model) && !["fal", "krea"].includes(provider)) return "Enable Fal or Krea in Settings for GPT Image 2.6. Atlas Cloud support is not yet verified.";
   if (isNanoBanana21Model(model) && !["fal", "krea"].includes(provider)) return "Enable Fal or Krea in Settings for Nano Banana 2.1. Atlas Cloud support is not yet verified.";
   if (isNanoBanana21Model(model) && data.aspectRatio && !imageModelAspectRatioOptions(model, provider).includes(data.aspectRatio)) return `Choose a supported Nano Banana 2.1 aspect ratio for ${provider === "krea" ? "Krea" : "Fal"}.`;
   return "";
 }
 
 function imageModelSelectionPatch(data = {}, model, provider = "fal") {
+  model = migrateOpenAiImageModel(model);
   return {
     model,
     aspectRatio: normalizeImageModelAspectRatio(data.aspectRatio, model),
     resolution: normalizeImageModelResolutionForModel(data.resolution, model),
-    quality: isOpenAiImage25Model(model) ? normalizeOpenAiImage25Quality(data.quality) : normalizeOpenAiImage2Quality(data.quality),
-    background: isSeedream5ProModel(model) || isNanoBanana21Model(model) ? "auto" : normalizeOpenAiImage25Background(data.background),
+    quality: isOpenAiImage26Model(model) ? normalizeOpenAiImage26Quality(data.quality, provider) : normalizeOpenAiImage2Quality(data.quality),
+    background: isSeedream5ProModel(model) || isNanoBanana21Model(model) ? "auto" : normalizeOpenAiImage26Background(data.background),
     batchCount: data.batchCount || "1",
-    ...(isOpenAiImage25Model(model) && provider === "krea" ? openAiImage25KreaSelection({ ...data, model }) : {})
+    ...(isOpenAiImage26Model(model) && provider === "krea" ? openAiImage26KreaSelection({ ...data, model }) : {})
   };
 }
 
@@ -12470,7 +12512,7 @@ function isModel3DImageInputPort(portId) {
 
 function imageModelAspectRatioOptions(model, provider = "fal") {
   if (isNanoBanana21Model(model)) return [imageModelAutoAspectRatio, ...nanoBanana21Ratios(provider)];
-  if (isOpenAiImage25Model(model) && provider === "krea") return [imageModelAutoAspectRatio, ...openAiImage25KreaAspectRatios];
+  if (isOpenAiImage26Model(model) && provider === "krea") return [imageModelAutoAspectRatio, ...openAiImage26KreaAspectRatios];
   return [imageModelAutoAspectRatio, ...imageModelSupportedAspectRatios(model)];
 }
 
@@ -12631,7 +12673,7 @@ function normalizeImageModelResolution(value) {
 function imageModelResolutionOptions(model, provider = "fal") {
   if (isNanoBanana21Model(model)) return nanoBanana21ResolutionOptions;
   if (isSeedream5ProModel(model)) return seedream5ProResolutionOptions;
-  if (isOpenAiImage25Model(model) && provider === "krea") return openAiImage25KreaResolutionOptions;
+  if (isOpenAiImage26Model(model) && provider === "krea") return openAiImage26KreaResolutionOptions;
   return imageResolutionOptions;
 }
 
@@ -12641,6 +12683,7 @@ function normalizeImageModelResolutionForModel(value, model) {
 }
 
 function normalizeAutoAspectModel(value) {
+  value = migrateOpenAiImageModel(value);
   return autoAspectModelOptions.includes(value) ? value : imageModelNames.openAiImage2;
 }
 
@@ -15393,7 +15436,8 @@ function formatSkillDirectorFinalPromptForClient(text = "", audioMode = "product
 
 function normalizeCurrentNode(node) {
   const nextNode = clearStaleRunningState(node);
-  const data = nextNode.data || {};
+  const migratedData = migrateOpenAiImageSettings(nextNode.data || {});
+  const data = nextNode.type === "character" ? repairCustomCharacterSheetBases(migratedData) : migratedData;
   if (nextNode.type === "output") return { ...nextNode, data: normalizeOutputData(data) };
   if (nextNode.type === "editor") return { ...nextNode, data: { ...data, editorTimeline: normalizeEditorTimeline(data.editorTimeline), editorNodeWidth: normalizeEditorNodeWidth(data.editorNodeWidth), resultType: "video" } };
   if (nextNode.type === "myNewt") {
@@ -16495,6 +16539,7 @@ function normalizeModel3DData(data = {}) {
 }
 
 function normalizeImageModelData(data = {}) {
+  data = migrateOpenAiImageSettings(data);
   const model = isRetiredNanoBanana2Model(data.model) ? imageModelNames.nanoBanana21 : imageModelOptions.includes(data.model) ? data.model : data.model ? imageModelNames.nanoBananaPro : imageModelNames.openAiImage2;
   const { kreaCreativity: _retiredControl, enablePromptExpansion: _retiredExpansion, ideogramSourceUrl: _retiredSource, ...savedData } = data;
   return {
@@ -16504,8 +16549,8 @@ function normalizeImageModelData(data = {}) {
     prompt: data.prompt || "",
     aspectRatio: normalizeImageModelAspectRatio(data.aspectRatio, model),
     resolution: normalizeImageModelResolutionForModel(data.resolution, model),
-    quality: isOpenAiImage25Model(model) ? normalizeOpenAiImage25Quality(data.quality) : normalizeOpenAiImage2Quality(data.quality),
-    background: isNanoBanana21Model(model) ? "auto" : normalizeOpenAiImage25Background(data.background),
+    quality: isOpenAiImage26Model(model) ? normalizeOpenAiImage26Quality(data.quality) : normalizeOpenAiImage2Quality(data.quality),
+    background: isNanoBanana21Model(model) ? "auto" : normalizeOpenAiImage26Background(data.background),
     batchCount: data.batchCount || "1",
     settingsOpen: data.settingsOpen !== false
   };
@@ -16537,6 +16582,7 @@ function normalizeAutoAspectData(data = {}) {
 }
 
 function normalizeCoverageData(data = {}) {
+  data = migrateOpenAiImageSettings(data);
   const model = coverageModelOptions.includes(data.model) ? data.model : imageModelNames.openAiImage2;
   const resultItems = normalizedResultItems(data.resultItems, data.resultUrl, "image");
   const selectedResultIndex = Math.min(
@@ -16595,7 +16641,8 @@ function normalizeCharacterSheetVariants(data = {}) {
   const existing = Array.isArray(data.characterSheetVariants)
     ? data.characterSheetVariants.filter((variant) => variant?.wardrobeId && (variant?.generated?.url || variant?.generated?.localUrl))
     : [];
-  if (existing.length || !data.resultUrl) return existing;
+  if (existing.length || !data.resultUrl || normalizeCharacterCustomSheets(data)
+    .some(sheet => [sheet.localUrl, sheet.url].includes(data.resultUrl))) return existing;
 
   const generated = (Array.isArray(data.resultItems) ? data.resultItems.find((item) => item?.url === data.resultUrl) : null) || {
     url: data.resultUrl,

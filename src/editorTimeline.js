@@ -1,3 +1,7 @@
+import { normalizeEditorTransitions, editorRemapTransitions } from "./editorTransitions.js";
+import { normalizeEditorPosition } from "./editorClipPosition.js";
+import { normalizeEditorFades } from "./editorFades.js";
+
 export const editorLimits = Object.freeze({ tracks: 24, clips: 200, assets: 128, seconds: 7200, dimension: 4096 });
 export const editorFrameRates = [24, 25, 30, 60];
 const integer = (value, fallback = 0) => Number.isFinite(Number(value)) ? Math.round(Number(value)) : fallback;
@@ -15,7 +19,7 @@ export function editorZoomStep(value, direction) {
 }
 
 export function createEditorTimeline() {
-  return { version: 1, fps: 24, width: 1920, height: 1080, inFrame: 0, outFrame: null, assets: [], clips: [], imports: [],
+  return { version: 1, fps: 24, width: 1920, height: 1080, inFrame: 0, outFrame: null, assets: [], clips: [], imports: [], transitions: [],
     tracks: [{ id: "v2", kind: "video", name: "V2" }, { id: "v1", kind: "video", name: "V1" },
       { id: "a1", kind: "audio", name: "A1" }, { id: "a2", kind: "audio", name: "A2" }] };
 }
@@ -41,7 +45,11 @@ export function normalizeEditorTimeline(input = {}) {
     const sourceIn = clampEditor(integer(c.sourceIn), 0, Math.max(0, sourceFrames - 1));
     const start = clampEditor(integer(c.start), 0, editorLimits.seconds * fps - 1);
     const duration = Math.min(Math.max(1, integer(c.duration, sourceFrames)), sourceFrames - sourceIn, editorLimits.seconds * fps - start);
+    const positionX = track.kind === "video" ? normalizeEditorPosition(c.positionX) : 0;
+    const positionY = track.kind === "video" ? normalizeEditorPosition(c.positionY) : 0;
     return duration > 0 && c.id ? [{ id: safeId(c.id), assetId: asset.id, trackId: track.id, start, sourceIn, duration,
+      ...(positionX ? { positionX } : {}), ...(positionY ? { positionY } : {}),
+      ...normalizeEditorFades({ ...c, duration }),
       linkGroup: safeId(c.linkGroup), volume: clampEditor(Number.isFinite(Number(c.volume)) ? Number(c.volume) : 1, 0, 1) }] : [];
   }));
   const end = Math.max(0, ...clips.map(c => c.start + c.duration));
@@ -50,6 +58,7 @@ export function normalizeEditorTimeline(input = {}) {
     height: clampEditor(integer(input.height, 1080), 2, editorLimits.dimension) & ~1,
     inFrame, outFrame: input.outFrame == null ? null : clampEditor(integer(input.outFrame), inFrame + 1, Math.max(1, end)),
     tracks: [...tracks.filter(t => t.kind === "video"), ...tracks.filter(t => t.kind === "audio")], assets, clips,
+    transitions: normalizeEditorTransitions({ fps, tracks, assets, clips }, input.transitions),
     imports: [...new Set((Array.isArray(input.imports) ? input.imports : []).filter(k => typeof k === "string"))].slice(-1024) };
 }
 
@@ -73,7 +82,8 @@ export function validateEditorTimeline(timeline) {
   for (let i = 0; i < timeline.clips.length; i++) for (let j = i + 1; j < timeline.clips.length; j++) {
     if (overlaps(timeline.clips[i], timeline.clips[j])) throw new Error("Clips cannot overlap on the same track. Move the clip to another track.");
   }
-  return timeline;
+  const clips = timeline.clips.map(({ fadeIn, fadeOut, ...clip }) => ({ ...clip, ...normalizeEditorFades({ ...clip, fadeIn, fadeOut }) }));
+  return { ...timeline, clips, transitions: normalizeEditorTransitions({ ...timeline, clips }) };
 }
 
 export function editorImportMedia(timeline, asset, importKey, makeId = editorId) {
@@ -111,8 +121,28 @@ export function editorSelection(timeline, ids, linked = true) {
   const selected = new Set(ids), groups = new Set(timeline.clips.filter(c => selected.has(c.id) && c.linkGroup).map(c => c.linkGroup));
   return timeline.clips.filter(c => selected.has(c.id) || (linked && c.linkGroup && groups.has(c.linkGroup)));
 }
+export function editorMarqueeSelection(timeline, initial, hits, linked = true) {
+  const locked = new Set(timeline.tracks.filter(t => t.locked).map(t => t.id));
+  const lockedGroups = new Set(timeline.clips.filter(c => locked.has(c.trackId)).map(c => c.linkGroup).filter(Boolean));
+  const eligible = timeline.clips.filter(c => hits.includes(c.id) && !locked.has(c.trackId) && (!linked || !lockedGroups.has(c.linkGroup)));
+  return [...new Set([...initial, ...eligible.map(c => c.id)])];
+}
 function editable(timeline, clips) {
   if (clips.some(c => timeline.tracks.find(t => t.id === c.trackId)?.locked)) throw new Error("Unlock the selected clip's track and its linked track before editing.");
+}
+
+export function editorSetClipPosition(timeline, id, patch) {
+  const clip = timeline.clips.find(c => c.id === id);
+  if (!clip || timeline.tracks.find(t => t.id === clip.trackId)?.kind !== "video") return timeline;
+  editable(timeline, [clip]);
+  const next = { ...clip };
+  for (const key of ["positionX", "positionY"]) if (Object.hasOwn(patch, key)) {
+    const value = normalizeEditorPosition(patch[key]);
+    if (value) next[key] = value;
+    else delete next[key];
+  }
+  if (JSON.stringify(next) === JSON.stringify(clip)) return timeline;
+  return { ...timeline, clips: timeline.clips.map(c => c.id === id ? next : c) };
 }
 
 export function editorMove(timeline, ids, delta, { linked = true, anchorId, trackId } = {}) {
@@ -121,7 +151,18 @@ export function editorMove(timeline, ids, delta, { linked = true, anchorId, trac
   const amount = Math.max(integer(delta), -Math.min(...selected.map(c => c.start))), picked = new Set(selected.map(c => c.id));
   const anchor = selected.find(c => c.id === anchorId), original = timeline.tracks.find(t => t.id === anchor?.trackId), target = timeline.tracks.find(t => t.id === trackId);
   if (trackId && (!target || target.locked || original?.kind !== target.kind)) throw new Error("Choose an unlocked track of the same media type.");
-  const clips = timeline.clips.map(c => picked.has(c.id) ? { ...c, start: c.start + amount, trackId: target && c.trackId === anchor.trackId ? target.id : c.trackId } : c);
+  const kindTracks = timeline.tracks.filter(t => t.kind === original?.kind);
+  const shift = target ? kindTracks.indexOf(target) - kindTracks.indexOf(original) : 0;
+  const clips = timeline.clips.map(c => {
+    if (!picked.has(c.id)) return c;
+    let destination = c.trackId;
+    if (shift && kindTracks.some(t => t.id === c.trackId)) {
+      const nextTrack = kindTracks[kindTracks.findIndex(t => t.id === c.trackId) + shift];
+      if (!nextTrack || nextTrack.locked) throw new Error("The selected clips need unlocked tracks with the same spacing.");
+      destination = nextTrack.id;
+    }
+    return { ...c, start: c.start + amount, trackId: destination };
+  });
   if (clips.some(c => c.start + c.duration > editorLimits.seconds * timeline.fps)) throw new Error("The sequence would exceed two hours.");
   return validateEditorTimeline({ ...timeline, clips });
 }
@@ -148,14 +189,18 @@ export function editorSplit(timeline, frame, ids = [], linked = true, makeId = e
   const selected = new Set(cuttable.filter(c => !timeline.tracks.find(t => t.id === c.trackId)?.locked && (!linked || !lockedGroups.has(c.linkGroup))).map(c => c.id));
   if (!selected.size) return timeline;
   if (timeline.clips.length + selected.size > editorLimits.clips) throw new Error("This sequence has reached its clip limit.");
-  const rightGroups = new Map();
-  return { ...timeline, clips: timeline.clips.flatMap(c => {
+  const rightGroups = new Map(), rightIds = new Map();
+  const clips = timeline.clips.flatMap(c => {
     if (!selected.has(c.id)) return [c];
     const length = integer(frame) - c.start;
     if (c.linkGroup && !rightGroups.has(c.linkGroup)) rightGroups.set(c.linkGroup, makeId());
-    return [{ ...c, duration: length }, { ...c, id: makeId(), start: integer(frame), sourceIn: c.sourceIn + length,
-      duration: c.duration - length, linkGroup: c.linkGroup ? rightGroups.get(c.linkGroup) : "" }];
-  }) };
+    const rightId = makeId(); rightIds.set(c.id, rightId);
+    const { fadeIn, fadeOut, ...plain } = c;
+    return [{ ...plain, duration: length, ...normalizeEditorFades({ duration: length, fadeIn }) },
+      { ...plain, id: rightId, start: integer(frame), sourceIn: c.sourceIn + length,
+        duration: c.duration - length, ...normalizeEditorFades({ duration: c.duration - length, fadeOut }), linkGroup: c.linkGroup ? rightGroups.get(c.linkGroup) : "" }];
+  });
+  return normalizeEditorTimeline({ ...timeline, clips, transitions: (timeline.transitions || []).map(t => ({ ...t, leftId: rightIds.get(t.leftId) || t.leftId })) });
 }
 
 export function editorDelete(timeline, ids, linked = true) {
@@ -179,7 +224,8 @@ export function editorCopyClips(timeline, ids, linked = true) {
     anchorTrackId: timeline.clips.find(c => c.id === ids[0])?.trackId,
     tracks: timeline.tracks.filter(t => clips.some(c => c.trackId === t.id)),
     assets: timeline.assets.filter(a => clips.some(c => c.assetId === a.id)),
-    clips: clips.map(c => ({ ...c, start: c.start - first })) }));
+    clips: clips.map(c => ({ ...c, start: c.start - first })),
+    transitions: editorRemapTransitions(timeline.transitions, new Map(clips.map(c => [c.id, c.id]))) }));
 }
 
 export function editorPasteClips(timeline, clipboard, frame, { targetTrackId, makeId = editorId } = {}) {
@@ -193,7 +239,7 @@ export function editorPasteClips(timeline, clipboard, frame, { targetTrackId, ma
   if (timeline.clips.length + copied.clips.length > editorLimits.clips) throw new Error("This sequence has reached its clip limit.");
   const start = Math.max(0, integer(frame)), factor = timeline.fps / copied.fps;
   let next = timeline;
-  const trackIds = new Map(), assetIds = new Map(), groups = new Map();
+  const trackIds = new Map(), assetIds = new Map(), groups = new Map(), clipIds = new Map();
   for (const track of copied.tracks) {
     const target = targetTrackId && track.id === clipboard.anchorTrackId ? next.tracks.find(t => t.id === targetTrackId && t.kind === track.kind) : null;
     let match = target || next.tracks.find(t => t.id === track.id && t.kind === track.kind) || next.tracks.find(t => t.name === track.name && t.kind === track.kind);
@@ -211,11 +257,13 @@ export function editorPasteClips(timeline, clipboard, frame, { targetTrackId, ma
     if (c.linkGroup && !groups.has(c.linkGroup)) groups.set(c.linkGroup, makeId());
     const sourceIn = Math.round(c.sourceIn * factor), asset = copied.assets.find(a => a.id === c.assetId);
     const duration = Math.min(Math.max(1, Math.round((c.start + c.duration) * factor) - Math.round(c.start * factor)), Math.floor(asset.duration * timeline.fps + .00001) - sourceIn);
-    return { ...c, id: makeId(), start: start + Math.round(c.start * factor), sourceIn, duration,
+    const id = makeId(); clipIds.set(c.id, id);
+    const { fadeIn, fadeOut, ...plain } = c;
+    return { ...plain, ...normalizeEditorFades({ duration, fadeIn, fadeOut }, factor), id, start: start + Math.round(c.start * factor), sourceIn, duration,
       trackId: trackIds.get(c.trackId), assetId: assetIds.get(c.assetId), linkGroup: c.linkGroup ? groups.get(c.linkGroup) : "" };
   });
   if (clips.some(c => c.duration < 1 || c.start + c.duration > editorLimits.seconds * timeline.fps)) throw new Error("The pasted clips exceed their source or sequence bounds.");
-  return validateEditorTimeline({ ...next, clips: [...next.clips, ...clips] });
+  return validateEditorTimeline({ ...next, clips: [...next.clips, ...clips], transitions: [...(next.transitions || []), ...editorRemapTransitions(copied.transitions, clipIds, factor)] });
 }
 
 export function editorEditPoint(timeline, frame, direction) {
@@ -254,21 +302,26 @@ export function editorDuplicate(timeline, ids, linked = true, makeId = editorId)
   if (!selected.length) return timeline;
   if (timeline.clips.length + selected.length > editorLimits.clips) throw new Error("This sequence has reached its clip limit.");
   const first = Math.min(...selected.map(c => c.start));
-  const tracks = new Set(selected.map(c => c.trackId)), groups = new Map();
+  const tracks = new Set(selected.map(c => c.trackId)), groups = new Map(), clipIds = new Map();
   const end = Math.max(...timeline.clips.filter(c => tracks.has(c.trackId)).map(c => c.start + c.duration));
   const clips = selected.map(c => {
     if (c.linkGroup && !groups.has(c.linkGroup)) groups.set(c.linkGroup, makeId());
-    return { ...c, id: makeId(), start: c.start + end - first, linkGroup: c.linkGroup ? groups.get(c.linkGroup) : "" };
+    const id = makeId(); clipIds.set(c.id, id);
+    return { ...c, id, start: c.start + end - first, linkGroup: c.linkGroup ? groups.get(c.linkGroup) : "" };
   });
   if (clips.some(c => c.start + c.duration > editorLimits.seconds * timeline.fps)) throw new Error("The sequence would exceed two hours.");
-  return { ...timeline, clips: [...timeline.clips, ...clips] };
+  return validateEditorTimeline({ ...timeline, clips: [...timeline.clips, ...clips], transitions: [...(timeline.transitions || []), ...editorRemapTransitions(timeline.transitions, clipIds)] });
 }
 
 export function editorSetFrameRate(timeline, fps) {
   if (!editorFrameRates.includes(fps) || fps === timeline.fps) return timeline;
   const convert = f => Math.round(f * fps / timeline.fps);
   return validateEditorTimeline(normalizeEditorTimeline({ ...timeline, fps, inFrame: convert(timeline.inFrame), outFrame: timeline.outFrame == null ? null : convert(timeline.outFrame),
-    clips: timeline.clips.map(c => ({ ...c, start: convert(c.start), sourceIn: convert(c.sourceIn), duration: Math.max(1, convert(c.start + c.duration) - convert(c.start)) })) }));
+    transitions: (timeline.transitions || []).map(t => ({ ...t, duration: Math.max(2, Math.round(convert(t.duration) / 2) * 2) })),
+    clips: timeline.clips.map(({ fadeIn, fadeOut, ...c }) => {
+      const duration = Math.max(1, convert(c.start + c.duration) - convert(c.start));
+      return { ...c, ...normalizeEditorFades({ duration, fadeIn, fadeOut }, fps / timeline.fps), start: convert(c.start), sourceIn: convert(c.sourceIn), duration };
+    }) }));
 }
 
 export function editorSnap(timeline, frame, excluded = [], threshold = 6, playhead = 0) {
@@ -288,5 +341,6 @@ export function editorActiveClips(timeline, frame) {
 export function editorRenderSignature(timeline) {
   return JSON.stringify({ fps: timeline.fps, width: timeline.width, height: timeline.height, inFrame: timeline.inFrame, outFrame: timeline.outFrame,
     tracks: timeline.tracks.map(({ id, kind, muted }) => ({ id, kind, muted })), clips: timeline.clips,
+    ...(timeline.transitions?.length ? { transitions: timeline.transitions } : {}),
     assets: timeline.assets.map(({ id, url }) => ({ id, url })) });
 }

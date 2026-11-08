@@ -2,7 +2,7 @@ import { applyPricingQuote } from "./pricingCatalog.js";
 import { kling4ModelName, kling4KreaEndpoint } from "./kling4.js";
 import { isNanoBanana21Model, nanoBanana21ModelName, nanoBanana21KreaEndpoint, buildNanoBanana21Input, nanoBanana21Cost } from "./nanoBanana21.js";
 import { isSeedream5ProModel, seedream5ProModelName, seedream5ProKreaEndpoint, validateSeedream5ProRequest, seedream5ProCost } from "./seedream5Pro.js";
-import { isOpenAiImage25Model, normalizeOpenAiImage25Quality, normalizeOpenAiImage25Background, openAiImage25Variant, validateOpenAiImage25KreaRequest } from "./openAiImage25.js";
+import { isOpenAiImage26Model, normalizeOpenAiImage26Quality, normalizeOpenAiImage26Background, openAiImage26Variant, validateOpenAiImage26KreaRequest } from "./openAiImage26.js";
 
 export const kreaApiBaseUrl = "https://api.krea.ai";
 
@@ -12,8 +12,8 @@ export const kreaEndpoints = Object.freeze({
     [nanoBanana21ModelName]: nanoBanana21KreaEndpoint,
     "Nano Banana Pro": "/generate/image/google/nano-banana-pro",
     "OpenAI Image 2": "/generate/image/openai/gpt-image-2",
-    "OpenAI Image 2.5 Sunburst": "/generate/image/openai/gpt-image-2.5-sunburst",
-    "OpenAI Image 2.5 Flare": "/generate/image/openai/gpt-image-2.5-flare"
+    "OpenAI Image 2.6 Sunburst": "/generate/image/openai/gpt-image-2.6-sunburst",
+    "OpenAI Image 2.6 Flare": "/generate/image/openai/gpt-image-2.6-flare"
   }),
   video: Object.freeze({
     [kling4ModelName]: kling4KreaEndpoint,
@@ -131,11 +131,11 @@ export function buildKreaImageInput({
     return { ...input, ...size, ...(refs.length ? { style_images: refs.map(url => ({ url, strength: 1 })) } : {}) };
   }
 
-  if (isOpenAiImage25Model(modelName)) {
-    validateOpenAiImage25KreaRequest({ model: modelName, resolution, aspectRatio, referenceCount: refs.length, background });
-    return compact({ ...input, quality: normalizeOpenAiImage25Quality(quality), image_urls: refs,
+  if (isOpenAiImage26Model(modelName)) {
+    validateOpenAiImage26KreaRequest({ model: modelName, resolution, aspectRatio, referenceCount: refs.length, background });
+    return compact({ ...input, quality: normalizeOpenAiImage26Quality(quality), image_urls: refs,
       aspect_ratio: aspectRatio, resolution: normalizedResolution,
-      ...(openAiImage25Variant(modelName) === "flare" ? { background: normalizeOpenAiImage25Background(background) } : {}) });
+      ...(openAiImage26Variant(modelName) === "flare" ? { background: normalizeOpenAiImage26Background(background) } : {}) });
   }
 
   if (modelName === "OpenAI Image 2") {

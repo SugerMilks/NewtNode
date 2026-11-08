@@ -285,32 +285,42 @@ test("wardrobe edits request a seamless complete layered outfit instead of parti
 test("regular and CU wardrobe edits include referenced headwear and eyewear without requiring extra text", () => {
   for (const prompt of [characterWardrobeEditPrompt, characterVideoWardrobeEditPrompt]) {
     assert.match(prompt, /Accessories visible in that reference are explicitly requested even when no accompanying text names them/);
-    assert.match(prompt, /Include hats, caps, glasses, sunglasses/);
-    assert.match(prompt, /whether shown separately in a flat lay or worn by a person/);
+    assert.match(prompt, /Transfer an accessory only when it is clearly visible in that image/);
+    assert.match(prompt, /either separately in a flat lay or worn in the reference/);
     assert.match(prompt, /not the accessories they are wearing/);
-    assert.match(prompt, /Headwear and eyewear are part of the outfit in every view where their wearing position is visible, including close-ups/);
+    assert.match(prompt, /wherever its wearing position falls inside an existing panel crop, including close-ups/);
     assert.match(prompt, /lens tint\/opacity consistently/);
-    assert.match(prompt, /Do not omit eyewear, move it onto the forehead, or hold it in a hand just to uncover the base's eyes/);
-    assert.match(prompt, /do not substitute clear lenses for referenced sunglasses/);
+    assert.match(prompt, /Do not move referenced eyewear onto the forehead or into a hand just to uncover the eyes/);
+    assert.match(prompt, /clear lenses stay clear and referenced sunglasses retain their tint\/opacity/);
     assert.doesNotMatch(prompt, /clothing only|requested wearable accessories|Preserve the portrait's face, hair.*exactly/i);
   }
 });
 
 test("multiple accessories retain their own placement instead of merging into one piece of eyewear", () => {
   for (const prompt of [characterWardrobeEditPrompt, characterVideoWardrobeEditPrompt]) {
-    assert.match(prompt, /unless the reference explicitly shows a different wearing position/);
+    assert.match(prompt, /Honor a shown wearing position; for an accessory displayed separately, use its normal wearing position/);
     assert.match(prompt, /Keep distinct accessories separate: do not merge, hybridize, or substitute one for another/);
-    assert.match(prompt, /keep the goggles mounted as shown and wear the separate eyewear over the eyes/);
+    assert.match(prompt, /If the reference shows headwear-mounted eyewear and separate eyewear, preserve their separate placements/);
   }
 });
 
 test("accessories can cover the head or face without weakening the identity and framing contract", () => {
   for (const prompt of [characterWardrobeEditPrompt, characterVideoWardrobeEditPrompt]) {
     assert.match(prompt, /local occlusion and contact shadows needed to wear them naturally/);
-    assert.match(prompt, /Referenced headwear may naturally cover hair, and eyewear may naturally cover the eyes or parts of the face/);
-    assert.match(prompt, /Preserve the underlying facial identity, anatomy, hairstyle, head angle, eyeline, and expression/);
+    assert.match(prompt, /Only a clearly referenced accessory may newly cover hair, eyes, or parts of the face/);
+    assert.match(prompt, /preserving underlying identity, anatomy, hairstyle, head angle, eyeline, and expression/);
     assert.match(prompt, /show only the portion of an accessory that falls within each crop, never zoom out or reposition the character/);
     assert.match(prompt, /Do not invent garments or accessories absent from the reference/);
   }
   assert.match(characterNeutralBaseWardrobePrompt, /Do not add styling, branding, patterns, accessories, jewelry, hats/);
+});
+
+test("wardrobe instructions explicitly preserve exposed eyes and hair when accessories are absent", () => {
+  for (const prompt of [characterWardrobeEditPrompt, characterVideoWardrobeEditPrompt]) {
+    assert.match(prompt, /If no eyewear is visible in the reference, add no eyewear and preserve the base's existing eye and face visibility/);
+    assert.match(prompt, /If no headwear is visible, add none and preserve the base's existing head and hair visibility/);
+    assert.match(prompt, /An unclear or cropped area is not evidence of an accessory/);
+    assert.match(prompt, /placement rules apply ONLY to accessories actually shown/);
+    assert.doesNotMatch(prompt, /Include hats, caps, glasses, sunglasses|Wear hats on the head|bare head or uncovered eyes of the base are not instructions/);
+  }
 });

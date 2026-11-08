@@ -10,6 +10,7 @@ import { characterSheetChoices, characterOutputReference, characterOutputState, 
 import { preferredCharacterReferenceForVideo } from "../src/characterVideoSheets.js";
 import { runSkillDirectorNode } from "../src/nodeRunners/skillDirector.js";
 import { nodeApi } from "../src/api/newtApi.js";
+import { cloneNode } from "../src/workflowState.js";
 
 const source = await readFile(new URL("../src/NodeEditor.jsx", import.meta.url), "utf8");
 const compiled = buildSync({ stdin: { contents: `${source}\nexport { NodeBody, normalizeCurrentNode, connectedOutputItem, connectedImagePromptItems, connectedCharacterReferences, directorPackageForVideo, storyboardCharacterReferenceItems };`, resolveDir: fileURLToPath(new URL("../src", import.meta.url)), loader: "jsx" }, bundle: true, write: false, platform: "node", format: "cjs", packages: "external", jsx: "automatic", define: { "import.meta.env": "{}" }, external: ["/newt-mark.png"], loader: { ".css": "empty" } });
@@ -104,6 +105,55 @@ test("saved projects retain Base preview selection but normalize outgoing output
   assert.equal(reopened.data.resultUrl, "");
   assert.equal(reopened.data.characterTab, "sheet");
   assert.equal(reopened.data.locked, true);
+});
+
+test("custom-only characters keep their output after save, copy and repeated reopening without a wardrobe", () => {
+  let node = character({ characterPortrait: null, characterWardrobes: [], characterSheetVariants: [],
+    characterBaseSheet: null, characterBaseVideoSheet: null, activeCharacterSheetId: "custom:client",
+    resultUrl: "/client.png", resultItems: [{ url: "/client.png", type: "image" }] });
+  for (let i = 0; i < 3; i++) {
+    if (i === 2) node = cloneNode(node);
+    node = editor.normalizeCurrentNode(JSON.parse(JSON.stringify(node)));
+    assert.equal(node.data.resultUrl, "/client.png");
+    assert.equal(node.data.characterBaseSheet, null);
+    assert.deepEqual(node.data.characterSheetVariants, []);
+    assert.deepEqual(characterSheetChoices(node.data).map(choice => choice.tabLabel), ["Sheet 1"]);
+    assert.equal(editor.connectedOutputItem(node, edge).url, "/client.png");
+    assert.equal(preferredCharacterReferenceForVideo(node).url, "/client.png");
+    assert.doesNotThrow(() => assertCharacterOutputReferences([{ source: node, edge }]));
+    const html = renderToStaticMarkup(React.createElement(editor.NodeBody, { node, incoming: {}, incomingByNode: {}, connectedPortKeys: new Set() }));
+    assert.match(html, /data-port-id="characterOut"/);
+  }
+});
+
+test("a legacy single custom sheet is preserved without manufacturing a Base", () => {
+  const node = character({ characterSheetVariants: [], characterCustomSheets: [], characterBaseSheet: null, characterBaseVideoSheet: null,
+    customCharacterSheet: { localUrl: "/legacy-client.png", fileName: "Legacy.png" }, useCustomCharacterSheet: true,
+    activeCharacterSheetId: "", resultUrl: "/legacy-client.png" });
+  const restored = editor.normalizeCurrentNode(node);
+  assert.equal(restored.data.resultUrl, "/legacy-client.png");
+  assert.equal(restored.data.characterBaseSheet, null);
+  assert.equal(restored.data.activeCharacterSheetId, "custom:legacy-custom-sheet");
+  assert.deepEqual(restored.data.characterSheetVariants, []);
+});
+
+test("reopening repairs the specific old custom-sheet migration without changing real bases", () => {
+  const custom = { localUrl: "/client.png", fileName: "Client.png" };
+  const node = character({ activeCharacterSheetId: "custom:client", resultUrl: "", resultItems: [],
+    characterBaseSheet: custom, characterBaseVideoSheet: null, characterBaseSignature: "",
+    characterSheetVariants: [{ wardrobeId: characterDefaultWardrobeId, wardrobeUrl: "", wardrobeFileName: "Existing wardrobe", generated: custom }] });
+  const restored = editor.normalizeCurrentNode(node);
+  assert.equal(restored.data.resultUrl, "/client.png");
+  assert.equal(restored.data.characterBaseSheet, null);
+  assert.deepEqual(restored.data.characterSheetVariants, []);
+  for (const proof of [{ isBase: true }, { baseSignature: "known-generation" }]) {
+    const genuine = structuredClone(node);
+    Object.assign(genuine.data.characterSheetVariants[0], proof);
+    assert.equal(editor.normalizeCurrentNode(genuine).data.resultUrl, "");
+    assert.equal(editor.normalizeCurrentNode(genuine).data.characterBaseSheet.localUrl, "/client.png");
+  }
+  const signed = structuredClone(node); signed.data.characterBaseSignature = "known-generation";
+  assert.equal(editor.normalizeCurrentNode(signed).data.resultUrl, "");
 });
 
 test("actual image, video, Director package and Storyboard connections all exclude Base", () => {

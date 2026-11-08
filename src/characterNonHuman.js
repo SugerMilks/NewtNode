@@ -1,3 +1,5 @@
+import { characterWardrobeAccessoryPrompt } from "./characterWardrobeAccessories.js";
+
 export const nonHumanCharacterIdentityPrompt = "Preserve the reference character's species, recognizable design, silhouette, proportions, posture, markings, surface materials, and exact number and arrangement of limbs, eyes, heads, and other appendages. Keep any existing fur, feathers, scales, horns, wings, tails, claws, shells, or fantasy features consistent across views. Do not humanize the character, normalize its anatomy to a human template, remove unusual features, or invent missing facial features or appendages.";
 
 const renderingPrompt = "Preserve the reference's visual medium and degree of stylization, whether photographic, illustrated, animated, sculpted, or fantastical. Do not force photorealism, human skin texture, human skin tones, pores, or a realistic human face onto the design. Render fine detail only when appropriate to the original material and style.";
@@ -35,7 +37,9 @@ ${nonHumanCharacterIdentityPrompt}
 
 Change only the clothing, footwear, and wearable accessories explicitly shown in the selected wardrobe reference. Ignore the wardrobe model's identity, species, anatomy, face, pose, background, and unrelated objects. Adapt the referenced garments to the existing body, never the body to the garments. Preserve natural surface coverage, integral shells or armor, appendages, and markings wherever they are not covered by the outfit. Do not invent a torso, hands, feet, eyes, ears, or other anatomy to accommodate clothing. Omit an anatomically incompatible item rather than altering the character.
 
-Wear one complete, consistent layered outfit in all ${video ? "three" : "six"} views wherever visible, including outerwear and clothing visible within close-up crops. Replace the foundation clothing wherever the new outfit covers it. Include referenced hats, caps, glasses, sunglasses, and other wearable accessories without requiring extra text when the existing anatomy supports them. Preserve each accessory's shape, material, placement, color, and lens tint/opacity. Honor the reference's wearing position; keep helmet-mounted goggles separate from sunglasses over the eyes. Do not merge or substitute accessories, move eyewear to uncover the eyes, or replace tinted lenses with clear lenses. Allow natural occlusion and local contact shadows without changing underlying identity or anatomy. Never extend or reposition a panel crop to reveal an accessory.
+Wear one complete, consistent layered outfit in all ${video ? "three" : "six"} views wherever visible, including outerwear and clothing visible within close-up crops. Replace the foundation clothing wherever the new outfit covers it. Apply referenced accessories only when the existing anatomy supports them; never add missing facial features to wear an accessory.
+
+${characterWardrobeAccessoryPrompt}
 
 Return one complete, seamless sheet, not isolated patches or pasted face cutouts. Do not redesign, reframe, relight, beautify, or regenerate unrelated areas. Keep existing head crops unchanged. Do not add alternate outfits, comparisons, labels, text, borders, or extra views.`;
 }

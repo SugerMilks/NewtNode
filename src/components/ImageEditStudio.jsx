@@ -2,7 +2,7 @@ import React from "react";
 import { ArrowUpRight, Brush, Check, Circle, Download, Eraser, Hand, LoaderCircle, Maximize, Minus, MoveHorizontal, Pencil, Plus, Redo2, Scan, Square, Trash2, Type, Undo2, X } from "lucide-react";
 import { drawImageEditMarks, imageEditColors, imageEditDefaultModel, imageEditModels, imageEditHasPixels, imageEditPoint, imageEditSize } from "../imageEdit.js";
 import { nodeApi } from "../api/newtApi.js";
-import { openAiImage25Models } from "../openAiImage25.js";
+import { openAiImage26Models, openAiImage26QualityOptions } from "../openAiImage26.js";
 import { ideogramImageEditModel, ideogramImageEditQualityOptions, ideogramImageEditPrecisionOptions } from "../ideogramImageEdit.js";
 import { nanoBanana21ModelName, nanoBanana21ResolutionOptions } from "../nanoBanana21.js";
 import { appendWorkflowContextFormFields } from "../workflowContext.js";
@@ -13,7 +13,7 @@ const tools = [["pen", Pencil, "Draw"], ["arrow", ArrowUpRight, "Arrow"], ["elli
 const blobOf = (canvas) => new Promise((resolve, reject) => canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("Could not prepare the drawing.")), "image/png"));
 const emptyHistory = { past: [], marks: [], future: [] };
 const qualityLabels = { very_low: "Very Low", low: "Low", medium: "Medium", high: "High", xhigh: "Extra High", max: "Maximum" };
-const modelLabel = (model) => model === openAiImage25Models.sunburst ? "Image 2.5 Sunburst" : model;
+const modelLabel = (model) => model === openAiImage26Models.sunburst ? "Image 2.6 Sunburst" : model;
 
 function IconButton({ icon: Icon, label, active = false, ...props }) {
   return <button type="button" title={label} aria-label={label} aria-pressed={active} className={`ies-icon ${active ? "active" : ""}`} {...props}><Icon size={18} /></button>;
@@ -62,8 +62,8 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider 
   const dirty = history.marks.length || prompt.trim();
   const isIdeogram = model === ideogramImageEditModel;
   const isNano = model === nanoBanana21ModelName;
-  const qualityOptions = isIdeogram ? ideogramImageEditQualityOptions : ["high", "xhigh", "max"];
-  const providerAvailable = provider === "fal" || (model === openAiImage25Models.sunburst && provider === "atlas");
+  const qualityOptions = isIdeogram ? ideogramImageEditQualityOptions : openAiImage26QualityOptions;
+  const providerAvailable = provider === "fal";
   const providerLabel = (isIdeogram || isNano) && !providerAvailable ? "Fal required" : provider === "atlas" ? "Atlas Cloud" : provider === "fal" ? "Fal" : provider === "krea" ? "Krea" : "Unavailable";
   const resultProvider = result?.provider || result?.cost?.provider;
 
@@ -296,7 +296,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider 
           <small>{modelLabel(result?.model || result?.cost?.model || model)} <span>{resultProvider === "fal.ai" ? "Fal" : resultProvider || providerLabel}</span></small>
           {!reviewing && <button className="ies-primary" type="button" onClick={generate} disabled={busy || !size || !providerAvailable || (mode === "remove" ? !hasSelection : !prompt.trim() && !(mode === "sketch" && hasDrawing))}><Brush size={17} />{busy ? "Generating..." : "Generate Edit"}</button>}
           {!reviewing && showApiCosts && <small className="ies-cost">Variable API cost</small>}
-          {!reviewing && !providerAvailable && <p role="status" className="ies-warning">{isIdeogram || isNano ? `Enable Fal in Settings to use ${model} image editing. Atlas Cloud and Krea are not supported for this model in Draw and Edit.` : "Enable Fal, or disable Krea and enable Atlas Cloud in Settings. Krea does not support masked edits."}</p>}
+          {!reviewing && !providerAvailable && <p role="status" className="ies-warning">Enable Fal in Settings to use {model} image editing. Atlas Cloud and Krea are not supported for this model in Draw and Edit.</p>}
         </div>
         {versions.length > 0 && <label>Versions<select aria-label="Edit version" value={resultIndex} disabled={busy || saving} onChange={(e) => { setResultIndex(Number(e.target.value)); setView("split"); }}><option value="-1">Current draft</option>{versions.map((version, i) => <option key={version.url} value={i}>Edit {i + 1}</option>)}</select></label>}
         {reviewing && <div className="ies-result-actions">

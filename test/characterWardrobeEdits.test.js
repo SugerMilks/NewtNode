@@ -13,6 +13,9 @@ import {
 import { characterVideoSheetPrompt } from "../src/characterVideoSheets.js";
 import { runCharacterSheetGeneration, runCharacterWardrobeEdit } from "../src/nodeRunners/mediaModels.js";
 import { normalizeCharacterWardrobeRequest } from "../server/character-wardrobe.js";
+import { characterAutoWardrobeId, characterAutoWardrobePrompt } from "../src/characterAutoWardrobe.js";
+import { nonHumanCharacterWardrobePrompt } from "../src/characterNonHuman.js";
+import { characterWardrobeAccessoryPrompt } from "../src/characterWardrobeAccessories.js";
 
 function editOptions(model, sheetKind = "video") {
   return {
@@ -82,7 +85,8 @@ for (const model of characterSheetModelOptions) {
     assert.deepEqual(request.imagePromptUrls, ["/outputs/cu-base.png", "/uploads/outfit.png"]);
     assert.equal(request.imagePromptLabels.length, 2);
     assert.match(request.imagePromptLabels[0], /Locked Base Identity CU Video Sheet/);
-    assert.match(request.imagePromptLabels[1], /clothing footwear accessories hats glasses sunglasses/);
+    assert.match(request.imagePromptLabels[1], /clothing, footwear, visible accessories only/);
+    assert.doesNotMatch(request.imagePromptLabels[1], /hats|glasses|sunglasses|goggles/i);
     assert.match(request.imagePromptLabels[1], /not identity/);
     assert.ok(request.imagePromptLabels[1].length <= 80, "Preserve the complete role within the provider label limit");
     assert.doesNotMatch(request.imagePromptLabels[1], /clothing only/);
@@ -135,11 +139,40 @@ test("regular wardrobe edits retain their existing two-reference workflow", asyn
   assert.deepEqual(request.imagePromptUrls, ["/outputs/regular-base.png", "/uploads/outfit.png"]);
   assert.equal(request.prompt, characterWardrobeEditPrompt);
   assert.equal(request.imagePromptLabels[0], "Locked Base Identity Character Sheet");
-  assert.match(request.imagePromptLabels[1], /accessories hats glasses sunglasses/);
+  assert.match(request.imagePromptLabels[1], /visible accessories only; not identity/);
+  assert.doesNotMatch(request.imagePromptLabels[1], /hats|glasses|sunglasses|goggles/i);
   assert.equal(request.editMaskDataUrl, undefined);
   assert.equal(request.characterWardrobeEdit, true);
   assert.deepEqual(normalizeCharacterWardrobeRequest({ ...request, editMaskDataUrl: "obsolete-mask" }), request,
     "Accessory-inclusive reference labels retain full-sheet editing, without protected face rectangles");
+});
+
+test("uploaded, Non-Human and Auto Wardrobe requests retain conditional accessory guidance in both sheet kinds", async (t) => {
+  const generate = t.mock.method(nodeApi, "generateImage", async () => successfulResponse());
+  for (const video of [false, true]) {
+    for (const nonHuman of [false, true]) {
+      for (const auto of [false, true]) {
+        const options = editOptions("OpenAI Image 2", video ? "video" : "image");
+        options.node.data.nonHumanCharacter = nonHuman;
+        options.node.data.autoWardrobe = auto;
+        options.prompt = auto ? characterAutoWardrobePrompt({ video, nonHuman })
+          : nonHuman ? nonHumanCharacterWardrobePrompt({ video })
+            : video ? characterVideoWardrobeEditPrompt : characterWardrobeEditPrompt;
+        options.wardrobe = auto
+          ? { id: characterAutoWardrobeId, localUrl: video ? "/outputs/auto-outfit.png" : "/uploads/portrait.png" }
+          : options.wardrobe;
+        const before = structuredClone(options);
+        await runCharacterWardrobeEdit(options);
+        const request = generate.mock.calls.at(-1).arguments[0];
+        assert.equal(request.prompt, options.prompt);
+        assert.equal(request.prompt.split(characterWardrobeAccessoryPrompt).length, 2, "Include the shared policy exactly once");
+        assert.deepEqual(request.imagePromptUrls, [options.baseSheet.localUrl, options.wardrobe.localUrl]);
+        assert.doesNotMatch(request.imagePromptLabels.join(" "), /hats|glasses|sunglasses|goggles/i);
+        assert.deepEqual(options, before, "Never rewrite the saved base, outfit, or settings");
+      }
+    }
+  }
+  assert.equal(generate.mock.callCount(), 8, "One request per explicit edit, no hidden analysis or retries");
 });
 
 test("multiple CU wardrobe edits reuse the saved CU base without regenerating either base", async (t) => {

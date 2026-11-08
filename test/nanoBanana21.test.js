@@ -16,7 +16,7 @@ import { createNanoBanana21Generator } from "../server/nano-banana-21.js";
 import { createSingleSubmissionFalClient } from "../server/fal-single-submission.js";
 import { normalizeCharacterWardrobeRequest } from "../server/character-wardrobe.js";
 import * as seedream from "../src/seedream5Pro.js";
-import * as image25 from "../src/openAiImage25.js";
+import * as image25 from "../src/openAiImage26.js";
 import { nodeApi, generationApi } from "../src/api/newtApi.js";
 
 const model = nano.nanoBanana21ModelName, prompt = "A cinematic location with the referenced actor.";
@@ -40,7 +40,7 @@ test("2.1 is distinct from 2, available throughout image tools, and does not rep
   assert.equal(normalizeModelPreferences({ image: { [model]: false } }).image[model], false);
   assert.equal(normalizeMyNewtFavoriteModels({ favoriteImageModel: model }).favoriteImageModel, model);
   assert.equal(characterSheetGenerationSettings().model, "Nano Banana Pro");
-  assert.equal(storyboardImageSettings().model, "OpenAI Image 2.5 Flare");
+  assert.equal(storyboardImageSettings().model, "OpenAI Image 2.6 Flare");
   assert.equal(characterSheetGenerationSettings(model).resolution, "4K");
   assert.equal(storyboardCharacterImageSettings({ model }).resolution, "4K");
   assert.equal(storyboardImageSettings({ model, aspectRatio: "2:1" }).aspectRatio, "16:9");

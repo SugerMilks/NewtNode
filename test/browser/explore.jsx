@@ -2,7 +2,7 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { ExploreNodeBody } from "../../src/components/ExploreNodeBody.jsx";
 import { exploreDefaults } from "../../src/explore.js";
-import { isOpenAiImage25Model, openAiImage25KreaAspectRatios, openAiImage25KreaResolutionOptions, openAiImage25KreaSelection } from "../../src/openAiImage25.js";
+import { isOpenAiImage26Model, openAiImage26KreaAspectRatios, openAiImage26KreaResolutionOptions, openAiImage26KreaSelection } from "../../src/openAiImage26.js";
 import { openAiImageAspectRatios, nanoImageAspectRatios } from "../../src/modelOptions.js";
 import { runExploreGeneration } from "../../src/nodeRunners/explore.js";
 import { clearStaleRunningState } from "../../src/workflowState.js";
@@ -21,7 +21,7 @@ function Harness() {
   const [plans, setPlans] = React.useState([]);
   const [connected, setConnected] = React.useState(false);
   const [provider, setProvider] = React.useState("fal");
-  const krea25 = provider === "krea" && isOpenAiImage25Model(node.data.model);
+  const krea25 = provider === "krea" && isOpenAiImage26Model(node.data.model);
   const [canvasGestures, setCanvasGestures] = React.useState(0), [zoom, setZoom] = React.useState(1);
   const canvasRef = React.useRef(null);
   React.useEffect(() => {
@@ -63,10 +63,10 @@ function Harness() {
     <article data-node-card-id={node.id} className="node-card explore" style={{ position: "relative", transform: `scale(${zoom})`, transformOrigin: "top left", maxWidth: "100%" }}>
       <header className="node-header">Explore</header>
       <ExploreNodeBody key={mount} node={node} config={config} incoming={incoming} prompt={node.data.prompt} onUpdate={update} onRun={run} onPreviewOpen={setPreview}
-        onConnectStart={() => {}} onDisconnectInput={() => {}} connectedPortKeys={connectedPortKeys} imageModels={["Nano Banana Pro", "OpenAI Image 2.5 Sunburst", "OpenAI Image 2.5 Flare"]}
-        ratios={krea25 ? openAiImage25KreaAspectRatios : isOpenAiImage25Model(node.data.model) ? openAiImageAspectRatios : nanoImageAspectRatios}
-        resolutions={krea25 ? openAiImage25KreaResolutionOptions : ["1K", "2K", "4K"]} qualities={isOpenAiImage25Model(node.data.model) ? ["low", "medium", "high", "xhigh", "max"] : []}
-        modelPatch={model => ({ model, ...(provider === "krea" && isOpenAiImage25Model(model) ? openAiImage25KreaSelection({ ...node.data, model }) : {}) })} provider={provider} showApiCosts={costs} />
+        onConnectStart={() => {}} onDisconnectInput={() => {}} connectedPortKeys={connectedPortKeys} imageModels={["Nano Banana Pro", "OpenAI Image 2.6 Sunburst", "OpenAI Image 2.6 Flare"]}
+        ratios={krea25 ? openAiImage26KreaAspectRatios : isOpenAiImage26Model(node.data.model) ? openAiImageAspectRatios : nanoImageAspectRatios}
+        resolutions={krea25 ? openAiImage26KreaResolutionOptions : ["1K", "2K", "4K"]} qualities={isOpenAiImage26Model(node.data.model) ? ["low", "medium", "high", "xhigh", "max"] : []}
+        modelPatch={model => ({ model, ...(provider === "krea" && isOpenAiImage26Model(model) ? openAiImage26KreaSelection({ ...node.data, model }) : {}) })} provider={provider} showApiCosts={costs} />
     </article>
     </div>
     <output aria-label="Selected output">{node.data.resultItems[node.data.selectedResultIndex]?.label || "None"}</output>

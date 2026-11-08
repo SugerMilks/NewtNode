@@ -12,7 +12,7 @@ async function withEditor(run, overrides = {}) {
   registerImageEditRoutes(app, {
     limiter: (_req, _res, next) => next(), hasFal: () => true,
     readSource: async (url) => { assert.equal(url, "/uploads/source.png"); return { buffer: source }; },
-    generate: async (request) => { calls.push(request); return { endpoint: "openai/gpt-image-2.5/sunburst/edit", remoteImage: { url: "mock-result" } }; },
+    generate: async (request) => { calls.push(request); return { endpoint: "openai/gpt-image-2.6/sunburst/edit", remoteImage: { url: "mock-result" } }; },
     readGenerated: async () => source,
     save: async (req, buffer) => { saves.push({ body: req.body, buffer }); return { url: "/workflow-assets/test/outputs/edit.png", fileName: "edit.png" }; },
     recordHistory: async (item) => histories.push(item),
@@ -35,7 +35,7 @@ test("image edits use Sunburst, persist native size with workflow context and ho
   const { item } = await response.json();
   assert.equal(item.width, 64); assert.equal(item.height, 96); assert.equal(item.sourceUrl, "/uploads/source.png");
   assert.equal(item.cost.amountUsd, null);
-  assert.equal(calls[0].model, "OpenAI Image 2.5 Sunburst"); assert.equal(calls[0].quality, "high");
+  assert.equal(calls[0].model, "OpenAI Image 2.6 Sunburst"); assert.equal(calls[0].quality, "high");
   assert.equal(saves[0].body.workflowPackagePath, "/fixture/project");
   assert.equal(histories[0].localImage, item.url); assert.equal(histories[0].node.id, "image1");
   assert.match(histories[0].submittedPrompt, /clean original/);

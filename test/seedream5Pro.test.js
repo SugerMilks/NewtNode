@@ -23,8 +23,8 @@ test("Seedream is selectable throughout the image tools and favorites without re
   assert.equal(normalizeModelPreferences({ image: { [model]: false } }).image[model], false);
   assert.equal(normalizeMyNewtFavoriteModels({ favoriteImageModel: model }).favoriteImageModel, model);
   assert.equal(characterSheetGenerationSettings().model, "Nano Banana Pro");
-  assert.equal(storyboardImageSettings().model, "OpenAI Image 2.5 Flare");
-  assert.equal(exploreDefaults().model, "OpenAI Image 2.5 Flare");
+  assert.equal(storyboardImageSettings().model, "OpenAI Image 2.6 Flare");
+  assert.equal(exploreDefaults().model, "OpenAI Image 2.6 Flare");
   for (const provider of ["fal", "krea", "atlas"]) {
     assert.deepEqual(characterSheetGenerationSettings(model, provider), { model, resolution: "2K" });
     assert.equal(storyboardImageSettings({ model, resolution: "4K" }, provider).resolution, "2K");
