@@ -35,7 +35,7 @@ test("Vector generation count defaults to one, is bounded to six and survives re
 });
 
 test("Vector batches snapshot validated requests with independent bounded seeds and references", () => {
-  const data = { ...vectorDefaults(), prompt: "An emblem", batchCount: "6", seed: "2147483646" };
+  const data = { ...vectorDefaults(), vectorModel: "Ideogram Vector", prompt: "An emblem", batchCount: "6", seed: "2147483646" };
   const source = { ...image }, board = { url: "/outputs/mood.png", label: "Look" };
   const requests = buildVectorBatchRequests(data, { images: [source], moodBoards: [board] });
   assert.equal(requests.length, 6);
@@ -62,11 +62,11 @@ test("Vector batch estimates multiply only the run total and preserve unknown pr
   assert.equal(ideogramVectorCost({ batchCount: "6" }, {}).amountUsd, null);
   assert.equal(ideogramVectorCost({ batchCount: "6" }, { medium: 0 }).amountUsd, 0);
   assert.match(ideogramVectorCost({ batchCount: "6" }).pricingBasis, /^6 SVGs/);
-  assert.equal(ideogramVectorCost(buildVectorBatchRequests({ ...vectorDefaults(), prompt: "Mark", batchCount: "6" })[0]).amountUsd, .16, "History records each individual request");
+  assert.equal(ideogramVectorCost(buildVectorBatchRequests({ ...vectorDefaults(), vectorModel: "Ideogram Vector", prompt: "Mark", batchCount: "6" })[0]).amountUsd, .16, "History records each individual request");
 });
 
 test("vector defaults and mode-specific requests preserve authored guidance and seed zero", () => {
-  const d = { ...vectorDefaults(), prompt: "A newt monogram", designPreset: "logo", lettering: "NEWT", palette: "navy and coral", seed: "0" };
+  const d = { ...vectorDefaults(), vectorModel: "Ideogram Vector", prompt: "A newt monogram", designPreset: "logo", lettering: "NEWT", palette: "navy and coral", seed: "0" };
   const request = buildVectorRequest(d, { images: [image] });
   assert.equal(request.mode, "generate"); assert.equal(request.quality, "medium"); assert.equal(request.seed, 0);
   assert.match(request.prompt, /^A newt monogram/); assert.match(request.prompt, /clear silhouette/); assert.match(request.prompt, /"NEWT"/); assert.match(request.prompt, /navy and coral/);
@@ -78,7 +78,7 @@ test("vector defaults and mode-specific requests preserve authored guidance and 
 
 test("Mood Boards supply ordered look-only direction without a Style input or extra API fields", () => {
   const board = { url: "/outputs/mood.png", label: "Graphic palette" };
-  const data = { ...vectorDefaults(), prompt: "A geometric emblem", lettering: "NEWT", palette: "navy", quality: "high" };
+  const data = { ...vectorDefaults(), vectorModel: "Ideogram Vector", prompt: "A geometric emblem", lettering: "NEWT", palette: "navy", quality: "high" };
   const request = buildVectorRequest(data, { images: [image], moodBoards: [board] });
   assert.deepEqual(request.images, [image, board]);
   assert.match(request.prompt, /Reference image 1: SUBJECT \/ CONTENT/);
@@ -94,7 +94,7 @@ test("Mood Boards supply ordered look-only direction without a Style input or ex
 });
 
 test("Mood Boards share reference and prompt limits without silently truncating or blocking conversion", () => {
-  const data = { ...vectorDefaults(), prompt: "An emblem" };
+  const data = { ...vectorDefaults(), vectorModel: "Ideogram Vector", prompt: "An emblem" };
   const boards = [{ url: "/outputs/mood.png", label: "Look" }];
   assert.equal(buildVectorRequest(data, { images: Array(4).fill(image), moodBoards: boards }).images.length, 5);
   assert.throws(() => buildVectorRequest(data, { images: Array(5).fill(image), moodBoards: boards }), /five/);
@@ -122,7 +122,7 @@ test("validation rejects invalid and incomplete requests before any submission",
   assert.throws(() => validateIdeogramVectorRequest({ mode: "vectorize", images: [image], vectorizeMode: "detailed" }), /Standard or Simple/);
   assert.equal(validateIdeogramVectorRequest({ ...base, prompt: "😀".repeat(9500) }).prompt.length, 19000);
   assert.throws(() => validateIdeogramVectorRequest({ ...base, prompt: "x".repeat(9501) }), /9,500/);
-  assert.throws(() => buildVectorRequest({ ...vectorDefaults(), prompt: "x".repeat(9490), designPreset: "logo" }), /9,500/);
+  assert.throws(() => buildVectorRequest({ ...vectorDefaults(), vectorModel: "Ideogram Vector", prompt: "x".repeat(9490), designPreset: "logo" }), /9,500/);
 });
 
 test("per-output costs match quality, reference mode and unknown overrides", () => {

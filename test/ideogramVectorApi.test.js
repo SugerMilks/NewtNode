@@ -10,6 +10,7 @@ import { createIdeogramVectorService, ideogramVectorProviderInput, readGenerated
 import { registerIdeogramVectorRoutes, secureVectorAssetResponse } from "../server/routes/ideogramVector.js";
 import { createSingleSubmissionFalClient } from "../server/fal-single-submission.js";
 import { buildVectorRequest, vectorDefaults } from "../src/ideogramVector.js";
+import { openAiVectorModels, openAiVectorEndpoint } from "../src/openAiVector.js";
 
 const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="96" height="64" viewBox="0 0 96 64"><path fill="#e8a928" d="M0 0h96v64H0z"/><circle cx="48" cy="32" r="20" fill="#203848"/></svg>';
 const body = (overrides = {}) => ({ requestId: randomUUID(), mode: "generate", prompt: "A geometric sun logo", quality: "medium", aspectRatio: "1:1", images: [],
@@ -43,6 +44,51 @@ async function withService(run, overrides) {
   try { await run(fixture); } finally { await fixture.cleanup(); }
 }
 
+test("both GPT 2.6 models save real editable SVG/PNG with their own model, endpoint and unknown charge", async () => {
+  for (const model of openAiVectorModels) await withService(async ({ service, deps, calls, uploads, histories }) => {
+    const request = body({ model, background: "transparent", complexity: "medium", quality: "xhigh" });
+    const result = await service.start(request);
+    assert.equal(uploads.length, 0); assert.equal(calls.length, 1);
+    assert.equal(calls[0].endpoint, openAiVectorEndpoint(model)); assert.equal(calls[0].context.model, model);
+    assert.equal(calls[0].input.output_format, "svg"); assert.equal(calls[0].input.num_images, 1);
+    assert.equal(calls[0].input.background, "transparent"); assert.equal(calls[0].input.quality, "xhigh");
+    assert.equal(calls[0].input.reasoning_effort, "medium"); assert.equal(calls[0].input.svg_model, "gpt-6-astra");
+    assert.equal(result.item.model, model); assert.equal(result.item.cost.amountUsd, null); assert.equal(result.item.seed, undefined);
+    assert.equal(result.item.width, 96); assert.ok(result.item.shapeCount > 0); assert.ok(result.item.svgUrl);
+    assert.equal(histories[0].modelName, model); assert.equal(histories[0].cost.amountUsd, null);
+    assert.equal(histories[0].endpoint, calls[0].endpoint);
+    assert.deepEqual(await createIdeogramVectorService(deps).inspect(request.requestId), result);
+    await assert.rejects(service.start({ ...request, model: "Ideogram Vector", quality: "high" }), { status: 409 });
+    assert.equal(calls.length, 1);
+  });
+});
+
+test("GPT validation rejects unsupported inputs before media reads or paid calls", () => withService(async ({ service, calls, uploads }) => {
+  for (const changes of [{ images: [{ url: "/uploads/ref.png" }] }, { mode: "vectorize", images: [{ url: "/uploads/ref.png" }] }, { seed: 4 }, { model: "Unknown Vector" }])
+    await assert.rejects(service.start(body({ model: openAiVectorModels[0], ...changes })), { status: 400 });
+  assert.equal(calls.length, 0); assert.equal(uploads.length, 0);
+}, { readSource: async () => { throw new Error("No reference may be read"); } }));
+
+test("GPT recovery uses the original endpoint and records the settled Fal charge without resubmitting", () => withService(async ({ service, deps, queries, histories }) => {
+  const request = body({ model: openAiVectorModels[1] });
+  await assert.rejects(service.start(request), /not automatically retried/);
+  const result = await createIdeogramVectorService(deps).inspect(request.requestId);
+  assert.equal(result.status, "completed"); assert.equal(result.item.cost.amountUsd, .47);
+  assert.equal(histories[0].cost.amountUsd, .47);
+  assert.ok(queries.every(query => query.endpoint === openAiVectorEndpoint(request.model)));
+}, { subscribe: async (_endpoint, options) => { options.onEnqueue("provider-request"); throw new Error("connection ended"); }, charge: async () => ({ amountUsd: .47, currency: "USD", estimated: false }) }));
+
+test("GPT raster or active SVG response is rejected locally and never regenerated", async () => {
+  for (const output of [Buffer.from("not an SVG"), Buffer.from('<svg width="96" height="64"><script>alert(1)</script></svg>')]) {
+    await withService(async ({ service, deps, calls, histories }) => {
+      const request = body({ model: openAiVectorModels[0] });
+      await assert.rejects(service.start(request), /local saving failed/);
+      assert.equal((await createIdeogramVectorService(deps).inspect(request.requestId)).status, "uncertain");
+      assert.equal(calls.length, 1); assert.equal(histories.length, 0);
+    }, { readGenerated: async () => output });
+  }
+});
+
 test("Vector text contract, editable SVG and PNG persist with project context, history, seed and estimate", () => withService(async ({ service, calls, uploads, saves, histories }) => {
   const request = body({ quality: "high", seed: 42 });
   const result = await service.start(request);
@@ -67,7 +113,7 @@ test("reference generation uses all validated images and the documented high-ref
 }));
 
 test("Mood Board direction reaches the existing Fal contract in order and is recorded with the result", () => withService(async ({ service, calls, uploads, histories }) => {
-  const request = body(buildVectorRequest({ ...vectorDefaults(), prompt: "An original emblem", quality: "high" }, {
+  const request = body(buildVectorRequest({ ...vectorDefaults(), vectorModel: "Ideogram Vector", prompt: "An original emblem", quality: "high" }, {
     images: [{ url: "/uploads/subject.png", label: "Subject" }], moodBoards: [{ url: "/uploads/board.png", label: "Mood Board" }]
   }));
   const result = await service.start(request);

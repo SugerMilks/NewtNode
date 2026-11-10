@@ -18,6 +18,7 @@ import { exploreDefaults, normalizeExploreData, exploreModels } from "./explore.
 import { cameraCoverageDefaults, normalizeCameraCoverageData, selectCoverageVersion, isReframeNode, isReframeTool, reframeOutputPort,
   reframeToolSelectionPatch, reframeUtilityTransition } from "./cameraCoverage.js";
 import { vectorDefaults, normalizeVectorData } from "./ideogramVector.js";
+import { isOpenAiVectorModel, openAiVectorReferenceNotice } from "./openAiVector.js";
 const VectorNodeBody = React.lazy(() => import("./components/VectorNodeBody.jsx").then(module => ({ default: module.VectorNodeBody })));
 const CameraCoverageNodeBody = React.lazy(() => import("./components/CameraCoverageNodeBody.jsx").then(module => ({ default: module.CameraCoverageNodeBody })));
 import { runExploreGeneration } from "./nodeRunners/explore.js";
@@ -125,6 +126,10 @@ import {
 import { MediaAssetNodeBody, PlainTextNodeBody, SkillDirectorNodeBody, TextModelNodeBody } from "./components/NodeBodies.jsx";
 import { NodeRow, OutputPortRow, PortHandle } from "./components/NodePorts.jsx";
 import { StyleCollage } from "./components/StyleCollage.jsx";
+import LibraryLookPreview from "./components/LibraryLookPreview.jsx";
+import { libraryLookPrompt, lookNodeData, lookSnapshot } from "./looks.js";
+import { dominantPaletteFromPixels } from "./palettePixels.js";
+import { preciseColorPickerGrade, styleGradePresetNames, styleGradePresetPrompts, normalizeStyleGradePresetName, isPaletteGrade, styleGradePaletteData, migrateStyleGradeData } from "./styleGrade.js";
 import { canvasToBlob, createTransferCollageBlob, drawImageCover, loadCanvasImage } from "./canvasMedia.js";
 import { canDeleteCanvasSelection, focusCanvasSelection, editorTimelineZoomDirection, editorShuttleKey } from "./nodeKeyboardRouting.js";
 import { cleanReferenceTag, promptHasReferenceTag, resolveTaggedImageReferences, taggedReferenceLabel } from "./referenceTags.js";
@@ -207,6 +212,7 @@ import {
   upsertCharacterWardrobeVariant
 } from "./characterSheetWorkflow.js";
 import { nonHumanCharacterBasePrompt, nonHumanCharacterIdentityPrompt, nonHumanCharacterWardrobePrompt } from "./characterNonHuman.js";
+import { characterDialoguePrompt, characterVoicePromptForSource, characterVoiceReferenceHelp, characterVoiceReferenceInputs, directCharacterVoiceReferencePrompts } from "./characterVoice.js";
 import { characterAutoWardrobeId, characterAutoWardrobePrompt, characterWardrobesForGeneration, isAutoCharacterWardrobe } from "./characterAutoWardrobe.js";
 import { normalizeOpenAiImage2Quality, openAiImage2Quality, openAiImage2QualityOptions } from "./openAiImage2.js";
 import { isOpenAiImage26Model, openAiImage26Variant, normalizeOpenAiImage26Quality, normalizeOpenAiImage26Background, openAiImage26Qualities, openAiImage26BackgroundOptions, openAiImage26KreaAspectRatios, openAiImage26KreaResolutionOptions, openAiImage26KreaSelection, migrateOpenAiImageModel, migrateOpenAiImageSettings } from "./openAiImage26.js";
@@ -296,10 +302,7 @@ import { isSeedream5ProModel, seedream5ProResolutionOptions, seedream5ProAspectR
 import { isNanoBanana21Model, nanoBanana21ResolutionOptions, nanoBanana21Ratios } from "./nanoBanana21.js";
 import {
   analyzeColorLookPalette,
-  buildColorGradePrompt,
-  gradePresetNames,
-  gradePresetPrompts,
-  normalizeGradePresetName
+  buildColorGradePrompt
 } from "./colorLook.js";
 import {
   clamp,
@@ -636,8 +639,7 @@ const characterSheetPrompt =
   "Make one image:\n\nStudy the reference image of the character and preserve the person's identity, physical features, proportions, image quality, and visual style as closely as possible.\n\nCreate one high-resolution horizontal character photo sheet on a clean white background. The final image must contain exactly six panels and exactly six total depictions of the same character. Follow this fixed layout precisely:\n- On the left side, place two tall vertical full-body panels side by side: one full body front view, then one full body side profile.\n- On the right side, place four equal 1:1 square face close-up panels in a clean 2 by 2 grid: top left is a left side face profile, top right is a right side face profile, bottom left is a front face portrait with a resting neutral expression, and bottom right is a front face portrait with a natural talking expression with the mouth slightly open.\n\nEach panel must contain exactly one view only. Keep the grid clean, evenly spaced, and clearly separated by simple white spacing. Do not generate any additional views, duplicate depictions, merged two-in-one panels, alternate variations, split sheets, comparison images, multiple sheets, text, labels, props, frames, or borders.";
 const cinematicCharacterSheetPrompt =
   "Make one image:\n\nStudy the reference image of the character and preserve the person's identity, physical features and proportions as closely as possible. It's important the image is realistic with natural skin texture and natural skin tones. Preserve only the skin detail and texture naturally visible in the reference image, with subtle tonal variation, natural translucency, and restrained matte-to-satin highlights. Do not invent, exaggerate, sharpen, or outline pores, wrinkles, blemishes, facial lines, or other skin features that are not clearly present in the reference. Skin must not look plastic, waxy, airbrushed, porcelain, oily, overly smooth, glossy, synthetic, or digitally retouched. Avoid excessive specular highlights, HDR sheen, beauty-filter smoothing, and CG skin texture. High-end cinematic still frame, shot on ARRI Alexa 35, high quality prime lens, high dynamic range, shallow depth of field, atmospheric cinematography, subtle halation, very gentle lens bloom that does not soften identity-defining detail, fine film grain, realistic lens softness, very slight atmospheric haze, imperfect real-camera texture, high production value, feature film look.\n\nThe final image must contain exactly six panels and exactly six total depictions of the same character placed on the same solid, evenly lit neutral gray background. The background's target sRGB color is RGB(125, 125, 125), HEX #7D7D7D. Keep the exposed backdrop uniform across all six panels, with no gradients, vignettes, texture, or color casts. Apply the cinematic lighting and color treatment to the character without tinting, brightening, or darkening the backdrop. Keep the white spacing between panels white; the gray color applies only to each panel's background. Follow this fixed layout precisely:\n- On the left side, place two tall vertical full-body panels side by side: one full body front view, then one full body side profile.\n- On the right side, place four equal 1:1 square face close-up panels in a clean 2 by 2 grid: top left is a left side face profile, top right is a right side face profile, bottom left is a front face portrait with a resting neutral expression, and bottom right is a front face portrait with a natural talking expression with the mouth slightly open.\n\nEach panel must contain exactly one view only. Keep the grid clean, evenly spaced, and clearly separated by simple white spacing. Do not generate any additional views, duplicate depictions, merged two-in-one panels, alternate variations, split sheets, comparison images, multiple sheets, text, labels, props, frames, or borders.";
-const characterVoicePrompt =
-  "Use the provided dialogue audio file for the character and make sure the dialogue is seamlessly and realistically integrated into the scene with professional mixing techniques.";
+const characterVoicePrompt = characterDialoguePrompt;
 const composerReferencePrompt = (writtenPrompt = "") => {
   const cleanWrittenPrompt = String(writtenPrompt || "").trim();
   return `Use the input guide image as a locked spatial blueprint. Use the written prompt as the sole source for the final subject matter, character design, wardrobe, environment, lighting, color, material, texture, style, mood, and rendering quality.
@@ -933,7 +935,7 @@ function sameRect(left, right, tolerance = 0.25) {
   return ["left", "top", "right", "bottom", "width", "height"].every((key) => Math.abs(left[key] - right[key]) <= tolerance);
 }
 
-export default function NodeEditor({ active = true, onStatusChange, modelPreferences, modelPreferencesReady = true, nodePreferences } = {}) {
+export default function NodeEditor({ active = true, lookRequest, onLookRequestConsumed, onStatusChange, modelPreferences, modelPreferencesReady = true, nodePreferences } = {}) {
   const visibleNodeCatalog = React.useMemo(() => nodeMenuEntries(nodeCatalog, nodePreferences), [nodePreferences]);
   const canvasRef = React.useRef(null);
   const sceneRef = React.useRef(null);
@@ -1685,6 +1687,23 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     });
   }
 
+  const consumedLookRequest = React.useRef("");
+  React.useEffect(() => {
+    if (!active || !lookRequest || consumedLookRequest.current === lookRequest.id) return;
+    consumedLookRequest.current = lookRequest.id;
+    const { kind, value } = lookRequest;
+    if (!["style", "transfer"].includes(kind)) { onLookRequestConsumed?.(); return; }
+    const count = nodesRef.current.filter(node => node.type === kind).length + 1;
+    const node = { id: createNodeId(kind), type: kind, ...defaultNodePosition(count),
+      data: { ...createNodeData(kind, kind === "style" ? "Style" : "Mood Board", count), ...lookNodeData(kind, value) } };
+    pushUndoSnapshot();
+    setNodes(current => [...current, node]);
+    setSelectedEdgeId(null);
+    setSelectedNodeIds([node.id]);
+    setSaveStatus(`Added ${kind === "style" ? "Style" : "Mood Board"} from Looks`);
+    onLookRequestConsumed?.();
+  }, [active, lookRequest]);
+
   function addNode(type, position) {
     if (!nodeCatalog.some((entry) => entry.type === type)) return;
     const existingNewt = type === "myNewt" && nodesRef.current.find((node) => node.type === "myNewt");
@@ -2154,7 +2173,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     let nextSkillDirectorData = null;
     let nextVideoModelData = null;
     const cameraPresetChanged = ["shotPreset", "lensPreset", "typePreset"].some((key) => Object.prototype.hasOwnProperty.call(patch, key));
-    const styleOutputMaybeChanged = ["stylePreset", "gradePreset", "customPaletteRgbText", "customPaletteColors", "customPalettePreviewUrl"].some((key) => Object.prototype.hasOwnProperty.call(patch, key));
+    const styleOutputMaybeChanged = ["stylePreset", "libraryStyle", "gradePreset", "precisePalette", "customPaletteRgbText", "customPaletteColors", "customPalettePreviewUrl"].some((key) => Object.prototype.hasOwnProperty.call(patch, key));
     setNodes((current) => {
       const shouldUpdateConnectedPreviews = Array.isArray(patch.resultItems) && patch.resultItems.some((item) => item?.url);
       const nextNodes = current.map((node) =>
@@ -5235,6 +5254,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (target.type === "output") return "";
     if (isReframeNode(target)) return "";
     if (target.type === "vector") {
+      if (["imageIn", "transferIn"].includes(to.port) && isOpenAiVectorModel(target.data.vectorModel)) return openAiVectorReferenceNotice;
       if (to.port === "transferIn" && target.data.vectorMode === "vectorize") return "Mood Board is available in Text to vector mode only";
       if (source.type === "character" && (!source.data.locked || !source.data.activated)) return "Lock the Character before connecting it to Vector Model";
       if (source.type === "transfer" && (!source.data.activated || !source.data.resultUrl)) return "Lock the Mood Board before connecting it to Vector Model";
@@ -5312,9 +5332,10 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
     if (source?.type === "style") {
       if (!styleOutputEnabled(source.data)) return "Choose a Style or Grade before connecting";
       if (
-        normalizeGradePresetName(source.data.gradePreset || "None") === "Custom"
-        && !customGradePromptPiece(source.data)
+        isPaletteGrade(normalizeStyleGradePresetName(source.data.gradePreset || "None"))
+        && !gradePromptPiece(source.data)
         && (!source.data.stylePreset || source.data.stylePreset === "None")
+        && !libraryLookPrompt(source.data)
       ) return "Add custom grade colors before connecting";
       if (target.type === "imageModel" && to.port === "styleIn") return "";
       if (target.type === "storyboard" && to.port === "styleIn") {
@@ -6495,7 +6516,7 @@ export default function NodeEditor({ active = true, onStatusChange, modelPrefere
 
   const myNewtOptions = React.useMemo(() => ({
     camera: { shotPreset: shotPresetNames, lensPreset: lensPresetNames, typePreset: typePresetNames },
-    style: { stylePreset: stylePresetNames, gradePreset: gradePresetNames },
+    style: { stylePreset: stylePresetNames, gradePreset: styleGradePresetNames },
     imageModel: { model: enabledImageModels, quality: ["low", "medium", "high"], batchCount: ["1", "2", "3", "4", "5", "6", "7", "8", "9"] },
     videoModel: { model: enabledVideoModels, batchCount: ["1", "2", "3", "4"] },
     coverage: { model: enabledCoverageModels, coverageMethod: ["Standard", "Dynamic", "Insane"] },
@@ -8249,13 +8270,21 @@ function NodeBody({
                   </summary>
                   <div className="character-collapsible-body">
                     <div className="character-section-head">
-                      <small>Dialogue references</small>
+                      <small>{node.data.characterVoiceReferenceOnly === true ? "Voice samples" : "Dialogue references"}</small>
                       {voices.length < maxCharacterVoices && (
-                        <label className="character-add-button" title="Upload dialogue audio">
+                        <label className="character-add-button" title={node.data.characterVoiceReferenceOnly === true ? "Upload voice sample" : "Upload dialogue audio"}>
                           <Plus size={13} />
                           <input type="file" accept="audio/mpeg,audio/wav,audio/mp4,audio/x-m4a" multiple onChange={(event) => onCharacterVoicesUpload(node, event.target.files)} />
                         </label>
                       )}
+                    </div>
+                    <div className="character-voice-mode" title={characterVoiceReferenceHelp}>
+                      <span>Voice Reference Only</span>
+                      <button type="button" className={`node-toggle ${node.data.characterVoiceReferenceOnly === true ? "enabled" : ""}`}
+                        role="switch" aria-label="Voice Reference Only" aria-checked={node.data.characterVoiceReferenceOnly === true}
+                        onClick={() => onUpdate(node.id, { characterVoiceReferenceOnly: node.data.characterVoiceReferenceOnly !== true })}>
+                        <span />
+                      </button>
                     </div>
                     <div className="character-voice-list">
                       {voices.map((voice) => (
@@ -8267,7 +8296,7 @@ function NodeBody({
                           </span>
                         </button>
                       ))}
-                      {!voices.length && <small>Drop dialogue audio here</small>}
+                      {!voices.length && <small>{node.data.characterVoiceReferenceOnly === true ? "Drop voice samples here" : "Drop dialogue audio here"}</small>}
                     </div>
                     {activeVoice && <CharacterVoicePlayer voice={activeVoice} />}
                   </div>
@@ -9017,13 +9046,20 @@ function NodeBody({
 
   if (node.type === "style") {
     const selectedPreset = node.data.stylePreset || "None";
-    const selectedGrade = normalizeGradePresetName(node.data.gradePreset || "None");
+    const selectedGrade = normalizeStyleGradePresetName(node.data.gradePreset || "None");
     const customPaletteSelected = selectedGrade === "Custom";
-    const paletteColors = normalizedCustomPaletteColors(node.data);
+    const precisePaletteSelected = selectedGrade === preciseColorPickerGrade;
+    const paletteSelected = isPaletteGrade(selectedGrade);
+    const paletteData = styleGradePaletteData(node.data);
+    const paletteColors = normalizedCustomPaletteColors(paletteData);
     const styleSelected = styleOutputEnabled(node.data);
-    const customGradeAnalysis = customPaletteSelected && paletteColors.length
+    const customGradeAnalysis = paletteSelected && paletteColors.length
       ? analyzeColorLookPalette(paletteColors.map((color) => color.hex))
       : null;
+
+    function updatePrecisePalette(patch) {
+      onUpdate(node.id, { precisePalette: { ...node.data.precisePalette, ...patch } });
+    }
 
     async function handlePaletteImageUpload(files) {
       const file = firstAcceptedFile(files, "image");
@@ -9087,38 +9123,26 @@ function NodeBody({
     }
 
     function addPickerColor() {
-      const pickerColor = node.data.customPalettePicker || "#ddc631";
+      const pickerColor = paletteData.customPalettePicker || "#ddc631";
       const nextColors = uniqueCustomPaletteColors([...paletteColors, customPaletteColorFromHex(pickerColor)]).slice(0, 10);
       const colorAlreadyApplied = nextColors.length === paletteColors.length && nextColors.every((color, index) => color.hex === paletteColors[index]?.hex);
       if (colorAlreadyApplied) return;
       onUndoSnapshot?.();
-      onUpdate(node.id, {
-        customPaletteColors: nextColors,
-        customPaletteRgbText: "",
-        customPalettePicker: pickerColor,
-        customPaletteError: ""
-      });
+      updatePrecisePalette({ colors: nextColors, rgbText: "", picker: pickerColor, error: "" });
     }
 
     async function pickScreenColor() {
       if (typeof window === "undefined" || !window.EyeDropper) {
-        onUpdate(node.id, {
-          customPaletteError: "Eye dropper is not available in this browser."
-        });
+        updatePrecisePalette({ error: "Eye dropper is not available in this browser." });
         return;
       }
       try {
         const result = await new window.EyeDropper().open();
         const color = customPaletteColorFromHex(result.sRGBHex);
-        onUpdate(node.id, {
-          customPalettePicker: color.hex,
-          customPaletteError: ""
-        });
+        updatePrecisePalette({ picker: color.hex, error: "" });
       } catch (error) {
         if (error?.name === "AbortError") return;
-        onUpdate(node.id, {
-          customPaletteError: "Could not pick that color."
-        });
+        updatePrecisePalette({ error: "Could not pick that color." });
       }
     }
 
@@ -9134,6 +9158,11 @@ function NodeBody({
       });
     }
 
+    function clearPrecisePalette() {
+      onUndoSnapshot?.();
+      updatePrecisePalette({ colors: [], rgbText: "", error: "" });
+    }
+
     function updateInlinePicker(event) {
       const rect = event.currentTarget.getBoundingClientRect();
       const x = clamp((event.clientX - rect.left) / Math.max(1, rect.width), 0, 1);
@@ -9141,10 +9170,7 @@ function NodeBody({
       const saturation = Math.round(x * 100);
       const value = Math.round((1 - y) * 100);
       const color = customPaletteColorFromHsv(pickerColor.hue, saturation, value);
-      onUpdate(node.id, {
-        customPalettePicker: color.hex,
-        customPaletteError: ""
-      });
+      updatePrecisePalette({ picker: color.hex, error: "" });
     }
 
     function startInlinePicker(event) {
@@ -9158,10 +9184,7 @@ function NodeBody({
       const y = clamp((event.clientY - rect.top) / Math.max(1, rect.height), 0, 1);
       const hue = Math.round(y * 360);
       const color = customPaletteColorFromHsv(hue, pickerColor.saturation, pickerColor.value);
-      onUpdate(node.id, {
-        customPalettePicker: color.hex,
-        customPaletteError: ""
-      });
+      updatePrecisePalette({ picker: color.hex, error: "" });
     }
 
     function startHuePicker(event) {
@@ -9170,7 +9193,7 @@ function NodeBody({
       updateHuePicker(event);
     }
 
-    const pickerColor = customPaletteColorFromHex(node.data.customPalettePicker || "#ddc631");
+    const pickerColor = customPaletteColorFromHex(paletteData.customPalettePicker || "#ddc631");
     const hasImagePalette = Boolean(node.data.customPalettePreviewUrl);
     const pickerHueColor = customPaletteColorFromHsv(pickerColor.hue, 100, 100);
     const pickerMarkerStyle = {
@@ -9193,12 +9216,12 @@ function NodeBody({
             connectedPortKeys={connectedPortKeys}
           />
         ) : (
-          <div className="style-output-placeholder">{customPaletteSelected ? "Add grade colors to enable output" : "Choose style or grade to enable output"}</div>
+          <div className="style-output-placeholder">{paletteSelected ? "Add grade colors to enable output" : "Choose style or grade to enable output"}</div>
         )}
 
         <div className="style-preset-row">
           <span>Style</span>
-          <select value={selectedPreset} onChange={(event) => onUpdate(node.id, { stylePreset: event.target.value })}>
+          <select aria-label="Style preset" value={selectedPreset} onChange={(event) => onUpdate(node.id, { stylePreset: event.target.value })}>
             {stylePresetNames.map((presetName) => (
               <option key={presetName}>{presetName}</option>
             ))}
@@ -9207,16 +9230,16 @@ function NodeBody({
 
         <div className="style-preset-row">
           <span>Grade</span>
-          <select value={selectedGrade} onChange={(event) => onUpdate(node.id, { gradePreset: event.target.value, customPaletteError: "" })}>
-            {gradePresetNames.map((presetName) => (
+          <select aria-label="Grade preset" value={selectedGrade} onChange={(event) => onUpdate(node.id, { gradePreset: event.target.value, customPaletteError: "" })}>
+            {styleGradePresetNames.map((presetName) => (
               <option key={presetName}>{presetName}</option>
             ))}
           </select>
         </div>
 
-        {customPaletteSelected && (
-          <section className="custom-palette-panel" onDragOver={allowFileDrop} onDrop={handlePaletteDrop}>
-            <div className={`custom-palette-image-wrap ${hasImagePalette ? "has-preview" : ""}`}>
+        {paletteSelected && (
+          <section className="custom-palette-panel" onDragOver={customPaletteSelected ? allowFileDrop : undefined} onDrop={customPaletteSelected ? handlePaletteDrop : undefined}>
+            {customPaletteSelected && <div className={`custom-palette-image-wrap ${hasImagePalette ? "has-preview" : ""}`}>
               <label className={`custom-palette-image-drop ${node.data.customPalettePreviewUrl ? "has-preview" : ""}`} title={node.data.customPalettePreviewUrl ? "Replace palette image" : "Extract palette from image"}>
                 {node.data.customPalettePreviewUrl ? (
                   <img {...fullResolutionImageProps(node.data.customPalettePreviewUrl, "custom-palette.png")} className="custom-palette-preview" src={previewImageUrl(node.data.customPalettePreviewUrl)} alt="Extracted custom palette" loading="lazy" decoding="async" />
@@ -9240,9 +9263,9 @@ function NodeBody({
                   <Trash2 size={15} />
                 </button>
               )}
-            </div>
+            </div>}
 
-            {!hasImagePalette && (
+            {precisePaletteSelected && (
               <>
                 <div className="custom-palette-inline-picker">
                   <div className="custom-palette-spectrum-wrap" style={pickerMarkerStyle}>
@@ -9278,7 +9301,7 @@ function NodeBody({
                       <Pipette size={16} />
                       <span>Pick</span>
                     </button>
-                    <button type="button" className="custom-palette-tool muted" onClick={clearCustomPalette} title="Clear palette colors">
+                    <button type="button" className="custom-palette-tool muted" onClick={clearPrecisePalette} title="Clear palette colors">
                       <Trash2 size={16} />
                       <span>Clear</span>
                     </button>
@@ -9309,10 +9332,11 @@ function NodeBody({
                 </div>
               </div>
             )}
-            {node.data.customPaletteStatus === "extracting" && <small className="custom-palette-status">Extracting...</small>}
-            {node.data.customPaletteError && <small className="upload-error">{node.data.customPaletteError}</small>}
+            {customPaletteSelected && node.data.customPaletteStatus === "extracting" && <small className="custom-palette-status">Extracting...</small>}
+            {paletteData.customPaletteError && <small className="upload-error">{paletteData.customPaletteError}</small>}
           </section>
         )}
+        {node.data.libraryStyle && <LibraryLookPreview look={node.data.libraryStyle} onChange={libraryStyle => onUpdate(node.id, { libraryStyle })} />}
       </div>
     );
   }
@@ -12304,6 +12328,7 @@ function createDefaultNodeData(type, label, count) {
       characterCustomSheets: [],
       activeCharacterSheetId: "",
       characterVoices: [],
+      characterVoiceReferenceOnly: false,
       activeVoiceId: "",
       characterTab: "build",
       activated: false,
@@ -12432,6 +12457,8 @@ function createDefaultNodeData(type, label, count) {
       title,
       stylePreset: "None",
       gradePreset: "None",
+      styleGradeVersion: 1,
+      precisePalette: { colors: [], rgbText: "", picker: "#ddc631", error: "" },
       customPaletteRgbText: "",
       customPalettePicker: "#ddc631",
       customPaletteColors: [],
@@ -14088,7 +14115,12 @@ async function runVideoModelGeneration({ node, prompt, incoming, incomingByNode,
   // Kling 4 binds every authored alias before the server deduplicates media.
   const referenceImageItems = isKling4Model(effectiveModel) ? collectedImageItems : uniqueAssetItems(collectedImageItems);
   const referenceVideoItems = isKling4Model(effectiveModel) ? collectedVideoItems : uniqueAssetItems(collectedVideoItems);
-  const referenceAudioItems = uniqueAssetItems(connectedAssetItems(incoming.referenceAudioIn, { prompt }));
+  const characterVoiceReferences = characterVoiceReferenceInputs(incoming);
+  const referenceAudioItems = uniqueAssetItems(connectedAssetItems(incoming.referenceAudioIn, { prompt })).map(item => {
+    const voice = characterVoiceReferences.find(({ source, url }) => url === item.url && characterConnections?.some(connection => connection.source.id === source.id));
+    // A direct voice wire must not steal the same Character's image alias.
+    return voice ? { ...item, label: `Character voice ${characterTag(voice.source)}` } : item;
+  });
   const characterVoiceItems = characterVoices.map((url, index) => ({ url, label: `Character voice ${index + 1}`, type: "audio" }));
   const audioItems = uniqueAssetItems([...referenceAudioItems, ...characterVoiceItems]);
   const { response, data } = await nodeApi.generateVideo(buildVideoGenerationRequest({
@@ -14107,6 +14139,7 @@ async function runVideoModelGeneration({ node, prompt, incoming, incomingByNode,
     referenceVideoLabels: referenceVideoItems.map((item) => item.label),
     referenceAudioUrls: audioItems.map((item) => item.url),
     referenceAudioLabels: audioItems.map((item) => item.label),
+    characterVoiceReferences,
     filmDirector
   }));
   if (!response.ok) throw new Error(`Run ${index + 1}: ${data.error || "Video generation failed."}`);
@@ -14782,6 +14815,7 @@ function promptPiecesForSource(source, { namedCharacterReferences = false } = {}
   if (source.type === "style") {
     const selectedPreset = source.data.stylePreset || "None";
     return [
+      libraryLookPrompt(source.data),
       stylePresetPrompts[selectedPreset] || "",
       gradePromptPiece(source.data)
     ].filter(Boolean);
@@ -14836,46 +14870,7 @@ function extractDominantPaletteColors(image, limit = 10) {
   const context = canvas.getContext("2d", { willReadFrequently: true });
   context.drawImage(image, 0, 0, width, height);
   const pixels = context.getImageData(0, 0, width, height).data;
-  const buckets = new Map();
-  const bucketSize = 24;
-
-  for (let index = 0; index < pixels.length; index += 4) {
-    const alpha = pixels[index + 3];
-    if (alpha < 32) continue;
-    const r = pixels[index];
-    const g = pixels[index + 1];
-    const b = pixels[index + 2];
-    const key = [
-      Math.min(255, Math.round(r / bucketSize) * bucketSize),
-      Math.min(255, Math.round(g / bucketSize) * bucketSize),
-      Math.min(255, Math.round(b / bucketSize) * bucketSize)
-    ].join(",");
-    const bucket = buckets.get(key) || { r: 0, g: 0, b: 0, count: 0 };
-    bucket.r += r;
-    bucket.g += g;
-    bucket.b += b;
-    bucket.count += 1;
-    buckets.set(key, bucket);
-  }
-
-  const total = [...buckets.values()].reduce((sum, bucket) => sum + bucket.count, 0) || 1;
-  const candidates = [...buckets.values()]
-    .map((bucket) => customPaletteColorFromRgb(
-      Math.round(bucket.r / bucket.count),
-      Math.round(bucket.g / bucket.count),
-      Math.round(bucket.b / bucket.count),
-      Math.round((bucket.count / total) * 1000) / 10
-    ))
-    .sort((first, second) => second.percent - first.percent);
-
-  const selected = [];
-  candidates.forEach((candidate) => {
-    if (selected.length >= limit) return;
-    const tooClose = selected.some((color) => colorDistance(color, candidate) < 30);
-    if (!tooClose) selected.push(candidate);
-  });
-
-  return selected.length >= limit ? selected : candidates.slice(0, limit);
+  return dominantPaletteFromPixels(pixels, limit).map(color => customPaletteColorFromRgb(color.r, color.g, color.b, color.percent));
 }
 
 function renderCustomPalettePreview(image, colors) {
@@ -14944,24 +14939,24 @@ function customGradePromptPiece(data = {}) {
 }
 
 function gradePromptPiece(data = {}) {
-  const selectedGrade = normalizeGradePresetName(data.gradePreset || "None");
-  if (selectedGrade === "Custom") return customGradePromptPiece(data);
-  return gradePresetPrompts[selectedGrade] || "";
+  const selectedGrade = normalizeStyleGradePresetName(data.gradePreset || "None");
+  if (isPaletteGrade(selectedGrade)) return customGradePromptPiece(styleGradePaletteData(data));
+  return styleGradePresetPrompts[selectedGrade] || "";
 }
 
 function styleOutputEnabled(data = {}) {
   const selectedPreset = data.stylePreset || "None";
-  const selectedGrade = normalizeGradePresetName(data.gradePreset || "None");
-  const hasStyle = selectedPreset !== "None";
-  const hasGrade = selectedGrade === "Custom" ? Boolean(customGradePromptPiece(data)) : selectedGrade !== "None";
+  const selectedGrade = normalizeStyleGradePresetName(data.gradePreset || "None");
+  const hasStyle = selectedPreset !== "None" || Boolean(libraryLookPrompt(data));
+  const hasGrade = isPaletteGrade(selectedGrade) ? Boolean(gradePromptPiece(data)) : selectedGrade !== "None";
   return hasStyle || hasGrade;
 }
 
 function styleGradeLabel(data = {}) {
-  const style = data.stylePreset && data.stylePreset !== "None" ? data.stylePreset : "";
-  const grade = normalizeGradePresetName(data.gradePreset || "None");
-  const gradeLabel = grade === "Custom"
-    ? (customGradePromptPiece(data) ? "Custom Grade" : "")
+  const style = [libraryLookPrompt(data) ? data.libraryStyle.name || "Catalog Look" : "", data.stylePreset && data.stylePreset !== "None" ? data.stylePreset : ""].filter(Boolean).join(" + ");
+  const grade = normalizeStyleGradePresetName(data.gradePreset || "None");
+  const gradeLabel = isPaletteGrade(grade)
+    ? (gradePromptPiece(data) ? grade === "Custom" ? "Custom Grade" : preciseColorPickerGrade : "")
     : grade !== "None" ? grade : "";
   return [style, gradeLabel].filter(Boolean).join(" + ") || "Style";
 }
@@ -15036,14 +15031,6 @@ function rgbToHsv(r, g, b) {
   };
 }
 
-function colorDistance(first, second) {
-  return Math.sqrt(
-    (first.r - second.r) ** 2 +
-      (first.g - second.g) ** 2 +
-      (first.b - second.b) ** 2
-  );
-}
-
 function buildVideoModelPrompt(node, prompt, incoming = {}, incomingByNode = {}) {
   const directorSource = videoModelSupportsFilmDirector(node.data.model) ? connectedDirectorPackageSource(incoming.directorIn) : null;
   const filmDirector = directorPackageForVideo(directorSource, incomingByNode);
@@ -15055,7 +15042,7 @@ function buildEffectiveVideoPrompt(prompt, incoming = {}, incomingByNode = {}, m
   const musicVideo = directorPackageConnections(incoming.directorIn || []).some(({ source }) => filmDirectorUsesMusic(source.data.skillApproach,
     (incomingByNode[source.id]?.musicIn || []).slice(-1).map(({ source }) => ({ url: source?.data?.resultUrl }))));
   const characterVoicesSupported = !isKling4Model(model);
-  const audioUrls = [...new Set([...connectedAudioUrls(incoming.referenceAudioIn), ...(characterVoicesSupported ? connectedCharacterVoiceUrls(incoming.characterIn) : [])])];
+  const audioUrls = [...new Set([...connectedAssetItems(incoming.referenceAudioIn, { prompt }).map(item => item.url), ...(characterVoicesSupported ? connectedCharacterVoiceUrls(incoming.characterIn) : [])])];
   const characterInstructions = (incoming.characterIn || [])
     .flatMap(({ source }) => {
       const voiceUrl = activeCharacterVoice(source)?.localUrl;
@@ -15063,7 +15050,8 @@ function buildEffectiveVideoPrompt(prompt, incoming = {}, incomingByNode = {}, m
       return characterVideoPromptPieces(source, audioIndex);
     })
     .filter(Boolean);
-  return [prompt, ...characterInstructions, storyboardVideoReferencePromptPiece(incoming.referenceImageIn)].filter(Boolean).join("\n\n");
+  const directVoiceInstructions = characterVoicesSupported && !musicVideo ? directCharacterVoiceReferencePrompts(incoming, audioUrls) : [];
+  return [prompt, ...characterInstructions, ...directVoiceInstructions, storyboardVideoReferencePromptPiece(incoming.referenceImageIn)].filter(Boolean).join("\n\n");
 }
 
 function storyboardVideoReferencePromptPiece(items = []) {
@@ -15094,7 +15082,7 @@ function characterVideoPromptPieces(source, audioIndex) {
     characterGenerationPhysicalDetailsPrompt(source.data),
     characterTraitPrompt(source.data),
     audioIndex && activeCharacterVoice(source)
-      ? `${source.data.compiledVoicePrompt || characterVoicePrompt} Use the dialogue reference labeled @Audio${audioIndex} for this character.`
+      ? characterVoicePromptForSource(source, audioIndex, characterTag(source))
       : ""
   ].filter(Boolean);
 }
@@ -15696,6 +15684,7 @@ function normalizeCurrentNode(node) {
       characterSheetModel: normalizeCharacterSheetModel(data.characterSheetModel),
       nonHumanCharacter: data.nonHumanCharacter === true,
       autoWardrobe: data.autoWardrobe === true,
+      characterVoiceReferenceOnly: data.characterVoiceReferenceOnly === true,
       characterSheetVariants,
       characterBaseSheet,
       characterBaseSignature: String(data.characterBaseSignature || ""),
@@ -16605,6 +16594,7 @@ function normalizeCoverageData(data = {}) {
 }
 
 function normalizeStyleData(data = {}) {
+  data = migrateStyleGradeData(data);
   const defaultData = createDefaultNodeData("style", data.title || "Style", 1);
   const customPaletteColors = normalizedCustomPaletteColors(data);
   const legacyCustomPalette = data.stylePreset === "Custom Palette";
@@ -16613,7 +16603,14 @@ function normalizeStyleData(data = {}) {
     ...data,
     title: data.title || "Style",
     stylePreset: normalizeStylePresetName(legacyCustomPalette ? "None" : data.stylePreset || "None"),
-    gradePreset: normalizeGradePresetName(data.gradePreset || (legacyCustomPalette ? "Custom" : "None")),
+    libraryStyle: data.libraryStyle ? lookSnapshot(data.libraryStyle) : null,
+    gradePreset: normalizeStyleGradePresetName(data.gradePreset),
+    precisePalette: {
+      colors: normalizedCustomPaletteColors(styleGradePaletteData({ ...data, gradePreset: preciseColorPickerGrade })),
+      rgbText: String(data.precisePalette?.rgbText || ""),
+      picker: /^#[0-9a-f]{6}$/i.test(String(data.precisePalette?.picker || "")) ? data.precisePalette.picker : "#ddc631",
+      error: ""
+    },
     customPaletteRgbText: String(data.customPaletteRgbText || ""),
     customPalettePicker: /^#[0-9a-f]{6}$/i.test(String(data.customPalettePicker || "")) ? data.customPalettePicker : "#ddc631",
     customPaletteColors,

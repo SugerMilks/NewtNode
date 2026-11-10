@@ -27,6 +27,7 @@ import {
   minimaxH3ResolutionOptions
 } from "../minimaxH3.js";
 import { normalizeVideoGenerateAudio } from "../videoAudio.js";
+import { validateCharacterVoiceReferences } from "../characterVoice.js";
 
 export { videoModelSupportsFilmDirector };
 
@@ -130,6 +131,7 @@ export function buildVideoGenerationRequest({
   referenceVideoLabels = [],
   referenceAudioUrls = [],
   referenceAudioLabels = [],
+  characterVoiceReferences = [],
   filmDirector = null
 }) {
   const activeFilmDirector = videoModelSupportsFilmDirector(node.data.model) ? filmDirector : null;
@@ -152,6 +154,11 @@ export function buildVideoGenerationRequest({
       throw new Error("MiniMax H3 with Director music also needs a reference image or video.");
     }
   }
+  const generateAudio = usesMusic ? true : activeFilmDirector
+    ? filmDirectorVideoGenerateAudio(activeFilmDirector.audioMode, normalizeVideoGenerateAudio(node.data.generateAudio))
+    : normalizeVideoGenerateAudio(node.data.generateAudio);
+  validateCharacterVoiceReferences({ inputs: characterVoiceReferences, model, audioUrls: referenceAudioUrls, generateAudio,
+    startFrames: startFrameUrls, endFrames: endFrameUrls, usesMusic });
   return {
     prompt,
     model,
@@ -166,9 +173,7 @@ export function buildVideoGenerationRequest({
       ? filmDirectorVideoAspectRatio(model, activeFilmDirector.aspectRatio, node.data.aspectRatio)
       : node.data.aspectRatio,
     ...(!isKling4Model(model) ? {
-      generateAudio: usesMusic ? true : activeFilmDirector
-        ? filmDirectorVideoGenerateAudio(activeFilmDirector.audioMode, normalizeVideoGenerateAudio(node.data.generateAudio))
-        : normalizeVideoGenerateAudio(node.data.generateAudio),
+      generateAudio,
       klingCfgScale: node.data.klingCfgScale ?? 0.5,
       negativePrompt: node.data.negativePrompt || "",
       seed: node.data.seed || "",

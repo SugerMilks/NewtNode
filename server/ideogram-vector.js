@@ -4,7 +4,8 @@ import { readFile } from "node:fs/promises";
 import sharp from "sharp";
 import { writeJsonAtomic } from "./json-store.js";
 import { sanitizeVectorSvg } from "./vector-svg.js";
-import { validateIdeogramVectorRequest, ideogramVectorCost } from "../src/ideogramVector.js";
+import { validateVectorRequest, vectorGenerationCost, ideogramVectorModel } from "../src/ideogramVector.js";
+import { isOpenAiVectorModel, openAiVectorEndpoint, openAiVectorProviderInput } from "../src/openAiVector.js";
 
 export const ideogramVectorEndpoints = {
   generate: "ideogram/vector/text-to-vector",
@@ -13,7 +14,6 @@ export const ideogramVectorEndpoints = {
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
 const hash = value => createHash("sha256").update(value).digest("hex");
 const validId = id => typeof id === "string" && /^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(id);
-const model = "Ideogram Vector";
 const maxOutputBytes = 20 * 1024 * 1024;
 
 export function ideogramVectorProviderInput(request, imageUrls) {
@@ -76,7 +76,7 @@ const publicJob = job => ({ requestId: job.id, status: job.status === "submittin
 // A stopped browser only stops waiting: submitted provider work keeps saving here.
 export function createIdeogramVectorService({ directory, getKey, clientFor, readSource, uploadImage, subscribe,
   save, recordHistory, readGenerated = readGeneratedVector, render = renderVectorPreview, charge = async () => null,
-  estimateCost = ideogramVectorCost }) {
+  estimateCost = vectorGenerationCost }) {
   const active = new Map(), activeNodes = new Map(), recovery = new Map();
   const receiptPath = id => {
     if (!validId(id)) throw fail("A valid Vector request ID is required.");
@@ -89,6 +89,7 @@ export function createIdeogramVectorService({ directory, getKey, clientFor, read
   const write = job => writeJsonAtomic(receiptPath(job.id), job, { mode: 0o600 });
 
   async function finish(job) {
+    const model = job.request.model || ideogramVectorModel;
     if (!job.item) {
       const artwork = await render(await readGenerated(job.remote.url));
       const output = await save(job.context, artwork);
@@ -132,7 +133,7 @@ export function createIdeogramVectorService({ directory, getKey, clientFor, read
     if (!job.providerRequestId) return { ...publicJob(job), status: "uncertain", error: job.error || "Submission was interrupted and cannot be confirmed. Check Fal History before starting a new vector. This request will not be resubmitted." };
     const key = String(getKey() || "").trim();
     if (!key || hash(key) !== job.credential) throw fail("Restore the original enabled Fal key to check this vector. No new generation was submitted.", 409);
-    const client = clientFor(key, job.endpoint);
+    const client = clientFor(key, job.endpoint, job.request.model || ideogramVectorModel);
     const state = await client.queue.status(job.endpoint, { requestId: job.providerRequestId, logs: false });
     if (["FAILED", "CANCELED", "CANCELLED"].includes(state.status)) {
       job.status = "failed"; job.error = "Fal reported that this vector failed or was cancelled."; await write(job); return publicJob(job);
@@ -152,7 +153,7 @@ export function createIdeogramVectorService({ directory, getKey, clientFor, read
     if (!Array.isArray(images) || images.length !== 1 || typeof images[0]?.url !== "string" || !images[0].url)
       throw fail("Fal returned no single SVG result. Check Fal History before starting another vector.", 502);
     job.remote = { url: images[0].url };
-    if (Number.isInteger(data.seed)) job.seed = data.seed;
+    if (!isOpenAiVectorModel(job.request.model) && Number.isInteger(data.seed)) job.seed = data.seed;
     if (result.requestId || result.request_id) job.providerRequestId = result.requestId || result.request_id;
     job.status = "saving";
   }
@@ -166,14 +167,16 @@ export function createIdeogramVectorService({ directory, getKey, clientFor, read
       throw fail(existing.error || "This vector is still processing. Check the existing request; it will not be submitted again.", job.errorStatus || 409);
     }
     const key = String(getKey() || "").trim();
-    if (!key) throw fail("Enable your existing Fal API key in Settings for Ideogram Vector. No other provider is used.");
+    if (!key) throw fail("Enable your existing Fal API key in Settings for Vector generation. No other provider is used.");
     const nodeKey = context.nodeId ? `${context.projectId}:${context.nodeId}` : `request:${id}`;
     if (activeNodes.has(nodeKey)) throw fail("This Vector node already has a request running. Check that request before generating again.", 409);
     if (activeNodes.size >= 2) throw fail("Two vectors are already processing. Wait for one to finish before starting another.", 429);
     activeNodes.set(nodeKey, id);
     try {
-      const endpoint = ideogramVectorEndpoints[request.mode];
-      const client = clientFor(key, endpoint);
+      const model = request.model || ideogramVectorModel;
+      const openAi = isOpenAiVectorModel(model);
+      const endpoint = openAi ? openAiVectorEndpoint(model) : ideogramVectorEndpoints[request.mode];
+      const client = clientFor(key, endpoint, model);
       // Every reference is validated before the first file can leave this computer.
       const images = await Promise.all(request.images.map(async image => validateVectorImage(await readSource(image.url, request.mode), request)));
       const imageUrls = [];
@@ -184,7 +187,7 @@ export function createIdeogramVectorService({ directory, getKey, clientFor, read
       await write(job);
       let enqueueWrite = Promise.resolve();
       try {
-        const result = await subscribe(endpoint, { input: ideogramVectorProviderInput(request, imageUrls), logs: true,
+        const result = await subscribe(endpoint, { input: openAi ? openAiVectorProviderInput(request) : ideogramVectorProviderInput(request, imageUrls), logs: true,
           onEnqueue: providerRequestId => {
             if (typeof providerRequestId === "string" && providerRequestId) {
               job.providerRequestId = providerRequestId;
@@ -222,7 +225,7 @@ export function createIdeogramVectorService({ directory, getKey, clientFor, read
   return {
     async start(body = {}) {
       receiptPath(body.requestId);
-      const request = validateIdeogramVectorRequest(body);
+      const request = validateVectorRequest(body);
       const context = Object.fromEntries(contextKeys.map(key => [key, String(body[key] || "").slice(0, key.endsWith("Path") ? 4096 : 200)]));
       const fingerprint = hash(JSON.stringify({ request, context }));
       const existing = active.get(body.requestId);

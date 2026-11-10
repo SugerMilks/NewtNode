@@ -9,7 +9,7 @@ const mark = { layer: "drawing", tool: "pen", color: "#191919", size: .01, opaci
 const layout = { url: "/uploads/layout.png", label: "Drawn layout", width: 1536, height: 768, marks: [mark], backgroundUrl: "/outputs/subject.png", backgroundLabel: "Subject", enabled: true };
 const font = { url: "/uploads/font.png", kind: "font", label: "Studio.otf", sample: "BRAND", enabled: true };
 const subject = { url: "/outputs/subject.png", label: "Subject" }, mood = { url: "/outputs/look.png", label: "Look" };
-const settings = () => ({ ...vectorDefaults(), prompt: "A graphic emblem", lettering: "BRAND", fontReference: font, layoutReference: layout, quality: "high" });
+const settings = () => ({ ...vectorDefaults(), vectorModel: "Ideogram Vector", prompt: "A graphic emblem", lettering: "BRAND", fontReference: font, layoutReference: layout, quality: "high" });
 
 test("Vector guidance is optional for old projects and remains editable across restore", () => {
   assert.equal(normalizeVectorData({ prompt: "old" }).layoutReference, null);

@@ -16,6 +16,7 @@ installGenerationChimeUnlock();
 const NodeEditor = React.lazy(() => import("./NodeEditor.jsx"));
 const StatsDashboard = React.lazy(() => import("./StatsDashboard.jsx"));
 const SettingsPage = React.lazy(() => import("./SettingsPage.jsx"));
+const LooksWorkspace = React.lazy(() => import("./LooksWorkspace.jsx"));
 
 class AppErrorBoundary extends React.Component {
   state = { error: null };
@@ -69,6 +70,8 @@ function App() {
   const nodePreferencesUpdatedRef = React.useRef(false);
   const [workspaceMode, setWorkspaceMode] = React.useState("nodes");
   const [nodeStatus, setNodeStatus] = React.useState("");
+  const [looksLoaded, setLooksLoaded] = React.useState(false);
+  const [lookRequest, setLookRequest] = React.useState(null);
   const nodeStatusInfo = normalizeNodeStatus(nodeStatus);
 
   React.useEffect(() => {
@@ -118,6 +121,9 @@ function App() {
           <button className={workspaceMode === "nodes" ? "active" : ""} aria-current={workspaceMode === "nodes" ? "page" : undefined} onClick={() => setWorkspaceMode("nodes")}>
             Projects
           </button>
+          <button className={workspaceMode === "looks" ? "active" : ""} aria-current={workspaceMode === "looks" ? "page" : undefined} onClick={() => { setLooksLoaded(true); setWorkspaceMode("looks"); }}>
+            Looks
+          </button>
           <button className={workspaceMode === "stats" ? "active" : ""} aria-current={workspaceMode === "stats" ? "page" : undefined} onClick={() => setWorkspaceMode("stats")}>
             Stats
           </button>
@@ -146,9 +152,18 @@ function App() {
         </React.Suspense>
       ) : null}
 
+      {looksLoaded && <div hidden={workspaceMode !== "looks"}>
+        <React.Suspense fallback={<WorkspaceFallback label="Loading looks" />}>
+          <LooksWorkspace active={workspaceMode === "looks"} onUse={(kind, value) => {
+            setLookRequest({ id: crypto.randomUUID(), kind, value });
+            setWorkspaceMode("nodes");
+          }} />
+        </React.Suspense>
+      </div>}
+
       <div className={`nodes-tab-keepalive ${workspaceMode === "nodes" ? "active" : ""}`} aria-hidden={workspaceMode !== "nodes"}>
         <React.Suspense fallback={<WorkspaceFallback label="Loading projects" />}>
-          <NodeEditor active={workspaceMode === "nodes"} onStatusChange={setNodeStatus} modelPreferences={modelPreferences} modelPreferencesReady={modelPreferencesLoaded} nodePreferences={nodePreferences} />
+          <NodeEditor active={workspaceMode === "nodes"} lookRequest={lookRequest} onLookRequestConsumed={() => setLookRequest(null)} onStatusChange={setNodeStatus} modelPreferences={modelPreferences} modelPreferencesReady={modelPreferencesLoaded} nodePreferences={nodePreferences} />
         </React.Suspense>
       </div>
     </main>

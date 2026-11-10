@@ -1,7 +1,9 @@
 .node-card.vector { width: 900px; max-width: calc(100vw - 48px); container: vector-node / inline-size; }
 .vector-node-body { display: flex; flex-direction: column; gap: 0; min-width: 0; font-size: 12px; letter-spacing: 0; }
 .vector-node-body button, .vector-node-body select, .vector-node-body input, .vector-node-body textarea { font: inherit; }
-.vector-monitor { width: 100%; aspect-ratio: 2 / 1; min-height: 220px; overflow: hidden; border: 1px solid #3e4045; border-radius: 7px; }
+.vector-monitor { position: relative; width: 100%; aspect-ratio: 2 / 1; min-height: 220px; overflow: hidden; border: 1px solid #3e4045; border-radius: 7px; }
+.vector-generation-progress { position: absolute; top: 12px; right: 12px; width: 32px; height: 32px; display: grid; place-items: center; border: 1px solid #ffffff30; border-radius: 50%; background: #111e; color: #e2ce31; pointer-events: none; }
+.vector-generation-spinner { animation: vector-layer-spin 1s linear infinite; }
 .vector-background-checker { background-color: #d2d2d2; background-image: conic-gradient(#ededed 25%, transparent 0 50%, #ededed 0 75%, transparent 0); background-size: 20px 20px; }
 .vector-background-light { background: #f4f4f4; }
 .vector-background-dark { background: #242529; }
@@ -45,6 +47,7 @@
 .vector-settings { display: flex; flex-direction: column; gap: 16px; min-width: 0; padding-left: 24px; border-left: 1px solid #ffffff12; }
 .vector-field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .vector-setting-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.vector-setting-grid-openai { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .vector-guidance { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .vector-guide-row { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; min-width: 0; min-height: 35px; }
 .vector-guide-row:has(input[type="checkbox"]) .vector-guide-open { flex-basis: 100%; }
@@ -90,8 +93,9 @@
   .vector-results-bar .output-row { grid-column: 1 / -1; }
   .vector-setting-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .vector-setting-grid > label:last-child { grid-column: 1 / -1; }
+  .vector-setting-grid-openai > label:last-child { grid-column: auto; }
 }
-@media (prefers-reduced-motion: reduce) { .vector-layer-status svg { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .vector-layer-status svg, .vector-generation-spinner { animation: none; } }
 .vector-saved-looks { display: grid; gap: 8px; }
 .vector-look-row { display: flex; gap: 6px; min-width: 0; }
 .vector-look-row > select, .vector-look-row > input { flex: 1; width: 0; min-width: 0; }

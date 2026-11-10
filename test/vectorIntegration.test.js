@@ -10,12 +10,13 @@ import { estimatedNodeWidth, estimatedNodeHeight, estimatedNodeRect } from "../s
 import { normalizedResultItems } from "../src/mediaResults.js";
 import { isReframeNode } from "../src/cameraCoverage.js";
 import { migrateOpenAiImageSettings } from "../src/openAiImage26.js";
+import { isOpenAiVectorModel, openAiVectorModels, openAiVectorReferenceNotice } from "../src/openAiVector.js";
 
 const editor = await readFile(new URL("../src/NodeEditor.jsx", import.meta.url), "utf8");
 function isolated(name, next, dependencies = {}) {
   const start = editor.indexOf(`function ${name}(`), end = next ? editor.indexOf(`function ${next}(`, start) : editor.indexOf("\nfunction ", start + 1);
   assert.ok(start >= 0 && end > start, `${name} exists in the real editor`);
-  const context = { isReframeNode, migrateOpenAiImageSettings, ...dependencies };
+  const context = { isReframeNode, migrateOpenAiImageSettings, isOpenAiVectorModel, openAiVectorReferenceNotice, ...dependencies };
   return Function(...Object.keys(context), `${editor.slice(start, end)};return ${name};`)(...Object.values(context));
 }
 const vectorConfigText = editor.match(/    vector: (\{.*\}),\n    cameraCoverage:/)?.[1];
@@ -76,6 +77,12 @@ test("real canvas validator accepts text/images and rejects incompatible or lock
   assert.equal(connect({ id: "c", type: "character", data: { locked: true, activated: true } }, "characterOut", "imageIn"), "");
   assert.match(connect({ id: "c", type: "character", data: { locked: true, activated: true } }, "voiceOut", "imageIn"), /Incompatible/);
   assert.equal(validate({ nodeId: "v", port: "imageOut" }, { nodeId: "p", port: "sourceIn" }, [vector, { id: "p", type: "preview", data: {} }]), "");
+  for (const model of openAiVectorModels) {
+    vector.data.vectorModel = model;
+    assert.match(connect(board, "transferOut", "transferIn"), /text-only/);
+    assert.match(connect({ id: "i", type: "image", data: {} }, "imageOut", "imageIn"), /text-only/);
+    assert.equal(connect({ id: "t", type: "plainText", data: {} }, "promptOut", "promptIn"), "");
+  }
 });
 
 test("Mood Board connections survive saved graph copy and presets with media intact", () => {

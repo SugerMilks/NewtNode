@@ -38,7 +38,7 @@ try {
   const button = name => nav.getByRole("button", { name, exact: true });
   const canvas = page.locator(".node-canvas");
   await canvas.waitFor();
-  assert.deepEqual(await nav.getByRole("button").allTextContents().then(labels => labels.map(label => label.trim())), ["Projects", "Stats", "Settings"]);
+  assert.deepEqual(await nav.getByRole("button").allTextContents().then(labels => labels.map(label => label.trim())), ["Projects", "Looks", "Stats", "Settings"]);
   assert.equal(await button("Projects").getAttribute("aria-current"), "page");
   assert.equal(await page.locator("[data-node-card-id]").count(), 0);
   await page.getByTitle("Show node palette", { exact: true }).click();
@@ -86,7 +86,7 @@ try {
       await button(tab).click(); await page.getByRole("navigation").waitFor();
       const rect = await nav.boundingBox();
       assert.ok(rect.x >= 0 && rect.x + rect.width <= viewport.width, "Navigation stays inside viewport");
-      for (const name of ["Projects", "Stats", "Settings"]) {
+      for (const name of ["Projects", "Looks", "Stats", "Settings"]) {
         const bounds = await button(name).boundingBox();
         assert.ok(bounds.x >= rect.x && bounds.x + bounds.width <= rect.x + rect.width);
       }
@@ -110,7 +110,7 @@ try {
     await page.screenshot({ path: path.join(directory, `status-alignment-${viewport.width}.png`) });
   }
   assert.deepEqual(errors, []); assert.deepEqual(unexpected, []); assert.deepEqual(writes, []);
-  console.log(JSON.stringify({ ok: true, directory, paidCalls: 0, checks: ["Projects default", "three tabs", "image/video nodes retained", "Stats legacy history", "Settings", "saved draft restore", "unsaved edits and mounted editor survive navigation", "reload", "desktop/mobile navigation"] }, null, 2));
+  console.log(JSON.stringify({ ok: true, directory, paidCalls: 0, checks: ["Projects default", "four tabs including Looks", "image/video nodes retained", "Stats legacy history", "Settings", "saved draft restore", "unsaved edits and mounted editor survive navigation", "reload", "desktop/mobile navigation"] }, null, 2));
 } catch (error) {
   console.error({ directory, errors, unexpected, writes });
   throw error;

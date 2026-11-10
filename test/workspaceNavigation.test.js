@@ -6,10 +6,10 @@ import { exploreModels } from "../src/explore.js";
 
 const shell = readFileSync(new URL("../src/main.jsx", import.meta.url), "utf8");
 
-test("the app opens directly to Projects with only Projects, Stats and Settings navigation", () => {
+test("the app opens directly to Projects with Projects, Looks, Stats and Settings navigation", () => {
   const navigation = shell.slice(shell.indexOf('<nav className="mode-switch"'), shell.indexOf("</nav>"));
-  assert.deepEqual([...navigation.matchAll(/>\s*([A-Za-z]+)\s*<\/button>/g)].map(match => match[1]), ["Projects", "Stats", "Settings"]);
-  assert.deepEqual([...navigation.matchAll(/setWorkspaceMode\("([^"]+)"\)/g)].map(match => match[1]), ["nodes", "stats", "settings"]);
+  assert.deepEqual([...navigation.matchAll(/>\s*([A-Za-z]+)\s*<\/button>/g)].map(match => match[1]), ["Projects", "Looks", "Stats", "Settings"]);
+  assert.deepEqual([...navigation.matchAll(/setWorkspaceMode\("([^"]+)"\)/g)].map(match => match[1]), ["nodes", "looks", "stats", "settings"]);
   assert.match(shell, /\[workspaceMode, setWorkspaceMode\] = React.useState\("nodes"\)/);
   assert.doesNotMatch(shell, /generationApi|historyApi|generateImage|generateVideo|function Gallery|function SelectChip|nodeWorkspaceLoaded/);
 });

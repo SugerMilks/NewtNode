@@ -47,8 +47,10 @@ import { createIdeogramVectorService } from "./ideogram-vector.js";
 import { registerIdeogramVectorRoutes, secureVectorAssetResponse } from "./routes/ideogramVector.js";
 import { createVectorLayerService, registerVectorLayerRoutes } from "./vector-layer-service.js";
 import { registerVectorLookRoutes } from "./vector-design-looks.js";
+import { registerLooksRoutes } from "./routes/looks.js";
+import { createLookAnalyzer } from "./looks-analysis.js";
 import { createVectorLayerNamer } from "./vector-layer-names.js";
-import { ideogramVectorCost, ideogramVectorRates } from "../src/ideogramVector.js";
+import { ideogramVectorCost, ideogramVectorRates, vectorGenerationCost } from "../src/ideogramVector.js";
 import { generateFalImageEdit, createIdeogramImageEditClient } from "./image-edit.js";
 import { ideogramImageEditModel } from "../src/ideogramImageEdit.js";
 import { isNanoBanana21Model, nanoBanana21ModelName, nanoBanana21FalTextEndpoint, nanoBanana21FalEditEndpoint, nanoBanana21Ratios, validateNanoBanana21Request, nanoBanana21Cost } from "../src/nanoBanana21.js";
@@ -759,7 +761,7 @@ async function saveVectorArtwork(context, artwork) {
 const ideogramVectorService = createIdeogramVectorService({
   directory: path.join(dataDir, "ideogram-vector"),
   getKey: () => process.env.FAL_KEY,
-  clientFor: (credentials, endpoint) => createSingleSubmissionFalClient({ credentials, endpoint, model: "Ideogram Vector" }),
+  clientFor: (credentials, endpoint, model) => createSingleSubmissionFalClient({ credentials, endpoint, model }),
   readSource: async (url, mode) => {
     const { filePath, fileName } = await resolveCoverageAsset(url);
     const maximum = (mode === "vectorize" ? 50 : 10) * 1024 * 1024;
@@ -768,7 +770,7 @@ const ideogramVectorService = createIdeogramVectorService({
   },
   uploadImage: uploadImageInputToFal,
   subscribe: subscribeFal,
-  estimateCost: request => ideogramVectorCost(request, vectorRates),
+  estimateCost: request => vectorGenerationCost(request, vectorRates),
   charge: (requestId, endpoint, key) => providerPricing.falCharge(requestId, endpoint, key),
   save: saveVectorArtwork,
   recordHistory: item => appendHistory(item, { deduplicate: true })
@@ -787,6 +789,12 @@ registerVectorLookRoutes(app, {
   directory: path.join(dataDir, "vector-looks"), assetDirectory: path.join(uploadsDir, "vector-looks"), assetUrl: "/uploads/vector-looks",
   readAsset: async url => { const { filePath } = await resolveCoverageAsset(url); if ((await stat(filePath)).size > 10 * 1024 * 1024) throw httpError(400, "Look references must be at most 10 MB."); return readFile(filePath); }
 }, sendApiError);
+
+registerLooksRoutes(app, {
+  directory: path.join(dataDir, "looks"), assetDirectory: path.join(uploadsDir, "looks"),
+  thumbnailDirectory: path.join(dataDir, "looks", "thumbnails"),
+  analyzeLook: createLookAnalyzer({ directory: path.join(dataDir, "looks", "analyses"), analyze: runMediaDescriptionLlm, estimateCost: estimateTextProcessingCost, recordHistory: appendHistory })
+});
 
 const newtPresetStore = registerNewtPresetRoutes(app, {
   directory: path.join(rootDir, "server", "data", "newt-presets"),
@@ -874,6 +882,8 @@ function buildHealthPayload() {
     ok: true,
     version: appVersion,
     routes: {
+      looksLibrary: true,
+      looksStyleAnalysis: true,
       myNewt: true,
       myNewtPlanning: true,
       myNewtLocalActions: true,
@@ -925,6 +935,7 @@ function buildHealthPayload() {
       imageEditing: true,
       imageEditingNanoBanana21: true,
       ideogramVector: true,
+      gptImage26Vector: true,
       vectorLayers: true,
       vectorLayerEditor: true,
       vectorLayerTransforms: true,
@@ -10040,7 +10051,7 @@ async function runTextLlm({
 }
 
 function checkedCreativeLlmResult(result, data, route) {
-  if (/^(film-director|storyboard|explore|vector)-/.test(route) && result.provider === "fal") {
+  if (/^(film-director|storyboard|explore|vector|look)-/.test(route) && result.provider === "fal") {
     result = { ...result, text: creativeFinalOutputText(result.text) };
   }
   creativeUsageContext.getStore()?.push(result);
@@ -10050,7 +10061,7 @@ function checkedCreativeLlmResult(result, data, route) {
       throw new Error(`${result.provider} returned an incomplete or failed response. Existing work has been preserved.`);
     }
     const validated = validateCreativeResponse(data, { ...result, route });
-    if (route === "explore-plan" || route === "vector-layer-names") result.text = JSON.stringify(validated);
+    if (["explore-plan", "vector-layer-names", "look-style-analysis"].includes(route)) result.text = JSON.stringify(validated);
     if (!result.text) throw new Error(`${result.provider} returned no text.`);
     return result;
   } catch (error) {
@@ -10092,7 +10103,7 @@ async function runMediaDescriptionLlm({
       logs: true
     }, { route, model: falModel }, route.startsWith("storyboard-")
       ? createStoryboardFalClient({ credentials: key, endpoint, model: falModel })
-      : route === "smart-text" ? createSingleSubmissionFalClient({ credentials: key, endpoint, model: falModel })
+      : ["smart-text", "look-style-analysis"].includes(route) ? createSingleSubmissionFalClient({ credentials: key, endpoint, model: falModel })
       : createFalClient({ credentials: key }));
     return checkedCreativeLlmResult({
       text: extractFalText(data).trim(),

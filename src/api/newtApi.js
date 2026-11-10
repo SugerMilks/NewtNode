@@ -17,6 +17,13 @@ function ensureOk(response, data, fallbackMessage) {
 }
 
 export async function fetchJsonApi(path, options = {}, label = "Request") {
+  if (path.startsWith("/api/looks")) {
+    const health = await getJson("/api/health", "Could not check Looks support.");
+    if (!health.routes?.looksLibrary) throw new Error("Restart NewtNode to activate the Looks library. Your projects are unchanged.");
+    if (path === "/api/looks/create-style" && !health.routes?.looksStyleAnalysis) throw new Error("Restart NewtNode to activate multi-image style analysis. No analysis was started.");
+    const response = await fetch(localApiFetchUrl(path), options);
+    return { response, data: await readJsonResponse(response, label) };
+  }
   if (path === "/api/editor/render") {
     const timeline = JSON.parse(options.body || "{}").timeline;
     const positioned = timeline?.clips?.some(c => c.positionX || c.positionY);
@@ -61,6 +68,8 @@ export async function fetchJsonApi(path, options = {}, label = "Request") {
   if (path === "/api/node/ideogram-vector" && options.method === "POST") {
     const health = await getJson("/api/health", "Could not verify Ideogram Vector support.");
     if (health.routes?.ideogramVector !== true) throw Object.assign(new Error("Restart NewtNode to activate Ideogram Vector. No generation was submitted."), { status: 409, noSubmission: true });
+    const model = JSON.parse(options.body || "{}").model;
+    if (model && model !== "Ideogram Vector" && health.routes?.gptImage26Vector !== true) throw Object.assign(new Error("Restart NewtNode to activate GPT Image 2.6 SVG generation. No generation was submitted."), { status: 409, noSubmission: true });
     options.signal?.throwIfAborted();
   }
   if (path === "/api/node/camera-coverage" || path === "/api/node/camera-coverage-capture") {
@@ -255,8 +264,19 @@ export const ideogramVectorApi = {
   pricing: () => getJson("/api/node/ideogram-vector-pricing", "Vector pricing"),
   generate: (body, { signal } = {}) => requestData("/api/node/ideogram-vector", {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal
-  }, "Ideogram Vector"),
+  }, "Vector generation"),
   job: requestId => getJson(`/api/node/ideogram-vector/${encodeURIComponent(requestId)}`, "Vector request status")
+};
+
+export const looksApi = {
+  status: () => getJson("/api/looks", "Looks library"),
+  connect: directory => postJson("/api/looks/folder", { directory }, "Connect Looks folder"),
+  search: (query, { signal } = {}) => requestData(`/api/looks/catalog?${new URLSearchParams(query)}`, { signal }, "Look catalog"),
+  detail: id => getJson(`/api/looks/catalog/${encodeURIComponent(id)}`, "Look details"),
+  favorite: (id, selected) => postJson(`/api/looks/favorites/${encodeURIComponent(id)}`, { selected }, "Favorite look"),
+  import: body => postJson("/api/looks/import", body, "Add look to canvas"),
+  createStyle: body => postJson("/api/looks/create-style", body, "Analyze look references"),
+  imageUrl: path => localApiFetchUrl(path)
 };
 
 export const outputApi = {

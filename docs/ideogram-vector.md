@@ -1,14 +1,28 @@
-# Ideogram Vector
+# Vector Model
 
 Vector is a dedicated graphic-design node. It uses the existing enabled Fal key; it does not require a direct Ideogram account or a new stored credential. Add it from the Nodes palette next to Image Model.
+
+## GPT Image 2.6 SVG
+
+The Model menu offers **Ideogram Vector**, **OpenAI Image 2.6 Sunburst** and **OpenAI Image 2.6 Flare**. New nodes default to Flare. Saved model choices remain unchanged; older projects without a model selection and Vectorize image keep Ideogram. Both GPT options generate real editable SVGs through the existing Fal account. Their results use the same Edit Artwork/layers, PNG preview, alpha editing, drag-to-canvas, Preview/Output connections and saved-project packaging as Ideogram. Existing artwork and settings are retained. Restart the backend and refresh after saving to activate the new choices; old backends block GPT submissions rather than silently running Ideogram.
+
+GPT SVG currently supports **text-to-vector only**. Image, Mood Board, font and layout references are not supported by this endpoint. Existing references are preserved, but block generation until removed/disabled or the model is switched back to Ideogram. New reference ports and guide creation are inactive for GPT. Selecting **Vectorize image (Ideogram)** explicitly returns to Ideogram conversion. No hidden image analysis, raster tracing, extra model call or provider fallback is introduced.
+
+GPT controls include five Quality levels, Low/Medium/High Complexity, Auto/Transparent/Opaque Background and ratios from 1:3 to 3:1 plus Auto. Quality controls the reference image used in SVG authoring; complexity controls planning effort independently. The internal reference raster is approximately 2K with exact aspect ratio and valid 16px dimensions; the resulting paths remain scalable. GPT does not expose a seed, so the saved Ideogram seed remains untouched and is never sent to GPT. Batches of 1-6 still run one SVG at a time, snapshotting model and settings before starting.
+
+Fal charges for reference-image generation and SVG authoring. Until a reliable per-request charge is available, the price is **unknown**, not free or an Ideogram estimate. The settled Fal charge is used when available. No paid tests were performed for this integration.
+
+Verified November 9, 2026: [OpenAI SVG output](https://developers.openai.com/api/docs/guides/image-generation#generate-svg-output), [Fal Flare schema](https://fal.ai/models/openai/gpt-image-2.6/flare/text-to-image/api), [Fal Sunburst schema](https://fal.ai/models/openai/gpt-image-2.6/sunburst/text-to-image/api). Requests set `output_format: "svg"`, `num_images: 1`, `sync_mode: false`, `svg_model: "gpt-6-astra"`, and `reasoning_effort` for complexity. They omit image references, masks, compression, animation and streaming options. Public OpenAI Flare and Sunburst sample SVGs passed the existing local validator/rasterizer; generated content must still satisfy the same passive-SVG limits. Krea, Atlas and direct OpenAI routes are not added by this update.
+
+`test/openAiVector.test.js` and the expanded Vector service/integration tests cover contracts, unsupported inputs, exact size limits, receipts/recovery, model-specific History/pricing and old-server protection. `scripts/verifyOpenAiVector.mjs` exercises both choices, frozen batches, references, persistence, local layer editing/alpha, dragging and narrow/desktop layouts with mocked generation only.
 
 ## Workflow
 
 The expanded editor requires a backend restart and browser refresh. Existing nodes, connections and saved versions remain compatible; no regeneration is needed.
 
-1. Choose **Text to vector** for a new design or **Vectorize image** for an existing image.
+1. Choose **Text to vector** and a model for a new design, or **Vectorize image** (Ideogram) for an existing image.
 2. Write a design brief, or connect a Text/Smart Text prompt. Graphic presets help express logo, icon, sticker, illustration and typography intent in the submitted prompt; they are creative instructions, not extra API parameters or an additional LLM call.
-3. For generation, optional connected image references guide the subject or composition. Connect a locked Mood Board to the separate pink **Mood Board** input for visual direction. For conversion, connect exactly one source image. Conversion uses the source directly without a prompt or Mood Board guidance.
+3. For Ideogram generation, optional connected image references guide the subject or composition. Connect a locked Mood Board to the separate pink **Mood Board** input for visual direction. GPT SVG accepts only text. For conversion, connect exactly one source image. Conversion uses the source directly without a prompt or Mood Board guidance.
 4. Choose **Generations** (1-6, default 1) beside Generate. Each successful generation appends a variant and preserves previous work. Browse variants on the fitted checkerboard preview; double-click the image to expand it. SVG and PNG files remain saved with the project.
 5. Connect the image output to Preview, Image Model or other compatible image nodes. These receive the PNG companion so existing raster-only provider contracts keep working.
 
@@ -17,6 +31,8 @@ Drag the large preview or any saved thumbnail onto the canvas to create an image
 The SVG keeps supported paths, groups, fills, strokes, transforms, clips and gradients editable in a vector editor. The preview background is a viewer setting, not a background-removal operation. The API does not promise editable font text, exact brand colors, transparent backgrounds, print color profiles, or a specific number of shapes. Include creative requests in the brief and inspect the delivered artwork.
 
 The compact preview has no background/Fit dropdowns or expand icon. Checkerboard and automatic fit apply to older saved nodes too. Focus the image and press Enter or Space as a keyboard alternative to double-click. Save layer edits before expanding the PNG preview, so it matches the artwork. Source comparison remains available when an image is connected; the separate Layers editor keeps its background and zoom controls.
+
+A small yellow spinner in the preview's upper-right corner indicates an active request, including a batch or a manual status check. It does not block selection or dragging, and disappears after completion, an error or Stop Waiting. Unconfirmed saved requests do not spin until checked. Reduced-motion settings retain the icon without animation. This indicator and the Flare default need only a browser refresh, not a backend restart.
 
 The node is a wide workspace with artwork across the top. Saved thumbnails, Edit Artwork and the output sit directly beneath it. Brief and connections occupy the left column; design direction, lettering, palette, font/layout references and generation settings occupy the right. Status and generation actions share the bottom row. Smaller windows stack the sections without hiding settings. Existing nodes use the layout automatically without changing their contents or connections.
 
@@ -87,7 +103,7 @@ To remove a background, select its objects and use **Mark selected objects as ba
 
 These are SVG object/group controls, not AI semantic segmentation, PSD layers or native Illustrator layers. Names are stored as SVG titles; support in other editors varies. The layer editor supports up to 5,000 objects and 500 edits per saved version; more complex originals can still be downloaded. Editing, rasterization and matte creation run locally with no provider charge; optional AI naming is billed separately. Saved drafts, locks and all companion assets survive project copy/save/import. A failed local save keeps the draft and previous results. Editor v2 requires the backend's `vectorLayerEditor` capability.
 
-## Provider contract
+## Ideogram Provider Contract
 
 Verified October 26, 2026 from [Ideogram Vector](https://ideogram.ai/models/vector/), [Fal text-to-vector API](https://fal.ai/models/ideogram/vector/text-to-vector/api) and [Fal image-to-vector API](https://fal.ai/models/ideogram/vector/image-to-vector/api).
 

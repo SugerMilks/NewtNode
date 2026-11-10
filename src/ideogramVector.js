@@ -1,8 +1,13 @@
 import { normalizedResultItems } from "./mediaResults.js";
+import { openAiImage26Models } from "./openAiImage26.js";
 import { appendedNodeResultState } from "./nodeRunner.js";
 import { normalizeVectorGuide, vectorReferences, vectorReferenceInstructions } from "./vectorGuidance.js";
+import { isOpenAiVectorModel, openAiVectorModels, openAiVectorQualities, openAiVectorComplexities, openAiVectorBackgrounds, openAiVectorAspectRatios, validateOpenAiVectorRequest, openAiVectorCost } from "./openAiVector.js";
 
 export const ideogramVectorModel = "Ideogram Vector";
+export const vectorModels = Object.freeze([ideogramVectorModel, ...openAiVectorModels]);
+export const vectorQualities = model => isOpenAiVectorModel(model) ? openAiVectorQualities : ["low", "medium", "high"];
+export const vectorModelAspectRatios = model => isOpenAiVectorModel(model) ? openAiVectorAspectRatios : vectorAspectRatios;
 export const vectorBatchOptions = Object.freeze(["1", "2", "3", "4", "5", "6"]);
 
 function vectorBatchCount(value) {
@@ -26,18 +31,22 @@ export function normalizeVectorRates(rates = {}) {
 }
 
 export function vectorDefaults() {
-  return { vectorMode: "generate", prompt: "", designPreset: "custom", lettering: "", palette: "", quality: "medium", aspectRatio: "1:1", seed: "", batchCount: "1", vectorizeMode: "default",
+  return { vectorModel: openAiImage26Models.flare, vectorComplexity: "high", vectorBackground: "auto", vectorMode: "generate", prompt: "", designPreset: "custom", lettering: "", palette: "", quality: "medium", aspectRatio: "1:1", seed: "", batchCount: "1", vectorizeMode: "default",
     fontReference: null, layoutReference: null, vectorSavedMoodBoards: [],
     previewBackground: "checker", vectorLayersOpen: false, vectorLayerDrafts: [], resultType: "image", resultItems: [], resultUrl: "", selectedResultIndex: 0, vectorJob: null, status: "idle", error: "" };
 }
 
 export function normalizeVectorData(value = {}, { restore = false } = {}) {
   const data = { ...vectorDefaults(), ...value };
+  // Pre-model-menu projects used Ideogram, including reference-based artwork.
+  const vectorModel = data.vectorMode !== "vectorize" && vectorModels.includes(value.vectorModel) ? value.vectorModel : ideogramVectorModel;
   const resultItems = normalizedResultItems(data.resultItems, data.resultUrl, "image");
   const selectedResultIndex = Math.max(0, Math.min(resultItems.length - 1, Math.trunc(Number(data.selectedResultIndex) || 0)));
   let vectorJob = data.vectorJob && typeof data.vectorJob.requestId === "string" ? { ...data.vectorJob } : null;
   if (restore && vectorJob && ["submitting", "running"].includes(vectorJob.status)) vectorJob = { ...vectorJob, status: "uncertain", error: "The request was interrupted. Check its result or History before generating again." };
-  return { ...data, resultItems, selectedResultIndex, resultUrl: resultItems[selectedResultIndex]?.url || "", resultType: "image", vectorJob,
+  return { ...data, vectorModel, resultItems, selectedResultIndex, resultUrl: resultItems[selectedResultIndex]?.url || "", resultType: "image", vectorJob,
+    vectorComplexity: openAiVectorComplexities.includes(data.vectorComplexity) ? data.vectorComplexity : "high",
+    vectorBackground: openAiVectorBackgrounds.includes(data.vectorBackground) ? data.vectorBackground : "auto",
     title: typeof data.title !== "string" || !data.title.trim() ? "Vector Model"
       : /^Vector(?: Node)?(?: \d+)?(?: Copy)*$/.test(data.title) ? data.title.replace(/^Vector(?: Node)?/, "Vector Model") : data.title,
     fontReference: normalizeVectorGuide(data.fontReference, "font"), layoutReference: normalizeVectorGuide(data.layoutReference, "layout"),
@@ -47,15 +56,26 @@ export function normalizeVectorData(value = {}, { restore = false } = {}) {
     vectorMode: data.vectorMode === "vectorize" ? "vectorize" : "generate",
     designPreset: vectorDesignPresets.some(p => p.value === data.designPreset) ? data.designPreset : "custom",
     prompt: String(data.prompt || ""), lettering: String(data.lettering || ""), palette: String(data.palette || ""),
-    quality: ["low", "medium", "high"].includes(data.quality) ? data.quality : "medium",
+    quality: vectorQualities(vectorModel).includes(data.quality) ? data.quality : "medium",
     batchCount: String(vectorBatchCount(data.batchCount)),
-    aspectRatio: vectorAspectRatios.includes(data.aspectRatio) ? data.aspectRatio : "1:1",
+    aspectRatio: vectorModelAspectRatios(vectorModel).includes(data.aspectRatio) ? data.aspectRatio : "1:1",
     seed: data.seed == null ? "" : String(data.seed), vectorizeMode: data.vectorizeMode === "simple" ? "simple" : "default",
     previewBackground: ["checker", "light", "dark"].includes(data.previewBackground) ? data.previewBackground : "checker",
     ...(restore && data.status === "running" ? { status: vectorJob ? "error" : resultItems.length ? "complete" : "idle" } : {}) };
 }
 
 function invalid(message) { throw Object.assign(new Error(message), { status: 400 }); }
+
+export function validateVectorRequest(body = {}) {
+  if (isOpenAiVectorModel(body.model)) return validateOpenAiVectorRequest(body);
+  if (body.model != null && body.model !== ideogramVectorModel) invalid("Choose a supported Vector model.");
+  // Keep legacy requests byte-for-byte compatible with their saved receipt fingerprints.
+  return validateIdeogramVectorRequest(body);
+}
+
+export function vectorGenerationCost(options = {}, rates) {
+  return isOpenAiVectorModel(options.model) ? openAiVectorCost(options) : ideogramVectorCost(options, rates);
+}
 
 // Strict request validation is shared by the browser and backend; normalization is only for saved UI data.
 export function validateIdeogramVectorRequest(body = {}) {
@@ -94,8 +114,9 @@ export function buildVectorRequest(data, { prompt = data.prompt, images = [], mo
     data.palette?.trim() ? `Color direction: ${data.palette.trim()}.` : "", referenceDirection].filter(Boolean).join("\n\n");
   // A preset alone is not an authored brief. Vectorize deliberately ignores every text-only control.
   if (data.vectorMode !== "vectorize" && !String(prompt || "").trim()) invalid("Add a design brief before generating a vector.");
-  return validateIdeogramVectorRequest({ mode: data.vectorMode, prompt: composed, images: references, quality: data.quality,
-    aspectRatio: data.aspectRatio, seed: data.seed, vectorizeMode: data.vectorizeMode });
+  return validateVectorRequest({ mode: data.vectorMode, prompt: composed, images: references, quality: data.quality,
+    aspectRatio: data.aspectRatio, vectorizeMode: data.vectorizeMode,
+    ...(isOpenAiVectorModel(data.vectorModel) ? { model: data.vectorModel, complexity: data.vectorComplexity, background: data.vectorBackground } : { seed: data.seed }) });
 }
 
 export function buildVectorBatchRequests(data, inputs) {

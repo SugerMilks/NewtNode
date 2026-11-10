@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 import { normalizeStylePresetName, stylePresetNames, stylePresetPrompts } from "../src/modelOptions.js";
-import { gradePresetNames, gradePresetPrompts, normalizeGradePresetName } from "../src/colorLook.js";
+import { styleGradePresetNames, styleGradePresetPrompts, normalizeStyleGradePresetName } from "../src/styleGrade.js";
+import { libraryLookPrompt } from "../src/looks.js";
 
 const addedStylePresetNames = [
   "Cinematic Indie",
@@ -56,22 +57,23 @@ test("saved Style selections append the current preset and grade to the final im
   assert.ok(start >= 0 && end > start);
   const deps = {
     stylePresetPrompts,
+    libraryLookPrompt,
     isReframeNode: () => false,
     activeConnectedCharacterSources: () => [],
     resolveImageReferenceMentions: prompt => prompt,
     resolveImageCharacterMentions: prompt => prompt,
     composerCharacterMappingPromptPieces: () => [],
     extractAspectRatio: value => value,
-    gradePromptPiece: data => gradePresetPrompts[data.gradePreset] || ""
+    gradePromptPiece: data => styleGradePresetPrompts[normalizeStyleGradePresetName(data.gradePreset)] || ""
   };
   const buildPrompt = new Function(...Object.keys(deps), `${editor.slice(start, end)}; return buildEffectiveImagePrompt;`)(...Object.values(deps));
   const brief = "A ceramic teapot on a plain wooden table, framed from above.";
   for (const stylePreset of stylePresetNames) {
-    for (const gradePreset of ["None", "Warm"]) {
+    for (const gradePreset of ["None", "Warm Grade", "Cool Grade", "Bright Fashion", "Modern Vintage"]) {
       const source = { type: "style", data: { stylePreset, gradePreset } };
       const before = structuredClone(source);
       const prompt = buildPrompt(brief, [{ source, edge: { from: { port: "styleOut" } } }], "16:9");
-      assert.equal(prompt, [brief, stylePresetPrompts[stylePreset], gradePresetPrompts[gradePreset]].filter(Boolean).join("\n\n"));
+      assert.equal(prompt, [brief, stylePresetPrompts[stylePreset], styleGradePresetPrompts[gradePreset]].filter(Boolean).join("\n\n"));
       assert.deepEqual(source, before);
     }
   }
@@ -100,12 +102,9 @@ test("legacy Cinematic preset is removed and migrates to Cinematic Standard", ()
 
 test("Grade choices remain independent from Style choices", () => {
   assert.equal(stylePresetNames.includes("Custom Palette"), false);
-  assert.deepEqual(gradePresetNames, [
-    "None", "Cool", "Warm", "Refn Beauty", "Spiky Nike", "Vintage Son", "Dusty Brothers",
-    "Moody Meadow", "Classy Kubric", "Coney Color", "Jaws of Life", "Custom"
-  ]);
-  assert.equal(stylePresetNames.includes("Jaws of Life"), false);
-  assert.match(gradePresetPrompts.Cool, /COLOR PALETTE:/);
-  assert.match(gradePresetPrompts.Warm, /COLOR PALETTE:/);
-  assert.equal(normalizeGradePresetName("Unknown"), "None");
+  assert.deepEqual(styleGradePresetNames, ["None", "Warm Grade", "Cool Grade", "Bright Fashion", "Modern Vintage", "Precise Color", "Custom"]);
+  assert.equal(stylePresetNames.includes("Bright Fashion"), false);
+  assert.match(styleGradePresetPrompts["Cool Grade"], /COLOR PALETTE:/);
+  assert.match(styleGradePresetPrompts["Warm Grade"], /COLOR PALETTE:/);
+  assert.equal(normalizeStyleGradePresetName("Unknown"), "None");
 });

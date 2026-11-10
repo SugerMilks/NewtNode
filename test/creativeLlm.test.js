@@ -147,6 +147,27 @@ test("Fal mood-board analysis explicitly enables mandatory reasoning and still v
   assert.equal(result.usages[0].cost, 0.02);
 });
 
+test("Looks adapters retain four images and normalize fenced analysis without another submission", async () => {
+  const look = { referenceCount: 4, anchorReference: 3,
+    signatureFeature: "Place a compact silhouette below a broad area of negative space, with a firm horizontal division between depth planes.",
+    stylePrompt: "Use dimensional painted surfaces, tactile brush marks, sculpted light and soft shadows to support the defining silhouette and depth structure without importing reference subjects." };
+  for (const provider of ["fal", "atlas", "openai"]) {
+    let calls = 0;
+    const text = `\`\`\`json\n${JSON.stringify(look)}\n\`\`\``;
+    const api = adapterFixture({ provider, data: provider === "fal"
+      ? { output: `<think>Compare references.</think>\n${text}`, usage: { cost: .02 } }
+      : { status: "completed", output_text: text, usage: { input_tokens: 1000, output_tokens: 100 } },
+    onRequest: (_url, body, _context, client) => {
+      calls++;
+      if (provider === "fal") { assert.equal(body.image_urls.length, 4); assert.equal(client.singleSubmission, true); }
+      else assert.equal(body.input[0].content.filter(item => item.type === "input_image").length, 4);
+    } });
+    const result = await api.runMediaDescriptionLlm({ ...request, route: "look-style-analysis", inputs: Array.from({ length: 4 }, (_, index) => ({ url: `/outputs/reference-${index}.png` })) });
+    assert.deepEqual(JSON.parse(result.text), look);
+    assert.equal(calls, 1); assert.ok(result.usages[0].cost > 0);
+  }
+});
+
 test("Fal Storyboard text and vision adapters use same-request recovery without changing other routes", async () => {
   for (const vision of [false, true]) {
     for (const route of ["storyboard-reference-analysis", "film-director-visual-analysis"]) {

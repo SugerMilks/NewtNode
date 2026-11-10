@@ -1,10 +1,11 @@
 import React from "react";
-import { Pencil, Play, RefreshCw, Square, Spline, Type, X, Columns2 } from "lucide-react";
+import { Pencil, Play, RefreshCw, Square, Spline, Type, X, Columns2, LoaderCircle } from "lucide-react";
 import { NodeRow, OutputPortRow } from "./NodePorts.jsx";
 import { useVectorGeneration } from "./useVectorGeneration.js";
 import { useVectorLayers } from "./useVectorLayers.js";
 import { VectorLayersPanel } from "./VectorLayersPanel.jsx";
-import { ideogramVectorCost, normalizeVectorRates, removeVectorResult, vectorAspectRatios, vectorBatchOptions, vectorDesignPresets } from "../ideogramVector.js";
+import { vectorGenerationCost, normalizeVectorRates, normalizeVectorData, removeVectorResult, vectorModelAspectRatios, vectorModels, vectorQualities, ideogramVectorModel, vectorBatchOptions, vectorDesignPresets } from "../ideogramVector.js";
+import { isOpenAiVectorModel, openAiVectorComplexities, openAiVectorBackgrounds, openAiVectorReferenceNotice } from "../openAiVector.js";
 import { ideogramVectorApi } from "../api/newtApi.js";
 import { setOutputItemDragData, finishOutputItemDragData } from "../mediaAssets.js";
 import { vectorReferences } from "../vectorGuidance.js";
@@ -48,7 +49,13 @@ export function VectorNodeBody({ node, config, prompt = "", promptConnected = fa
   const item = data.resultItems[data.selectedResultIndex];
   const source = imageInputs[0];
   const vectorize = data.vectorMode === "vectorize";
+  const openAi = isOpenAiVectorModel(data.vectorModel);
   const references = vectorReferences(data, imageInputs, moodBoardInputs);
+  const unsupportedReferences = openAi && references.length > 0;
+  const changeModel = vectorModel => {
+    const normalized = normalizeVectorData({ ...data, vectorModel });
+    update({ vectorModel, quality: normalized.quality, aspectRatio: normalized.aspectRatio });
+  };
   const displayed = showSource && source?.url ? source : item;
   const previewBlocked = !showSource && layers.dirty;
   const canPreview = Boolean(displayed?.url && onPreviewOpen && !previewBlocked);
@@ -57,12 +64,13 @@ export function VectorNodeBody({ node, config, prompt = "", promptConnected = fa
     if (canPreview) onPreviewOpen(displayed);
   };
   const ports = { node, onConnectStart, onDisconnectInput, connectedPortKeys };
-  const price = ideogramVectorCost({ mode: data.vectorMode, quality: data.quality, referenceCount: references.length, batchCount: data.batchCount }, pricing?.scope === pricingScope ? pricing.rates : {});
+  const price = vectorGenerationCost({ model: data.vectorModel, mode: data.vectorMode, quality: data.quality, referenceCount: references.length, batchCount: data.batchCount }, pricing?.scope === pricingScope ? pricing.rates : {});
   const actionLabel = vectorize ? data.batchCount === "1" ? "Vectorize Image" : `Vectorize Image (${data.batchCount})` : data.batchCount === "1" ? "Generate SVG" : `Generate ${data.batchCount} SVGs`;
-  const title = showApiCosts ? price.amountUsd == null ? "Current local pricing is unavailable. Generation may still be billed by Fal." : `${price.pricingBasis} ${price.source === "Configured estimate" ? "" : `Verified ${price.checkedAt}. `}${price.pricingSource}` : `Create ${data.batchCount} SVG${data.batchCount === "1" ? "" : "s"} through the enabled Fal account.`;
+  const title = showApiCosts ? price.amountUsd == null ? openAi ? price.pricingBasis : "Current local pricing is unavailable. Generation may still be billed by Fal." : `${price.pricingBasis} ${price.source === "Configured estimate" ? "" : `Verified ${price.checkedAt}. `}${price.pricingSource}` : `Create ${data.batchCount} SVG${data.batchCount === "1" ? "" : "s"} through the enabled Fal account.`;
   const currentPrompt = promptConnected ? prompt : data.prompt;
+  const progressLabel = data.vectorJob?.batchCount > 1 ? `Generating ${data.vectorJob.batchIndex} of ${data.vectorJob.batchCount}` : "Waiting for vector";
   const missingInput = references.some(image => !image?.url);
-  const canRun = !data.vectorJob && !working && !missingInput && (vectorize ? imageInputs.length === 1 : currentPrompt.trim().length > 0 && references.length <= 5);
+  const canRun = !data.vectorJob && !working && !missingInput && !unsupportedReferences && (vectorize ? !openAi && imageInputs.length === 1 : currentPrompt.trim().length > 0 && references.length <= 5);
   const select = index => { setShowSource(false); update({ selectedResultIndex: index, resultUrl: data.resultItems[index]?.url || "" }); };
   const deleteVariation = event => {
     if (event.key !== "Delete" && event.key !== "Backspace") return;
@@ -103,7 +111,7 @@ export function VectorNodeBody({ node, config, prompt = "", promptConnected = fa
   React.useEffect(() => { if (!source?.url) setShowSource(false); }, [source?.url]);
 
   return <div className="node-body vector-node-body">
-    <div className="vector-monitor vector-background-checker" onWheel={event => event.stopPropagation()}>
+    <div className="vector-monitor vector-background-checker" aria-busy={working} onWheel={event => event.stopPropagation()}>
       {displayed?.url ? <div className="vector-image-stage">
         <img src={!showSource && layers.previewUrl ? layers.previewUrl : !showSource && displayed.svgUrl ? displayed.svgUrl : displayed.url} alt={showSource ? source.label || "Source image" : item?.label || "Vector artwork"}
           role={onPreviewOpen ? "button" : undefined} aria-haspopup={onPreviewOpen ? "dialog" : undefined} aria-disabled={onPreviewOpen ? !canPreview : undefined} tabIndex={canPreview ? 0 : undefined}
@@ -111,6 +119,7 @@ export function VectorNodeBody({ node, config, prompt = "", promptConnected = fa
           onDoubleClick={openPreview} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openPreview(event); } }}
           {...dragProps(displayed, previewBlocked)} />
       </div> : <div className="vector-empty"><Spline size={32} /><span>Scalable artwork from a brief or image</span></div>}
+      {working && <span className="vector-generation-progress" role="status" aria-label={progressLabel}><LoaderCircle size={22} className="vector-generation-spinner" aria-hidden="true" /></span>}
     </div>
     <div className="vector-results-bar">
       <div ref={variantsRef} className="vector-variants" role="group" tabIndex={-1} aria-label="Saved vector variations" onKeyDown={deleteVariation} onWheel={event => event.stopPropagation()}>
@@ -135,17 +144,18 @@ export function VectorNodeBody({ node, config, prompt = "", promptConnected = fa
     {compare && <React.Suspense fallback={null}><VectorCompareDialog items={comparable} currentUrl={item?.url} update={update} onChoose={url => select(data.resultItems.findIndex(result => result.url === url))} onClose={() => setCompare(false)} /></React.Suspense>}
     <div className="vector-controls">
       <section className="vector-compose" aria-label="Brief and connections">
-        <label className="vector-mode">Task<select aria-label="Vector task" value={data.vectorMode} onChange={event => { setShowSource(false); update({ vectorMode: event.target.value }); }}><option value="generate">Text to vector</option><option value="vectorize">Vectorize image</option></select></label>
+        <label className="vector-mode">Task<select aria-label="Vector task" value={data.vectorMode} onChange={event => { setShowSource(false); update({ vectorMode: event.target.value, ...(event.target.value === "vectorize" ? { vectorModel: ideogramVectorModel, quality: ["low", "medium", "high"].includes(data.quality) ? data.quality : "high" } : {}) }); }}><option value="generate">Text to vector</option><option value="vectorize">{openAi ? "Vectorize image (Ideogram)" : "Vectorize image"}</option></select></label>
         {!vectorize && <textarea className="vector-brief" aria-label="Design brief" placeholder="Describe the artwork, composition and style…" value={currentPrompt} readOnly={promptConnected} onChange={event => update({ prompt: event.target.value })} />}
         {vectorize && <div className="vector-source-summary" role="status">{imageInputs.length === 1 && source?.url ? source.label || "Connected image" : "Connect one PNG, JPEG or WebP image."}</div>}
         <div className="vector-inputs">
           <NodeRow {...ports} label="Brief" inputPort={{ ...config.input.find(port => port.id === "promptIn"), disabled: vectorize, disabledReason: "Image vectorization uses the source image without a prompt." }}><span className="vector-input-summary">{vectorize ? "Not used" : promptConnected ? "Connected text" : "Use the design brief above"}</span></NodeRow>
-          <NodeRow {...ports} label={vectorize ? "Source image" : "References"} inputPort={config.input.find(port => port.id === "imageIn")}><span className="vector-input-summary">{imageConnected ? `${imageInputs.length} connected` : vectorize ? "Required · 1 image" : "Optional · up to 5"}</span></NodeRow>
-          <NodeRow {...ports} label="Mood Board" inputPort={{ ...config.input.find(port => port.id === "transferIn"), disabled: vectorize, disabledReason: "Mood Board guides Text to vector only. Image vectorization converts its source without style guidance." }}><span className="vector-input-summary" title={vectorize ? "The connection is preserved but is not sent when vectorizing." : "Visual direction only: palette, shapes, linework and texture, not the board's subjects or collage layout. Shares the five-reference limit."}>{vectorize ? "Not used" : moodBoardConnected ? moodBoardInputs.map(board => board.label || "Mood Board").join(", ") : "Optional"}</span></NodeRow>
+          <NodeRow {...ports} label={vectorize ? "Source image" : "References"} inputPort={{ ...config.input.find(port => port.id === "imageIn"), disabled: openAi, disabledReason: openAiVectorReferenceNotice }}><span className="vector-input-summary" title={openAi ? openAiVectorReferenceNotice : undefined}>{imageConnected ? `${imageInputs.length} connected` : openAi ? "Ideogram only" : vectorize ? "Required · 1 image" : "Optional · up to 5"}</span></NodeRow>
+          <NodeRow {...ports} label="Mood Board" inputPort={{ ...config.input.find(port => port.id === "transferIn"), disabled: vectorize || openAi, disabledReason: openAi ? openAiVectorReferenceNotice : "Mood Board guides Text to vector only. Image vectorization converts its source without style guidance." }}><span className="vector-input-summary" title={openAi ? openAiVectorReferenceNotice : vectorize ? "The connection is preserved but is not sent when vectorizing." : "Visual direction only: palette, shapes, linework and texture, not the board's subjects or collage layout. Shares the five-reference limit."}>{vectorize ? "Not used" : moodBoardConnected ? moodBoardInputs.map(board => board.label || "Mood Board").join(", ") : openAi ? "Ideogram only" : "Optional"}</span></NodeRow>
           {!vectorize && data.vectorSavedMoodBoards?.length > 0 && <div className="vector-look-references"><span>{moodBoardInputs.length ? "Saved look references (connected boards take priority)" : `Saved look: ${data.vectorSavedMoodBoards.map(board => board.label || "Mood Board").join(", ")}`}</span><button type="button" className="vector-icon" title="Remove saved look mood boards" aria-label="Remove saved look mood boards" onClick={() => update({ vectorSavedMoodBoards: [] })}><X size={14} /></button></div>}
         </div>
       </section>
       <section className="vector-settings" aria-label="Design settings">
+      {!vectorize && <label title="All Vector models use your enabled Fal account. GPT Image 2.6 supports text-only SVG; Ideogram also supports visual references.">Model<select aria-label="Vector model" value={data.vectorModel} onChange={event => changeModel(event.target.value)}>{vectorModels.map(model => <option key={model} value={model}>{model}</option>)}</select></label>}
       {!vectorize && <VectorSavedLooks key={guideScope} data={data} moodBoards={moodBoardInputs} update={update} api={api} />}
       {vectorize ? <label>Conversion detail<select aria-label="Conversion detail" value={data.vectorizeMode} onChange={event => update({ vectorizeMode: event.target.value })}><option value="default">Standard</option><option value="simple">Simple shapes</option></select></label> : <>
         <label>Design direction<select aria-label="Design direction" value={data.designPreset} onChange={event => update({ designPreset: event.target.value })}>{vectorDesignPresets.map(preset => <option key={preset.value} value={preset.value}>{preset.label}</option>)}</select></label>
@@ -155,26 +165,30 @@ export function VectorNodeBody({ node, config, prompt = "", promptConnected = fa
         </div>
         <div className="vector-guidance" aria-label="Vector creative references">
           {[["font", "fontReference", "Font Reference", Type], ["layout", "layoutReference", "Draw Layout", Pencil]].map(([kind, key, label, Icon]) => <div key={kind} className="vector-guide-row">
-            <button type="button" className="vector-guide-open" onClick={() => setGuideEditor({ kind, key, scope: guideScope })} title={kind === "font" ? "Reference lettering shapes with an image or a locally rendered font sample. Exact font reproduction is not guaranteed." : "Draw composition and shape guidance. Applying saves the sketch without generating."}>
+            <button type="button" className="vector-guide-open" disabled={openAi} onClick={() => setGuideEditor({ kind, key, scope: guideScope })} title={openAi ? openAiVectorReferenceNotice : kind === "font" ? "Reference lettering shapes with an image or a locally rendered font sample. Exact font reproduction is not guaranteed." : "Draw composition and shape guidance. Applying saves the sketch without generating."}>
               {data[key]?.url ? <img src={data[key].url} alt="" /> : <Icon size={17} />}<span>{label}</span>
             </button>
             {data[key] && <><input type="checkbox" aria-label={`Use ${label}`} title={`Include ${label} in generation`} checked={data[key].enabled !== false} onChange={e => update({ [key]: { ...data[key], enabled: e.target.checked } })} /><IconButton title={`Remove ${label}`} onClick={() => update({ [key]: null })}><X size={14} /></IconButton></>}
           </div>)}
         </div>
-        <div className="vector-setting-grid">
-          <label>Quality<select aria-label="Vector quality" value={data.quality} onChange={event => update({ quality: event.target.value })}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></label>
-          <label>Aspect ratio<select aria-label="Vector aspect ratio" value={data.aspectRatio} onChange={event => update({ aspectRatio: event.target.value })}>{vectorAspectRatios.map(ratio => <option key={ratio} value={ratio}>{ratio === "auto" ? "Auto" : ratio}</option>)}</select></label>
-          <label title="Blank uses random seeds. Batches start with this seed and advance by one for each generation.">Seed<input aria-label="Vector seed" type="number" min="0" max="2147483647" step="1" placeholder="Random" value={data.seed} onChange={event => update({ seed: event.target.value })} /></label>
+        <div className={`vector-setting-grid${openAi ? " vector-setting-grid-openai" : ""}`}>
+          <label title={openAi ? "Rendering quality of the reference image used to author the SVG. Higher settings may cost more; SVG paths remain scalable." : undefined}>Quality<select aria-label="Vector quality" value={data.quality} onChange={event => update({ quality: event.target.value })}>{vectorQualities(data.vectorModel).map(quality => <option key={quality} value={quality}>{{ low: "Low", medium: "Medium", high: "High", xhigh: "Extra High", max: "Maximum" }[quality]}</option>)}</select></label>
+          <label>Aspect ratio<select aria-label="Vector aspect ratio" value={data.aspectRatio} onChange={event => update({ aspectRatio: event.target.value })}>{vectorModelAspectRatios(data.vectorModel).map(ratio => <option key={ratio} value={ratio}>{ratio === "auto" ? "Auto" : ratio}</option>)}</select></label>
+          {openAi ? <>
+            <label title="Planning effort before rendering, separate from quality. Higher complexity can help dense lettering and layouts, but may take longer.">Complexity<select aria-label="Vector complexity" value={data.vectorComplexity} onChange={event => update({ vectorComplexity: event.target.value })}>{openAiVectorComplexities.map(value => <option key={value} value={value}>{value[0].toUpperCase() + value.slice(1)}</option>)}</select></label>
+            <label>Background<select aria-label="Vector background" value={data.vectorBackground} onChange={event => update({ vectorBackground: event.target.value })}>{openAiVectorBackgrounds.map(value => <option key={value} value={value}>{value[0].toUpperCase() + value.slice(1)}</option>)}</select></label>
+          </> : <label title="Blank uses random seeds. Batches start with this seed and advance by one for each generation.">Seed<input aria-label="Vector seed" type="number" min="0" max="2147483647" step="1" placeholder="Random" value={data.seed} onChange={event => update({ seed: event.target.value })} /></label>}
         </div>
       </>}
       </section>
     </div>
     <div className="vector-footer">
       <div className="vector-feedback">
+        {unsupportedReferences && <div className="node-error" role="alert">{openAiVectorReferenceNotice}</div>}
         {missingInput && <div className="node-error">A connected image or Mood Board has no saved output yet.</div>}
         {references.length > (vectorize ? 1 : 5) && <div className="node-error">{vectorize ? "Connect exactly one image to vectorize." : "Use at most five references in total, including Mood Boards, font and layout. Disable or disconnect an extra reference."}</div>}
         {data.vectorJob && <div className="vector-job">
-          <span role="status">{working ? data.vectorJob.batchCount > 1 ? `Generating ${data.vectorJob.batchIndex} of ${data.vectorJob.batchCount}` : "Waiting for vector…" : `Request ${data.vectorJob.status}`}</span>
+          <span role="status">{working ? progressLabel : `Request ${data.vectorJob.status}`}</span>
           {working ? <IconButton title="Stop waiting; provider work may still finish and be billed" onClick={stopWaiting}><Square size={14} /></IconButton> : <>
             <IconButton title="Check existing request; does not generate again" onClick={check}><RefreshCw size={15} /></IconButton>
             <IconButton title="Release request after checking History; does not cancel provider work" onClick={release}><X size={15} /></IconButton>

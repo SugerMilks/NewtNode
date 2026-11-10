@@ -14,7 +14,7 @@ Current release: `v3.0.0-beta.0`
 
 ## What It Does
 
-- Open directly into Projects, with Stats and Settings available in the top navigation. Each project can contain multiple canvases. Image and video generation live in their corresponding nodes; there are no separate Image or Video pages.
+- Open directly into Projects, with Looks, Stats and Settings available in the top navigation. Each project can contain multiple canvases. Image and video generation live in their corresponding nodes; there are no separate Image or Video pages.
 - Build media workflows visually with typed node ports and dependency-aware `Run All`.
 - Generate image, video, audio, text, utility, and 3D outputs through local API routes.
 - Use the Composer node to block camera, pose, image planes, props, maquettes, and guide frames before generation.
@@ -39,6 +39,16 @@ Current release: `v3.0.0-beta.0`
 - **3D preview**: GLB results render in-node with the shared lazy Three.js viewer.
 - **Color ID Matte**: Image and video matte pickers support color sampling, tolerance controls, and enlarged picker views.
 - **Cross-platform launchers**: Windows and macOS launchers are included for local app-style startup.
+
+## Looks
+
+The **Looks** tab connects a local compact Lookbook catalog (`catalog.json` beside an `images` folder), compatible with [kungfukoi/Newt_Node](https://github.com/kungfukoi/Newt_Node). Use the folder icon to connect a catalog, search by visual treatment or name, filter categories, and star favorites. Browse example images and edit the style description before choosing **Add Style** or **Add Mood Board**. Both add to the currently open canvas without replacing its contents. Mood Boards retain the normal compile/lock action.
+
+Catalog browsing, favorites and Add Mood Board are local operations with no paid AI calls. **Add Style** analyzes every example together in one billed vision request through an enabled provider; unchanged image sets and descriptions reuse the saved analysis. It creates a model-neutral visual-treatment prompt, with Style set to **None** and the first image in **Custom Grade**. Choose an additional Style preset without losing the look prompt. The editable prompt and all reference thumbnails remain at the bottom of the node; drag any thumbnail into Custom Grade to replace the grade without another AI call. Instructions describe visual qualities, not sample subjects or Midjourney switches. Selected files are copied into managed assets and travel with saved project packages. Originals are never moved, modified or deleted. Folder settings, favorites and caches stay local and are not shipped in Git.
+
+Style analysis reviews the full set, then chooses one distinctive blocking, shape or rendering feature and uses compatible qualities from the other images to support it. It is instructed to omit literal colors and palette directions so Grade stays independent. Existing saved descriptions are preserved; use Add Style again to create a look with the updated analysis.
+
+Only the catalog and canvas-handoff parts of the upstream Lookbook are integrated. Remote catalog scraping, automatic AI analysis, shared-drive file retirement and unrelated upstream changes are not enabled. See [Looks integration notes](docs/looks.md) for provenance and verification.
 
 ## Atlas Cloud
 
@@ -244,6 +254,8 @@ Inspect the SVG against light, dark or checker backgrounds. Settings and input c
 Published estimates range from $0.13–$0.32 per generated SVG, or $0.10 per converted image, depending on the selected operation and references. Tests use mocks and local fixtures; live account access and output quality have not been tested with credits. See [the Vector guide](docs/ideogram-vector.md).
 
 ## Ideogram 4.5 compatibility
+
+The **Vector Model** node also offers **GPT Image 2.6 Sunburst and Flare** for text-only editable SVG generation through Fal. New nodes default to Flare; saved model choices remain unchanged. Ideogram supports image/Mood Board/font/sketch references plus image vectorization. GPT results retain the existing layer editor, PNG/alpha companions and Preview/Output connections. See the [Vector guide](docs/ideogram-vector.md#gpt-image-26-svg) for controls, limits and variable billing.
 
 Ideogram 4.5 is currently available in **Image Edit**, while the new **Vector** node handles editable SVG artwork. Previously saved Ideogram Image Model nodes use the existing Nano Banana Pro migration and preserve their prompts, connections, results and History. GPT Image 2.6 Sunburst and Flare replace the 2.5 generation choices; Ideogram remains the Image Edit default.
 

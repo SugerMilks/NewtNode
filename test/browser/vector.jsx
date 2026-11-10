@@ -10,7 +10,7 @@ import "../../src/nodeEditor.css";
 // scripts/verifyVector.mjs supplies local image/SVG fixture responses without any app backend access.
 const config = { input: [{ id: "promptIn", label: "Brief", color: "#f0c83b" }, { id: "imageIn", label: "References", color: "#3d85ff" }, { id: "transferIn", label: "Mood Board", color: "#ff4fb3" }], output: [{ id: "imageOut", label: "Image output", color: "#3d85ff" }] };
 // Exercise older projects whose settings were collapsed and preview background was dark.
-const fresh = () => ({ id: "qa-vector", type: "vector", data: { ...vectorDefaults(), settingsOpen: false, previewBackground: "dark", title: "Vector", prompt: "A playful newt mark for a design studio" } });
+const fresh = () => ({ id: "qa-vector", type: "vector", data: { ...vectorDefaults(), ...(new URLSearchParams(location.search).has("newNode") ? {} : { vectorModel: "Ideogram Vector" }), settingsOpen: false, previewBackground: "dark", title: "Vector", prompt: "A playful newt mark for a design studio" } });
 const requests = new Map();
 const looks = new Map();
 function Harness() {
@@ -61,7 +61,7 @@ function Harness() {
         requests.set(body.requestId, { requestId: body.requestId, status: "failed", error: "Mock provider rejection; no automatic retry." });
         throw Object.assign(new Error("Mock provider rejection; check the request."), { status: 400 });
       }
-      const item = { type: "image", url: `/outputs/vector-qa/${body.requestId}.png`, thumbnailUrl: `/outputs/vector-qa/${body.requestId}-thumb.png`, svgUrl: `/outputs/vector-qa/${body.requestId}.svg`, width: 640, height: 640, model: "Ideogram Vector", label: body.mode === "vectorize" ? "Converted artwork" : "Newt studio mark", cost: { amountUsd: body.mode === "vectorize" ? 0.10 : 0.16 }, seed: 42, settings: body };
+      const item = { type: "image", url: `/outputs/vector-qa/${body.requestId}.png`, thumbnailUrl: `/outputs/vector-qa/${body.requestId}-thumb.png`, svgUrl: `/outputs/vector-qa/${body.requestId}.svg`, width: 640, height: 640, model: body.model || "Ideogram Vector", label: body.mode === "vectorize" ? "Converted artwork" : "Newt studio mark", cost: { amountUsd: body.model ? null : body.mode === "vectorize" ? 0.10 : 0.16 }, seed: 42, settings: body };
       const result = { requestId: body.requestId, status: "completed", item };
       requests.set(body.requestId, result); return result;
     },

@@ -1,5 +1,5 @@
 import { normalizeVectorData } from "./ideogramVector.js";
-export const vectorLookFields = ["designPreset", "lettering", "palette", "quality", "aspectRatio", "seed", "fontReference", "layoutReference", "vectorSavedMoodBoards"];
+export const vectorLookFields = ["vectorModel", "vectorComplexity", "vectorBackground", "designPreset", "lettering", "palette", "quality", "aspectRatio", "seed", "fontReference", "layoutReference", "vectorSavedMoodBoards"];
 export function vectorDesignLook(data, moodBoards) {
   const normalized = normalizeVectorData(data);
   const settings = Object.fromEntries(vectorLookFields.map(key => [key, normalized[key]]));

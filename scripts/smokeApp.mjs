@@ -2,6 +2,8 @@ const clientUrl = new URL(process.env.NEWT_SMOKE_CLIENT_URL || process.argv[2] |
 const apiHealthUrl = new URL(process.env.NEWT_SMOKE_API_URL || process.argv[3] || "http://127.0.0.1:3336/api/health");
 
 const requiredHealthRoutes = [
+  "looksLibrary",
+  "looksStyleAnalysis",
   "myNewt",
   "myNewtPlanning",
   "myNewtCreativeSkills",
@@ -47,6 +49,7 @@ const requiredHealthRoutes = [
   "gptImage26",
   "imageEditingNanoBanana21",
   "ideogramVector",
+  "gptImage26Vector",
   "vectorLayers",
   "vectorLayerEditor",
   "vectorLayerTransforms",
