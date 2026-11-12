@@ -4,6 +4,8 @@ Keep an asset's role clear: character identity and wardrobe, location geometry, 
 
 Use a bounded number of candidates and targeted retries, with the task budget and requested quality in mind. Tutorial demonstration settings are not universal defaults. Never silently lower quality or repeat an uncertain paid request. Reuse unchanged inspected assets and valid completed outputs.
 
+When most of an image is approved, prefer a localized repair over regenerating the whole scene. Specify the exact unwanted detail and what must remain unchanged, then compare the returned image to the source before accepting it. A prompt-only rerun is not an identity-preserving edit. If Advanced Edit or masking is not exposed by the current tools, provide the repair instruction and identify the source for a manual edit; do not claim that a mask or corrected image exists. Model-specific artifact anecdotes are not guarantees about current providers.
+
 If inspection is disabled, describe choices as based on metadata or user selection, not visual approval. If an operation such as selecting a specific character wardrobe or result is not supported by the available tools, request the precise manual selection instead of changing protected output fields or pretending the choice was made.
 
 Preserve reusable creative source branches and revision history. Disposable preparation may be cleaned from the canvas only through the cleanup tool after preserving the chosen full-resolution asset independently; local files and History remain intact. Selection and rejection reasons should support later changes without another paid analysis of the same unchanged image. State remaining uncertainty honestly when finishing.

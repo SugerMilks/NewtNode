@@ -58,7 +58,7 @@ The generation prompt also requests headroom, look room and retention of the sou
 
 - **Upscale:** Fal Topaz High Fidelity V2, 2x or 4x, PNG, crop disabled, face enhancement disabled. This prioritizes retention of the selected composition over generative face reconstruction. It is not claimed to be mathematically lossless.
 - **Refine:** the selected enabled image model receives only the selected shot plus a fidelity prompt that preserves viewpoint, crop, perspective, identity, staging, lighting and grade. The master image is deliberately not added because it can pull the result toward the original camera. Refinement can still change details; compare versions. Provider-supported aspect ratios apply.
-- New nodes default to Nano Banana 2.1, 2K, with Auto Refine on. Saved 2.5 model selections upgrade to the matching 2.6 variant; other choices and generated media remain unchanged. Other currently enabled supported choices include Nano Banana Pro, OpenAI Image 2.6 Sunburst/Flare and Seedream 5.0 Pro. Existing provider routing is retained for refinement. Camera generation and Topaz require Fal; no new billing account is introduced.
+- New nodes default to Nano Banana 2.1, 2K, with Auto Refine on. Saved 2.5 model selections upgrade to the matching 2.6 variant; other choices and generated media remain unchanged. Other currently enabled supported choices include Nano Banana Pro, OpenAI Image 2.6 Sunburst/Flare and Seedream 5.5. Existing provider routing is retained for refinement. Camera generation and Topaz require Fal; no new billing account is introduced.
 
 ### Lens Changes
 

@@ -1,6 +1,7 @@
 import { scopedMyNewtRequest } from "../myNewt/requestScope.js";
 import { isVideoGenerationRequest } from "../videoJobPolicy.js";
 import { isNanoBanana21Model } from "../nanoBanana21.js";
+import { isSeedream55Model, migrateSeedreamModel } from "../seedream55.js";
 import { isKling4Model } from "../kling4.js";
 import { isOpenAiImage26Model } from "../openAiImage26.js";
 const localApiPort = import.meta.env?.VITE_API_PORT || "3336";
@@ -10,6 +11,7 @@ function ensureOk(response, data, fallbackMessage) {
   if (!response.ok) {
     const error = new Error(data?.error || fallbackMessage || "Request failed.");
     error.status = response.status;
+    if (data?.noSubmission === true) error.noSubmission = true;
     throw error;
   }
 
@@ -17,9 +19,31 @@ function ensureOk(response, data, fallbackMessage) {
 }
 
 export async function fetchJsonApi(path, options = {}, label = "Request") {
+  if (path.startsWith("/api/node/image-layers")) {
+    let health;
+    try { health = await getJson("/api/health", "Could not verify Layers support."); }
+    catch (error) { if (options.method === "POST") error.noSubmission = true; throw error; }
+    if (!health.routes?.imageLayers) throw Object.assign(new Error("Restart NewtNode to activate Layers. No generation was submitted."), { noSubmission: true });
+    if (path.startsWith("/api/node/image-layers-psd") && !health.routes?.imageLayersPsd) throw Object.assign(new Error("Restart NewtNode to activate layered PSD export. No export was started."), { noSubmission: true });
+    if (options.body && JSON.parse(options.body).document?.layers?.some(layer => layer.rotation) && !health.routes?.imageLayersRotation)
+      throw Object.assign(new Error("Restart NewtNode to save or export rotated layers. Your edits are preserved."), { noSubmission: true });
+    if (options.body && JSON.parse(options.body).document?.folders?.length && !health.routes?.imageLayerFolders)
+      throw Object.assign(new Error("Restart NewtNode to save or export layer folders. Your edits are preserved."), { noSubmission: true });
+    const layersBody = JSON.parse(options.body || "{}");
+    if ((layersBody.layerOnly || layersBody.document?.folders?.some(folder => folder.parentId)) && !health.routes?.imageLayerSeparation)
+      throw Object.assign(new Error("Restart NewtNode to separate individual layers and preserve nested folders. No generation or export was submitted."), { noSubmission: true });
+    options.signal?.throwIfAborted();
+    const response = await fetch(localApiFetchUrl(path), options);
+    return { response, data: await readJsonResponse(response, label) };
+  }
   if (path.startsWith("/api/looks")) {
     const health = await getJson("/api/health", "Could not check Looks support.");
     if (!health.routes?.looksLibrary) throw new Error("Restart NewtNode to activate the Looks library. Your projects are unchanged.");
+    if ((path.startsWith("/api/looks/shared") || /[?&]source=shared(?:&|$)/.test(path) || options.body && JSON.parse(options.body).destination === "shared") && !health.routes?.looksSharedFolders) throw new Error("Restart NewtNode to activate Shared User Looks. Nothing was shared.");
+    if (/[?&]source=all(?:&|$)/.test(path) && !health.routes?.looksUnifiedSearch) throw new Error("Restart NewtNode to include all libraries in Looks search and Favorites. Your saved looks are unchanged.");
+    if ((/[?&]source=film-stills(?:&|$)/.test(path) || /\/film-still-/.test(path) || options.body && /^film-still-/.test(JSON.parse(options.body).id || "")) && !health.routes?.looksFilmStills) throw new Error("Restart NewtNode to activate Film Stills. Your looks and projects are unchanged.");
+    if ((/^\/api\/looks\/(library|custom|collections)(\/|$)/.test(path) || /[?&](source=custom|collection=)/.test(path)) && !health.routes?.looksWorkspaceTools) throw new Error("Restart NewtNode to activate custom Looks and collections. Your library and projects are unchanged.");
+    if (options.body && JSON.parse(options.body).styleBoardVersion === 1 && !health.routes?.looksCreateStyleBoard) throw new Error("Restart NewtNode to activate the Create Look style board. No extraction or save was started.");
     if (path === "/api/looks/create-style" && !health.routes?.looksStyleAnalysis) throw new Error("Restart NewtNode to activate multi-image style analysis. No analysis was started.");
     const response = await fetch(localApiFetchUrl(path), options);
     return { response, data: await readJsonResponse(response, label) };
@@ -89,6 +113,10 @@ export async function fetchJsonApi(path, options = {}, label = "Request") {
   }
   if (path === "/api/node/generate-image") {
     const body = JSON.parse(options.body || "{}");
+    if (isSeedream55Model(migrateSeedreamModel(body.model))) {
+      const health = await getJson("/api/health", "Could not verify Seedream 5.5 support.");
+      if (health.routes?.seedream55 !== true) throw new Error("Restart NewtNode to activate Seedream 5.5. No generation was submitted.");
+    }
     if (isOpenAiImage26Model(body.model)) {
       const health = await getJson("/api/health", "Could not verify GPT Image 2.6 support.");
       if (health.routes?.gptImage26 !== true) throw new Error("Restart NewtNode to activate GPT Image 2.6. No generation was submitted.");
@@ -254,6 +282,14 @@ export const cameraCoverageApi = {
   capture: body => postJson("/api/node/camera-coverage-capture", body, "Capture coverage shot")
 };
 
+export const imageLayersApi = {
+  start: body => postJson("/api/node/image-layers", body, "Layers"),
+  job: id => getJson(`/api/node/image-layers/${encodeURIComponent(id)}`, "Layers status"),
+  save: body => postJson("/api/node/image-layers-save", body, "Save Layers"),
+  exportPsd: body => postJson("/api/node/image-layers-psd", body, "Export PSD"),
+  psdJob: id => getJson(`/api/node/image-layers-psd/${encodeURIComponent(id)}`, "PSD export status")
+};
+
 export const ideogramVectorApi = {
   looks: () => getJson("/api/vector-looks", "Saved Vector looks"),
   saveLook: body => postJson("/api/vector-looks", body, "Save Vector look"),
@@ -276,6 +312,17 @@ export const looksApi = {
   favorite: (id, selected) => postJson(`/api/looks/favorites/${encodeURIComponent(id)}`, { selected }, "Favorite look"),
   import: body => postJson("/api/looks/import", body, "Add look to canvas"),
   createStyle: body => postJson("/api/looks/create-style", body, "Analyze look references"),
+  library: () => getJson("/api/looks/library", "Saved Looks"),
+  shared: () => getJson("/api/looks/shared", "Shared User Looks"),
+  connectShared: directory => postJson("/api/looks/shared/folder", { directory }, "Connect Shared User Looks"),
+  share: (ids, sharedDirectory) => postJson("/api/looks/shared/publish", { ids, sharedDirectory }, "Share Looks"),
+  removeShared: (id, directory) => requestData(`/api/looks/shared/${encodeURIComponent(id)}`, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ directory }) }, "Delete shared Look"),
+  create: body => postJson("/api/looks/custom", body, "Save Look"),
+  analyze: body => postJson("/api/looks/custom/analyze", body, "Analyze look references"),
+  remove: id => requestData(`/api/looks/custom/${encodeURIComponent(id)}`, { method: "DELETE" }, "Delete Look"),
+  createCollection: name => postJson("/api/looks/collections", { name }, "Create collection"),
+  updateCollection: (id, body) => postJson(`/api/looks/collections/${encodeURIComponent(id)}`, body, "Update collection"),
+  removeCollection: id => requestData(`/api/looks/collections/${encodeURIComponent(id)}`, { method: "DELETE" }, "Delete collection"),
   imageUrl: path => localApiFetchUrl(path)
 };
 
@@ -473,6 +520,10 @@ export const nodeApi = {
     return postJson("/api/node/explore-plan", body, "Explore planning");
   },
   async editImage(form) {
+    if (form.get("preserveAlpha") === "true") {
+      const health = await getJson("/api/health", "Could not verify layer editing support.");
+      if (health.routes?.imageEditingLayers !== true) throw new Error("Restart NewtNode to activate transparency-preserving layer edits. No generation was submitted.");
+    }
     if (isOpenAiImage26Model(form.get("model"))) {
       const health = await getJson("/api/health", "Could not verify GPT Image 2.6 editing support.");
       if (health.routes?.gptImage26 !== true) throw new Error("Restart NewtNode to activate GPT Image 2.6 masked edits. No generation was submitted.");

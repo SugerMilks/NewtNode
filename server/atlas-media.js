@@ -3,6 +3,7 @@ import { buildAtlasVideoRequest } from "../src/atlasVideos.js";
 import { estimateAtlasImageCost, estimateAtlasVideoCost } from "../src/atlasPricing.js";
 import { imageModelNames } from "../src/modelOptions.js";
 import { seedanceDraftCost } from "../src/seedanceDraft.js";
+import { isSeedream55Model } from "../src/seedream55.js";
 
 export function createAtlasMedia({ client, readLocalAsset, imageSize, labelPrompt, validateVideoAssets = async () => {}, quoteInput = async () => null }) {
   async function quotedCost(cost, input, key) {
@@ -13,7 +14,7 @@ export function createAtlasMedia({ client, readLocalAsset, imageSize, labelPromp
     const openAi = model === imageModelNames.openAiImage2;
     const size = openAi ? explicitSize === undefined ? imageSize({ aspectRatio, resolution }) : explicitSize : undefined;
     if (!openAi) quality = "high";
-    background = "auto";
+    if (!isSeedream55Model(model)) background = "auto";
     const submittedPrompt = labelPrompt(prompt, imageInputs);
     const options = { model, prompt: submittedPrompt, aspectRatio, resolution, quality, size, background };
     // Validate the complete request before sending even reference files to the provider.

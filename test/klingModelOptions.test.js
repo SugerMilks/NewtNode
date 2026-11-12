@@ -273,6 +273,6 @@ test("removed video models are no longer selectable", () => {
     imageModelNames.openAiImage2,
     imageModelNames.openAiImage26Sunburst,
     imageModelNames.openAiImage26Flare,
-    imageModelNames.seedream5Pro
+    imageModelNames.seedream55
   ]);
 });

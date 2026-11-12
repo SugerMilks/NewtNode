@@ -30,13 +30,21 @@ try {
   if (!(await voiceSection.evaluate(element => element.open))) await voiceSection.locator("summary").click();
   const toggle = page.getByRole("switch", { name: "Voice Reference Only", exact: true });
   const state = () => page.getByLabel("Voice QA state").textContent().then(JSON.parse);
+  const oneCharacterOutput = async () => {
+    assert.equal(await page.locator('[data-port-role="output"]').count(), 1);
+    assert.equal(await page.locator('[data-port-role="output"]').getAttribute("data-port-id"), "characterOut");
+    assert.equal(await page.locator('[data-port-id="voiceOut"]').count(), 0);
+    assert.equal(await page.getByText("Selected Voice", { exact: true }).count(), 0);
+  };
   await toggle.waitFor();
+  await oneCharacterOutput();
   assert.equal(await toggle.getAttribute("aria-checked"), "false");
   assert.equal(await toggle.isEnabled(), true, "voice role remains editable on locked sheets");
   assert.match((await state()).prompt, /Use the provided dialogue audio file/);
   assert.match(await page.locator(".character-voice-mode").getAttribute("title"), /written|supplies the words/);
   const voices = (await state()).data.characterVoices;
   await toggle.click();
+  await oneCharacterOutput();
   assert.equal(await toggle.getAttribute("aria-checked"), "true");
   assert.match((await state()).prompt, /VOICE REFERENCE ONLY.*@Audio1/);
   assert.doesNotMatch((await state()).prompt, /Use the provided dialogue audio file/);
@@ -58,12 +66,23 @@ try {
   assert.equal(await fits(), true);
   const screenshots = await mkdtemp(path.join(tmpdir(), "newtnode-character-voice-"));
   await page.locator("details.voice").screenshot({ path: path.join(screenshots, "voice-desktop.png") });
+  await page.locator(".character-topbar").screenshot({ path: path.join(screenshots, "single-output-build.png") });
+  await page.getByRole("tab", { name: "Sheet 1", exact: true }).click();
+  await oneCharacterOutput();
+  await page.locator(".character-node").screenshot({ path: path.join(screenshots, "single-output-sheet.png") });
+  await page.getByRole("tab", { name: "Character Build", exact: true }).click();
+  await voiceSection.waitFor();
+  if (!(await voiceSection.evaluate(element => element.open))) await voiceSection.locator("summary").click();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.locator(".character-qa-stage").evaluate(element => Object.assign(element.style, { width: "820px", maxWidth: "none", transform: "scale(0.44)", transformOrigin: "top left" }));
   assert.equal(await fits(), true);
   await page.locator("details.voice").screenshot({ path: path.join(screenshots, "voice-scaled.png") });
   await page.getByRole("button", { name: "Load Legacy", exact: true }).click();
   assert.equal(await toggle.getAttribute("aria-checked"), "false");
+  await oneCharacterOutput();
+  await page.getByRole("button", { name: "Load Legacy Voice Wire", exact: true }).click();
+  await oneCharacterOutput();
+  assert.equal(await page.locator('[data-port-id="characterOut"]').evaluate(element => element.classList.contains("connected")), true);
   assert.deepEqual(calls, []); assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ ok: true, paidCalls: 0, screenshots, checks: ["off default", "locked character toggle", "live prompt role", "save/reopen/copy", "legacy compatibility", "keyboard switch", "desktop/scaled canvas"] }, null, 2));
+  console.log(JSON.stringify({ ok: true, paidCalls: 0, screenshots, checks: ["single output in both tabs and voice modes", "legacy wire anchor while unlocked", "off default", "locked character toggle", "live prompt role", "save/reopen/copy", "legacy compatibility", "keyboard switch", "desktop/scaled canvas"] }, null, 2));
 } finally { await browser?.close(); await server.close(); }

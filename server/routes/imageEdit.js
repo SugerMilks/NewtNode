@@ -16,6 +16,9 @@ export function registerImageEditRoutes(app, { limiter, hasFal, getProvider, rea
       const quality = model === openAiImage26Models.sunburst && ["xhigh", "max"].includes(requestedQuality) ? "high" : requestedQuality;
       const ideogram = model === ideogramImageEditModel;
       const nano = model === nanoBanana21ModelName;
+      if (req.body.preserveAlpha !== undefined && !["true", "false"].includes(req.body.preserveAlpha)) throw Object.assign(new Error("Invalid layer transparency option."), { status: 400 });
+      const preserveAlpha = req.body.preserveAlpha === "true";
+      if (preserveAlpha && (mode !== "edit" || req.body.blank === "true")) throw Object.assign(new Error("Layer edits require Edit image without a blank canvas."), { status: 400 });
       if (!imageEditModels.includes(model)) throw Object.assign(new Error("Choose Ideogram 4.5, Nano Banana 2.1 or Image 2.6 Sunburst for image editing."), { status: 400 });
       // getProvider applies global precedence; an unsupported selected provider returns "".
       const provider = getProvider ? getProvider() : hasFal?.() ? "fal" : "";
@@ -25,7 +28,7 @@ export function registerImageEditRoutes(app, { limiter, hasFal, getProvider, rea
       if (!/^[a-z0-9-]{16,80}$/i.test(requestId || "")) throw Object.assign(new Error("An edit request ID is required."), { status: 400 });
       if (ideogram) {
         const submittedPrompt = (() => {
-          try { return buildImageEditPrompt({ prompt, mode, model, blank: req.body.blank === "true", hasDrawing: Boolean(req.files?.drawing?.[0]), hasSelection: Boolean(req.files?.selection?.[0]) }); }
+          try { return buildImageEditPrompt({ prompt, mode, model, preserveAlpha, blank: req.body.blank === "true", hasDrawing: Boolean(req.files?.drawing?.[0]), hasSelection: Boolean(req.files?.selection?.[0]) }); }
           catch (error) { throw Object.assign(error, { status: 400 }); }
         })();
         validateIdeogramImageEditRequest({ prompt: submittedPrompt, quality, editPrecision });
@@ -52,7 +55,7 @@ export function registerImageEditRoutes(app, { limiter, hasFal, getProvider, rea
     const nano = model === nanoBanana21ModelName;
     const source = await readSource(sourceUrl);
     const prepared = await prepareImageEdit({ source: source.buffer, drawing: req.files?.drawing?.[0]?.buffer,
-      selection: req.files?.selection?.[0]?.buffer, prompt, mode, model, blank: req.body.blank === "true" })
+      selection: req.files?.selection?.[0]?.buffer, prompt, mode, model, blank: req.body.blank === "true", preserveAlpha: req.body.preserveAlpha === "true" })
       .catch((error) => { throw Object.assign(error, { status: 400 }); });
     let generation;
     let generationProvider = provider === "atlas" ? "Atlas Cloud" : "fal.ai";
@@ -67,14 +70,15 @@ export function registerImageEditRoutes(app, { limiter, hasFal, getProvider, rea
         : model === ideogramImageEditModel ? ideogramImageEditCost(costOptions) : openAiImage26Cost(costOptions));
       const modelSettings = nano ? { resolution, thinkingLevel: nanoBanana21ThinkingLevel } : model === ideogramImageEditModel ? { editPrecision, ...(Number.isInteger(generation.seed) ? { seed: generation.seed } : {}) } : {};
       const item = { url: output.url, thumbnailUrl: output.thumbnailUrl, fileName: output.fileName, type: "image", mimeType: "image/png",
-        label: "Image Edit", model, ...modelSettings, provider: generationProvider, sourceUrl, width: prepared.width, height: prepared.height, cost };
+        label: prepared.preserveAlpha ? "Layer Edit" : "Image Edit", model, ...modelSettings, provider: generationProvider, sourceUrl, width: prepared.width, height: prepared.height, cost,
+        ...(prepared.preserveAlpha ? { preserveAlpha: true, alphaUrl: output.url } : {}) };
       let warning = "";
       try {
         await recordHistory({ id: randomUUID(), createdAt: new Date().toISOString(), mediaType: "image", provider: generationProvider, modelName: model,
-          endpoint: generation.endpoint, mode: `Image Edit: ${mode}`, prompt, submittedPrompt: prepared.submittedPrompt,
+          endpoint: generation.endpoint, mode: prepared.preserveAlpha ? "Layer Edit" : `Image Edit: ${mode}`, prompt, submittedPrompt: prepared.submittedPrompt,
           project: { id: req.body.projectId || "node-workspace", name: req.body.projectName || "Node workspace" },
           node: { id: req.body.nodeId, title: req.body.nodeTitle || "Image Edit" },
-          settings: { ...(!nano ? { quality } : {}), ...modelSettings, sourceUrl, maskedEdit: Boolean(prepared.selection), blank: req.body.blank === "true", imageSize: `${prepared.size.width}x${prepared.size.height}` },
+          settings: { ...(!nano ? { quality } : {}), ...modelSettings, sourceUrl, maskedEdit: Boolean(prepared.selection), ...(prepared.preserveAlpha ? { preserveAlpha: true } : {}), blank: req.body.blank === "true", imageSize: `${prepared.size.width}x${prepared.size.height}` },
           localImage: item.url, localThumbnail: item.thumbnailUrl, outputFileName: item.fileName, cost });
       } catch { warning = "Image saved, but this run could not be added to History."; }
       return { item, warning };

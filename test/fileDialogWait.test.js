@@ -3,12 +3,13 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { registerCoreRoutes } from "../server/routes/core.js";
 import { chooseEditorExportPath } from "../src/editorExport.js";
+import { isDialogCancellation } from "../server/dialog-errors.js";
 
 const source = readFileSync(new URL("../server/index.js", import.meta.url), "utf8");
 const start = source.indexOf("async function runFileDialogCommand(");
 const end = source.indexOf("\nfunction safeComposerPoseFileName(", start);
 assert.ok(start > 0 && end > start);
-const runner = execFile => new Function("execFile", `${source.slice(start, end)}\nreturn runFileDialogCommand;`)(execFile);
+const runner = execFile => new Function("execFile", "isDialogCancellation", `${source.slice(start, end)}\nreturn runFileDialogCommand;`)(execFile, isDialogCancellation);
 
 test("file dialogs stay open past the old two-minute limit and complete on the user's decision", async t => {
   t.mock.timers.enable({ apis: ["setTimeout"] });

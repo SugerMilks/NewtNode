@@ -8,6 +8,7 @@ import { nanoBanana21ModelName, nanoBanana21ResolutionOptions } from "../nanoBan
 import { appendWorkflowContextFormFields } from "../workflowContext.js";
 import { notifyGenerationTaskComplete } from "../generationChime.js";
 import "./imageEditStudio.css";
+const ImageEditLayers = React.lazy(() => import("./ImageEditLayers.jsx"));
 
 const tools = [["pen", Pencil, "Draw"], ["arrow", ArrowUpRight, "Arrow"], ["ellipse", Circle, "Circle"], ["rectangle", Square, "Rectangle"], ["text", Type, "Text note"], ["eraser", Eraser, "Erase marks"], ["hand", Hand, "Pan"]];
 const blobOf = (canvas) => new Promise((resolve, reject) => canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("Could not prepare the drawing.")), "image/png"));
@@ -32,6 +33,8 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider 
   const [note, setNote] = React.useState("");
   const [prompt, setPrompt] = React.useState("");
   const [mode, setMode] = React.useState("edit");
+  const [layersVisited, setLayersVisited] = React.useState(false);
+  const [layerActivity, setLayerActivity] = React.useState({ busy: false, dirty: false });
   const [blank, setBlank] = React.useState(false);
   const [model, setModel] = React.useState(imageEditDefaultModel);
   const [quality, setQuality] = React.useState("high");
@@ -56,10 +59,16 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider 
   const compareDragRef = React.useRef(null);
   const result = versions[resultIndex];
   const reviewing = Boolean(result);
+  const selectionAvailable = mode !== "sketch";
+  const visibleTools = tools.filter(([id]) => {
+    if (reviewing) return id === "hand";
+    if (mode === "sketch" && ["arrow", "ellipse", "rectangle"].includes(id)) return false;
+    return layer !== "selection" || !["text", "arrow"].includes(id);
+  });
   const marks = draft ? [...history.marks, draft] : history.marks;
   const hasDrawing = history.marks.some((mark) => mark.layer === "drawing" && mark.tool !== "eraser");
   const hasSelection = history.marks.some((mark) => mark.layer === "selection" && mark.tool !== "eraser");
-  const dirty = history.marks.length || prompt.trim();
+  const dirty = history.marks.length || prompt.trim() || layerActivity.dirty;
   const isIdeogram = model === ideogramImageEditModel;
   const isNano = model === nanoBanana21ModelName;
   const qualityOptions = isIdeogram ? ideogramImageEditQualityOptions : openAiImage26QualityOptions;
@@ -103,21 +112,22 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider 
       if (!canvas) continue;
       drawImageEditMarks(canvas.getContext("2d"), marks, canvas.width, canvas.height, targetLayer);
     }
-  }, [marks, size, reviewing]);
+  }, [marks, size, reviewing, selectionAvailable]);
 
   function commit(nextMarks) {
     setHistory((current) => ({ past: [...current.past.slice(-59), current.marks], marks: nextMarks, future: [] }));
   }
   function undo() {
-    if (busyRef.current || dragRef.current) return;
+    if (busyRef.current || dragRef.current || reviewing) return;
     setHistory((s) => !s.past.length ? s : ({ past: s.past.slice(0, -1), marks: s.past.at(-1), future: [s.marks, ...s.future] }));
   }
   function redo() {
-    if (busyRef.current || dragRef.current) return;
+    if (busyRef.current || dragRef.current || reviewing) return;
     setHistory((s) => !s.future.length ? s : ({ past: [...s.past, s.marks], marks: s.future[0], future: s.future.slice(1) }));
   }
-  function close() { if (!busyRef.current && !saving) dirty ? setConfirmClose(true) : onClose(); }
+  function close() { if (!busyRef.current && !saving && !layerActivity.busy) dirty ? setConfirmClose(true) : onClose(); }
   function keyboard(event) {
+    if (event.target.closest(".ies-layer-workspace") && event.key !== "Tab") return;
     event.stopPropagation();
     if (event.key === "Escape") { event.preventDefault(); compareDragRef.current ? finishComparison(true) : close(); return; }
     if (event.key === "Tab") {
@@ -216,7 +226,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider 
     busyRef.current = true; setBusy(true); setError(""); setWarning("");
     try {
       imageEditSize(size.width, size.height, model);
-      const drawing = await renderLayer("drawing"), selection = blank ? null : await renderLayer("selection");
+      const drawing = await renderLayer("drawing"), selection = selectionAvailable && !blank ? await renderLayer("selection") : null;
       if (mode === "remove" && !selection) throw new Error("Paint a selection over the area to remove.");
       if (blank && !drawing) throw new Error("Draw a sketch first.");
       const form = new FormData();
@@ -243,26 +253,43 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider 
   function continueEditing() {
     setBase(result); setResultIndex(-1); setHistory(emptyHistory); setPrompt(""); setBlank(false); setMode("edit"); setError(""); setZoom(1); setPan({ x: 0, y: 0 });
   }
+  function changeMethod(value) {
+    if (busyRef.current || saving || layerActivity.busy || dragRef.current) return;
+    setMode(value);
+    if (value === "layers") setLayersVisited(true);
+    if (value !== "sketch") setBlank(false);
+    if (value === "remove") { setActiveLayer("selection"); setTool("pen"); }
+    if (value === "sketch") {
+      setActiveLayer("drawing");
+      if (["arrow", "ellipse", "rectangle"].includes(tool)) setTool("pen");
+    }
+  }
+  const methodControl = <label className="ies-method">Method<select aria-label="Edit method" value={mode} disabled={busy || saving || layerActivity.busy} onChange={event => changeMethod(event.target.value)}><option value="edit">Edit image</option><option value="sketch">Generate from Sketch</option><option value="remove">Remove selected</option><option value="layers">Layers</option></select></label>;
   const scale = size ? Math.min(1, (viewport.width - 40) / size.width, (viewport.height - 40) / size.height) : 1;
   const displaySize = size ? { width: size.width * scale, height: size.height * scale } : { width: 300, height: 300 };
   const previewScale = size ? Math.min(1, 1600 / Math.max(size.width, size.height)) : 1;
   const setActiveLayer = (value) => { setLayer(value); if (value === "selection" && ["text", "arrow"].includes(tool)) setTool("pen"); };
 
   return <section ref={rootRef} tabIndex={-1} className="image-edit-studio" aria-label="Image Edit" role="dialog" aria-modal="true" onKeyDownCapture={keyboard} onPointerDown={(event) => event.stopPropagation()}>
-    <header className="ies-header"><span><Pencil size={18} /><strong>Image Edit</strong><small>{item.label || item.fileName || "Image"}</small></span><IconButton icon={X} label="Close image editor" onClick={close} disabled={busy || saving} /></header>
-    <div className="ies-workspace">
+    <header className="ies-header"><span><Pencil size={18} /><strong>Image Edit</strong></span>{methodControl}<small title={item.label || item.fileName || "Image"}>{item.label || item.fileName || "Image"}</small><IconButton icon={X} label="Close image editor" onClick={close} disabled={busy || saving || layerActivity.busy} /></header>
+    {layersVisited && <div className="ies-layers-host" hidden={mode !== "layers"}><React.Suspense fallback={<div role="status">Loading Layers...</div>}><ImageEditLayers key={JSON.stringify([(result || base).url, workflowContext?.projectId, workflowContext?.workflowPackagePath])}
+      item={{ ...(result || base), editContext: item.editContext }} workflowContext={workflowContext} provider={provider} showApiCosts={showApiCosts} canApply={canApply} onActivityChange={setLayerActivity}
+      onClose={close} onAccept={async (result, action) => { await onAccept(item, result, action); onClose(); }}
+      onContinue={result => { setBase(result); setResultIndex(-1); setHistory(emptyHistory); setPrompt(""); setBlank(false); setMode("edit"); setError(""); setZoom(1); setPan({ x: 0, y: 0 }); }} /></React.Suspense></div>}
+    <div className="ies-workspace" hidden={mode === "layers"}>
       <div className="ies-main">
         <div className="ies-toolbar" role="toolbar" aria-label="Drawing tools">
-          <div className="ies-segment" role="group" aria-label="Editing layer"><IconButton icon={Pencil} label="Drawing layer" active={layer === "drawing"} disabled={busy || reviewing} onClick={() => setActiveLayer("drawing")} /><IconButton icon={Scan} label="Selection layer" active={layer === "selection"} disabled={busy || reviewing || blank} onClick={() => setActiveLayer("selection")} /></div>
-          {tools.map(([id, Icon, label]) => <IconButton key={id} icon={Icon} label={label} active={reviewing ? id === "hand" : tool === id} disabled={busy || (reviewing && id !== "hand") || (layer === "selection" && ["text", "arrow"].includes(id))} onClick={() => setTool(id)} />)}
-          <div className="ies-divider" />
-          <IconButton icon={Undo2} label="Undo stroke" onClick={undo} disabled={busy || reviewing || !history.past.length} /><IconButton icon={Redo2} label="Redo stroke" onClick={redo} disabled={busy || reviewing || !history.future.length} />
-          <IconButton icon={Trash2} label="Clear active layer" onClick={() => commit(history.marks.filter((mark) => mark.layer !== layer))} disabled={busy || reviewing || !history.marks.some((mark) => mark.layer === layer)} />
+          {!reviewing && mode === "edit" && <div className="ies-segment" role="group" aria-label="Editing layer"><IconButton icon={Pencil} label="Drawing layer" active={layer === "drawing"} disabled={busy} onClick={() => setActiveLayer("drawing")} /><IconButton icon={Scan} label="Selection layer" active={layer === "selection"} disabled={busy} onClick={() => setActiveLayer("selection")} /></div>}
+          {visibleTools.map(([id, Icon, label]) => <IconButton key={id} icon={Icon} label={label} active={reviewing ? id === "hand" : tool === id} disabled={busy} onClick={() => setTool(id)} />)}
+          {!reviewing && <><div className="ies-divider" />
+            <IconButton icon={Undo2} label="Undo stroke" onClick={undo} disabled={busy || !history.past.length} /><IconButton icon={Redo2} label="Redo stroke" onClick={redo} disabled={busy || !history.future.length} />
+            <IconButton icon={Trash2} label="Clear active layer" onClick={() => commit(history.marks.filter((mark) => mark.layer !== layer))} disabled={busy || !history.marks.some((mark) => mark.layer === layer)} />
+          </>}
         </div>
         <div className="ies-stage" ref={stageRef}>
           <div ref={surfaceRef} className={`ies-surface ${tool === "hand" || reviewing ? "panning" : ""}`} style={{ ...displaySize, transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerLeave={() => setCursor(null)} onPointerUp={pointerUp} onPointerCancel={pointerUp} onLostPointerCapture={pointerUp}>
             <img src={reviewing ? result.before : base.url} alt="Original image" draggable={false} style={{ visibility: blank && !reviewing ? "hidden" : "visible" }} onLoad={(event) => setSize({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })} onError={() => setError("Could not load the original full-resolution image.")} />
-            {!reviewing && size && <><canvas ref={drawingRef} aria-label="Drawing canvas" width={Math.round(size.width * previewScale)} height={Math.round(size.height * previewScale)} /><canvas ref={selectionRef} aria-label="Selection canvas" className="ies-selection" width={Math.round(size.width * previewScale)} height={Math.round(size.height * previewScale)} /></>}
+            {!reviewing && size && <><canvas ref={drawingRef} aria-label="Drawing canvas" width={Math.round(size.width * previewScale)} height={Math.round(size.height * previewScale)} />{selectionAvailable && <canvas ref={selectionRef} aria-label="Selection canvas" className="ies-selection" width={Math.round(size.width * previewScale)} height={Math.round(size.height * previewScale)} />}</>}
             {reviewing && view !== "original" && <img className="ies-result" src={result.url} alt="Edited result" draggable={false} style={{ clipPath: view === "split" ? `inset(0 0 0 ${split}%)` : undefined }} />}
             {reviewing && view === "split" && <div className="ies-split-line" role="slider" tabIndex={0} aria-label="Comparison divider" aria-orientation="horizontal" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(split)} aria-valuetext={`${Math.round(split)}% original, ${100 - Math.round(split)}% edited`} title="Drag to compare original and edit"
               style={{ left: `${split}%`, "--ies-compare-scale": 1 / zoom }} onPointerDown={startComparison} onPointerMove={moveComparison} onPointerUp={endComparison} onPointerCancel={endComparison} onLostPointerCapture={endComparison} onBlur={() => finishComparison(true)}>
@@ -282,11 +309,10 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider 
       <aside className="ies-sidebar">
         {!reviewing && <fieldset disabled={busy || saving}>
           <label>Model<select aria-label="Edit model" value={model} onChange={(e) => { setModel(e.target.value); setQuality("high"); setError(""); }}>{imageEditModels.map(value => <option key={value} value={value}>{modelLabel(value)}</option>)}</select></label>
-          <label>Method<select aria-label="Edit method" value={mode} onChange={(e) => { setMode(e.target.value); if (e.target.value !== "sketch") setBlank(false); if (e.target.value === "remove") { setActiveLayer("selection"); setTool("pen"); } }}><option value="edit">Edit image</option><option value="sketch">Generate from Sketch</option><option value="remove">Remove selected</option></select></label>
           {mode === "sketch" && <label className="ies-checkbox"><input type="checkbox" checked={blank} onChange={(e) => { setBlank(e.target.checked); if (e.target.checked) setActiveLayer("drawing"); }} />Blank canvas</label>}
-          <div className="ies-color-row" aria-label="Drawing color">{imageEditColors.map((value) => <button type="button" key={value} aria-label={`Color ${value}`} title={value} aria-pressed={color === value} className={`ies-swatch ${color === value ? "active" : ""}`} style={{ background: value }} onClick={() => setColor(value)} disabled={layer === "selection"} />)}<input aria-label="Custom drawing color" type="color" value={color} onChange={(e) => setColor(e.target.value)} disabled={layer === "selection"} /></div>
+          {layer === "drawing" && <div className="ies-color-row" aria-label="Drawing color">{imageEditColors.map((value) => <button type="button" key={value} aria-label={`Color ${value}`} title={value} aria-pressed={color === value} className={`ies-swatch ${color === value ? "active" : ""}`} style={{ background: value }} onClick={() => setColor(value)} />)}<input aria-label="Custom drawing color" type="color" value={color} onChange={(e) => setColor(e.target.value)} /></div>}
           <label className="ies-slider">{tool === "text" ? "Text size" : "Brush size"}<output>{brushSize.toFixed(1)}</output><input aria-label="Brush size" type="range" min="0.2" max="12" step="0.2" value={brushSize} onChange={(e) => setBrushSize(Number(e.target.value))} /></label>
-          <label className="ies-slider">Opacity<output>{opacity}%</output><input aria-label="Drawing opacity" type="range" min="10" max="100" value={opacity} onChange={(e) => setOpacity(Number(e.target.value))} disabled={layer === "selection"} /></label>
+          {layer === "drawing" && <label className="ies-slider">Opacity<output>{opacity}%</output><input aria-label="Drawing opacity" type="range" min="10" max="100" value={opacity} onChange={(e) => setOpacity(Number(e.target.value))} /></label>}
           {tool === "text" && <label>Text note<textarea aria-label="Text note" rows={2} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} /></label>}
           <label>Prompt<textarea className="ies-prompt" aria-label="Edit prompt" rows={5} maxLength={isIdeogram ? 10000 : 16000} placeholder={mode === "remove" ? "Additional direction (optional)" : "Describe the change..."} value={prompt} onChange={(e) => setPrompt(e.target.value)} /></label>
           {isNano ? <label>Resolution<select aria-label="Edit resolution" value={resolution} onChange={(e) => setResolution(e.target.value)}>{nanoBanana21ResolutionOptions.map(value => <option key={value} value={value}>{value}</option>)}</select></label> : <label>Quality<select aria-label="Edit quality" value={quality} onChange={(e) => setQuality(e.target.value)}>{qualityOptions.map((value) => <option key={value} value={value}>{qualityLabels[value]}</option>)}</select></label>}
@@ -308,6 +334,6 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, provider 
         {error && <p className="ies-error" role="alert">{error}</p>}{warning && <p className="ies-warning" role="status">{warning}</p>}
       </aside>
     </div>
-    {confirmClose && <div className="ies-confirm"><div role="alertdialog" aria-label="Discard edit draft"><h3>Discard this draft?</h3><p>Generated edits are kept in History. Unsaved drawing marks will be discarded.</p><div><button onClick={() => setConfirmClose(false)}>Keep Editing</button><button className="ies-primary" onClick={onClose}>Discard Draft</button></div></div></div>}
+    {confirmClose && <div className="ies-confirm"><div role="alertdialog" aria-label="Discard edit draft"><h3>{layerActivity.dirty ? "Close this edit?" : "Discard this draft?"}</h3><p>{layerActivity.dirty ? "Layer changes have not been added to the canvas. Unsaved drawing marks will be discarded." : "Generated edits are kept in History. Unsaved drawing marks will be discarded."}</p><div><button onClick={() => setConfirmClose(false)}>Keep Editing</button><button className="ies-primary" onClick={onClose}>{layerActivity.dirty ? "Close Editor" : "Discard Draft"}</button></div></div></div>}
   </section>;
 }

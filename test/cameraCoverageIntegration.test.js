@@ -4,11 +4,12 @@ import { readFile } from "node:fs/promises";
 import { normalizeCameraCoverageData, coverageOutputPatch, cameraCoverageDefaults, selectCoverageVersion, applyCoverageVersion, isReframeNode, reframeOutputPort } from "../src/cameraCoverage.js";
 import { normalizedResultItems } from "../src/mediaResults.js";
 import { isRunnableNode } from "../src/nodeRunner.js";
+import { isLayersNode, normalizeLayersData } from "../src/imageLayers.js";
 
 const source = await readFile(new URL("../src/NodeEditor.jsx", import.meta.url), "utf8");
 function isolated(name, next, dependencies = {}) {
   const body = source.slice(source.indexOf(`function ${name}(`), source.indexOf(`function ${next}(`));
-  const context = { isReframeNode, reframeOutputPort, ...dependencies };
+  const context = { isReframeNode, reframeOutputPort, isLayersNode, normalizeLayersData, ...dependencies };
   return Function(...Object.keys(context), `${body};return ${name};`)(...Object.values(context));
 }
 const shot = (id, name, url) => ({ id, label: name, originalUrl: url, versionId: "original", versions: [{ id: "original", url, type: "image" }] });

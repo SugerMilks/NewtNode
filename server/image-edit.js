@@ -7,7 +7,7 @@ import { nanoBanana21ModelName, nanoBanana21FalEditEndpoint, buildNanoBanana21In
 
 const decode = (buffer) => sharp(buffer, { limitInputPixels: imageEditMaxPixels, animated: false, failOn: "error" });
 
-export async function prepareImageEdit({ source, drawing, selection, prompt, mode, blank = false, model = openAiImage26Models.sunburst }) {
+export async function prepareImageEdit({ source, drawing, selection, prompt, mode, blank = false, preserveAlpha = false, model = openAiImage26Models.sunburst }) {
   const original = await decode(source).rotate().ensureAlpha().png().toBuffer();
   const { width, height } = await decode(original).metadata();
   const size = imageEditSize(width, height, model);
@@ -22,9 +22,23 @@ export async function prepareImageEdit({ source, drawing, selection, prompt, mod
     return visible ? buffer : null;
   }
   drawing = await layer(drawing);
+  const suppliedSelection = selection;
   selection = await layer(selection);
+  if (preserveAlpha && suppliedSelection && !selection) throw new Error("The layer selection is empty. Paint a visible area or clear the selection.");
+  if (preserveAlpha) {
+    const alpha = await decode(original).extractChannel(3).raw().toBuffer();
+    const selected = selection ? await decode(selection).extractChannel(3).raw().toBuffer() : null;
+    const pixels = Buffer.alloc(width * height * 4);
+    let visible = false;
+    for (let p = 0; p < alpha.length; p++) {
+      const weight = alpha[p] ? selected ? selected[p] : 255 : 0;
+      pixels.fill(255, p * 4, p * 4 + 3); pixels[p * 4 + 3] = weight;
+      if (weight) visible = true;
+    }
+    if (!visible) throw new Error("Select a visible part of the layer to edit.");
+    selection = await sharp(pixels, { raw: { width, height, channels: 4 } }).png().toBuffer();
+  }
   if (blank && selection) throw new Error("Blank sketches cannot use a selection mask.");
-  const submittedPrompt = buildImageEditPrompt({ prompt, mode, blank, model, hasDrawing: Boolean(drawing), hasSelection: Boolean(selection) });
   const canvas = blank ? await sharp({ create: { width, height, channels: 4, background: "#ffffff" } }).png().toBuffer() : original;
   const guide = drawing ? await decode(canvas).composite([{ input: drawing }]).png().toBuffer() : null;
   let mask = null;
@@ -42,13 +56,14 @@ export async function prepareImageEdit({ source, drawing, selection, prompt, mod
         pixels[p] = alpha[p] >= 128 ? 0 : 255;
         if (pixels[p] === 0) edited = true; else protectedPixels = true;
       }
-      if (!edited || !protectedPixels) throw new Error("Ideogram 4.5 masks need both selected and protected areas. Paint a selection covering part of the image, or clear it for a full-image edit.");
-      mask = await sharp(pixels, { raw: { width, height, channels: 1 } }).png().toBuffer();
+      if ((!edited || !protectedPixels) && !preserveAlpha) throw new Error("Ideogram 4.5 masks need both selected and protected areas. Paint a selection covering part of the image, or clear it for a full-image edit.");
+      if (edited && protectedPixels) mask = await sharp(pixels, { raw: { width, height, channels: 1 } }).png().toBuffer();
     } else {
       mask = await decode(selection).extractChannel(3).png().toBuffer();
     }
   }
-  return { original, width, height, size, selection, mask, submittedPrompt,
+  const submittedPrompt = buildImageEditPrompt({ prompt, mode, blank, model, preserveAlpha, hasDrawing: Boolean(drawing), hasSelection: Boolean(mask || selectionGuide) });
+  return { original, width, height, size, selection, mask, submittedPrompt, preserveAlpha,
     images: blank ? [guide] : [original, guide, selectionGuide].filter(Boolean) };
 }
 
@@ -61,6 +76,13 @@ export async function finishImageEdit(prepared, generated) {
     for (let p = 0; p < mask.length; p++) {
       const i = p * 4, m = mask[p] / 255;
       if (m === 0) { original.copy(result, i, i, i + 4); continue; }
+      if (prepared.preserveAlpha) {
+        // Selection controls RGB only. Original coverage, including soft edges,
+        // is restored exactly regardless of the provider's output transparency.
+        for (let c = 0; c < 3; c++) result[i + c] = Math.round(result[i + c] * m + original[i + c] * (1 - m));
+        result[i + 3] = original[i + 3];
+        continue;
+      }
       const a = result[i + 3] / 255 * m, b = original[i + 3] / 255 * (1 - m), alpha = a + b;
       for (let c = 0; c < 3; c++) result[i + c] = alpha ? Math.round((result[i + c] * a + original[i + c] * b) / alpha) : 0;
       result[i + 3] = Math.round(alpha * 255);

@@ -8,6 +8,7 @@ const xlinkNamespace = "http://www.w3.org/1999/xlink";
 const shapes = new Set(["path", "rect", "circle", "ellipse", "line", "polyline", "polygon", "text"]);
 const elements = new Set([...shapes, "svg", "g", "defs", "clipPath", "mask", "linearGradient", "radialGradient", "stop", "pattern", "tspan", "title", "desc"]);
 const paintElements = new Set(["linearGradient", "radialGradient", "pattern"]);
+const nonvisualAttrs = new Set(["role", "aria-label", "aria-labelledby", "aria-describedby", "aria-hidden", "focusable"]);
 const numeric = "[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?";
 const numberToken = new RegExp(numeric, "g");
 const idPattern = /^[A-Za-z_][A-Za-z0-9_.:-]{0,159}$/;
@@ -87,6 +88,9 @@ export function sanitizeVectorSvg(input, { allowEmpty = false } = {}) {
       }
       if (prefix === "xmlns" && name === "xlink" && !depth && value === xlinkNamespace) continue;
       if (prefix && !(prefix === "xlink" && name === "href" && namespace === xlinkNamespace)) throw invalid("foreign attributes are not supported");
+      // Provider accessibility metadata does not affect artwork pixels. Drop only
+      // these known attributes; keep validating every element and other attribute.
+      if (!prefix && !namespace && nonvisualAttrs.has(name)) continue;
       if (name === "style") {
         for (const declaration of value.split(";")) {
           if (!declaration.trim()) continue;

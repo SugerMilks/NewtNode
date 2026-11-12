@@ -36,8 +36,9 @@ export function imageEditSize(width, height, model = openAiImage26Models.sunburs
   return { width: w, height: h };
 }
 
-export function buildImageEditPrompt({ prompt = "", mode = "edit", hasDrawing = false, hasSelection = false, blank = false, model = openAiImage26Models.sunburst }) {
+export function buildImageEditPrompt({ prompt = "", mode = "edit", hasDrawing = false, hasSelection = false, blank = false, preserveAlpha = false, model = openAiImage26Models.sunburst }) {
   if (!imageEditModes.includes(mode)) throw new Error("Choose an image editing method.");
+  if (preserveAlpha && (mode !== "edit" || blank)) throw new Error("Layer edits must use Edit image without a blank canvas.");
   const brief = String(prompt).trim();
   const ideogram = model === ideogramImageEditModel;
   const nano = model === nanoBanana21ModelName;
@@ -48,6 +49,7 @@ export function buildImageEditPrompt({ prompt = "", mode = "edit", hasDrawing = 
   if (blank && !hasDrawing) throw new Error("Draw your sketch before generating.");
   const submittedPrompt = [
     blank ? "Create one finished image from the supplied sketch." : "Edit image 1, the clean original. Keep its exact framing, aspect ratio, composition, identities, lighting and texture except where the requested change requires otherwise.",
+    preserveAlpha ? "This is one isolated layer from a larger composition. Edit its appearance in place. Preserve the exact silhouette, pose, anatomy, facial identity, object geometry and pixel alignment. Do not crop, move, scale, rotate or add content outside the existing silhouette. Preserve all details not explicitly requested to change. The original transparency will be restored locally; do not paint a backdrop, checkerboard or transparency pattern." : "",
     hasDrawing ? mode === "sketch"
       ? "The drawn marks are a composition sketch. Turn their shapes, placement and colors into finished visual content according to the brief. Preserve the sketch's intended arrangement, not its rough pen texture unless requested."
       : `${ideogram ? "The guide reference shows" : "Image 2 shows"} annotations over the same original. Circles, arrows, outlines, handwriting and colored strokes are editing instructions and location guides, not artwork to copy into the result. Interpret them together with the brief. Remove every guide mark from the final image; use the clean original to recover the underlying content. Only include literal text if the brief explicitly requests visible text.`

@@ -109,7 +109,7 @@ export function useImagePreviewViewport({ stageRef, imageSize, enabled, sourceKe
   }
   function cancelPan() { if (!dragRef.current) return false; finishPan(true); return true; }
   return {
-    view, panning, cancelPan,
+    view, panning, cancelPan, zoom, reset, endPan: () => finishPan(),
     handlers: { onPointerDown: pointerDown, onPointerMove: pointerMove, onPointerUp: pointerEnd,
       onPointerCancel: pointerEnd, onLostPointerCapture: pointerEnd, onKeyDown: keyboard, onBlur: () => finishPan(true) }
   };

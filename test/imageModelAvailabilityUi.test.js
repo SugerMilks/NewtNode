@@ -25,6 +25,7 @@ const control = (tree, name) => elements(tree).find(element => element.props["ar
 const options = select => React.Children.toArray(select.props.children).map(option => option.props.value || option.props.children);
 function editor(t, data = {}, provider = "fal") {
   t.mock.method(React, "useEffect", () => {});
+  t.mock.method(React, "useRef", value => ({ current: value }));
   let node = { id: "image-qa", type: "imageModel", data: normalizeImageModelData({ model, prompt: "A cinematic room", ...data }) };
   return { get node() { return node; }, render() { return NodeBody({ node, incoming: {}, incomingByNode: {}, connectedPortKeys: new Set(), imageModelOptions, generationProvider: provider, onRun() {},
     onUpdate: (_id, patch) => { node = { ...node, data: { ...node.data, ...patch } }; } }); } };

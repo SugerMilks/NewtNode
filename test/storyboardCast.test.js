@@ -189,6 +189,7 @@ for (const scenario of ["correct swapped identities", "missing sheet", "duplicat
     const storyboardCharacterReferenceItemForSource = getFunction(editor, "storyboardCharacterReferenceItemForSource", { characterOutputReference, characterReferenceLabel });
     const storyboardImagePromptItems = getFunction(editor, "storyboardImagePromptItems", {
       connectedDirectorPackageSource: () => null, storyboardCharacterReferenceItemForSource,
+      filmStillGradeReferences: () => [],
       connectedImagePromptItems: () => [], uniqueStoryboardImagePromptItems
     });
     const buildStoryboardFramePrompt = getFunction(editor, "buildStoryboardFramePrompt", {

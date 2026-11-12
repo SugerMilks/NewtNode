@@ -1,4 +1,5 @@
 import { isReframeNode } from "./cameraCoverage.js";
+import { isLayersNode } from "./imageLayers.js";
 
 export const contextMenuSize = { width: 190, height: 420, inset: 8 };
 export const outputDrawerWidthLimits = { default: 116, min: 116, max: 480 };
@@ -50,6 +51,7 @@ export function resizePlainTextNode(startSize = {}, delta = {}) {
 }
 
 export function estimatedNodeWidth(type) {
+  if (type === "imageLayers") return 580;
   if (type === "cameraCoverage") return 780;
   if (type === "output") return 420;
   if (type === "vector") return 900;
@@ -69,6 +71,7 @@ export function estimatedNodeWidth(type) {
 }
 
 export function estimatedNodeHeight(type) {
+  if (type === "imageLayers") return 880;
   if (type === "cameraCoverage") return 1040;
   if (type === "output") return 590;
   if (type === "vector") return 1020;
@@ -88,7 +91,7 @@ export function estimatedNodeHeight(type) {
 }
 
 export function estimatedNodeRect(node, padding = 0) {
-  const geometryType = isReframeNode(node) ? "cameraCoverage" : node?.type;
+  const geometryType = isReframeNode(node) ? "cameraCoverage" : isLayersNode(node) ? "imageLayers" : node?.type;
   const plainTextSize = node?.type === "plainText" ? normalizePlainTextNodeSize(node.data) : null;
   const storyboardScale = node?.type === "storyboard" ? Math.max(1, Number(node.data?.storyboardScale) || 1) : 1;
   return {

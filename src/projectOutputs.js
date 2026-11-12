@@ -29,7 +29,8 @@ export function buildProjectOutputItems({
           label: item.label || `${node.data.title || titleFallback?.(node.type) || node.type || "Node"} ${index + 1}`,
           fileName: item.fileName || fileNameFromLocalUrl(item.url),
           mimeType: item.mimeType || mimeForOutputItem(item),
-          createdAt: item.createdAt || ""
+          createdAt: item.createdAt || "",
+          ...(item.imageLayersDocument?.items?.[0]?.url === item.url ? { imageLayersDocument: item.imageLayersDocument } : {})
         });
       });
   });

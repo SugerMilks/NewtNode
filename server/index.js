@@ -27,6 +27,7 @@ import { fal, createFalClient } from "@fal-ai/client";
 import ffmpegStaticPath from "ffmpeg-static";
 import ffprobeStatic from "ffprobe-static";
 import { directoryStats, fileMetadata, readJsonFile, writeJsonAtomic } from "./json-store.js";
+import { isDialogCancellation } from "./dialog-errors.js";
 import { findRemoteHistoryAssetUrl } from "./local-asset-recovery.js";
 import { registerComposerPoseRoutes } from "./routes/composerPoses.js";
 import { registerAudioModelRoutes } from "./routes/audioModel.js";
@@ -42,6 +43,9 @@ import { scriptFileByteLimit } from "../src/storyboardScriptImport.js";
 import { registerEditorRoutes } from "./routes/editor.js";
 import { registerOutputRoutes } from "./routes/output.js";
 import { createOutputAssetResolver } from "./output-export.js";
+import { createLayersService } from "./image-layers.js";
+import { createLayersPsdService } from "./image-layers-psd.js";
+import { registerLayersRoutes } from "./routes/imageLayers.js";
 import { registerImageEditRoutes } from "./routes/imageEdit.js";
 import { createIdeogramVectorService } from "./ideogram-vector.js";
 import { registerIdeogramVectorRoutes, secureVectorAssetResponse } from "./routes/ideogramVector.js";
@@ -100,8 +104,8 @@ import {
 import { estimateOpenAiImage2Cost as estimateOpenAiImage2OutputCost, normalizeOpenAiImage2Quality, openAiImage2Costs, openAiImage2HighCosts, openAiImage2Quality } from "../src/openAiImage2.js";
 import { migrateOpenAiImageModel, migrateOpenAiImagePreferences, openAiImage26Models, openAiImage26Variant, isOpenAiImage26Model, normalizeOpenAiImage26Quality, buildOpenAiImage26FalRequest, validateOpenAiImage26KreaRequest, openAiImage26KreaSelection, openAiImage26Cost } from "../src/openAiImage26.js";
 import { nanoBananaProFalThinkingMode, nanoBananaProThinkingConfig } from "../src/nanoBananaPro.js";
-import { seedream5ProModelName, isSeedream5ProModel, seedream5ProFalEndpoint, seedream5ProAspectRatios, validateSeedream5ProRequest, seedream5ProCost } from "../src/seedream5Pro.js";
-import { createSeedream5ProGenerator } from "./seedream5-pro.js";
+import { seedream55ModelName, isSeedream55Model, seedream55FalEndpoint, seedream55Ratios, validateSeedream55Request, seedream55Cost, migrateSeedreamModel, migrateSeedreamPreferences } from "../src/seedream55.js";
+import { createSeedream55Generator } from "./seedream5-5.js";
 import { isRetiredNanoBanana2Model } from "../src/retiredImageModels.js";
 import { filmDirectorAdjacentCoverageIssue } from "../src/filmDirectorCoverage.js";
 import { normalizeFilmDirectorAspectRatio } from "../src/filmDirectorAspectRatios.js";
@@ -327,7 +331,7 @@ const openAiImageAspectRatios = [...nanoImageAspectRatios, "2:1", "1:2"];
 const storyboardAspectRatioOptions = ["16:9", "21:9", "9:16", "1:1", "3:2", "2:3", "4:3", "3:4", "2:1", "1:2"];
 const imageModelNames = {
   nanoBanana21: nanoBanana21ModelName,
-  seedream5Pro: seedream5ProModelName,
+  seedream55: seedream55ModelName,
   nanoBananaPro: "Nano Banana Pro",
   openAiImage2: "OpenAI Image 2",
   openAiImage26Sunburst: openAiImage26Models.sunburst,
@@ -339,7 +343,7 @@ const imageModelOptions = [
   imageModelNames.openAiImage2,
   imageModelNames.openAiImage26Sunburst,
   imageModelNames.openAiImage26Flare,
-  imageModelNames.seedream5Pro
+  imageModelNames.seedream55
 ];
 const videoModelNames = {
   seedance: "Seedance 2.0",
@@ -358,7 +362,7 @@ const videoModelOptions = [
   videoModelNames.minimaxH3
 ];
 const defaultModelPreferences = {
-  image: Object.fromEntries(imageModelOptions.map((model) => [model, isNanoBanana21Model(model) || model === imageModelNames.openAiImage2 || isOpenAiImage26Model(model) || isSeedream5ProModel(model)])),
+  image: Object.fromEntries(imageModelOptions.map((model) => [model, isNanoBanana21Model(model) || model === imageModelNames.openAiImage2 || isOpenAiImage26Model(model) || isSeedream55Model(model)])),
   video: Object.fromEntries(videoModelOptions.map((model) => [model, true]))
 };
 const falNanoBananaProEndpoint = process.env.FAL_NANO_BANANA_PRO_ENDPOINT || "fal-ai/nano-banana-pro";
@@ -621,6 +625,13 @@ registerOutputRoutes(app, {
 });
 
 const resolveCoverageAsset = createOutputAssetResolver({ uploadsDir, outputsDir, findRegisteredWorkflowPackage });
+const layersService = createLayersService({ directory: path.join(dataDir, "image-layers"), client: atlasClient,
+  getKey: () => process.env.ATLAS_API_KEY, resolveAsset: resolveCoverageAsset,
+  createTarget: (body, kind, extension) => createManagedAssetTarget({ body }, kind, extension),
+  recordHistory: entry => appendHistory(entry, { deduplicate: true, replaceExisting: true }) });
+const layersPsdService = createLayersPsdService({ resolveAsset: resolveCoverageAsset,
+  createTarget: (body, kind, extension) => createManagedAssetTarget({ body }, kind, extension) });
+registerLayersRoutes(app, { service: layersService, psdService: layersPsdService, sendError: sendApiError, limiter: imageGenerationRequestLimiter });
 const cameraCoverageService = createCameraCoverageService({
   directory: path.join(dataDir, "camera-coverage"),
   getKey: () => process.env.FAL_KEY,
@@ -793,6 +804,7 @@ registerVectorLookRoutes(app, {
 registerLooksRoutes(app, {
   directory: path.join(dataDir, "looks"), assetDirectory: path.join(uploadsDir, "looks"),
   thumbnailDirectory: path.join(dataDir, "looks", "thumbnails"),
+  readAsset: async url => { const { filePath } = await resolveCoverageAsset(url); if ((await stat(filePath)).size > 32 * 1024 * 1024) throw httpError(413, "Look references must be at most 32 MB."); return readFile(filePath); },
   analyzeLook: createLookAnalyzer({ directory: path.join(dataDir, "looks", "analyses"), analyze: runMediaDescriptionLlm, estimateCost: estimateTextProcessingCost, recordHistory: appendHistory })
 });
 
@@ -884,6 +896,11 @@ function buildHealthPayload() {
     routes: {
       looksLibrary: true,
       looksStyleAnalysis: true,
+      looksWorkspaceTools: true,
+      looksSharedFolders: true,
+      looksCreateStyleBoard: true,
+      looksUnifiedSearch: true,
+      looksFilmStills: true,
       myNewt: true,
       myNewtPlanning: true,
       myNewtLocalActions: true,
@@ -896,6 +913,7 @@ function buildHealthPayload() {
       seedanceDrafts: true,
       seedanceMultiProviderDrafts: true,
       nanoBanana21: true,
+      seedream55: true,
       myNewtCreativeSkills: true,
       myNewtLearning: true,
       myNewtLearningAnalysis: true,
@@ -912,6 +930,11 @@ function buildHealthPayload() {
       newtPresets: true,
       systemNewtPresets: true,
       utilityImage: true,
+      imageLayers: true,
+      imageLayersPsd: true,
+      imageLayersRotation: true,
+      imageLayerFolders: true,
+      imageLayerSeparation: true,
       utilityVideo: true,
       videoOutpaint: true,
       colorIdMatte: true,
@@ -933,6 +956,7 @@ function buildHealthPayload() {
       atlasCloud: true,
       apiCostVisibility: true,
       imageEditing: true,
+      imageEditingLayers: true,
       imageEditingNanoBanana21: true,
       ideogramVector: true,
       gptImage26Vector: true,
@@ -1412,7 +1436,7 @@ function preferredApiKeySource(versions = []) {
 }
 
 function normalizeModelPreferences(value = {}) {
-  const incomingImage = migrateOpenAiImagePreferences(value?.image && typeof value.image === "object" ? value.image : {});
+  const incomingImage = migrateSeedreamPreferences(migrateOpenAiImagePreferences(value?.image && typeof value.image === "object" ? value.image : {}));
   const incomingVideo = value?.video && typeof value.video === "object" ? value.video : {};
   const image = Object.fromEntries(imageModelOptions.map((model) => [model, Boolean(incomingImage[model] ?? defaultModelPreferences.image[model])]));
   const video = Object.fromEntries(videoModelOptions.map((model) => [model, Boolean(incomingVideo[model] ?? defaultModelPreferences.video[model])]));
@@ -2401,6 +2425,14 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
     }
 
     const selectedModel = resolveImageModel(req.body.model);
+    if (isSeedream55Model(selectedModel.displayName)) {
+      const refs = req.body.imagePromptUrls === undefined ? [] : req.body.imagePromptUrls;
+      validateSeedream55Request({ prompt, images: refs, resolution: req.body.resolution,
+        aspectRatio: isAutoImageAspectRatio(req.body.aspectRatio) ? "16:9" : req.body.aspectRatio,
+        provider: atlasMediaEnabled() ? "atlas" : process.env.FAL_KEY ? "fal" : "krea",
+        maskUrl: req.body.editMaskDataUrl, background: req.body.background });
+      if (refs.some(url => !isLocalAssetUrl(url))) throw httpError(400, "Seedream 5.5 references must be connected local images. No references were submitted.");
+    }
     if (isNanoBanana21Model(selectedModel.displayName)) {
       const provider = process.env.FAL_KEY ? "fal" : process.env.KREA_API_KEY ? "krea" : "atlas";
       const refs = req.body.imagePromptUrls === undefined ? [] : req.body.imagePromptUrls;
@@ -2531,14 +2563,14 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
       });
     }
 
-    if (["fal-nano-banana-21", "fal-seedream-5-pro"].includes(selectedModel.provider)) {
+    if (["fal-nano-banana-21", "fal-seedream-5-5"].includes(selectedModel.provider)) {
       if (!process.env.FAL_KEY) {
         return res.status(400).json({ error: "Missing FAL_KEY in .env." });
       }
 
-      const seedream = isSeedream5ProModel(selectedModel.displayName);
+      const seedream = isSeedream55Model(selectedModel.displayName);
       const nano21 = isNanoBanana21Model(selectedModel.displayName);
-      const createGenerator = seedream ? createSeedream5ProGenerator : createNanoBanana21Generator;
+      const createGenerator = seedream ? createSeedream55Generator : createNanoBanana21Generator;
       const generate = createGenerator({ readLocalAsset, uploadImageInputToFal, promptWithReferenceLabels, subscribeFal, firstFalImageResult });
       const falImage = await generate({
         prompt,
@@ -2549,8 +2581,8 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
         editMaskDataUrl: req.body.editMaskDataUrl,
         background: req.body.background
       }, process.env.FAL_KEY);
-      const output = await downloadImage(req, falImage.remoteImage.url, seedream ? "seedream-5-pro" : "nano-banana-2.1", falImage.remoteImage.content_type || falImage.remoteImage.mimeType);
-      const cost = nano21 ? nanoBanana21Cost({ resolution: falImage.resolution, referenceCount: imagePromptUrls.length }) : seedream5ProCost({ resolution: falImage.resolution, aspectRatio, referenceCount: imagePromptUrls.length });
+      const output = await downloadImage(req, falImage.remoteImage.url, seedream ? "seedream-5.5" : "nano-banana-2.1", falImage.remoteImage.content_type || falImage.remoteImage.mimeType);
+      const cost = nano21 ? nanoBanana21Cost({ resolution: falImage.resolution, referenceCount: imagePromptUrls.length }) : seedream55Cost({ resolution: falImage.resolution, aspectRatio, referenceCount: imagePromptUrls.length });
 
       await appendHistory({
         id: falImage.requestId || randomUUID(),
@@ -2569,7 +2601,7 @@ app.post("/api/node/generate-image", imageGenerationRequestLimiter, async (req, 
           aspectRatio,
           requestedAspectRatio: requestedAspectRatio || aspectRatio,
           resolution: falImage.resolution,
-          ...(seedream ? { imageSize: falImage.size } : {}),
+          ...(seedream ? { imageSize: falImage.size, background: req.body.background || "auto" } : {}),
           thinkingLevel: falImage.thinkingLevel,
           imagePromptCount: imagePromptUrls.length,
           imagePromptLabels: cleanReferenceLabels
@@ -2798,8 +2830,6 @@ async function runKreaImageModel(
     validateOpenAiImage26KreaRequest({ model: selectedModel.displayName, resolution: req.body.resolution,
       aspectRatio, referenceCount: imagePromptUrls.length, background: req.body.background, editMaskDataUrl: req.body.editMaskDataUrl });
   }
-  if (isSeedream5ProModel(selectedModel.displayName)) validateSeedream5ProRequest({ prompt, images: imagePromptUrls,
-    resolution: req.body.resolution, aspectRatio, maskUrl: req.body.editMaskDataUrl, background: req.body.background });
   if (isNanoBanana21Model(selectedModel.displayName)) {
     if (isAutoImageAspectRatio(requestedAspectRatio)) aspectRatio = closestAspectRatio(Number(aspectRatio.split(":")[0]) / Number(aspectRatio.split(":")[1]), nanoBanana21Ratios("krea"));
     validateNanoBanana21Request({ prompt, images: imagePromptUrls, resolution: req.body.resolution, aspectRatio,
@@ -7392,7 +7422,7 @@ async function runFolderDialogCommand(command, args) {
     }
     return selectedPath;
   } catch (error) {
-    if (error.code === "DIALOG_CANCELED" || error.code === 2) {
+    if (isDialogCancellation(error, command)) {
       const canceled = new Error("Folder selection canceled.");
       canceled.code = "DIALOG_CANCELED";
       throw canceled;
@@ -7413,7 +7443,7 @@ async function runFileDialogCommand(command, args) {
     }
     return selectedPath;
   } catch (error) {
-    if (error.code === "DIALOG_CANCELED" || error.code === 2) {
+    if (isDialogCancellation(error, command)) {
       const canceled = new Error("File selection canceled.");
       canceled.code = "DIALOG_CANCELED";
       throw canceled;
@@ -9262,7 +9292,7 @@ function truncateString(value, maxLength) {
   return text.length > maxLength ? `${text.slice(0, maxLength - 1)}...` : text;
 }
 
-async function appendHistory(item, { deduplicate = false } = {}) {
+async function appendHistory(item, { deduplicate = false, replaceExisting = false } = {}) {
   if (item.provider === "fal.ai" && ["image", "video"].includes(item.mediaType) && item.cost) {
     const billing = generationBillingScope.getStore() || [];
     const matches = billing.filter(row => !row.used && row.endpoint === item.endpoint);
@@ -9274,8 +9304,11 @@ async function appendHistory(item, { deduplicate = false } = {}) {
   }
   const write = historyWriteQueue.then(async () => {
     const history = await readHistory();
-    if (deduplicate && history.some(entry => entry.id === item.id && entry.endpoint === item.endpoint)) return;
-    history.unshift(item);
+    const existing = history.findIndex(entry => entry.id === item.id && entry.endpoint === item.endpoint);
+    if (deduplicate && existing >= 0) {
+      if (!replaceExisting) return;
+      history[existing] = item;
+    } else history.unshift(item);
     await writeHistory(history.slice(0, maxHistoryItems));
   });
   historyWriteQueue = write.catch(() => {});
@@ -9305,7 +9338,8 @@ function sendApiError(res, error, fallback) {
   if (!res.headersSent) {
     res.status(status).json({
       error: message,
-      status
+      status,
+      ...(error?.noSubmission === true ? { noSubmission: true } : {})
     });
   }
 }
@@ -10061,7 +10095,7 @@ function checkedCreativeLlmResult(result, data, route) {
       throw new Error(`${result.provider} returned an incomplete or failed response. Existing work has been preserved.`);
     }
     const validated = validateCreativeResponse(data, { ...result, route });
-    if (["explore-plan", "vector-layer-names", "look-style-analysis"].includes(route)) result.text = JSON.stringify(validated);
+    if (["explore-plan", "vector-layer-names", "look-style-analysis", "look-create-analysis"].includes(route)) result.text = JSON.stringify(validated);
     if (!result.text) throw new Error(`${result.provider} returned no text.`);
     return result;
   } catch (error) {
@@ -10103,7 +10137,7 @@ async function runMediaDescriptionLlm({
       logs: true
     }, { route, model: falModel }, route.startsWith("storyboard-")
       ? createStoryboardFalClient({ credentials: key, endpoint, model: falModel })
-      : ["smart-text", "look-style-analysis"].includes(route) ? createSingleSubmissionFalClient({ credentials: key, endpoint, model: falModel })
+      : ["smart-text", "look-style-analysis", "look-create-analysis"].includes(route) ? createSingleSubmissionFalClient({ credentials: key, endpoint, model: falModel })
       : createFalClient({ credentials: key }));
     return checkedCreativeLlmResult({
       text: extractFalText(data).trim(),
@@ -11915,11 +11949,11 @@ async function removeLegacyNodeProject(projectId) {
 }
 
 function resolveImageModel(model) {
-  model = migrateOpenAiImageModel(model);
+  model = migrateSeedreamModel(migrateOpenAiImageModel(model));
   if (isRetiredNanoBanana2Model(model)) throw httpError(400, "Nano Banana 2 has been retired. Choose Nano Banana 2.1 with Fal or Krea, or Nano Banana Pro.");
   if (/ideogram/i.test(String(model || ""))) throw httpError(400, "Ideogram 4.5 is available only in Image Edit. Open an image preview and choose the pencil to edit it, or select another generation model.");
   if (isNanoBanana21Model(model)) return { provider: "fal-nano-banana-21", displayName: nanoBanana21ModelName, id: nanoBanana21FalTextEndpoint };
-  if (isSeedream5ProModel(model)) return { provider: "fal-seedream-5-pro", displayName: seedream5ProModelName, id: seedream5ProFalEndpoint() };
+  if (isSeedream55Model(model)) return { provider: "fal-seedream-5-5", displayName: seedream55ModelName, id: seedream55FalEndpoint() };
   const normalized = String(model || "").toLowerCase();
   if (normalized.includes("sam") && normalized.includes("image")) {
     if (!sam3SegmentationModelsEnabled) {
@@ -12215,7 +12249,7 @@ function normalizeImageAspectRatioForProvider(value, provider) {
 
 function imageAspectRatiosForProvider(provider) {
   if (provider === "fal-nano-banana-21") return nanoBanana21Ratios();
-  if (provider === "fal-seedream-5-pro") return seedream5ProAspectRatios;
+  if (provider === "fal-seedream-5-5") return seedream55Ratios(atlasMediaEnabled() ? "atlas" : "fal");
   return ["fal-openai-image-2", "fal-openai-image-26"].includes(provider) ? openAiImageAspectRatios : nanoImageAspectRatios;
 }
 

@@ -4,7 +4,7 @@ import path from "node:path";
 import { readFile } from "node:fs/promises";
 import * as image25 from "../src/openAiImage26.js";
 import { normalizeOpenAiImage2Quality } from "../src/openAiImage2.js";
-import { createSeedream5ProGenerator } from "../server/seedream5-pro.js";
+import { createSeedream55Generator } from "../server/seedream5-5.js";
 
 const source = await readFile(new URL("../server/index.js", import.meta.url), "utf8");
 const names = ["uploadImageInputToFal", "extensionForMime", "promptWithReferenceLabels", "openAiSizeToFalImageSize",
@@ -46,14 +46,14 @@ function harness({ failUpload = false } = {}) {
     }
   };
   const helpers = new Function(...Object.keys(dependencies), `${code}\nreturn {${names.join(",")}};`)(...Object.values(dependencies));
-  return { ...helpers, uploads, submissions, seedream: createSeedream5ProGenerator({ ...dependencies, ...helpers }) };
+  return { ...helpers, uploads, submissions, seedream: createSeedream55Generator({ ...dependencies, ...helpers, createClient: () => dependencies.fal }) };
 }
 
 const variants = [
   ["Nano Banana Pro", (h, args) => h.generateFalNanoBananaPro(args)],
   ...["OpenAI Image 2", ...Object.values(image25.openAiImage26Models)].map(model =>
     [model, (h, args) => h.generateFalOpenAiImage2FromInputs({ ...args, model })]),
-  ["Seedream 5.0 Pro", (h, args) => h.seedream(args)]
+  ["Seedream 5.5", (h, args) => h.seedream(args, "mock-key")]
 ];
 
 function inputs(refs) {

@@ -13,9 +13,10 @@ import { supportsAtlasImageModel } from "../src/atlasImages.js";
 import { estimateImageRunCost } from "../src/generationPricing.js";
 import { parseKreaPricing } from "../server/pricing-sources.js";
 import { createNanoBanana21Generator } from "../server/nano-banana-21.js";
+import { createSeedream55Generator } from "../server/seedream5-5.js";
 import { createSingleSubmissionFalClient } from "../server/fal-single-submission.js";
 import { normalizeCharacterWardrobeRequest } from "../server/character-wardrobe.js";
-import * as seedream from "../src/seedream5Pro.js";
+import * as seedream from "../src/seedream55.js";
 import * as image25 from "../src/openAiImage26.js";
 import { nodeApi, generationApi } from "../src/api/newtApi.js";
 
@@ -132,7 +133,7 @@ function routeHarness(provider, fail = false) {
   const requests = [], history = [], uploads = [];
   const env = provider === "fal" ? { FAL_KEY: "fixture-key" } : provider === "krea" ? { KREA_API_KEY: "fixture-key" } : { ATLAS_API_KEY: "fixture-key" };
   const deps = { ...nano, ...krea, ...seedream, ...image25, isRetiredNanoBanana2Model, imageModelNames, normalizeCharacterWardrobeRequest,
-    createNanoBanana21Generator, process: { env }, app: { post: (_path, _limiter, callback) => { handler = callback; } }, imageGenerationRequestLimiter: null,
+    createNanoBanana21Generator, createSeedream55Generator, process: { env }, app: { post: (_path, _limiter, callback) => { handler = callback; } }, imageGenerationRequestLimiter: null,
     atlasMediaEnabled: () => provider === "atlas", supportsAtlasImageModel,
     httpError: (status, message) => Object.assign(new Error(message), { status }), sendApiError: (_res, error) => { status = error.status || 500; json = { error: error.message }; },
     isLocalAssetUrl: url => typeof url === "string" && url.startsWith("/uploads/"), cleanImagePromptLabel: label => label || "",
@@ -159,6 +160,27 @@ function routeHarness(provider, fail = false) {
     return { status, data: json };
   } };
 }
+
+test("Seedream 5.5 route saves reference outputs under the new model and rejects Krea without substitution", async () => {
+  for (const name of ["Seedream 5.5", "Seedream 5.0 Pro"]) {
+    const h = routeHarness("fal");
+    const result = await h.run({ model: name, resolution: "2K", background: "transparent" });
+    assert.equal(result.status, 200, result.data?.error);
+    assert.equal(h.requests.length, 1);
+    assert.equal(h.requests[0].endpoint, "bytedance/seedream/v5.5/edit");
+    assert.equal(h.requests[0].input.background, "transparent");
+    assert.equal(h.history[0].modelName, "Seedream 5.5");
+    assert.equal(h.history[0].cost.amountUsd, null);
+    assert.equal(h.history[0].project.id, "fixture");
+    assert.equal(result.data.image.localUrl, "/workflow-assets/fixture/outputs/image.png");
+    const kreaOnly = routeHarness("krea");
+    const blocked = await kreaOnly.run({ model: name, resolution: "2K" });
+    assert.equal(blocked.status, 400);
+    assert.match(blocked.data.error, /requires Fal or Atlas/);
+    assert.equal(kreaOnly.uploads.length, 0);
+    assert.equal(kreaOnly.requests.length, 0);
+  }
+});
 
 for (const provider of ["fal", "krea"]) {
   test(`${provider} route saves output, history, project, endpoint and references for text and reference runs`, async () => {

@@ -88,6 +88,28 @@ test("Image Edit defaults to Ideogram, High quality and Regular precision, with 
   assert.match(renderToStaticMarkup(tree), /Ideogram 4.5 <span>Fal<\/span>/);
 });
 
+test("one shared Method control stays in the title bar for every method and result review", async t => {
+  const state = studio(t);
+  const check = () => {
+    const tree = state.render(), header = elements(tree).find(element => element.props.className === "ies-header");
+    const controls = elements(tree).filter(element => element.props["aria-label"] === "Edit method");
+    assert.equal(controls.length, 1);
+    assert.deepEqual(find(header, "Edit method"), controls[0]);
+    return tree;
+  };
+  for (const method of ["sketch", "remove", "layers", "edit"]) { state.change("Edit method", method); check(); }
+  await state.generate();
+  check();
+  state.change("Edit method", "layers");
+  const layers = elements(check()).find(element => element.props.onActivityChange);
+  layers.props.onActivityChange({ busy: true, dirty: false });
+  assert.equal(find(check(), "Edit method").props.disabled, true);
+  state.change("Edit method", "edit");
+  assert.equal(find(check(), "Edit method").props.value, "layers", "busy layers cannot be switched away");
+  layers.props.onActivityChange({ busy: false, dirty: false });
+  assert.equal(find(check(), "Edit method").props.disabled, false);
+});
+
 test("model switching updates controls without discarding the prompt, drawing or undo history", (t) => {
   const state = studio(t);
   state.paint();
@@ -209,6 +231,97 @@ test("Nano Banana editing requires Fal without silent provider or model fallback
   }
   assert.equal(state.requests.length, 0);
   assert.equal(generateButton(state.render({ provider: "fal" })).props.disabled, false);
+});
+
+test("Generate from Sketch hides selection, arrow and shape tools and switches back to a usable drawing tool", t => {
+  const state = studio(t);
+  for (const label of ["Arrow", "Circle", "Rectangle"]) {
+    state.change("Edit method", "edit");
+    find(state.render(), "Drawing layer").props.onClick();
+    find(state.render(), label).props.onClick();
+    state.change("Edit method", "sketch");
+    const tree = state.render();
+    for (const hidden of ["Editing layer", "Selection layer", "Arrow", "Circle", "Rectangle", "Selection canvas"]) assert.equal(find(tree, hidden), undefined, hidden);
+    for (const visible of ["Draw", "Text note", "Erase marks", "Pan", "Drawing color", "Drawing opacity"]) assert.ok(find(tree, visible), visible);
+    assert.equal(find(tree, "Draw").props.active, true);
+    state.paint();
+    assert.equal(find(state.render(), "Clear active layer").props.disabled, false);
+  }
+});
+
+test("sketch excludes the hidden selection from requests but preserves it when returning to Edit image", async t => {
+  const state = studio(t);
+  state.paint();
+  find(state.render(), "Selection layer").props.onClick();
+  state.paint();
+  state.change("Edit method", "sketch");
+  await state.generate();
+  assert.equal(state.requests[0].get("mode"), "sketch");
+  assert.equal(state.requests[0].get("blank"), "false");
+  assert.equal(state.requests[0].get("selection"), null);
+  assert.equal(state.requests[0].get("drawing").type, "image/png");
+  state.change("Edit version", "-1");
+  state.change("Edit method", "edit");
+  assert.ok(find(state.render(), "Selection canvas"));
+  find(state.render(), "Selection layer").props.onClick();
+  assert.equal(find(state.render(), "Clear active layer").props.disabled, false);
+  assert.equal(find(state.render(), "Undo stroke").props.disabled, false);
+  await state.generate();
+  assert.equal(state.requests[1].get("selection").type, "image/png");
+  assert.equal(state.requests[1].get("drawing").type, "image/png");
+});
+
+test("Remove selected is selection-only without layer-switch buttons, annotation tools or colors", async t => {
+  const state = studio(t);
+  state.change("Edit method", "remove");
+  state.change("Edit prompt", "");
+  let tree = state.render();
+  for (const hidden of ["Editing layer", "Drawing layer", "Selection layer", "Arrow", "Text note", "Drawing color", "Custom drawing color", "Drawing opacity"]) assert.equal(find(tree, hidden), undefined, hidden);
+  assert.equal(elements(tree).filter(element => element.props.className?.includes("ies-swatch")).length, 0);
+  for (const visible of ["Draw", "Circle", "Rectangle", "Erase marks", "Pan", "Brush size"]) assert.ok(find(tree, visible), visible);
+  assert.equal(generateButton(tree).props.disabled, true);
+  state.paint();
+  assert.equal(generateButton(state.render()).props.disabled, false);
+  await state.generate();
+  assert.equal(state.requests[0].get("mode"), "remove");
+  assert.equal(state.requests[0].get("selection").type, "image/png");
+  assert.equal(state.requests[0].get("drawing"), null, "painting in Remove selected never creates drawing annotations");
+  state.change("Edit version", "-1");
+  assert.equal(find(state.render(), "Drawing layer"), undefined, "returning from results keeps selection-only tools");
+  state.change("Edit method", "edit");
+  find(state.render(), "Drawing layer").props.onClick();
+  tree = state.render();
+  for (const restored of ["Arrow", "Text note", "Drawing color", "Custom drawing color", "Drawing opacity"]) assert.ok(find(tree, restored), restored);
+});
+
+test("Remove selected switches from annotation tools to the selection brush without discarding drawing marks", t => {
+  const state = studio(t);
+  state.paint();
+  find(state.render(), "Arrow").props.onClick();
+  state.change("Edit method", "remove");
+  assert.equal(find(state.render(), "Draw").props.active, true);
+  assert.equal(find(state.render(), "Clear active layer").props.disabled, true, "only the empty selection is active");
+  state.paint();
+  find(state.render(), "Clear active layer").props.onClick();
+  assert.equal(find(state.render(), "Clear active layer").props.disabled, true);
+  state.change("Edit method", "edit");
+  find(state.render(), "Drawing layer").props.onClick();
+  assert.equal(find(state.render(), "Clear active layer").props.disabled, false, "the earlier drawing is preserved");
+});
+
+test("reviewing a generated result hides inactive editing tools without altering the preserved draft", async t => {
+  const state = studio(t);
+  state.paint();
+  await state.generate();
+  const tree = state.render();
+  for (const hidden of ["Editing layer", "Draw", "Arrow", "Circle", "Rectangle", "Text note", "Erase marks", "Undo stroke", "Redo stroke", "Clear active layer"]) assert.equal(find(tree, hidden), undefined, hidden);
+  assert.equal(find(tree, "Pan").props.active, true);
+  assert.equal(find(tree, "Pan").props.disabled, false);
+  assert.ok(find(tree, "Comparison divider"));
+  tree.props.onKeyDownCapture({ key: "z", metaKey: true, target: { closest: () => null }, preventDefault() {}, stopPropagation() {} });
+  state.change("Edit version", "-1");
+  assert.equal(find(state.render(), "Undo stroke").props.disabled, false, "review shortcuts cannot alter the hidden draft");
+  assert.equal(find(state.render(), "Clear active layer").props.disabled, false);
 });
 
 function comparison(state, rect = { left: 100, top: 50, width: 400, height: 240 }) {

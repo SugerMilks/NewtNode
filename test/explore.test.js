@@ -1,6 +1,7 @@
 import test from "node:test";
 import { isCoverageNode } from "../src/coveragePresets.js";
 import { isReframeNode } from "../src/cameraCoverage.js";
+import { isLayersNode } from "../src/imageLayers.js";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { exploreDefaults, exploreRequest, exploreDirectionRequest, explorePlanningPrompt, normalizeExploreData, normalizeExplorePlan, explorePlanSchema, exploreSelectionPatch, validateExplorePlan, exploreImagePrompt, explorePlanningInstructions, exploreGrades, exploreStyleFamilies, exploreReferenceDescription } from "../src/explore.js";
@@ -368,7 +369,7 @@ test("Preview's actual source helper receives all full-resolution Explore images
   const editor = await readFile(new URL("../src/NodeEditor.jsx", import.meta.url), "utf8");
   const start = editor.indexOf("function connectedPreviewSources(");
   const helpers = editor.slice(start, editor.indexOf("function normalizedPreviewLayoutItems(", start));
-  const preview = new Function("normalizedResultItems", "sourceLabel", "previewMediaType", "isCoverageNode", "isReframeNode", `${helpers}; return connectedPreviewSources;`)(normalizedResultItems, source => source.data.title, () => "image", isCoverageNode, isReframeNode);
+  const preview = new Function("normalizedResultItems", "sourceLabel", "previewMediaType", "isCoverageNode", "isReframeNode", "isLayersNode", `${helpers}; return connectedPreviewSources;`)(normalizedResultItems, source => source.data.title, () => "image", isCoverageNode, isReframeNode, isLayersNode);
   const source = { id: "e", type: "explore", data: { title: "Explore", resultItems: [item(), item("Reflections")], selectedResultIndex: 1, resultUrl: item("Reflections").url } };
   const result = preview([{ source, edge: { from: { port: "imageOut" } } }]);
   assert.deepEqual(result[0].items.map(item => item.url), source.data.resultItems.map(item => item.url));
@@ -555,7 +556,7 @@ test("an uncertain planning POST is never replayed", async t => {
 test("actual canvas output helper rejects removed style ports while keeping image output", async () => {
   const editor = await readFile(new URL("../src/NodeEditor.jsx", import.meta.url), "utf8");
   const start = editor.indexOf("function connectedOutputItem(");
-  const helper = new Function("previewMediaType", "sourceLabel", "isReframeNode", `${editor.slice(start, editor.indexOf("function connectedOutputUrl(", start))}; return connectedOutputItem;`)(() => "image", source => source.data.title, isReframeNode);
+  const helper = new Function("previewMediaType", "sourceLabel", "isReframeNode", "isLayersNode", `${editor.slice(start, editor.indexOf("function connectedOutputUrl(", start))}; return connectedOutputItem;`)(() => "image", source => source.data.title, isReframeNode, isLayersNode);
   const source = { type: "explore", data: { title: "Look", resultUrl: "/outputs/selected.png", resultText: "Graphic light" } };
   assert.equal(helper(source, { from: { port: "imageOut" } }).url, source.data.resultUrl);
   assert.equal(helper(source, { from: { port: "styleOut" } }), null);

@@ -108,6 +108,10 @@ test("AI reads authoritative presets, approves a reasoned plan and inserts its e
   assert.equal(context(bodies[0]).graph.presets[0].name, "Cinematic Location");
   assert.equal(f.reads.every(item => item.args.restoreAssets === false), true);
   assert.ok(bodies[0].input[0].content.includes("Workflow Planning"));
+  for (const skill of (await f.skillStore.snapshot()).skills) {
+    assert.ok(bodies[0].input[0].content.includes(skill.title), `Missing skill title: ${skill.id}`);
+    assert.ok(bodies[0].input[0].content.includes(skill.instructions.split("\n")[0]), `Missing skill guidance: ${skill.id}`);
+  }
   assert.equal(f.service.public(job).skills.items[0].instructions, undefined);
   assert.equal(Object.keys(job.receipts).length, 0);
 });

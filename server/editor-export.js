@@ -13,20 +13,24 @@ export function normalizeEditorExportPath(value) {
 async function existingFile(filePath) {
   try {
     const info = await lstat(filePath);
-    if (!info.isFile()) throw new Error("Choose an MP4 file, not a folder or symbolic link.");
+    if (!info.isFile()) throw new Error("Choose a file, not a folder or symbolic link.");
     return { dev: info.dev, ino: info.ino, size: info.size, mtimeMs: info.mtimeMs, ctimeMs: info.ctimeMs };
   } catch (error) { if (error.code === "ENOENT") return null; throw error; }
 }
 
 export async function prepareEditorExport(filePath, sources) {
-  const normalized = normalizeEditorExportPath(filePath);
+  return prepareFileExport(normalizeEditorExportPath(filePath), sources, "timeline source file");
+}
+
+// File-type validation belongs to the caller; source and destination protection is shared.
+export async function prepareFileExport(normalized, sources, sourceLabel = "source file") {
   const directory = await realpath(path.dirname(normalized));
   await access(directory, constants.W_OK);
   const target = path.join(directory, path.basename(normalized)), before = await existingFile(target);
   for (const source of sources) {
     const sourcePath = await realpath(source.filePath);
     const sourceInfo = await lstat(sourcePath);
-    if (sourcePath === target || (before && before.dev === sourceInfo.dev && before.ino === sourceInfo.ino)) throw new Error("Choose a different name or folder. An export must not replace a timeline source file.");
+    if (sourcePath === target || (before && before.dev === sourceInfo.dev && before.ino === sourceInfo.ino)) throw new Error(`Choose a different name or folder. An export must not replace a ${sourceLabel}.`);
   }
   return { filePath: target, before };
 }

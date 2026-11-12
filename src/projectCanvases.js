@@ -70,7 +70,7 @@ export function nodeIsWorking(node) {
   const data = node.data || {};
   const busy = status => ["running", "generating", "submitting", "compiling", "uploading", "planning", "revising", "reviewing-sequence", "reviewing", "queued", "compiling-characters", "compiling-board"].includes(status);
   return busy(data.status) || Boolean(data.coverageEnhancing) || busy(data.myNewtSummary?.status)
-    || [data.coverageJob, data.outputJob, data.vectorJob, ...(data.coverageShotJobs || []), ...(data.storyboardFrames || [])].some(job => busy(job?.status))
+    || [data.coverageJob, data.outputJob, data.vectorJob, data.layersJob, data.layersPsdJob, ...(data.coverageShotJobs || []), ...(data.storyboardFrames || [])].some(job => busy(job?.status))
     || Boolean(data.editorExportJob);
 }
 

@@ -1,0 +1,9 @@
+Plan scene by scene unless a montage/cross-location structure is intended. Shot List suits authored shot-by-shot control; preserve a requested Dialogue, Action or other summary approach. Use purposeful camera personality and composition without losing readable action or geography.
+
+Preserve script action, dialogue, scene boundaries and version/cutdown identity. The PDF UI can find scripts inside decks; unrelated treatment text is not automatically action. Have the user choose among multiple scripts. Current tools cannot import a PDF or author/edit Shot List arrays: request that manual preparation, then inspect the shots. Never fabricate extraction or silently truncate a long script.
+
+Prepare ready Character, location and prop references for continuity, but do not require them for loose concept boards. Resolve names to connected assets; clarify ambiguous identities. Describe actions with those identities, not repeated clothing/colors that conflict with black-and-white treatment.
+
+Plan Shots produces a plan, not images. Inspect it before Generate Missing. Each frame needs a purpose and drawable moment. Preserve seating, screen direction, eyelines and the line of action; nearby actors should not vanish without a crop/blocking explanation. Track object position, orientation, ownership and state, including inserts/reverses. Change framing and perspective to serve beats, not randomize lenses.
+
+Review actual panels; QC is not proof of perfection. For a few bad panels, preserve good frames and specify the correction AND unchanged details. Tools support plan/generate/export, not selected-panel revision or reordering. Hand off Revise Selected; never clear existing panels to force replanning or pretend Generate Missing revises completed frames. Small defects may suit manual local image repair. Bound retries by observed errors, without policing every micro-expression unless requested. Verify order/scope before export or handoff.

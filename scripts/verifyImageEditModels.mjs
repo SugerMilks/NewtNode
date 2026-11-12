@@ -47,6 +47,14 @@ try {
     await page.mouse.up();
   };
   await open();
+  const methodBounds = await page.getByLabel("Edit method", { exact: true }).boundingBox();
+  const methodElement = await page.getByLabel("Edit method", { exact: true }).elementHandle();
+  const checkMethod = async () => {
+    const method = page.getByLabel("Edit method", { exact: true });
+    assert.equal(await method.count(), 1);
+    assert.ok(await method.evaluate((element, original) => element === original && Boolean(element.closest(".ies-header")), methodElement));
+    assert.deepEqual(await method.boundingBox(), methodBounds, "method selector stays in one stable position");
+  };
   assert.equal(await page.getByLabel("Edit quality", { exact: true }).inputValue(), "high");
   assert.equal(await page.getByLabel("Edit precision", { exact: true }).inputValue(), "regular");
   await page.screenshot({ path: path.join(screenshots, "ideogram-default.png") });
@@ -54,6 +62,31 @@ try {
   await page.getByLabel("Selection layer", { exact: true }).click();
   await paint();
   const pixels = await page.getByLabel("Drawing canvas", { exact: true }).evaluate(canvas => canvas.toDataURL());
+  const selectionPixels = await page.getByLabel("Selection canvas", { exact: true }).evaluate(canvas => canvas.toDataURL());
+  await page.getByLabel("Circle", { exact: true }).click();
+  await page.getByLabel("Edit method", { exact: true }).selectOption("sketch");
+  await checkMethod();
+  for (const name of ["Editing layer", "Selection layer", "Arrow", "Circle", "Rectangle", "Selection canvas"]) assert.equal(await page.getByLabel(name, { exact: true }).count(), 0, name);
+  assert.equal(await page.getByLabel("Draw", { exact: true }).getAttribute("aria-pressed"), "true");
+  assert.ok(await page.getByLabel("Custom drawing color", { exact: true }).isVisible());
+  await page.screenshot({ path: path.join(screenshots, "sketch-tools-desktop.png") });
+  await page.getByLabel("Edit method", { exact: true }).selectOption("remove");
+  await checkMethod();
+  for (const name of ["Editing layer", "Drawing layer", "Selection layer", "Arrow", "Text note", "Drawing color", "Custom drawing color", "Drawing opacity"]) assert.equal(await page.getByLabel(name, { exact: true }).count(), 0, name);
+  for (const name of ["Draw", "Circle", "Rectangle", "Erase marks", "Brush size"]) assert.ok(await page.getByLabel(name, { exact: true }).isVisible(), name);
+  assert.equal(await page.locator(".ies-swatch").count(), 0);
+  assert.equal(await page.getByLabel("Selection canvas", { exact: true }).evaluate(canvas => canvas.toDataURL()), selectionPixels, "remounted selection canvas restores its marks");
+  await page.screenshot({ path: path.join(screenshots, "remove-tools-desktop.png") });
+  await page.getByLabel("Edit method", { exact: true }).selectOption("edit");
+  await checkMethod();
+  for (const name of ["Drawing layer", "Selection layer"]) assert.ok(await page.getByLabel(name, { exact: true }).isVisible(), name);
+  await page.getByLabel("Drawing layer", { exact: true }).click();
+  await page.getByLabel("Arrow", { exact: true }).click();
+  await page.getByLabel("Edit method", { exact: true }).selectOption("sketch");
+  assert.equal(await page.getByLabel("Arrow", { exact: true }).count(), 0);
+  assert.equal(await page.getByLabel("Draw", { exact: true }).getAttribute("aria-pressed"), "true");
+  await page.getByLabel("Edit method", { exact: true }).selectOption("edit");
+  assert.ok(await page.getByLabel("Arrow", { exact: true }).isVisible());
   await page.getByLabel("Edit prompt", { exact: true }).fill("Warm the marked area while keeping the rest unchanged.");
   await page.getByLabel("Edit model", { exact: true }).selectOption("Nano Banana 2.1");
   assert.equal(await page.getByLabel("Drawing canvas", { exact: true }).evaluate(canvas => canvas.toDataURL()), pixels);
@@ -64,6 +97,8 @@ try {
   await page.screenshot({ path: path.join(screenshots, "nano-banana-drawing.png") });
   await page.getByRole("button", { name: "Generate Edit", exact: true }).click();
   await page.getByRole("button", { name: "Add Image to Canvas", exact: true }).waitFor();
+  await checkMethod();
+  assert.deepEqual(await page.getByRole("toolbar", { name: "Drawing tools" }).getByRole("button").evaluateAll(buttons => buttons.map(button => button.getAttribute("aria-label"))), ["Pan"], "review omits inactive drawing tools");
   const report = JSON.parse(await page.getByLabel("QA report").textContent());
   assert.equal(report.model, "Nano Banana 2.1"); assert.equal(report.resolution, "4K");
   assert.equal(report.quality, null); assert.equal(report.editPrecision, null);
@@ -120,6 +155,24 @@ try {
   assert.deepEqual(JSON.parse(await page.getByLabel("QA report").textContent()), report, "comparison never generates or changes the edit");
   await page.getByRole("button", { name: "Add Image to Canvas", exact: true }).click();
   assert.match(await page.getByLabel("QA report").textContent(), /Accepted: copy 1536x864/);
+  await open();
+  await paint();
+  await page.getByLabel("Selection layer", { exact: true }).click();
+  await paint();
+  const retainedSelection = await page.getByLabel("Selection canvas", { exact: true }).evaluate(canvas => canvas.toDataURL());
+  await page.getByLabel("Edit method", { exact: true }).selectOption("sketch");
+  await page.getByRole("button", { name: "Generate Edit", exact: true }).click();
+  await page.getByRole("button", { name: "Add Image to Canvas", exact: true }).waitFor();
+  const unmaskedSketch = JSON.parse(await page.getByLabel("QA report").textContent());
+  assert.equal(unmaskedSketch.mode, "sketch"); assert.equal(unmaskedSketch.blank, "false");
+  assert.equal(unmaskedSketch.layers.selection, undefined); assert.ok(unmaskedSketch.layers.drawing.pixels > 0);
+  await page.getByLabel("Edit version", { exact: true }).selectOption("-1");
+  await page.getByLabel("Edit method", { exact: true }).selectOption("remove");
+  assert.equal(await page.getByLabel("Selection canvas", { exact: true }).evaluate(canvas => canvas.toDataURL()), retainedSelection);
+  await page.getByRole("button", { name: "Generate Edit", exact: true }).click();
+  await page.getByRole("button", { name: "Add Image to Canvas", exact: true }).waitFor();
+  const removal = JSON.parse(await page.getByLabel("QA report").textContent());
+  assert.equal(removal.mode, "remove"); assert.ok(removal.layers.selection.pixels > 0);
   await open(true);
   await page.getByLabel("Edit model", { exact: true }).selectOption("OpenAI Image 2.6 Sunburst");
   await page.getByLabel("Edit quality", { exact: true }).selectOption("high");
@@ -151,6 +204,16 @@ try {
   const modelBox = await page.getByLabel("Edit resolution", { exact: true }).boundingBox();
   assert.ok(modelBox.x >= 0 && modelBox.x + modelBox.width <= 390);
   await page.screenshot({ path: path.join(screenshots, "nano-banana-mobile.png") });
+  for (const mode of ["sketch", "remove"]) {
+    await page.getByLabel("Edit method", { exact: true }).selectOption(mode);
+    for (const name of ["Editing layer", "Drawing layer", "Selection layer", "Arrow"]) assert.equal(await page.getByLabel(name, { exact: true }).count(), 0, name);
+    const toolbar = page.getByRole("toolbar", { name: "Drawing tools" });
+    await toolbar.scrollIntoViewIfNeeded();
+    const bounds = await toolbar.boundingBox();
+    assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 390, `${mode} toolbar fits mobile`);
+    assert.equal(await page.locator(".image-edit-studio").evaluate(element => element.scrollWidth > element.clientWidth), false);
+    await page.screenshot({ path: path.join(screenshots, `${mode}-tools-mobile.png`) });
+  }
   await page.setViewportSize({ width: 1440, height: 1000 });
   await open(false, "atlas");
   await page.getByLabel("Edit prompt", { exact: true }).fill("Warm the scene");
@@ -160,5 +223,5 @@ try {
   await page.getByLabel("Edit model", { exact: true }).selectOption("Nano Banana 2.1");
   assert.ok(await page.getByRole("button", { name: "Generate Edit", exact: true }).isDisabled());
   assert.deepEqual(errors, []); assert.deepEqual(apiCalls, []);
-  console.log(JSON.stringify({ ok: true, screenshots, paidCalls: 0, checks: ["Ideogram default", "preserved drawing and selection", "Nano Banana resolution and mock generation", "blank sketch", "copy result", "provider guards", "mobile controls", "direct comparison dragging, zoom and pan", "comparison keyboard and Escape", "mobile touch comparison"] }, null, 2));
+  console.log(JSON.stringify({ ok: true, screenshots, paidCalls: 0, checks: ["Ideogram default", "method-specific tools on desktop and mobile", "hidden sketch selection excluded from generation and restored on switching back", "preserved drawing and selection", "Nano Banana resolution and mock generation", "blank sketch", "copy result", "provider guards", "mobile controls", "direct comparison dragging, zoom and pan", "comparison keyboard and Escape", "mobile touch comparison"] }, null, 2));
 } finally { await browser?.close(); await server.close(); }

@@ -7,16 +7,18 @@ import { buildSync } from "esbuild";
 import { characterDialoguePrompt, characterVoicePromptForSource, characterVoiceReferenceInputs } from "../src/characterVoice.js";
 import { buildVideoGenerationRequest } from "../src/nodeRunners/videoModels.js";
 import { characterBaseGenerationSignature, characterBaseVideoGenerationSignature } from "../src/characterSheetWorkflow.js";
+import { scenePortPoint } from "../src/nodeGeometry.js";
+import { remapImportedGraph } from "../src/workflowState.js";
 
 const editor = readFileSync(new URL("../src/NodeEditor.jsx", import.meta.url), "utf8");
 const compiled = buildSync({
-  stdin: { contents: `${editor}\nexport { buildVideoModelPrompt, runVideoModelGeneration, expandVideoDirectorPackageIncoming, normalizeCurrentNode, createDefaultNodeData };`, resolveDir: fileURLToPath(new URL("../src", import.meta.url)), loader: "jsx" },
+  stdin: { contents: `${editor}\nexport { buildVideoModelPrompt, runVideoModelGeneration, expandVideoDirectorPackageIncoming, normalizeCurrentNode, createDefaultNodeData, getNodeConfig, outputPortIdsForNode, normalizeEditorGraph, buildIncomingByNode, connectedOutputItem };`, resolveDir: fileURLToPath(new URL("../src", import.meta.url)), loader: "jsx" },
   bundle: true, write: false, platform: "node", format: "cjs", packages: "external", jsx: "automatic",
   define: { "import.meta.env": "{}" }, external: ["/newt-mark.png"], loader: { ".css": "empty" }
 });
 const module = { exports: {} };
 new Function("require", "module", "exports", compiled.outputFiles[0].text)(createRequire(import.meta.url), module, module.exports);
-const { buildVideoModelPrompt, runVideoModelGeneration, expandVideoDirectorPackageIncoming, normalizeCurrentNode, createDefaultNodeData } = module.exports;
+const { buildVideoModelPrompt, runVideoModelGeneration, expandVideoDirectorPackageIncoming, normalizeCurrentNode, createDefaultNodeData, getNodeConfig, outputPortIdsForNode, normalizeEditorGraph, buildIncomingByNode, connectedOutputItem } = module.exports;
 const video = { id: "video", type: "videoModel", data: { model: "Seedance 2.5", duration: "5 seconds", generateAudio: true, aspectRatio: "16:9", resolution: "720p" } };
 const character = (name, referenceOnly = true) => ({ id: name, type: "character", data: {
   title: "Character", characterName: name, locked: true, activated: true,
@@ -25,6 +27,69 @@ const character = (name, referenceOnly = true) => ({ id: name, type: "character"
   compiledVoicePrompt: characterDialoguePrompt
 } });
 const connection = (source, port = "characterOut") => ({ source, edge: { from: { nodeId: source.id, port }, to: { nodeId: "video", port: port === "voiceOut" ? "referenceAudioIn" : "characterIn" } } });
+
+test("Character offers one output while saved audio-only wires survive reopen and import unchanged", () => {
+  const actor = character("Newt");
+  actor.data.characterCustomSheets = [{ id: "custom", localUrl: actor.data.resultUrl }];
+  actor.data.activeCharacterSheetId = "custom:custom";
+  assert.deepEqual(getNodeConfig("character").output.map(port => port.id), ["characterOut"]);
+  assert.deepEqual(outputPortIdsForNode(actor), ["characterOut"]);
+  const edge = { id: "old-audio", ...connection(actor, "voiceOut").edge };
+  const graph = normalizeEditorGraph([actor, video], [edge]);
+  const restored = normalizeEditorGraph(...[graph.nodes, graph.edges].map(value => JSON.parse(JSON.stringify(value))));
+  const imported = remapImportedGraph(restored, { x: 25, y: 50 }, 123);
+  for (const saved of [graph, restored, normalizeEditorGraph(imported.nodes, imported.edges)]) {
+    assert.equal(saved.edges.length, 1);
+    assert.equal(saved.edges[0].from.port, "voiceOut");
+    assert.equal(saved.edges[0].to.port, "referenceAudioIn");
+    const target = saved.nodes.find(node => node.type === "videoModel");
+    const incoming = buildIncomingByNode(saved.nodes, saved.edges)[target.id];
+    assert.equal(incoming.characterIn, undefined, "legacy audio-only wires must not add image references");
+    const { source, edge: savedEdge } = incoming.referenceAudioIn[0];
+    assert.equal(connectedOutputItem(source, savedEdge).url, "/uploads/Newt.wav");
+    assert.equal(connectedOutputItem(source, savedEdge).type, "audio");
+    assert.deepEqual(source.data.characterVoices, actor.data.characterVoices);
+  }
+});
+
+test("legacy voice lines use the Character handle's measured position and fallback", () => {
+  const start = editor.indexOf("  function getPortPoint(");
+  const code = editor.slice(start, editor.indexOf("\n  function estimatePortPoint", start));
+  const actor = { ...character("Newt"), x: 10, y: 20 };
+  const fallback = [];
+  const resolve = positions => new Function("nodes", "portPositions", "scenePortPoint", "estimatePortPoint", `${code}\nreturn getPortPoint;`)(
+    [actor], positions, scenePortPoint, (id, port) => { fallback.push({ id, port }); return { x: 0, y: 0 }; });
+  const measured = resolve({ "Newt:characterOut": { x: 800, y: 100 }, "Newt:voiceOut": { x: 800, y: 200 } });
+  assert.deepEqual(measured("Newt", "voiceOut"), measured("Newt", "characterOut"));
+  resolve({})("Newt", "voiceOut");
+  assert.deepEqual(fallback, [{ id: "Newt", port: "characterOut" }]);
+});
+
+test("a single Character connection carries the current selected audio in either voice mode", async t => {
+  const calls = [];
+  t.mock.method(globalThis, "fetch", async (_url, options = {}) => {
+    if (options.body) calls.push(JSON.parse(options.body));
+    return Response.json({ video: { localUrl: "/outputs/mock.mp4" } });
+  });
+  const actor = character("Newt", false);
+  actor.data.characterVoices.push({ id: "second", localUrl: "/uploads/second.wav" });
+  const incoming = { characterIn: [connection(actor)] };
+  for (const referenceOnly of [false, true]) {
+    actor.data.characterVoiceReferenceOnly = referenceOnly;
+    actor.data.activeVoiceId = referenceOnly ? "second" : "sample";
+    const prompt = buildVideoModelPrompt(video, '@Newt says "Hello."', incoming);
+    await runVideoModelGeneration({ node: video, incoming, incomingByNode: {}, prompt, index: 0 });
+    const request = calls.at(-1);
+    assert.deepEqual(request.referenceAudioUrls, [referenceOnly ? "/uploads/second.wav" : "/uploads/Newt.wav"]);
+    assert.deepEqual(request.characterReferenceUrls, ["/uploads/Newt.png"]);
+    assert.match(request.prompt, referenceOnly ? /VOICE REFERENCE ONLY.*@Audio1/ : /dialogue reference labeled @Audio1/);
+  }
+  actor.data.activeVoiceId = "";
+  const prompt = buildVideoModelPrompt(video, "Newt listens.", incoming);
+  await runVideoModelGeneration({ node: video, incoming, incomingByNode: {}, prompt, index: 0 });
+  assert.deepEqual(calls.at(-1).referenceAudioUrls, []);
+  assert.doesNotMatch(calls.at(-1).prompt, /VOICE REFERENCE ONLY|dialogue reference/);
+});
 
 test("legacy dialogue is unchanged; voice-only replaces stale dialogue guidance immediately", () => {
   const actor = character("Newt", false);

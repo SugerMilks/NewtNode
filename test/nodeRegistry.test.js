@@ -6,6 +6,7 @@ import { utilityImageModelNames, utilityModelDescriptions } from "../src/modelOp
 import { myNewtDefaults } from "../src/myNewt/contract.js";
 import { clearStaleRunningState } from "../src/workflowState.js";
 import { migrateOpenAiImageSettings } from "../src/openAiImage26.js";
+import { migrateSeedreamSettings } from "../src/seedream55.js";
 
 test("Newt is first in the shared sidebar and context-menu catalog with its existing type", async () => {
   assert.deepEqual(nodeTypeDefinitions[0], { type: "myNewt", label: "Newt" });
@@ -24,7 +25,7 @@ test("new and saved Newt nodes use the new default without changing custom title
     assert.ok(start >= 0);
     const end = editor.indexOf("\nfunction ", start + 1);
     assert.ok(end > start);
-    return new Function("nodeTypeLabel", "myNewtDefaults", "clearStaleRunningState", "migrateOpenAiImageSettings", `${editor.slice(start, end)}\nreturn ${name};`)(nodeTypeLabel, myNewtDefaults, clearStaleRunningState, migrateOpenAiImageSettings);
+    return new Function("nodeTypeLabel", "myNewtDefaults", "clearStaleRunningState", "migrateOpenAiImageSettings", "migrateSeedreamSettings", `${editor.slice(start, end)}\nreturn ${name};`)(nodeTypeLabel, myNewtDefaults, clearStaleRunningState, migrateOpenAiImageSettings, migrateSeedreamSettings);
   };
   const create = load("createDefaultNodeData"), normalize = load("normalizeCurrentNode");
   assert.deepEqual(create("myNewt", "My Newt", 1), { title: "Newt", ...myNewtDefaults });

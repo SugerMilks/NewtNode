@@ -14,6 +14,7 @@ const fixture = () => ({ id: "voice-qa", type: "character", x: 0, y: 0, data: {
 
 function Harness() {
   const [node, setNode] = React.useState(fixture);
+  const [legacyConnected, setLegacyConnected] = React.useState(false);
   const update = (_id, patch) => setNode(current => ({ ...current, data: { ...current.data, ...patch } }));
   const prompt = buildVideoModelPrompt({ data: { model: "Seedance 2.5" } }, '@Newt says "These are new words."', { characterIn: [{ source: node }] }, {});
   return <main style={{ padding: 12 }}>
@@ -21,10 +22,11 @@ function Harness() {
       <button onClick={() => setNode(current => normalizeCurrentNode(JSON.parse(JSON.stringify(current))))}>Save / Reopen</button>
       <button onClick={() => setNode(current => normalizeCurrentNode(cloneNode(current)))}>Copy Node</button>
       <button onClick={() => { const old = fixture(); delete old.data.characterVoiceReferenceOnly; setNode(normalizeCurrentNode(old)); }}>Load Legacy</button>
+      <button onClick={() => { setLegacyConnected(true); const old = fixture(); old.data.locked = false; old.data.activated = false; setNode(old); }}>Load Legacy Voice Wire</button>
     </div>
     <div className="character-qa-stage" style={{ width: 1000, maxWidth: "100%" }}>
       <section className="node-card character-node" style={{ position: "relative", width: "100%" }}>
-        <NodeBody node={node} generationProvider="fal" incoming={{}} incomingByNode={{}} connectedPortKeys={new Set()} onUpdate={update}
+        <NodeBody node={node} generationProvider="fal" incoming={{}} incomingByNode={{}} connectedPortKeys={new Set(legacyConnected ? [`${node.id}:voiceOut`] : [])} onUpdate={update}
           onCharacterUnlock={() => update(node.id, { locked: false, activated: false })} onConnectStart={() => {}} onDisconnectInput={() => {}} />
       </section>
     </div>

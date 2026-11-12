@@ -6,6 +6,7 @@ import { creativeImageDefaultModel } from "../src/modelOptions.js";
 import { generationProviderFromSettings, estimateImageRunCost, estimateVideoRunCost } from "../src/generationPricing.js";
 import { normalizeCharacterWardrobeRequest } from "../server/character-wardrobe.js";
 import { isNanoBanana21Model } from "../src/nanoBanana21.js";
+import { isSeedream55Model, validateSeedream55Request } from "../src/seedream55.js";
 
 const source = await readFile(new URL("../server/index.js", import.meta.url), "utf8");
 const code = source.slice(source.indexOf('app.post("/api/node/generate-image",'), source.indexOf("\nasync function runKreaImageModel("));
@@ -23,7 +24,7 @@ function imageApi({ failure } = {}) {
   let handler;
   const calls = [], history = [], reads = [];
   const deps = {
-    normalizeCharacterWardrobeRequest, isNanoBanana21Model,
+    normalizeCharacterWardrobeRequest, isNanoBanana21Model, isSeedream55Model, validateSeedream55Request, isAutoImageAspectRatio: value => String(value).toLowerCase() === "auto",
     app: { post: (_path, _limiter, run) => { handler = run; } }, imageGenerationRequestLimiter: null,
     process: { env: { ATLAS_API_KEY: "test-atlas-original" } }, atlasMediaEnabled: () => true, supportsAtlasImageModel,
     resolveImageModel: (displayName) => ({ displayName, provider: "fal-openai-image-26" }),
@@ -85,4 +86,20 @@ test("Atlas estimates use Atlas standard rates and leave unverified token settin
   assert.equal(estimateImageRunCost({ model: creativeImageDefaultModel, provider: "atlas" }), null);
   assert.equal(estimateVideoRunCost({ model: "Seedance 2.5", duration: "8 seconds", resolution: "720p", provider: "atlas" }), 3.00456);
   assert.equal(estimateVideoRunCost({ model: "Seedance 2.5", duration: "8 seconds", resolution: "720p", provider: "atlas", hasVideoReference: true }), null);
+});
+
+test("Seedream 5.5 rejects invalid references and unsupported Atlas settings before reading or submitting", async () => {
+  for (const patch of [{ imagePromptUrls: Array(11).fill("/uploads/ref.png") }, { imagePromptUrls: ["https://example.com/ref.png"] },
+    { imagePromptUrls: [null] }, { imagePromptUrls: "bad" }, { resolution: "4K" }, { aspectRatio: "4:5" }, { editMaskDataUrl: "mask" }]) {
+    const api = imageApi();
+    const result = await api.run({ model: "Seedream 5.5", resolution: "2K", ...patch });
+    assert.equal(result.status, 400, result.data?.error);
+    assert.equal(api.reads.length, 0);
+    assert.equal(api.calls.length, 0);
+  }
+  const api = imageApi();
+  const result = await api.run({ model: "Seedream 5.5", resolution: "2K", imagePromptUrls: ["/uploads/ref.png"] });
+  assert.equal(result.status, 200, result.data?.error);
+  assert.equal(api.calls.length, 1);
+  assert.equal(api.calls[0].request.model, "Seedream 5.5");
 });

@@ -1,10 +1,10 @@
 import { imageModelNames, nanoImageAspectRatios } from "./modelOptions.js";
-import { seedream5ProAtlasBase, validateSeedream5ProRequest } from "./seedream5Pro.js";
+import { seedream55AtlasBase, validateSeedream55Request } from "./seedream55.js";
 
 // Verified 2026-09-10 against https://static.atlascloud.ai/model/schema/<model-id-with-dashes>.json.
 // GPT Image 2.6 is not published on Atlas (catalog checked 2026-11-04).
 const models = {
-  [imageModelNames.seedream5Pro]: { id: seedream5ProAtlasBase, family: "seedream", maxReferences: 10 },
+  [imageModelNames.seedream55]: { id: seedream55AtlasBase, family: "seedream", maxReferences: 10 },
   [imageModelNames.openAiImage2]: { id: "openai/gpt-image-2", family: "openai", maxReferences: 10 },
   [imageModelNames.nanoBananaPro]: { id: "google/nano-banana-pro", family: "nano", maxReferences: 10 }
 };
@@ -105,10 +105,11 @@ export function buildAtlasImageRequest(options = {}) {
 
   const config = models[model];
   if (config.family === "seedream") {
-    const dimensions = validateSeedream5ProRequest({ prompt, images, resolution, aspectRatio, maskUrl, background });
+    const dimensions = validateSeedream55Request({ prompt, images, resolution, aspectRatio, maskUrl, background, provider: "atlas" });
     return { model: `${config.id}/${images.length ? "edit" : "text-to-image"}`, prompt,
-      size: `${dimensions.width}*${dimensions.height}`, output_format: "png", thinking: "enabled", prompt_optimization_mode: "standard",
-      ...(images.length ? { images: [...images] } : {}) };
+      size: `${dimensions.width}*${dimensions.height}`, output_format: "png", background,
+      enable_sync_mode: false, enable_base64_output: false,
+      ...(images.length ? { reference_images: [...images] } : {}) };
   }
   const openAi = config.family === "openai";
   validateReferences(images, config.maxReferences, model);

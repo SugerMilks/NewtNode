@@ -4,6 +4,11 @@ const apiHealthUrl = new URL(process.env.NEWT_SMOKE_API_URL || process.argv[3] |
 const requiredHealthRoutes = [
   "looksLibrary",
   "looksStyleAnalysis",
+  "looksWorkspaceTools",
+  "looksSharedFolders",
+  "looksCreateStyleBoard",
+  "looksUnifiedSearch",
+  "looksFilmStills",
   "myNewt",
   "myNewtPlanning",
   "myNewtCreativeSkills",
@@ -46,7 +51,9 @@ const requiredHealthRoutes = [
   "editorClipFades",
   "outputExport",
   "imageEditing",
+  "imageEditingLayers",
   "gptImage26",
+  "seedream55",
   "imageEditingNanoBanana21",
   "ideogramVector",
   "gptImage26Vector",
@@ -61,6 +68,11 @@ const requiredHealthRoutes = [
   "apiCostVisibility",
   "elevenLabsVoices",
   "utilityImage",
+  "imageLayers",
+  "imageLayersPsd",
+  "imageLayersRotation",
+  "imageLayerFolders",
+  "imageLayerSeparation",
   "utilityVideo",
   "videoOutpaint"
 ];

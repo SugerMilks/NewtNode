@@ -1,4 +1,5 @@
 import { coverageJobState, isReframeNode } from "./cameraCoverage.js";
+import { isLayersNode } from "./imageLayers.js";
 
 export function cloneGraphState(state) {
   return {
@@ -46,6 +47,8 @@ export function resetCopiedNodeRuntime(data = {}) {
   delete copy.myNewtRunRecords;
   if (data.editorExportJob) copy.editorExportJob = null;
   if (data.vectorJob) { copy.vectorJob = null; copy.status = copy.resultUrl ? "complete" : "ready"; copy.error = ""; }
+  if (data.layersJob) { copy.layersJob = null; copy.status = copy.resultUrl ? "complete" : "ready"; copy.error = ""; }
+  if (data.layersPsdJob) copy.layersPsdJob = null;
   if (data.coverageJob) copy.coverageJob = null;
   if (data.coverageEnhancing) copy.coverageEnhancing = null;
   if (copy.coverageShotJobs) copy.coverageShotJobs = [];
@@ -130,7 +133,7 @@ export function remapImportedGraph(graph = {}, offset = {}, stamp = Date.now()) 
     idMap.set(node.id, nextId);
     return {
       ...cloneNode(node),
-      data: node.type === "myNewt" ? { ...node.data, jobId: "", myNewtSummary: null } : (["editor", "output", "vector"].includes(node.type) || isReframeNode(node) || node.data?.coveragePoses) ? resetCopiedNodeRuntime(cloneNode(node).data) : cloneNode(node).data,
+      data: node.type === "myNewt" ? { ...node.data, jobId: "", myNewtSummary: null } : (["editor", "output", "vector"].includes(node.type) || isReframeNode(node) || isLayersNode(node) || node.data?.layersJob || node.data?.coveragePoses) ? resetCopiedNodeRuntime(cloneNode(node).data) : cloneNode(node).data,
       id: nextId,
       x: Math.round(node.x + safeOffset.x),
       y: Math.round(node.y + safeOffset.y)

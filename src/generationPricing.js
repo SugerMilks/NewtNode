@@ -4,7 +4,7 @@ import { estimateMiniMaxH3FalCost } from "./minimaxH3.js";
 import { estimateKling4Cost, isKling4Model } from "./kling4.js";
 import { estimateOpenAiImage2Cost } from "./openAiImage2.js";
 import { isOpenAiImage26Model } from "./openAiImage26.js";
-import { isSeedream5ProModel, seedream5ProCost } from "./seedream5Pro.js";
+import { isSeedream55Model, seedream55Cost } from "./seedream55.js";
 import { isNanoBanana21Model, nanoBanana21Cost } from "./nanoBanana21.js";
 import { estimateSeedance25FalCost } from "./seedance25.js";
 import { estimateAtlasImageCost, estimateAtlasVideoCost } from "./atlasPricing.js";
@@ -73,10 +73,10 @@ export function estimateImageRunCost({
 
   if (isOpenAiImage26Model(model)) return null;
 
-  if (isSeedream5ProModel(model)) {
+  if (isSeedream55Model(model)) {
     unitCost = normalizedProvider === "krea"
       ? estimateKreaImageCost({ modelName: model, resolution, aspectRatio, referenceCount: references }).amountUsd
-      : seedream5ProCost({ provider: normalizedProvider, resolution, aspectRatio, referenceCount: references }).amountUsd;
+      : seedream55Cost({ provider: normalizedProvider, resolution, aspectRatio, referenceCount: references }).amountUsd;
   }
 
   if (model === "OpenAI Image 2") {

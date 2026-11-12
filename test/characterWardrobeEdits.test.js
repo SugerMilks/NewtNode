@@ -64,7 +64,7 @@ for (const model of characterSheetModelOptions) {
     assert.equal(request.prompt, prompt);
     assert.doesNotMatch(request.prompt, /Base Identity Character Sheet|layout conversion|supporting identity check/);
     assert.equal(request.model, model);
-    assert.equal(request.resolution, model === "Seedream 5.0 Pro" ? "2K" : "4K");
+    assert.equal(request.resolution, model === "Seedream 5.5" ? "2K" : "4K");
     assert.equal(request.aspectRatio, "16:9");
     assert.equal(request.workflowPackagePath, "/projects/production");
     assert.equal(request.nodeId, "character-1");
@@ -92,7 +92,7 @@ for (const model of characterSheetModelOptions) {
     assert.doesNotMatch(request.imagePromptLabels[1], /clothing only/);
     assert.equal(request.prompt, characterVideoWardrobeEditPrompt);
     assert.equal(request.model, model);
-    assert.equal(request.resolution, model === "Seedream 5.0 Pro" ? "2K" : "4K");
+    assert.equal(request.resolution, model === "Seedream 5.5" ? "2K" : "4K");
     assert.equal(request.aspectRatio, "16:9");
     assert.equal(request.editMaskDataUrl, undefined, "Obsolete rectangle masks must not be sent, even by older callers");
     assert.equal(request.characterWardrobeEdit, true);

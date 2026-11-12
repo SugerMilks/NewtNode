@@ -6,7 +6,7 @@ import os from "node:os";
 import { randomUUID } from "node:crypto";
 import express from "express";
 import sharp from "sharp";
-import { createIdeogramVectorService, ideogramVectorProviderInput, readGeneratedVector, validateVectorImage } from "../server/ideogram-vector.js";
+import { createIdeogramVectorService, ideogramVectorProviderInput, readGeneratedVector, renderVectorPreview, validateVectorImage } from "../server/ideogram-vector.js";
 import { registerIdeogramVectorRoutes, secureVectorAssetResponse } from "../server/routes/ideogramVector.js";
 import { createSingleSubmissionFalClient } from "../server/fal-single-submission.js";
 import { buildVectorRequest, vectorDefaults } from "../src/ideogramVector.js";
@@ -68,6 +68,31 @@ test("GPT validation rejects unsupported inputs before media reads or paid calls
     await assert.rejects(service.start(body({ model: openAiVectorModels[0], ...changes })), { status: 400 });
   assert.equal(calls.length, 0); assert.equal(uploads.length, 0);
 }, { readSource: async () => { throw new Error("No reference may be read"); } }));
+
+test("GPT accessibility-label failures recover after restart without another generation or duplicate save", async () => {
+  const labeled = svg.replace('<svg ', '<svg role="img" aria-label="A sun logo" ').replace('<path ', '<path aria-label="Background" ');
+  for (const model of openAiVectorModels) await withService(async ({ service, deps, directory, calls, uploads, saves, histories, queries }) => {
+    const request = body({ model });
+    await assert.rejects(service.start(request), /unsupported attribute aria-label/);
+    const receipt = JSON.parse(await readFile(path.join(directory, `${request.requestId}.json`), "utf8"));
+    assert.equal(receipt.status, "uncertain"); assert.ok(receipt.remote.url);
+    assert.equal(saves.length, 0); assert.equal(histories.length, 0);
+    const restarted = createIdeogramVectorService({ ...deps, render: renderVectorPreview });
+    const result = await restarted.inspect(request.requestId);
+    assert.equal(result.status, "completed"); assert.equal(result.item.model, model);
+    assert.ok(result.item.svgUrl); assert.equal(result.item.shapeCount, 2);
+    assert.doesNotMatch(saves[0].artwork.svg, /aria-label|role=/);
+    assert.deepEqual(saves[0].artwork.png, (await renderVectorPreview(svg)).png);
+    assert.deepEqual(await restarted.inspect(request.requestId), result);
+    assert.deepEqual(await restarted.start(request), result);
+    assert.deepEqual(await createIdeogramVectorService(deps).inspect(request.requestId), result);
+    assert.equal(calls.length, 1); assert.equal(uploads.length, 0); assert.equal(queries.length, 0);
+    assert.equal(saves.length, 1); assert.equal(histories.length, 1);
+  }, {
+    readGenerated: async () => Buffer.from(labeled),
+    render: async () => { throw Object.assign(new Error("unsupported attribute aria-label"), { status: 422 }); }
+  });
+});
 
 test("GPT recovery uses the original endpoint and records the settled Fal charge without resubmitting", () => withService(async ({ service, deps, queries, histories }) => {
   const request = body({ model: openAiVectorModels[1] });

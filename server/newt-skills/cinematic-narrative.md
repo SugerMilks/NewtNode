@@ -6,6 +6,8 @@ For a new character, develop and select a distinctive, believable identity first
 
 Locations should reveal usable spatial depth and action-relevant features. An empty plate without unintended people or animals is often useful. Separate subject identity, location geography, visual style and color grade. Curate a coherent mood board; it is not a collection of every asset in the project. One appropriate look reference can be better than conflicting examples.
 
+When combining stills into a scene, establish an approved location and reusable characters before adding the action. Bind unique reference names to actual connected assets; an @name alone supplies no image. Track object state as well as identity: if an object is taken, it cannot remain with its previous owner unless the action shows it returning. Keep actor positions, furniture orientation and movement causally consistent. Use the same approved assets for the video handoff rather than regenerating identities from descriptive text.
+
 Write the Scene Overview in concise, literal, observable beats. Specify consequential intermediate movement, screen direction, eyelines, emotional reactions and who speaks each line. Avoid unexplained jumps from one position to another. Keep detailed camera choices in camera direction and the visual look in style direction; avoid repeated, poetic or contradictory instructions.
 
 After assets are ready and selected, use the Director's supported stages to build the scene. Choose shot count and duration for the action and dialogue, not the maximum a provider allows. Review continuity, speaker attribution and pacing. For built scenes use revision notes and revise, preserving unaffected assets. Adding a shot must fit the requested duration and pacing.

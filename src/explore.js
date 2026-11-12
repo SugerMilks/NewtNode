@@ -1,6 +1,7 @@
 import { imageModelNames, imageModelOptions, stylePresetNames, stylePresetPrompts } from "./modelOptions.js";
 import { normalizedResultItems } from "./mediaResults.js";
 import { migrateOpenAiImageSettings } from "./openAiImage26.js";
+import { migrateSeedreamSettings } from "./seedream55.js";
 import { gradePresetNames, gradePresetPrompts } from "./colorLook.js";
 import { exploreMediumGuidance, exploreContrastBriefs, describeExploreContrast } from "./exploreArtDirection.js";
 
@@ -24,7 +25,7 @@ export function exploreDefaults() {
 }
 
 export function normalizeExploreData(data = {}) {
-  data = migrateOpenAiImageSettings(data);
+  data = migrateSeedreamSettings(migrateOpenAiImageSettings(data));
   const defaults = exploreDefaults();
   const savedData = { ...data };
   delete savedData.advancedOutputsOpen;

@@ -44,6 +44,33 @@ test("retains intentional spaces between editable text spans", () => {
   assert.match(svg, /<tspan>NORTH<\/tspan> <tspan>STAR<\/tspan>/);
 });
 
+test("drops nonvisual accessibility metadata without changing artwork or descriptions", async () => {
+  const body = '<title id="title">Sun &amp; sky</title><desc id="description">A geometric badge</desc><g id="badge">'+path+'</g>';
+  const plain = sanitizeVectorSvg(wrap(body));
+  const metadata = 'role="img" aria-label="Sun &amp; sky" aria-labelledby="title" aria-describedby="description" aria-hidden="false" focusable="false"';
+  const input = wrap(body).replace('<svg ', `<svg ${metadata} `).replace('<g ', `<g ${metadata} `).replace('<path ', `<path ${metadata} `);
+  const result = sanitizeVectorSvg(input);
+  assert.deepEqual(result, plain, "geometry, IDs, titles and descriptions must remain identical");
+  assert.deepEqual(sanitizeVectorSvg(result.svg), result);
+  const pixels = await sharp(Buffer.from(result.svg)).raw().toBuffer();
+  assert.deepEqual(pixels, await sharp(Buffer.from(plain.svg)).raw().toBuffer());
+});
+
+test("discarded labels cannot inject markup and do not bypass content validation", () => {
+  const result = sanitizeVectorSvg(wrap(path).replace('<svg ', '<svg aria-label="&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;" '));
+  assert.deepEqual(result, sanitizeVectorSvg(wrap(path)));
+  for (const body of [
+    '<g aria-label="safe"><script>alert(1)</script></g>',
+    '<path aria-label="safe" d="M0 0L1 1" onload="alert(1)"/>',
+    '<path aria-label="safe" d="M0 0L1 1" fill="url(https://example.invalid/a.svg#x)"/>',
+    '<path aria-label="safe" d="M0 0L1 1" style="fill: url(file:///etc/passwd)"/>',
+    '<g xlink:aria-label="safe">'+path+'</g>',
+    '<g aria-unknown="safe">'+path+'</g>',
+    '<g data-unknown="safe">'+path+'</g>',
+    '<g aria-label="safe" mystery="unsafe">'+path+'</g>'
+  ]) assert.throws(() => sanitizeVectorSvg(wrap(body)), /safely opened/);
+});
+
 test("normalizes XML attribute whitespace and accepts inert standard root version metadata", async () => {
   const input = '<svg version="1.1" width=" 100 " height="100" viewBox="0\n0\t100 100"><path d="M0 0\nL100 0\tL100 100Z" fill="#00ff00"/></svg>';
   const result = sanitizeVectorSvg(input);

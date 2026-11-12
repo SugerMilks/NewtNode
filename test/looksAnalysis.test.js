@@ -9,6 +9,7 @@ import { createLookAnalyzer, lookAnalysisInstructions, lookAnalysisVersion } fro
 import { validateCreativeResponse } from "../server/creative-llm.js";
 import { dominantPaletteFromPixels } from "../src/palettePixels.js";
 import { lookSnapshot, libraryLookPrompt } from "../src/looks.js";
+import { lookStyleSections } from "../src/createLookStyle.js";
 
 const stylePrompt = "Layered painterly surfaces with dimensional light, restrained edge detail, tactile brushwork and soft shadows. Balance luminous highlights against broad muted midtones, with natural depth and varied marks instead of flat uniform fills.";
 const signatureFeature = "Stage the main subject low in the frame with an oversized, uninterrupted area of negative space above; keep its silhouette compact and immediately readable.";
@@ -123,4 +124,27 @@ test("shared provider validator rejects partial or refused Look responses", () =
   assert.throws(() => validateCreativeResponse({ partial: true }, options), /Looks:.*incomplete/);
   assert.throws(() => validateCreativeResponse({ output: [{ content: [{ type: "refusal" }] }] }, options), /refused/);
   assert.throws(() => validateCreativeResponse({}, { ...options, text: '{"stylePrompt":"too short","referenceCount":4}' }), /incomplete planning data/);
+});
+
+test("Create Look extraction returns all six sections, tags and palette in one billed call, separate from Add Style", async t => {
+  const created = { stylePrompt, tags: ["Illustration"], visualStyle: Object.fromEntries(lookStyleSections.map(section => [section.id, `${section.label}: ${stylePrompt}`])), palette: [{ name: "Reference", hex: "#556677" }] };
+  const f = await fixture(t, body => ({ ...response(), text: JSON.stringify(body.route === "look-create-analysis" ? created : JSON.parse(response().text)) }));
+  const request = { ...f.request, purpose: "create-look", categories: ["Illustration"] };
+  assert.deepEqual(await f.analyze(request), created);
+  assert.equal(f.calls.length, 1); assert.equal(f.calls[0].inputs.length, 4); assert.equal(f.calls[0].reasoningEffort, "high");
+  assert.match(f.calls[0].systemPrompt, /Keep all style text color-neutral/); assert.match(f.calls[0].systemPrompt, /Return up to six representative colors separately/);
+  assert.equal(f.history[0].mode, "Create Look analysis"); assert.equal(f.history[0].cost.amountUsd, .02);
+  await createLookAnalyzer(f.options)(request); assert.equal(f.calls.length, 1);
+  await f.analyze(f.request); assert.equal(f.calls.length, 2, "Create Look cannot reuse the catalog-style cache");
+  await assert.rejects(f.analyze({ ...request, images: Array(7).fill(f.images[0]) }), /supported number/);
+  assert.equal(f.calls.length, 2);
+});
+
+test("incomplete style boards and unknown categories never silently save or trigger paid repairs", async t => {
+  for (const malformed of [{ stylePrompt, tags: ["Illustration"], visualStyle: {}, palette: [] },
+    { stylePrompt, tags: ["Invented category"], visualStyle: Object.fromEntries(lookStyleSections.map(section => [section.id, stylePrompt])), palette: [] }]) {
+    const f = await fixture(t, () => ({ ...response(), text: JSON.stringify(malformed) }));
+    await assert.rejects(f.analyze({ ...f.request, purpose: "create-look" }), /may have been billed/);
+    assert.equal(f.calls.length, 1); assert.equal(f.history[0].status, "failed"); assert.deepEqual(await readdir(f.directory), []);
+  }
 });

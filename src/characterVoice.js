@@ -1,7 +1,7 @@
 import { isSeedance25Model, seedance25ReferenceLimits } from "./seedance25.js";
 
 export const characterDialoguePrompt = "Use the provided dialogue audio file for the character and make sure the dialogue is seamlessly and realistically integrated into the scene with professional mixing techniques.";
-export const characterVoiceReferenceHelp = "Off: use the recording as dialogue. On: Seedance uses the recording as a guide to this character's voice, while the video or Director prompt supplies the words. Use a clear, single-speaker sample you have permission to use. Voice similarity is not guaranteed.";
+export const characterVoiceReferenceHelp = "The selected audio travels with the Character output to Director and supported video models; no separate audio connection is needed. Off: use the recording as dialogue. On: Seedance uses the recording as a guide to this character's voice, while the video or Director prompt supplies the words. Use a clear, single-speaker sample you have permission to use. Voice similarity is not guaranteed.";
 
 export function characterVoicePromptForSource(source, audioIndex, imageTag = "") {
   if (!Number.isInteger(audioIndex) || audioIndex < 1) return "";

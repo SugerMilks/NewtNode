@@ -1,5 +1,5 @@
 import { openAiImage26Models, isOpenAiImage26Model, migrateOpenAiImagePreferences } from "./openAiImage26.js";
-import { seedream5ProModelName, isSeedream5ProModel } from "./seedream5Pro.js";
+import { seedream55ModelName, isSeedream55Model, migrateSeedreamPreferences } from "./seedream55.js";
 import { nanoBanana21ModelName, isNanoBanana21Model } from "./nanoBanana21.js";
 import { kling4ModelName } from "./kling4.js";
 export { kling4DurationOptions, kling4ResolutionOptions, kling4AspectRatioOptions } from "./kling4.js";
@@ -31,7 +31,7 @@ export const batchOptions = ["1", "2", "3", "4"];
 export const imageBatchOptions = Array.from({ length: 9 }, (_value, index) => String(index + 1));
 export const imageModelAutoAspectRatio = "Auto";
 export const imageModelNames = {
-  seedream5Pro: seedream5ProModelName,
+  seedream55: seedream55ModelName,
   nanoBanana21: nanoBanana21ModelName,
   nanoBananaPro: "Nano Banana Pro",
   openAiImage2: "OpenAI Image 2",
@@ -44,7 +44,7 @@ export const imageModelOptions = [
   imageModelNames.openAiImage2,
   imageModelNames.openAiImage26Sunburst,
   imageModelNames.openAiImage26Flare,
-  imageModelNames.seedream5Pro
+  imageModelNames.seedream55
 ];
 export const creativeImageDefaultModel = imageModelNames.openAiImage26Sunburst;
 export const storyboardImageDefaultModel = imageModelNames.openAiImage26Flare;
@@ -53,14 +53,14 @@ export const coverageModelOptions = [
   imageModelNames.openAiImage2,
   imageModelNames.nanoBananaPro,
   imageModelNames.nanoBanana21,
-  imageModelNames.seedream5Pro
+  imageModelNames.seedream55
 ];
 export const storyboardImageModelOptions = [
   storyboardImageDefaultModel,
   creativeImageDefaultModel,
   imageModelNames.openAiImage2,
   imageModelNames.nanoBanana21,
-  imageModelNames.seedream5Pro
+  imageModelNames.seedream55
 ];
 export const nanoImageAspectRatios = ["21:9", "16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3", "4:5", "5:4"];
 export const openAiImageAspectRatios = [...nanoImageAspectRatios, "2:1", "1:2"];
@@ -191,11 +191,11 @@ export const videoModelOptions = [
   videoModelNames.minimaxH3
 ];
 export const defaultModelPreferences = {
-  image: Object.fromEntries(imageModelOptions.map((model) => [model, model === imageModelNames.openAiImage2 || isOpenAiImage26Model(model) || isSeedream5ProModel(model) || isNanoBanana21Model(model)])),
+  image: Object.fromEntries(imageModelOptions.map((model) => [model, model === imageModelNames.openAiImage2 || isOpenAiImage26Model(model) || isSeedream55Model(model) || isNanoBanana21Model(model)])),
   video: Object.fromEntries(videoModelOptions.map((model) => [model, true]))
 };
 export function normalizeModelPreferences(value = {}) {
-  const incomingImage = migrateOpenAiImagePreferences(value?.image && typeof value.image === "object" ? value.image : {});
+  const incomingImage = migrateSeedreamPreferences(migrateOpenAiImagePreferences(value?.image && typeof value.image === "object" ? value.image : {}));
   const incomingVideo = value?.video && typeof value.video === "object" ? value.video : {};
   const image = Object.fromEntries(imageModelOptions.map((model) => [model, Boolean(incomingImage[model] ?? defaultModelPreferences.image[model])]));
   const video = Object.fromEntries(videoModelOptions.map((model) => [model, Boolean(incomingVideo[model] ?? defaultModelPreferences.video[model])]));
@@ -237,6 +237,7 @@ export const model3DDescription =
   "Generates a GLB 3D model from connected view images. Front is required; Back, Left, Right, Top, Bottom, Left Front, and Right Front are optional.";
 
 export const utilityImageModelNames = {
+  layers: "Layers",
   coverage: "Coverage",
   autoAspect: "Auto Aspect",
   frameIt: "Frame It",
@@ -320,6 +321,7 @@ export const wanVaceSamplerOptions = ["unipc", "dpm++", "euler"];
 export const wanVaceAccelerationOptions = ["regular", "low", "none"];
 
 export const utilityModelDescriptions = {
+  [utilityImageModelNames.layers]: "Separate a still image into editable transparent layers through Atlas Cloud.",
   [utilityVideoModelNames.reframe]: "Generate a camera pass from a master image, capture shots, and refine or upscale them.",
   [utilityImageModelNames.coverage]: "Generate nine camera angles from a connected image.",
   [utilityImageModelNames.autoAspect]: "Reframes one connected image into multiple selected aspect ratios while preserving its visual identity.",

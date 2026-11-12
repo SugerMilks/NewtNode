@@ -84,3 +84,23 @@ test("failed result downloads do not regenerate and explain the completed provid
   assert.match((await response.json()).error, /completed.*Check Fal history/);
   assert.equal(calls.length, 1); assert.equal(saves.length, 0);
 }, { readGenerated: async () => { throw new Error("download failed"); } }));
+
+test("layer editing preserves alpha with honest history and request deduplication", () => withEditor(async ({ post, calls, saves, histories }) => {
+  const requestId = randomUUID();
+  const response = await post({ preserveAlpha: "true", requestId });
+  assert.equal(response.status, 200);
+  const { item } = await response.json();
+  assert.equal(item.preserveAlpha, true); assert.equal(item.alphaUrl, item.url);
+  assert.equal(item.label, "Layer Edit"); assert.equal(item.cost.amountUsd, null);
+  assert.equal(histories[0].mode, "Layer Edit"); assert.equal(histories[0].settings.preserveAlpha, true);
+  assert.match(calls[0].prompt, /original transparency will be restored locally/);
+  assert.equal((await post({ preserveAlpha: "true", requestId })).status, 200);
+  assert.equal((await post({ preserveAlpha: "false", requestId })).status, 409);
+  assert.equal(calls.length, 1); assert.equal(saves.length, 1);
+}));
+
+test("invalid layer edit modes and transparency flags never generate", () => withEditor(async ({ post, calls }) => {
+  for (const changes of [{ preserveAlpha: "yes" }, { preserveAlpha: "true", mode: "remove" }, { preserveAlpha: "true", blank: "true" }])
+    assert.equal((await post(changes)).status, 400);
+  assert.equal(calls.length, 0);
+}));

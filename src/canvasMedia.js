@@ -1,6 +1,19 @@
 import { clamp } from "./nodeGeometry.js";
+import { dominantPaletteFromPixels } from "./palettePixels.js";
 
 const defaultMoodBoardOutputFileName = "MOOD_BOARD.png";
+
+export function imagePaletteColors(image, limit = 10) {
+  const sourceWidth = image.naturalWidth || image.width || 1;
+  const sourceHeight = image.naturalHeight || image.height || 1;
+  const scale = Math.min(1, 220 / Math.max(sourceWidth, sourceHeight));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(sourceWidth * scale));
+  canvas.height = Math.max(1, Math.round(sourceHeight * scale));
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  return dominantPaletteFromPixels(context.getImageData(0, 0, canvas.width, canvas.height).data, limit);
+}
 
 export function canvasToBlob(canvas, type, errorMessage = "Could not render still frame.") {
   return new Promise((resolve, reject) => {

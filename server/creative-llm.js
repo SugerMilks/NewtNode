@@ -7,6 +7,7 @@ import { scriptCatalogSchema, scriptOcrSchema, scriptShotsSchema } from "../src/
 import { storyboardCameraChoices } from "../src/storyboardCinematography.js";
 import { vectorLayerNameSchema } from "./vector-layer-names.js";
 import { lookAnalysisSchema } from "./looks-analysis.js";
+import { createLookAnalysisSchema } from "../src/createLookStyle.js";
 
 export const creativeOpenAiModel = "gpt-6-astra";
 export const creativeFalModel = `openai/${creativeOpenAiModel}`;
@@ -26,6 +27,7 @@ const captions = object({ descriptions: list(nonempty, 1, 35) });
 
 export const creativeSchemas = {
   "look-style-analysis": lookAnalysisSchema,
+  "look-create-analysis": createLookAnalysisSchema,
   "vector-layer-names": vectorLayerNameSchema,
   "storyboard-script-catalog": scriptCatalogSchema,
   "storyboard-script-ocr": scriptOcrSchema,
@@ -79,6 +81,7 @@ const validators = new Map(Object.entries(creativeSchemas).map(([route, schema])
 
 export function creativeOutputBudget(route = "") {
   if (route === "look-style-analysis") return 4000;
+  if (route === "look-create-analysis") return 8000;
   if (route === "vector-layer-names") return 4000;
   if (/^storyboard-script-/.test(route)) return 24000;
   if (/shotlist|revision|shot-repair|storyboard-plan|storyboard-cast-repair|explore-plan/.test(route)) return 24000;
@@ -124,7 +127,7 @@ export function validateCreativeResponse(data, { route, provider, text: outputTe
   const validator = validators.get(route);
   if (!validator) return null;
   data = data?.data || data;
-  const label = route === "look-style-analysis" ? "Looks" : route === "explore-plan" ? "Explore" : route.startsWith("vector-") ? "Vector" : route.startsWith("storyboard") ? "Storyboard" : "Director";
+  const label = route.startsWith("look-") ? "Looks" : route === "explore-plan" ? "Explore" : route.startsWith("vector-") ? "Vector" : route.startsWith("storyboard") ? "Storyboard" : "Director";
   const contents = (Array.isArray(data?.output) ? data.output : []).flatMap((item) => item.content || []);
   if (data?.error || data?.status === "failed") throw new Error(`${label}: ${provider} could not complete this response.`);
   if (data?.partial || data?.status === "incomplete" || ["length", "content_filter"].includes(data?.choices?.[0]?.finish_reason)

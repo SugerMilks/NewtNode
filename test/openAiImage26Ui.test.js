@@ -43,6 +43,22 @@ test("2.5 saved selections migrate across creative nodes without rewriting saved
   }
 });
 
+test("Seedream 5.0 selections migrate across saved nodes without rewriting output history", () => {
+  for (const [type, field] of [["imageModel", "model"], ["storyboard", "model"], ["explore", "model"],
+    ["character", "characterSheetModel"], ["coverage", "model"], ["cameraCoverage", "model"],
+    ["autoAspect", "autoAspectModel"], ["frameIt", "frameItImageModel"], ["myNewt", "favoriteImageModel"]]) {
+    const old = "Seedream 5.0 Pro";
+    const saved = { ...createDefaultNodeData(type, type, 1), [field]: old,
+      resultItems: [{ url: "/outputs/saved.png", model: old }] };
+    const before = structuredClone(saved);
+    const restored = normalizeCurrentNode({ id: "saved", type, data: saved }).data;
+    assert.equal(restored[field], "Seedream 5.5", `${type}.${field}`);
+    assert.deepEqual(saved, before);
+    const baseline = normalizeCurrentNode({ id: "saved", type, data: { ...before, [field]: "Seedream 5.5" } }).data;
+    assert.deepEqual(restored.resultItems, baseline.resultItems);
+  }
+});
+
 test("Storyboard QC defaults to Balanced while saved Deep and explicit Off survive reopening", () => {
   assert.equal(createDefaultNodeData("storyboard", "Board", 1).storyboardQcMode, "balanced");
   for (const [saved, mode, enabled] of [[{}, "balanced", true], [{ storyboardAutoQc: false }, "balanced", false], [{ storyboardQcMode: "deep", storyboardAutoQc: true }, "deep", true], [{ storyboardQcMode: "unknown" }, "balanced", true]]) {
@@ -58,19 +74,22 @@ test("Storyboard QC defaults to Balanced while saved Deep and explicit Off survi
   }
 });
 
-test("Seedream Pro controls keep defaults, formats and saved content consistent across image tools", () => {
-  const model = "Seedream 5.0 Pro";
+test("Seedream 5.5 controls keep defaults, formats and saved content consistent across image tools", () => {
+  const model = "Seedream 5.5";
   for (const provider of ["fal", "krea", "atlas"]) {
     const html = renderModel(model, provider);
-    assert.match(html, /selected="">Seedream 5\.0 Pro/);
+    assert.match(html, /selected="">Seedream 5\.5/);
     assert.match(html, />2K</);
     assert.match(html, />1K</);
     assert.match(html, />16:9</);
     assert.match(html, />21:9</);
-    assert.doesNotMatch(html, />4K<|>Maximum<|>Transparent</);
+    assert.doesNotMatch(html, />4K<|>Maximum</);
+    assert.match(html, />Transparent</);
+    if (provider === "atlas") assert.doesNotMatch(html, />4:5<|>5:4<|>2:1<|>1:2</);
+    if (provider === "krea") assert.match(html, /Enable Fal or Atlas Cloud/);
     const patch = imageModelSelectionPatch({ model: "OpenAI Image 2.6 Flare", resolution: "4K", aspectRatio: "21:9", background: "transparent" }, model, provider);
     assert.equal(patch.resolution, "2K");
-    assert.equal(patch.background, "auto");
+    assert.equal(patch.background, "transparent");
     assert.equal(patch.aspectRatio, "21:9");
     for (const type of ["character", "storyboard", "coverage", "autoAspect", "utility"]) {
       const field = type === "character" ? "characterSheetModel" : "model";

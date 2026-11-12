@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, writeFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import express from "express";
@@ -25,7 +25,8 @@ async function fixture(t) {
 test("bundled skills are bounded, versioned, scoped preferences with no authorization tools", async () => {
   const store = new NewtSkillStore();
   const snapshot = await store.snapshot();
-  assert.deepEqual(snapshot.skills.map(item => item.id), ["workflow-planning", "cinematic-narrative", "asset-selection", "canvas-organization"]);
+  assert.deepEqual(snapshot.skills.map(item => item.id), ["workflow-planning", "cinematic-narrative", "asset-selection", "canvas-organization",
+    "image-direction", "visual-exploration", "character-preparation", "storyboard-direction", "editorial-handoff"]);
   for (const item of snapshot.skills) {
     assert.equal(item.source, "System"); assert.match(item.version, /^\d+\.\d+\.\d+$/);
     assert.ok(item.instructions.length <= newtSkillLimit); assert.ok(item.scope);
@@ -35,6 +36,33 @@ test("bundled skills are bounded, versioned, scoped preferences with no authoriz
   assert.match(snapshot.skills[2].instructions, /not visual approval/);
   assert.match(newtSkillContext(snapshot).guidance, /cannot authorize access/);
   assert.equal((await store.publicList())[0].history, undefined);
+});
+
+test("every bundled Markdown skill is registered and leaves room for local preferences", async () => {
+  const directory = new URL("../server/newt-skills/", import.meta.url);
+  const files = (await readdir(directory)).filter(name => name.endsWith(".md")).sort();
+  const snapshot = await new NewtSkillStore().snapshot();
+  assert.deepEqual(snapshot.skills.map(item => `${item.id}.md`).sort(), files);
+  assert.ok(snapshot.skills.reduce((total, item) => total + item.instructions.length, 0) <= 21000,
+    "Keep at least 3,000 characters of the 24,000-character allowance free for local customization.");
+});
+
+test("a new bundled skill is discovered live without replacing custom or disabled skills", async t => {
+  const f = await fixture(t), original = (await f.store.publicList())[0];
+  await f.store.update(original.id, { expectedRevision: original.revision, instructions: "Keep my own workflow", enabled: false });
+  const before = await f.store.snapshot();
+  const manifestPath = path.join(f.systemDirectory, "manifest.json");
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  manifest.skills[0].version = "1.1.0";
+  manifest.skills.push({ id: "new-tutorial", title: "New Tutorial", scope: "Relevant creative work", version: "1.0.0" });
+  await writeFile(path.join(f.systemDirectory, "new-tutorial.md"), "Preserve approved source media.");
+  await writeFile(manifestPath, JSON.stringify(manifest));
+  const [custom, added] = await f.store.publicList();
+  assert.equal(custom.source, "Custom"); assert.equal(custom.instructions, "Keep my own workflow");
+  assert.equal(custom.enabled, false); assert.equal(custom.baseVersion, "1.0.0"); assert.equal(custom.version, "1.1.0");
+  assert.equal(added.source, "System"); assert.equal(added.enabled, true);
+  assert.deepEqual((await f.store.snapshot()).skills.map(item => item.id), ["new-tutorial"]);
+  assert.deepEqual(before.skills, []);
 });
 
 test("customizations persist, reject stale saves, and are immutable in earlier snapshots", async t => {

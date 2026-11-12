@@ -1,9 +1,14 @@
 {
   "schemaVersion": 1,
   "skills": [
-    { "id": "workflow-planning", "version": "1.0.1", "title": "Workflow Planning", "scope": "All creative workflow tasks" },
-    { "id": "cinematic-narrative", "version": "1.0.0", "title": "Cinematic Narrative", "scope": "Narrative scenes and cinematic storytelling, only when relevant to the brief" },
-    { "id": "asset-selection", "version": "1.0.1", "title": "Asset Selection and Review", "scope": "Tasks that choose or create visual references" },
-    { "id": "canvas-organization", "version": "1.0.0", "title": "Canvas Organization", "scope": "Layout and cleanup of Newt-created work" }
+    { "id": "workflow-planning", "version": "1.1.0", "title": "Workflow Planning", "scope": "All creative workflow tasks" },
+    { "id": "cinematic-narrative", "version": "1.1.0", "title": "Cinematic Narrative", "scope": "Narrative scenes and cinematic storytelling, only when relevant to the brief" },
+    { "id": "asset-selection", "version": "1.1.0", "title": "Asset Selection and Review", "scope": "Tasks that choose or create visual references" },
+    { "id": "canvas-organization", "version": "1.1.0", "title": "Canvas Organization", "scope": "Layout and cleanup of Newt-created work" },
+    { "id": "image-direction", "version": "1.0.0", "title": "Image Direction and Mood Boards", "scope": "Directed still images, modular prompts, camera and look references" },
+    { "id": "visual-exploration", "version": "1.0.0", "title": "Visual Exploration", "scope": "Brainstorming distinct visual directions and narrowing a chosen look" },
+    { "id": "character-preparation", "version": "1.0.0", "title": "Character Preparation", "scope": "Casting, wardrobe and reusable character references" },
+    { "id": "storyboard-direction", "version": "1.0.0", "title": "Storyboard Direction and Revision", "scope": "Shot planning, continuity and targeted storyboard revisions" },
+    { "id": "editorial-handoff", "version": "1.0.0", "title": "Editing and Delivery", "scope": "Preparing selected media for manual timeline editing and delivery" }
   ]
 }

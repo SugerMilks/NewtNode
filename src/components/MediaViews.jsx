@@ -21,6 +21,7 @@ export function MediaPreview({ node, onPreviewOpen }) {
   }
 
   const dragItem = {
+    ...(node.type === "image" ? normalizedResultItems(node.data.resultItems, node.data.resultUrl, "image").find(item => item.url === node.data.resultUrl) : {}),
     id: `${node.id}:${node.data.resultUrl}`,
     url: node.data.resultUrl,
     type: node.type,

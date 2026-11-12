@@ -14,7 +14,7 @@ import { PricingRefresh } from "../server/pricing-refresh.js";
 import { isRetiredNanoBanana2Model } from "../src/retiredImageModels.js";
 import * as nanoBanana21 from "../src/nanoBanana21.js";
 import { migrateOpenAiImageModel } from "../src/openAiImage26.js";
-import { isSeedream5ProModel, seedream5ProModelName, seedream5ProFalEndpoint } from "../src/seedream5Pro.js";
+import { isSeedream55Model, seedream55ModelName, seedream55FalEndpoint, migrateSeedreamModel } from "../src/seedream55.js";
 import { isOpenAiImage26Model, openAiImage26Variant, openAiImage26Models } from "../src/openAiImage26.js";
 
 const retired = ["Krea 2 Large", "REVE 2.1", "Nano Banana 2", "Ideogram 4.5"];
@@ -34,7 +34,7 @@ test("backend rejects retired names and endpoints instead of silently generating
   const source = await readFile(new URL("../server/index.js", import.meta.url), "utf8");
   const start = source.indexOf("function resolveImageModel(");
   const end = source.indexOf("function resolveUtilityImageModel(", start);
-  const deps = { ...nanoBanana21, isSeedream5ProModel, seedream5ProModelName, seedream5ProFalEndpoint, isRetiredNanoBanana2Model, isOpenAiImage26Model, openAiImage26Variant, openAiImage26Models,
+  const deps = { ...nanoBanana21, migrateSeedreamModel, isSeedream55Model, seedream55ModelName, seedream55FalEndpoint, isRetiredNanoBanana2Model, isOpenAiImage26Model, openAiImage26Variant, openAiImage26Models,
     migrateOpenAiImageModel, imageModelNames, falNanoBananaProEndpoint: "fal-ai/nano-banana-pro",
     httpError: (status, message) => Object.assign(new Error(message), { status }) };
   const resolve = new Function(...Object.keys(deps), source.slice(start, end) + "\nreturn resolveImageModel;")(...Object.values(deps));
